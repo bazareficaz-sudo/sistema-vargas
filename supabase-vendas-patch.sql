@@ -1,0 +1,10 @@
+-- Adiciona colunas faltantes na tabela vendas
+ALTER TABLE vendas
+  ADD COLUMN IF NOT EXISTS desconto        NUMERIC(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS subtotal        NUMERIC(12,2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS valor_pago      NUMERIC(12,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS troco           NUMERIC(12,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS observacao      TEXT,
+  ADD COLUMN IF NOT EXISTS entrega_solicitada BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS operador_nome   TEXT,
+  ADD COLUMN IF NOT EXISTS cliente_id      UUID REFERENCES clientes(id) ON DELETE SET NULL;
