@@ -34,17 +34,26 @@ export default async function ProdutosPage({
 
   const { data: produtos, count } = await query
 
-  // Contagens para as abas e promoção
-  const [simplesRes, kitsRes, promoRes] = await Promise.all([
-    supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).in('tipo', ['simples', 'normal']),
-    supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).eq('tipo', 'kit'),
+  // Contagens para as abas — aplicam os mesmos filtros de busca e promoção
+  function baseCount() {
+    let q2 = supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId)
+    if (q) q2 = q2.or(`nome.ilike.%${q}%,sku.ilike.%${q}%,ean.ilike.%${q}%`)
+    if (promoFiltro) q2 = q2.eq('promocao_ativa', true)
+    return q2
+  }
+  const [todosRes, simplesRes, kitsRes, promoRes] = await Promise.all([
+    baseCount(),
+    baseCount().in('tipo', ['simples', 'normal']),
+    baseCount().eq('tipo', 'kit'),
     supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).eq('promocao_ativa', true),
   ])
-  const totalSimples = simplesRes.count
-  const totalKits = kitsRes.count
+  const totalSimples = simplesRes.count ?? 0
+  const totalKits = kitsRes.count ?? 0
   const totalEmPromocao = promoRes.count ?? 0
 
+  // total da aba ativa (usado para paginação); todosRes conta sem filtro de aba
   const total = count ?? 0
+  const totalTodos = todosRes.count ?? 0
   const totalPaginas = Math.ceil(total / POR_PAGINA)
 
   return (
@@ -53,8 +62,9 @@ export default async function ProdutosPage({
       total={total}
       totalAtivos={total}
       totalInativos={0}
-      totalSimples={totalSimples ?? 0}
-      totalKits={totalKits ?? 0}
+      totalTodos={totalTodos}
+      totalSimples={totalSimples}
+      totalKits={totalKits}
       totalEmPromocao={totalEmPromocao}
       pagina={pg}
       totalPaginas={totalPaginas}

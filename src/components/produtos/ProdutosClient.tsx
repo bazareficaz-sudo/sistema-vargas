@@ -33,6 +33,7 @@ type Props = {
   total: number
   totalAtivos: number
   totalInativos: number
+  totalTodos?: number
   totalSimples: number
   totalKits: number
   totalEmPromocao: number
@@ -54,7 +55,7 @@ const ABAS = [
 ]
 
 export default function ProdutosClient({
-  produtos: inicial, total, totalAtivos, totalSimples, totalKits, totalEmPromocao,
+  produtos: inicial, total, totalTodos, totalSimples, totalKits, totalEmPromocao,
   pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, empresaId
 }: Props) {
   const router = useRouter()
@@ -118,7 +119,7 @@ export default function ProdutosClient({
   }, [router])
 
   const abaCounts: Record<string, number> = {
-    todos: total,
+    todos: totalTodos ?? total,
     simples: totalSimples,
     kit: totalKits,
     generico: 0,
