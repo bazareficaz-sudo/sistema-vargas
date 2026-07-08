@@ -9,6 +9,7 @@ type Produto = {
   id: string; nome: string; sku: string; ean: string | null
   preco_venda: number; preco_custo: number; estoque: number; unidade: string
   marca: string | null
+  promocao_ativa: boolean; preco_promocional: number | null
 }
 type ItemVenda = {
   id: string; produto_id: string; nome: string; sku: string
@@ -16,6 +17,7 @@ type ItemVenda = {
   estoque_disponivel: number; unidade: string
   tipo: 'venda' | 'devolucao'
   custo: number
+  em_promocao: boolean; preco_original: number
 }
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
@@ -126,7 +128,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
     if (!q.trim() || q.length < 2) { setSugestoes([]); return }
     setBuscando(true)
     const palavras = q.trim().split(/\s+/).filter(Boolean)
-    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca'
+    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional'
 
     if (palavras.length === 1 && /^\d{8,14}$/.test(palavras[0])) {
       const { data } = await sb.from('produtos')
@@ -194,11 +196,14 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           ? { ...i, quantidade: newQ, total: newQ * i.preco_unitario * (1 - i.desconto / 100) }
           : i)
       }
+      const emPromo = !!(p.promocao_ativa && p.preco_promocional && p.preco_promocional < p.preco_venda)
+      const precoFinal = emPromo ? p.preco_promocional! : p.preco_venda
       return [...prev, {
         id: uid(), produto_id: p.id, nome: p.nome, sku: p.sku,
-        quantidade: q, preco_unitario: p.preco_venda, desconto: 0,
-        total: q * p.preco_venda, estoque_disponivel: p.estoque, unidade: p.unidade,
+        quantidade: q, preco_unitario: precoFinal, desconto: 0,
+        total: q * precoFinal, estoque_disponivel: p.estoque, unidade: p.unidade,
         tipo: tipoItem, custo: p.preco_custo,
+        em_promocao: emPromo, preco_original: p.preco_venda,
       }]
     })
     setBusca(''); setSugestoes([]); setQtdInput('1'); setProdutoPendente(null)
@@ -607,22 +612,37 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
 
           {sugestoes.length > 0 && (
             <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-              <div className="grid grid-cols-[90px_1fr_130px_70px_90px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
+              <div className="grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
                 <span>SKU</span><span>Nome</span><span>Marca</span><span className="text-center">Estoque</span><span className="text-right">Preço</span>
               </div>
               <div ref={sugestaoListRef}>
-                {sugestoes.map((p, i) => (
+                {sugestoes.map((p, i) => {
+                  const emPromo = !!(p.promocao_ativa && p.preco_promocional && p.preco_promocional < p.preco_venda)
+                  return (
                   <div key={p.id} onMouseDown={() => { confirmarAdicao(p); setSugestaoIdx(-1) }}
-                    className={`grid grid-cols-[90px_1fr_130px_70px_90px] gap-0 px-3 py-2 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                    className={`grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-2 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                     <span className="text-gray-400 text-xs font-mono truncate pr-2">{p.sku}</span>
-                    <span className="font-medium text-gray-900 truncate pr-2">{p.nome}</span>
+                    <span className="font-medium text-gray-900 truncate pr-2 flex items-center gap-1">
+                      {p.nome}
+                      {emPromo && <span className="shrink-0 text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded">PROMO</span>}
+                    </span>
                     <span className="text-indigo-600 text-xs truncate pr-2">{p.marca ?? '—'}</span>
                     <span className={`text-center text-xs font-medium ${p.estoque <= 0 ? 'text-red-500' : p.estoque <= 5 ? 'text-orange-500' : 'text-gray-500'}`}>
                       {p.estoque} {p.unidade}
                     </span>
-                    <span className="text-right font-semibold text-blue-700">{fmt(p.preco_venda)}</span>
+                    <div className="text-right">
+                      {emPromo ? (
+                        <>
+                          <span className="block text-[10px] text-gray-400 line-through">{fmt(p.preco_venda)}</span>
+                          <span className="font-bold text-orange-600">{fmt(p.preco_promocional!)}</span>
+                        </>
+                      ) : (
+                        <span className="font-semibold text-blue-700">{fmt(p.preco_venda)}</span>
+                      )}
+                    </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -700,8 +720,19 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
                           </span>
                         )}
                         <div>
-                          <div className={`font-medium ${isDev ? 'text-red-800' : 'text-gray-900'}`}>{item.nome}</div>
-                          <div className="text-xs text-gray-400">{item.sku} · {item.unidade}</div>
+                          <div className={`font-medium flex items-center gap-1.5 ${isDev ? 'text-red-800' : 'text-gray-900'}`}>
+                            {item.nome}
+                            {item.em_promocao && (
+                              <span className="text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded flex-shrink-0">PROMO</span>
+                            )}
+                          </div>
+                          {item.em_promocao ? (
+                            <div className="text-xs text-orange-600 font-medium">
+                              de <span className="line-through text-gray-400">{fmt(item.preco_original)}</span> por {fmt(item.preco_unitario)}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-gray-400">{item.sku} · {item.unidade}</div>
+                          )}
                         </div>
                       </div>
                     </td>
