@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import VendedorModal from './VendedorModal'
 
 interface VendedorEmpresa {
@@ -79,8 +80,12 @@ function formatTelefone(t?: string) {
 }
 
 export default function VendedoresClient({ vendedores: inicial, empresas, empresaAtualId, total, ativos, comissionados }: Props) {
+  const router = useRouter()
   const [vendedores, setVendedores] = useState<Vendedor[]>(inicial)
   const [busca, setBusca] = useState('')
+
+  // Sincroniza quando o servidor re-renderiza com dados atualizados
+  useEffect(() => { setVendedores(inicial) }, [inicial])
   const [filtroStatus, setFiltroStatus] = useState('')
   const [modalAberto, setModalAberto] = useState(false)
   const [editando, setEditando] = useState<Vendedor | null>(null)
@@ -114,6 +119,7 @@ export default function VendedoresClient({ vendedores: inicial, empresas, empres
   }
 
   function aoSalvar(novo: Vendedor) {
+    // Atualização otimista: aparece imediatamente na tela
     setVendedores(prev => {
       const idx = prev.findIndex(v => v.id === novo.id)
       if (idx >= 0) {
@@ -124,6 +130,8 @@ export default function VendedoresClient({ vendedores: inicial, empresas, empres
       return [novo, ...prev]
     })
     setModalAberto(false)
+    // Sincroniza com o banco para garantir consistência
+    router.refresh()
   }
 
   return (
