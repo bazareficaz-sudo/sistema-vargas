@@ -305,14 +305,28 @@ export default function WhatsAppConfigClient({
               <F label="Token da instância *" value={cfg.token} onChange={v => upd('token', v)} type="password" placeholder="••••••••" />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <F label="Client Token (opcional)" value={cfg.client_token} onChange={v => upd('client_token', v)} type="password" />
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Client Token
+                  <span className="ml-1 text-orange-500 font-semibold">(exigido pela Z-API)</span>
+                </label>
+                <input
+                  type="password"
+                  value={cfg.client_token}
+                  onChange={e => upd('client_token', e.target.value)}
+                  placeholder="Token da conta Z-API"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Encontre em: <span className="font-medium text-blue-600">app.z-api.io → Account → Security Token</span>
+                </p>
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">URL Base da Z-API</label>
                 <input
                   value={cfg.url_base}
                   onChange={e => {
                     let v = e.target.value
-                    // Auto-sanitiza se o usuário colar a URL completa da instância
                     const idx = v.indexOf('/instances/')
                     if (idx > 0) v = v.substring(0, idx)
                     upd('url_base', v)
