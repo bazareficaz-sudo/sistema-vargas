@@ -63,6 +63,7 @@ const nav = [
       { href: '/dashboard/empresas',                    label: 'Empresas',      icon: '🏢' },
       { href: '/dashboard/terminais',                   label: 'Terminais PDV', icon: '🖥️' },
       { href: '/dashboard/configuracoes/integracoes',   label: 'Integrações',   icon: '🔌' },
+      { href: '/dashboard/configuracoes/saude-venda',   label: 'Saúde da Venda', icon: '💚' },
     ]
   },
 ]

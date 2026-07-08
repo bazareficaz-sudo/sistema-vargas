@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { calcSaude, type SaudeConfig, type FaixaSaude, FAIXAS_PADRAO, CONFIG_PADRAO } from '@/lib/saude-venda'
 
 type Produto = {
   id: string; nome: string; sku: string; ean: string | null
@@ -14,6 +15,7 @@ type ItemVenda = {
   quantidade: number; preco_unitario: number; desconto: number; total: number
   estoque_disponivel: number; unidade: string
   tipo: 'venda' | 'devolucao'
+  custo: number
 }
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
@@ -33,9 +35,19 @@ const FORMAS = [
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 function uid() { return Math.random().toString(36).slice(2) }
+function SaudeCard({ label, valor, cor }: { label: string; valor: string; cor?: string }) {
+  return (
+    <div className="bg-white rounded border border-gray-100 px-3 py-2">
+      <div className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</div>
+      <div className="text-sm font-semibold mt-0.5" style={{ color: cor ?? '#111827' }}>{valor}</div>
+    </div>
+  )
+}
 
-export default function PDVClient({ empresaId, empresaNome, operadorNome, clientes }: {
+export default function PDVClient({ empresaId, empresaNome, operadorNome, clientes, saudeConfig, saudeFaixas }: {
   empresaId: string; empresaNome: string; operadorNome: string; clientes: Cliente[]
+  saudeConfig?: SaudeConfig | null
+  saudeFaixas?: FaixaSaude[] | null
 }) {
   const router = useRouter()
   const sb = createClient()
@@ -186,7 +198,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         id: uid(), produto_id: p.id, nome: p.nome, sku: p.sku,
         quantidade: q, preco_unitario: p.preco_venda, desconto: 0,
         total: q * p.preco_venda, estoque_disponivel: p.estoque, unidade: p.unidade,
-        tipo: tipoItem,
+        tipo: tipoItem, custo: p.preco_custo,
       }]
     })
     setBusca(''); setSugestoes([]); setQtdInput('1'); setProdutoPendente(null)
@@ -297,6 +309,20 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
 
   const isFiado = formas.length === 1 && formas[0].tipo === 'fiado'
   const isCarteira = formas.some(f => f.tipo === 'carteira')
+
+  // ── Saúde da venda ────────────────────────────────────────────
+  const cfg   = saudeConfig ?? CONFIG_PADRAO
+  const faixas = (saudeFaixas && saudeFaixas.length > 0) ? saudeFaixas : FAIXAS_PADRAO
+  const formaPrincipal = formas[0]?.tipo ?? 'dinheiro'
+  const saude = calcSaude(
+    itens.map(i => ({ custo: i.custo, preco_unitario: i.preco_unitario, quantidade: i.quantidade, tipo: i.tipo })),
+    descontoGlobal,
+    formaPrincipal,
+    1,
+    cfg,
+    faixas
+  )
+  const [saudeAberto, setSaudeAberto] = useState(false)
 
   // ── Concluir venda (normal, mista ou troca) ───────────────────
   async function concluirVenda(tipoOp: 'venda' | 'troca' | 'devolucao' | 'mista' = 'venda') {
@@ -694,6 +720,88 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           </table>
         )}
       </div>
+
+      {/* ── SAÚDE DA VENDA ────────────────────────────────────────── */}
+      {itens.length > 0 && (
+        <div className="flex-shrink-0 border-t border-gray-200" style={{ backgroundColor: saude.faixa?.cor_fundo ?? '#f9fafb' }}>
+          {/* Barra resumo sempre visível */}
+          <button
+            onClick={() => setSaudeAberto(a => !a)}
+            className="w-full flex items-center gap-3 px-4 py-2 text-sm hover:opacity-80 transition-opacity"
+          >
+            <span className="text-base">{saude.faixa?.emoji ?? '⚪'}</span>
+            <span className="font-semibold" style={{ color: saude.faixa?.cor ?? '#374151' }}>
+              {saude.faixa?.nome ?? 'Calculando...'}
+            </span>
+            <span className="text-gray-500">Margem:</span>
+            <span className="font-bold" style={{ color: saude.faixa?.cor ?? '#374151' }}>
+              {saude.margem.toFixed(1)}%
+            </span>
+            {saude.lucroLiquido !== 0 && cfg.exibir_lucro_vendedor && (
+              <>
+                <span className="text-gray-400">·</span>
+                <span className="text-gray-500">Lucro:</span>
+                <span className={`font-semibold ${saude.lucroLiquido >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {fmt(saude.lucroLiquido)}
+                </span>
+              </>
+            )}
+            {saude.alertas.length > 0 && (
+              <span className="ml-1 text-xs bg-red-500 text-white rounded-full px-2 py-0.5 font-bold">
+                {saude.alertas.length} alerta{saude.alertas.length > 1 ? 's' : ''}
+              </span>
+            )}
+            <span className="ml-auto text-gray-400 text-xs">{saudeAberto ? '▲ fechar' : '▼ detalhes'}</span>
+          </button>
+
+          {/* Painel expandido */}
+          {saudeAberto && (
+            <div className="px-4 pb-3 space-y-2 border-t" style={{ borderColor: (saude.faixa?.cor ?? '#9ca3af') + '40' }}>
+              {/* Alertas */}
+              {saude.alertas.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {saude.alertas.map((a, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-1.5">
+                      <span>⚠️</span><span>{a}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Mensagem da faixa */}
+              {saude.faixa?.mensagem_vendedor && (
+                <div className="text-xs rounded px-3 py-2 mt-1" style={{ backgroundColor: saude.faixa.cor + '15', color: saude.faixa.cor }}>
+                  💬 {saude.faixa.mensagem_vendedor}
+                </div>
+              )}
+
+              {/* Grid de indicadores */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+                <SaudeCard label="Subtotal" valor={fmt(saude.totalBruto)} />
+                <SaudeCard label="Com Desconto" valor={fmt(saude.totalComDesc)} />
+                {cfg.exibir_custo_vendedor && <SaudeCard label="Custo Total" valor={fmt(saude.custoTotal)} />}
+                <SaudeCard label="Taxa Pagamento" valor={`${saude.taxaPagPct.toFixed(1)}% = ${fmt(saude.custoTaxaPag)}`} />
+                {cfg.exibir_lucro_vendedor && <SaudeCard label="Lucro Bruto" valor={fmt(saude.lucroBruto)} cor={saude.lucroBruto >= 0 ? '#16a34a' : '#dc2626'} />}
+                {cfg.exibir_lucro_vendedor && <SaudeCard label="Lucro Líquido" valor={fmt(saude.lucroLiquido)} cor={saude.lucroLiquido >= 0 ? '#16a34a' : '#dc2626'} />}
+                {cfg.exibir_margem_vendedor && <SaudeCard label="Margem Bruta" valor={`${saude.margemBruta.toFixed(1)}%`} />}
+                {cfg.exibir_margem_vendedor && <SaudeCard label="Margem Líquida" valor={`${saude.margem.toFixed(1)}%`} cor={saude.faixa?.cor} />}
+                <SaudeCard label="Desc. restante" valor={`${fmt(saude.descontoRestante)} (${saude.descontoMaxPct}% máx.)`} />
+                <SaudeCard label="Vlr. mín. recomendado" valor={fmt(saude.valorMinRecomendado)} />
+              </div>
+
+              {/* Formas permitidas */}
+              {saude.formasPermitidas && (
+                <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
+                  <span className="font-medium">Formas permitidas:</span>
+                  {saude.formasPermitidas.map(f => (
+                    <span key={f} className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-medium capitalize">{f}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── RODAPÉ ────────────────────────────────────────────────── */}
       <div className="flex-shrink-0 border-t-2 border-gray-300 bg-gray-50">
