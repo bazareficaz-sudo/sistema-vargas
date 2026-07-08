@@ -145,14 +145,14 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     if (!form) return
     setSalvando(true); setErro('')
     const sb = createClient()
+    const isKit = form.tipo === 'kit'
     const { error } = await sb.from('produtos').update({
       nome: form.nome,
       tipo: form.tipo,
       sku: form.sku || null,
       ean: form.ean || null,
       preco_venda: form.preco_venda,
-      preco_custo: form.preco_custo,
-      markup: form.markup ?? null,
+      ...(isKit ? {} : { preco_custo: form.preco_custo, markup: form.markup ?? null }),
       preco_promocional: form.preco_promocional ?? null,
       promocao_inicio: form.promocao_inicio ?? null,
       promocao_fim: promocaoInfinita ? null : (form.promocao_fim ?? null),
@@ -160,8 +160,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       unidade: form.unidade,
       categoria: form.categoria || null,
       marca: form.marca || null,
-      estoque: form.estoque,
-      estoque_minimo: form.estoque_minimo,
+      ...(isKit ? {} : { estoque: form.estoque, estoque_minimo: form.estoque_minimo }),
       ativo: form.ativo,
       disponivel_pdv: form.disponivel_pdv,
       permite_fracao: form.permite_fracao,
@@ -326,16 +325,26 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               </div>
 
               {/* Estoque */}
+              {form.tipo === 'kit' && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+                  <span className="mt-0.5">⚠️</span>
+                  <span>O estoque de kits é calculado automaticamente com base nos componentes. Edite o estoque de cada componente individualmente.</span>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Estoque atual</label>
-                  <input type="number" value={form.estoque} onChange={e => campo('estoque', parseFloat(e.target.value) || 0)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                  <input type="number" value={form.estoque}
+                    disabled={form.tipo === 'kit'}
+                    onChange={e => campo('estoque', parseFloat(e.target.value) || 0)}
+                    className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${form.tipo === 'kit' ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 text-gray-900 focus:border-blue-500'}`} />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Estoque mínimo</label>
-                  <input type="number" value={form.estoque_minimo} onChange={e => campo('estoque_minimo', parseFloat(e.target.value) || 0)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                  <input type="number" value={form.estoque_minimo}
+                    disabled={form.tipo === 'kit'}
+                    onChange={e => campo('estoque_minimo', parseFloat(e.target.value) || 0)}
+                    className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${form.tipo === 'kit' ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 text-gray-900 focus:border-blue-500'}`} />
                 </div>
               </div>
             </div>
@@ -346,15 +355,19 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
             <div className="space-y-5">
               {/* Custo */}
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Custo (R$)</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Custo (R$)
+                  {form.tipo === 'kit' && <span className="ml-1 text-amber-500 text-[10px]">(soma dos componentes)</span>}
+                </label>
                 <input type="number" step="0.01" value={form.preco_custo}
+                  disabled={form.tipo === 'kit'}
                   onChange={e => {
                     const custo = parseFloat(e.target.value) || 0
                     const mk = form.markup ?? 0
                     const venda = mk > 0 ? parseFloat((custo * (1 + mk / 100)).toFixed(2)) : form.preco_venda
                     setForm(prev => prev ? { ...prev, preco_custo: custo, preco_venda: venda } : prev)
                   }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${form.tipo === 'kit' ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 text-gray-900 focus:border-blue-500'}`} />
               </div>
 
               {/* Markup */}
