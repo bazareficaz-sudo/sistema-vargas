@@ -417,6 +417,30 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         }).eq('id', clienteSelecionado.id)
       }
 
+      // Carteira (cobrança na conta do cliente)
+      if (isCarteira && clienteSelecionado) {
+        const valorCarteira = formas.find(f => f.tipo === 'carteira')?.valor ?? total
+        await sb.from('contas_receber').insert({
+          empresa_id: empresaId,
+          cliente_id: clienteSelecionado.id,
+          cliente_nome: clienteSelecionado.nome,
+          origem: 'carteira',
+          origem_id: venda.id,
+          numero_doc: `CART-${venda.id?.slice(-6).toUpperCase()}`,
+          parcela_numero: 1,
+          total_parcelas: 1,
+          data_emissao: new Date().toISOString().split('T')[0],
+          data_vencimento: new Date().toISOString().split('T')[0],
+          valor_original: valorCarteira,
+          valor_recebido: 0,
+          status: 'aberto',
+          operador_nome: operadorNome,
+        })
+        await sb.from('clientes').update({
+          saldo_devedor: (clienteSelecionado.saldo_devedor ?? 0) + valorCarteira,
+        }).eq('id', clienteSelecionado.id)
+      }
+
       // Crédito gerado por devolução maior que compra
       if (valorCredito > 0 && clienteSelecionado) {
         const credId = uid()
