@@ -59,6 +59,13 @@ const nav = [
     ]
   },
   {
+    section: 'Integrações',
+    items: [
+      { href: '/dashboard/integracoes/whatsapp',            label: 'WhatsApp / Z-API',  icon: '💬' },
+      { href: '/dashboard/integracoes/whatsapp/historico',  label: 'Histórico WhatsApp', icon: '📋' },
+    ]
+  },
+  {
     section: 'Config',
     items: [
       { href: '/dashboard/empresas',                    label: 'Empresas',      icon: '🏢' },

@@ -245,7 +245,8 @@ export default function EntradasListClient({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <Link href={`/dashboard/entradas/${e.id}`}
+                    <Link
+                      href={e.status === 'rascunho' ? `/dashboard/entradas/nova?rascunho=${e.id}` : `/dashboard/entradas/${e.id}`}
                       className="opacity-0 group-hover:opacity-100 text-xs text-blue-600 hover:text-blue-800 transition-opacity font-medium whitespace-nowrap">
                       {e.status === 'rascunho' ? 'Continuar →' : 'Abrir →'}
                     </Link>

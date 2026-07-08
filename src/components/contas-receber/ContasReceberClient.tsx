@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import EnviarWhatsAppModal from '@/components/integracoes/EnviarWhatsAppModal'
 
 type Conta = {
   id: string
@@ -107,6 +108,9 @@ export default function ContasReceberClient({
     observacao: '', origem: 'manual', numero_doc: ''
   })
   const [salvandoNova, setSalvandoNova] = useState(false)
+
+  // Modal WhatsApp cobrança
+  const [wppConta, setWppConta] = useState<Conta | null>(null)
 
   // Modal recebimento
   const [contaReceber, setContaReceber] = useState<Conta | null>(null)
@@ -551,6 +555,11 @@ export default function ContasReceberClient({
                           Receber
                         </button>
                       )}
+                      <button onClick={() => setWppConta(c)}
+                        title="Enviar cobrança por WhatsApp"
+                        className="px-2 py-1 bg-green-50 hover:bg-green-100 text-green-600 text-xs rounded-lg transition-colors">
+                        💬
+                      </button>
                       {podeReceber && (
                         <button onClick={() => cancelarConta(c.id)}
                           className="px-2 py-1 bg-slate-100 hover:bg-red-50 text-slate-500 hover:text-red-500 text-xs rounded-lg transition-colors">
@@ -813,6 +822,25 @@ export default function ContasReceberClient({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── MODAL WHATSAPP COBRANÇA ──────────────────────────────── */}
+      {wppConta && (
+        <EnviarWhatsAppModal
+          aberto={!!wppConta}
+          titulo="Enviar Cobrança por WhatsApp"
+          payload={{
+            telefone: '',
+            mensagem: `Olá ${wppConta.cliente_nome}! 👋\nVocê tem um valor em aberto.\n\n💰 *Valor:* ${fmt(wppConta.valor_aberto)}\n📅 *Vencimento:* ${new Date(wppConta.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}\n📄 *Doc:* ${wppConta.numero_doc ?? wppConta.id.slice(0, 8)}\n\nPara regularizar, entre em contato conosco.`,
+            tipo: 'cobranca',
+            cliente_id: wppConta.cliente_id,
+            cliente_nome: wppConta.cliente_nome,
+            referencia_tipo: 'conta_receber',
+            referencia_id: wppConta.id,
+          }}
+          onClose={() => setWppConta(null)}
+          onEnviado={() => setTimeout(() => setWppConta(null), 2000)}
+        />
       )}
     </div>
   )

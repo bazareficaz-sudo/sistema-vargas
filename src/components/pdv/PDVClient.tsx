@@ -86,6 +86,17 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
   const [salvando, setSalvando] = useState(false)
   const [formaIdx, setFormaIdx] = useState(0)
 
+  // Modal pós-venda WhatsApp
+  const [vendaConcluidaModal, setVendaConcluidaModal] = useState<{
+    msg: string; vendaId: string; total: number
+    clienteNome: string | null; clienteTelefone: string | null; clienteId: string | null
+    itensResumo: string
+  } | null>(null)
+  const [wppTel, setWppTel] = useState('')
+  const [wppEnviando, setWppEnviando] = useState(false)
+  const [wppStatus, setWppStatus] = useState<'idle' | 'ok' | 'erro'>('idle')
+  const [wppErro, setWppErro] = useState('')
+
   const [modalOrc, setModalOrc] = useState(false)
   const [obsOrc, setObsOrc] = useState('')
   const [validadeOrc, setValidadeOrc] = useState('')
@@ -470,19 +481,68 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
       }
 
       const msgs: Record<string, string> = {
-        troca:    `✓ Troca registrada!\nSem diferença de valor.`,
-        devolucao:`✓ Devolução registrada!\nCrédito gerado: ${fmt(valorCredito)}\nCliente: ${clienteSelecionado?.nome ?? '—'}`,
-        mista:    `✓ Operação concluída!\nVendas: ${fmt(totalVendas)} | Devoluções: ${fmt(totalDevolucoes)}\nPago: ${fmt(total)}`,
+        troca:    `✓ Troca registrada! Sem diferença de valor.`,
+        devolucao:`✓ Devolução registrada! Crédito: ${fmt(valorCredito)} para ${clienteSelecionado?.nome ?? '—'}`,
+        mista:    `✓ Operação concluída! Vendas: ${fmt(totalVendas)} | Dev.: ${fmt(totalDevolucoes)} | Pago: ${fmt(total)}`,
         venda:    isFiado
-          ? `✓ Venda fiada registrada!\nTotal: ${fmt(total)}`
-          : `✓ Venda concluída!\nTotal: ${fmt(total)}\nTroco: ${fmt(troco2)}`,
+          ? `✓ Venda fiada registrada! Total: ${fmt(total)}`
+          : `✓ Venda concluída! Total: ${fmt(total)} | Troco: ${fmt(troco2)}`,
       }
+
+      // Captura dados antes de limpar
+      const resumoItens = itens.map(i => `• ${i.nome} x${i.quantidade} = ${fmt(i.total)}`).join('\n')
+      const capClienteNome = clienteSelecionado?.nome ?? null
+      const capClienteTel = clienteSelecionado?.telefone ?? null
+      const capClienteId = clienteSelecionado?.id ?? null
+      const capTotal = total
+      const capVendaId = venda.id
+
       limparTudo()
-      alert(msgs[operacaoFinal] ?? msgs.venda)
+
+      // Mostra modal pós-venda em vez de alert
+      setWppTel(capClienteTel ?? '')
+      setWppStatus('idle')
+      setWppErro('')
+      setVendaConcluidaModal({
+        msg: msgs[operacaoFinal] ?? msgs.venda,
+        vendaId: capVendaId,
+        total: capTotal,
+        clienteNome: capClienteNome,
+        clienteTelefone: capClienteTel,
+        clienteId: capClienteId,
+        itensResumo: resumoItens,
+      })
     } catch (e: any) {
       alert('Erro: ' + e.message)
       setSalvando(false)
     }
+  }
+
+  async function enviarComprovantWpp() {
+    if (!wppTel.trim() || !vendaConcluidaModal) return
+    setWppEnviando(true); setWppErro('')
+    const mensagem = `${empresaNome} — Comprovante de Compra\n\n${vendaConcluidaModal.clienteNome ? `Cliente: ${vendaConcluidaModal.clienteNome}\n` : ''}${vendaConcluidaModal.itensResumo}\n\n💰 Total: ${fmt(vendaConcluidaModal.total)}\n📅 ${new Date().toLocaleDateString('pt-BR')}\n\nObrigado! 🙏`
+    try {
+      const res = await fetch('/api/whatsapp/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telefone: wppTel,
+          mensagem,
+          tipo: 'cupom',
+          cliente_id: vendaConcluidaModal.clienteId,
+          cliente_nome: vendaConcluidaModal.clienteNome,
+          referencia_tipo: 'venda',
+          referencia_id: vendaConcluidaModal.vendaId,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) setWppStatus('ok')
+      else { setWppErro(data.error ?? 'Erro ao enviar'); setWppStatus('erro') }
+    } catch (e: any) {
+      setWppErro(e.message); setWppStatus('erro')
+    }
+    setWppEnviando(false)
   }
 
   // ── Atalhos globais ─────────────────────────────────────────
@@ -1250,6 +1310,59 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
             )}
           </div>
         </Modal>
+      )}
+
+      {/* ── MODAL PÓS-VENDA: comprovante WhatsApp ─────────────────── */}
+      {vendaConcluidaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4">
+            <div className="px-6 pt-6 pb-4">
+              {wppStatus === 'ok' ? (
+                <div className="text-center py-2">
+                  <p className="text-4xl mb-3">✅</p>
+                  <p className="text-lg font-bold text-gray-900">Comprovante enviado!</p>
+                  <p className="text-sm text-gray-500 mt-1">WhatsApp enviado para {wppTel}</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-xl">✓</div>
+                    <div>
+                      <p className="font-semibold text-gray-900">{vendaConcluidaModal.msg.split('!')[0]}!</p>
+                      {vendaConcluidaModal.clienteNome && <p className="text-xs text-gray-500">Cliente: {vendaConcluidaModal.clienteNome}</p>}
+                    </div>
+                  </div>
+                  <div className="border-t border-gray-100 pt-4">
+                    <p className="text-sm font-medium text-gray-700 mb-3">📲 Enviar comprovante por WhatsApp?</p>
+                    <div className="flex gap-2">
+                      <input
+                        value={wppTel}
+                        onChange={e => setWppTel(e.target.value)}
+                        placeholder="(11) 99999-9999"
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500"
+                      />
+                      <button
+                        onClick={enviarComprovantWpp}
+                        disabled={wppEnviando || !wppTel.trim()}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg whitespace-nowrap">
+                        {wppEnviando ? '⏳' : '📤 Enviar'}
+                      </button>
+                    </div>
+                    {wppErro && <p className="text-xs text-red-600 mt-2">{wppErro}</p>}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="px-6 pb-5">
+              <button
+                onClick={() => { setVendaConcluidaModal(null); setWppStatus('idle') }}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm">
+                🛒 Nova Venda
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -60,11 +60,16 @@ function addDays(dateStr: string, days: number) {
 }
 
 export default function NovaEntradaClient({
-  fornecedores: fornecedoresIniciais, empresaId,
-}: { fornecedores: Fornecedor[]; empresaId: string }) {
+  fornecedores: fornecedoresIniciais, empresaId, rascunhoInicial,
+}: { fornecedores: Fornecedor[]; empresaId: string; rascunhoInicial?: { id: string; entrada: any; itens: any[] } }) {
   const router = useRouter()
 
   const [fornecedores, setFornecedores] = useState(fornecedoresIniciais)
+
+  // Rascunho
+  const [rascunhoId, setRascunhoId] = useState<string | null>(rascunhoInicial?.id ?? null)
+  const [salvandoRascunho, setSalvandoRascunho] = useState(false)
+  const [rascunhoMsg, setRascunhoMsg] = useState<string | null>(null)
 
   // Modal fornecedor rápido
   const [modalForn, setModalForn] = useState(false)
@@ -93,18 +98,41 @@ export default function NovaEntradaClient({
     setNovoForn({ razao_social: '', nome_fantasia: '', cnpj: '', telefone: '', email: '', contato: '', cidade: '', estado: '' })
   }
 
-  // Cabeçalho NF
-  const [fornecedorId, setFornecedorId] = useState('')
-  const [numeroNf, setNumeroNf] = useState('')
-  const [serie, setSerie] = useState('')
-  const [dataEmissao, setDataEmissao] = useState('')
-  const [valorFrete, setValorFrete] = useState('')
-  const [valorDesconto, setValorDesconto] = useState('')
-  const [valorOutros, setValorOutros] = useState('')
-  const [observacoes, setObservacoes] = useState('')
+  // Cabeçalho NF — inicializa do rascunho se disponível
+  const _r = rascunhoInicial?.entrada
+  const [fornecedorId, setFornecedorId] = useState(_r?.fornecedor_id ?? '')
+  const [numeroNf, setNumeroNf] = useState(_r?.numero_nf ?? '')
+  const [serie, setSerie] = useState(_r?.serie ?? '')
+  const [dataEmissao, setDataEmissao] = useState(_r?.data_emissao ?? '')
+  const [valorFrete, setValorFrete] = useState(_r?.valor_frete ? String(_r.valor_frete) : '')
+  const [valorDesconto, setValorDesconto] = useState(_r?.valor_desconto ? String(_r.valor_desconto) : '')
+  const [valorOutros, setValorOutros] = useState(_r?.valor_outros ? String(_r.valor_outros) : '')
+  const [observacoes, setObservacoes] = useState(_r?.observacoes ?? '')
 
-  // Etapa 2: Itens
-  const [itens, setItens] = useState<ItemEntrada[]>([])
+  // Inicializa nome do fornecedor no campo de busca quando vem do rascunho
+  useEffect(() => {
+    if (_r?.fornecedor_id) {
+      const forn = fornecedoresIniciais.find(f => f.id === _r.fornecedor_id)
+      if (forn) setBuscaForn(forn.nome_fantasia ?? forn.razao_social)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Etapa 2: Itens — inicializa do rascunho
+  const [itens, setItens] = useState<ItemEntrada[]>(
+    (rascunhoInicial?.itens ?? []).map((i: any) => ({
+      produto_id: i.produto_id,
+      nome_produto: i.nome_produto,
+      sku: i.sku,
+      quantidade: i.quantidade,
+      preco_custo_anterior: i.preco_custo_anterior,
+      preco_custo_novo: i.preco_custo_novo,
+      markup: i.markup,
+      preco_venda_novo: i.preco_venda_novo,
+      atualizar_custo: i.atualizar_custo,
+      atualizar_preco: i.atualizar_preco,
+    }))
+  )
   const [buscaProd, setBuscaProd] = useState('')
   const [resultados, setResultados] = useState<any[]>([])
   const [buscando, setBuscando] = useState(false)
@@ -360,20 +388,81 @@ export default function NovaEntradaClient({
     setParcelas(ps); setParcelasGeradas(true)
   }
 
+  function mostrarRascunhoMsg(msg: string) {
+    setRascunhoMsg(msg)
+    setTimeout(() => setRascunhoMsg(null), 3500)
+  }
+
+  async function salvarRascunho() {
+    if (!fornecedorId && itens.length === 0) {
+      mostrarRascunhoMsg('⚠ Adicione pelo menos um fornecedor ou item para salvar o rascunho.')
+      return
+    }
+    setSalvandoRascunho(true)
+    const sb = createClient()
+    const dadosEntrada = {
+      empresa_id: empresaId, fornecedor_id: fornecedorId || null,
+      numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
+      valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
+      valor_outros: outros, valor_total: totalGeral,
+      observacoes: observacoes || null, status: 'rascunho',
+    }
+
+    let entradaId = rascunhoId
+    if (entradaId) {
+      await sb.from('entradas').update(dadosEntrada).eq('id', entradaId)
+      await sb.from('entrada_itens').delete().eq('entrada_id', entradaId)
+    } else {
+      const { data: nova, error } = await sb.from('entradas').insert(dadosEntrada).select('id').single()
+      if (error || !nova) { setSalvandoRascunho(false); mostrarRascunhoMsg('❌ Erro ao salvar rascunho.'); return }
+      entradaId = nova.id
+      setRascunhoId(entradaId)
+    }
+
+    if (itens.length > 0) {
+      await sb.from('entrada_itens').insert(itens.map(i => ({
+        entrada_id: entradaId, produto_id: i.produto_id, nome_produto: i.nome_produto,
+        sku: i.sku, quantidade: i.quantidade, preco_custo_anterior: i.preco_custo_anterior,
+        preco_custo_novo: i.preco_custo_novo, markup: i.markup, preco_venda_novo: i.preco_venda_novo,
+        atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
+        subtotal: i.preco_custo_novo * i.quantidade,
+      })))
+    }
+
+    setSalvandoRascunho(false)
+    mostrarRascunhoMsg('✓ Rascunho salvo! Você pode continuar depois em Entradas.')
+  }
+
   async function confirmarEntrada() {
     if (!fornecedorId) { setErro('Selecione o fornecedor.'); return }
     setSalvando(true); setErro('')
     const sb = createClient()
 
-    const { data: entrada, error: errEntrada } = await sb.from('entradas').insert({
-      empresa_id: empresaId, fornecedor_id: fornecedorId,
-      numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
-      valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
-      valor_outros: outros, valor_total: totalGeral,
-      observacoes: observacoes || null, status: 'confirmada',
-    }).select().single()
+    let entrada: any
+    if (rascunhoId) {
+      // Atualiza o rascunho existente para confirmada
+      const { data, error: errEntrada } = await sb.from('entradas').update({
+        fornecedor_id: fornecedorId,
+        numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
+        valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
+        valor_outros: outros, valor_total: totalGeral,
+        observacoes: observacoes || null, status: 'confirmada',
+      }).eq('id', rascunhoId).select().single()
+      if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao confirmar.'); setSalvando(false); return }
+      entrada = data
+      await sb.from('entrada_itens').delete().eq('entrada_id', rascunhoId)
+    } else {
+      const { data, error: errEntrada } = await sb.from('entradas').insert({
+        empresa_id: empresaId, fornecedor_id: fornecedorId,
+        numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
+        valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
+        valor_outros: outros, valor_total: totalGeral,
+        observacoes: observacoes || null, status: 'confirmada',
+      }).select().single()
+      if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao salvar.'); setSalvando(false); return }
+      entrada = data
+    }
 
-    if (errEntrada || !entrada) { setErro(errEntrada?.message ?? 'Erro ao salvar.'); setSalvando(false); return }
 
     await sb.from('entrada_itens').insert(itens.map(i => ({
       entrada_id: entrada.id, produto_id: i.produto_id, nome_produto: i.nome_produto,
@@ -449,6 +538,11 @@ export default function NovaEntradaClient({
       </div>
 
       {erro && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">{erro}</div>}
+      {rascunhoMsg && (
+        <div className={`text-sm px-4 py-3 rounded-lg mb-4 ${rascunhoMsg.startsWith('✓') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-yellow-50 border border-yellow-200 text-yellow-700'}`}>
+          {rascunhoMsg}
+        </div>
+      )}
 
       {/* ── ETAPA 1: Dados NF ── */}
       {etapa === 'dados' && (
@@ -511,7 +605,11 @@ export default function NovaEntradaClient({
             <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)} rows={2}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none" />
           </div>
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-between items-center pt-2">
+            <button onClick={salvarRascunho} disabled={salvandoRascunho}
+              className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+              {salvandoRascunho ? '⏳ Salvando...' : '💾 Salvar Rascunho'}
+            </button>
             <button onClick={() => { if (!fornecedorId) { setErro('Selecione o fornecedor.'); return }; setErro(''); setEtapa('itens') }}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
               Próximo: Itens →
@@ -668,8 +766,12 @@ export default function NovaEntradaClient({
             </div>
           )}
 
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <button onClick={() => setEtapa('dados')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
+            <button onClick={salvarRascunho} disabled={salvandoRascunho}
+              className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+              {salvandoRascunho ? '⏳ Salvando...' : '💾 Salvar Rascunho'}
+            </button>
             <button onClick={avancarParaReajuste} disabled={carregandoReajuste || itens.length === 0}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
               {carregandoReajuste ? 'Carregando...' : 'Próximo: Reajuste de Preços →'}
@@ -725,8 +827,12 @@ export default function NovaEntradaClient({
             </div>
           )}
 
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <button onClick={() => setEtapa('itens')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
+            <button onClick={salvarRascunho} disabled={salvandoRascunho}
+              className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+              {salvandoRascunho ? '⏳ Salvando...' : '💾 Salvar Rascunho'}
+            </button>
             <button onClick={() => setEtapa('pagamento')} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
               Próximo: Pagamento →
             </button>
@@ -796,8 +902,12 @@ export default function NovaEntradaClient({
               </table>
             </div>
           )}
-          <div className="flex justify-between pt-2">
+          <div className="flex justify-between items-center pt-2">
             <button onClick={() => setEtapa('reajuste')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
+            <button onClick={salvarRascunho} disabled={salvandoRascunho}
+              className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+              {salvandoRascunho ? '⏳ Salvando...' : '💾 Salvar Rascunho'}
+            </button>
             <button onClick={() => setEtapa('confirmacao')} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
               Revisar e confirmar →
             </button>
