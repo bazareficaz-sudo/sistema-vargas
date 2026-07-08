@@ -825,23 +825,27 @@ export default function ContasReceberClient({
       )}
 
       {/* ── MODAL WHATSAPP COBRANÇA ──────────────────────────────── */}
-      {wppConta && (
-        <EnviarWhatsAppModal
-          aberto={!!wppConta}
-          titulo="Enviar Cobrança por WhatsApp"
-          payload={{
-            telefone: '',
-            mensagem: `Olá ${wppConta.cliente_nome}! 👋\nVocê tem um valor em aberto.\n\n💰 *Valor:* ${fmt(wppConta.valor_aberto)}\n📅 *Vencimento:* ${new Date(wppConta.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}\n📄 *Doc:* ${wppConta.numero_doc ?? wppConta.id.slice(0, 8)}\n\nPara regularizar, entre em contato conosco.`,
-            tipo: 'cobranca',
-            cliente_id: wppConta.cliente_id,
-            cliente_nome: wppConta.cliente_nome,
-            referencia_tipo: 'conta_receber',
-            referencia_id: wppConta.id,
-          }}
-          onClose={() => setWppConta(null)}
-          onEnviado={() => setTimeout(() => setWppConta(null), 2000)}
-        />
-      )}
+      {wppConta && (() => {
+        const cli = clientes.find(c => c.id === wppConta.cliente_id)
+        const tel = cli?.telefone ?? ''
+        return (
+          <EnviarWhatsAppModal
+            aberto={!!wppConta}
+            titulo="Enviar Cobrança por WhatsApp"
+            payload={{
+              telefone: tel,
+              mensagem: `Olá ${wppConta.cliente_nome}! 👋\nVocê tem um valor em aberto.\n\n💰 *Valor:* ${fmt(wppConta.valor_aberto)}\n📅 *Vencimento:* ${new Date(wppConta.data_vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}\n📄 *Doc:* ${wppConta.numero_doc ?? wppConta.id.slice(0, 8)}\n\nPara regularizar, entre em contato conosco.`,
+              tipo: 'cobranca',
+              cliente_id: wppConta.cliente_id,
+              cliente_nome: wppConta.cliente_nome,
+              referencia_tipo: 'conta_receber',
+              referencia_id: wppConta.id,
+            }}
+            onClose={() => setWppConta(null)}
+            onEnviado={() => setTimeout(() => setWppConta(null), 2000)}
+          />
+        )
+      })()}
     </div>
   )
 }
