@@ -34,6 +34,18 @@ export default async function ProdutosPage({
 
   const { data: produtos, count } = await query
 
+  // Imagens principais dos produtos desta página
+  const produtoIds = (produtos ?? []).map(p => p.id)
+  let imagensMap: Record<string, string> = {}
+  if (produtoIds.length > 0) {
+    const { data: imgs } = await supabase
+      .from('produto_imagens')
+      .select('produto_id, url')
+      .in('produto_id', produtoIds)
+      .eq('principal', true)
+    for (const img of imgs ?? []) imagensMap[img.produto_id] = img.url
+  }
+
   // Contagens para as abas — aplicam os mesmos filtros de busca e promoção
   function baseCount() {
     let q2 = supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId)
@@ -59,6 +71,7 @@ export default async function ProdutosPage({
   return (
     <ProdutosClient
       produtos={produtos ?? []}
+      imagensMap={imagensMap}
       total={total}
       totalAtivos={total}
       totalInativos={0}

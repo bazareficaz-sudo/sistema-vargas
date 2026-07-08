@@ -30,6 +30,7 @@ type Produto = {
 
 type Props = {
   produtos: Produto[]
+  imagensMap?: Record<string, string>
   total: number
   totalAtivos: number
   totalInativos: number
@@ -55,7 +56,7 @@ const ABAS = [
 ]
 
 export default function ProdutosClient({
-  produtos: inicial, total, totalTodos, totalSimples, totalKits, totalEmPromocao,
+  produtos: inicial, imagensMap = {}, total, totalTodos, totalSimples, totalKits, totalEmPromocao,
   pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, empresaId
 }: Props) {
   const router = useRouter()
@@ -266,7 +267,16 @@ export default function ProdutosClient({
                   </button>
                 </td>
                 <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    {imagensMap[p.id] ? (
+                      <img src={imagensMap[p.id]} alt={p.nome}
+                        onClick={() => setEditando(p)}
+                        className="w-9 h-9 rounded-lg object-cover border border-gray-200 flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity" />
+                    ) : (
+                      <div className="w-9 h-9 rounded-lg border border-dashed border-gray-200 flex items-center justify-center flex-shrink-0 text-gray-300 text-sm select-none">
+                        📷
+                      </div>
+                    )}
                     <button onClick={() => setEditando(p)} className="text-left text-gray-900 hover:text-blue-600 font-medium max-w-xs truncate block transition-colors">
                       {p.nome}
                     </button>
