@@ -172,7 +172,7 @@ export default function NovaEntradaClient({
       // Busca pela primeira palavra no banco (filtro inicial amplo)
       const primeiraPalavra = palavras[0]
       const { data } = await sb.from('produtos')
-        .select('id, nome, sku, ean, preco_custo, preco_venda, markup')
+        .select('id, nome, sku, ean, preco_custo, preco_venda, markup, marca')
         .eq('empresa_id', empresaId)
         .or(`nome.ilike.%${primeiraPalavra}%,sku.ilike.%${primeiraPalavra}%,ean.ilike.%${primeiraPalavra}%`)
         .limit(200)
@@ -543,7 +543,7 @@ export default function NovaEntradaClient({
                         className={`w-full text-left px-4 py-3 transition-colors border-b border-gray-100 last:border-0 ${indiceProd === i ? 'bg-blue-600' : 'hover:bg-blue-50'}`}>
                         <p className={`text-sm font-medium ${indiceProd === i ? 'text-white' : 'text-gray-900'}`}>{r.nome}</p>
                         <p className={`text-xs ${indiceProd === i ? 'text-blue-100' : 'text-gray-400'}`}>
-                          {r.sku} · Custo: {fmt(r.preco_custo ?? 0)} · Venda: {fmt(r.preco_venda ?? 0)}
+                          {r.sku}{r.marca ? ` · ${r.marca}` : ''} · Custo: {fmt(r.preco_custo ?? 0)} · Venda: {fmt(r.preco_venda ?? 0)}
                         </p>
                       </button>
                     ))}
