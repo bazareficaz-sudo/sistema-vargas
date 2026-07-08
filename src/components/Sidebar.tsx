@@ -52,8 +52,9 @@ const nav = [
     section: 'Compras',
     items: [
       { href: '/dashboard/fornecedores', label: 'Fornecedores',    icon: '🏭' },
-      { href: '/dashboard/entradas',     label: 'Entradas',        icon: '📥' },
-      { href: '/dashboard/entradas-xml', label: 'Entrada XML/NF-e',icon: '📄' },
+      { href: '/dashboard/entradas',          label: 'Entradas',          icon: '📥' },
+      { href: '/dashboard/entradas/produtos', label: 'Produtos Comprados', icon: '📦' },
+      { href: '/dashboard/entradas-xml',      label: 'Entrada XML/NF-e',  icon: '📄' },
       { href: '/dashboard/contas-pagar', label: 'Contas a Pagar',  icon: '💳' },
     ]
   },

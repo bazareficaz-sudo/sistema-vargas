@@ -10,8 +10,13 @@ export default async function EntradaDetalhePage({
   const { id } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('empresa_id, role')
+    .eq('id', user!.id)
+    .single()
   const empresaId = profile?.empresa_id ?? ''
+  const operadorNome = user?.email ?? ''
 
   const { data: entrada } = await supabase
     .from('entradas')
@@ -28,6 +33,19 @@ export default async function EntradaDetalhePage({
     .eq('entrada_id', id)
     .order('created_at', { ascending: true })
 
+  // Busca preços atuais dos produtos vinculados
+  const produtoIds = (itens ?? []).filter(i => i.produto_id).map(i => i.produto_id as string)
+  let produtosMap: Record<string, { preco_venda: number; preco_custo: number; categoria: string | null; marca: string | null; tipo: string }> = {}
+  if (produtoIds.length > 0) {
+    const { data: prods } = await supabase
+      .from('produtos')
+      .select('id, preco_venda, preco_custo, categoria, marca, tipo')
+      .in('id', produtoIds)
+    for (const p of prods ?? []) {
+      produtosMap[p.id] = { preco_venda: p.preco_venda, preco_custo: p.preco_custo, categoria: p.categoria, marca: p.marca, tipo: p.tipo }
+    }
+  }
+
   const { data: contasPagar } = await supabase
     .from('contas_pagar')
     .select('*')
@@ -41,13 +59,23 @@ export default async function EntradaDetalhePage({
     .eq('ativo', true)
     .order('razao_social')
 
+  // Histórico de preços desta entrada
+  const { data: historicoPrecos } = await supabase
+    .from('historico_precos')
+    .select('*')
+    .eq('entrada_id', id)
+    .order('created_at', { ascending: false })
+
   return (
     <EditarEntradaClient
       entrada={entrada}
       itens={itens ?? []}
       contasPagar={contasPagar ?? []}
       fornecedores={fornecedores ?? []}
+      produtosMap={produtosMap}
+      historicoPrecos={historicoPrecos ?? []}
       empresaId={empresaId}
+      operadorNome={operadorNome}
     />
   )
 }
