@@ -12,23 +12,39 @@ export async function GET(request: NextRequest) {
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ error: 'Empresa não encontrada' }, { status: 400 })
 
-  const { data: cfg } = await supabase
-    .from('whatsapp_config')
-    .select('instance_id, token, client_token, url_base')
-    .eq('empresa_id', empresaId)
-    .single()
+  // Aceita config inline via query params (para testar sem salvar)
+  const sp = request.nextUrl.searchParams
+  const inlineInstance = sp.get('instance_id')
+  const inlineToken    = sp.get('token')
 
-  if (!cfg?.instance_id || !cfg?.token)
-    return NextResponse.json({ error: 'Instância não configurada' }, { status: 400 })
+  let zapiCfg: { instanceId: string; token: string; clientToken?: string | null; urlBase?: string | null }
 
-  const zapiCfg = {
-    instanceId: cfg.instance_id,
-    token: cfg.token,
-    clientToken: cfg.client_token,
-    urlBase: cfg.url_base,
+  if (inlineInstance && inlineToken) {
+    zapiCfg = {
+      instanceId: inlineInstance,
+      token: inlineToken,
+      clientToken: sp.get('client_token') || null,
+      urlBase: sp.get('url_base') || 'https://api.z-api.io',
+    }
+  } else {
+    const { data: cfg } = await supabase
+      .from('whatsapp_config')
+      .select('instance_id, token, client_token, url_base')
+      .eq('empresa_id', empresaId)
+      .single()
+
+    if (!cfg?.instance_id || !cfg?.token)
+      return NextResponse.json({ error: 'Instância não configurada' }, { status: 400 })
+
+    zapiCfg = {
+      instanceId: cfg.instance_id,
+      token: cfg.token,
+      clientToken: cfg.client_token,
+      urlBase: cfg.url_base,
+    }
   }
 
-  const action = request.nextUrl.searchParams.get('action') ?? 'status'
+  const action = sp.get('action') ?? 'status'
 
   if (action === 'qrcode') {
     const qr = await zapiQrCode(zapiCfg)

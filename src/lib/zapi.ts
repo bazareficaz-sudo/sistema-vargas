@@ -12,7 +12,10 @@ export interface ZAPIStatus {
 }
 
 function buildUrl(config: ZAPIConfig, endpoint: string) {
-  const base = (config.urlBase ?? 'https://api.z-api.io').replace(/\/$/, '')
+  let base = (config.urlBase ?? 'https://api.z-api.io').replace(/\/$/, '')
+  // Sanitiza: se o usuário colou a URL completa (com /instances/), extrai só o host
+  const instancesIdx = base.indexOf('/instances/')
+  if (instancesIdx > 0) base = base.substring(0, instancesIdx)
   return `${base}/instances/${config.instanceId}/token/${config.token}/${endpoint}`
 }
 

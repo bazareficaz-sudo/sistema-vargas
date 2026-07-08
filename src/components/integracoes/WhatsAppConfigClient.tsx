@@ -103,13 +103,29 @@ export default function WhatsAppConfigClient({
   }
 
   async function testarConexao() {
+    if (!cfg.instance_id || !cfg.token) {
+      toast('erro', 'Preencha o Instance ID e o Token antes de testar.')
+      return
+    }
     setTestando(true)
     try {
-      const res = await fetch('/api/whatsapp/status')
+      // Passa os valores atuais do formulário — não precisa salvar antes
+      const params = new URLSearchParams({
+        instance_id: cfg.instance_id,
+        token: cfg.token,
+        ...(cfg.client_token ? { client_token: cfg.client_token } : {}),
+        url_base: cfg.url_base || 'https://api.z-api.io',
+      })
+      const res = await fetch(`/api/whatsapp/status?${params}`)
       const data = await res.json()
       const novoStatus = data.connected ? 'conectado' : 'desconectado'
       setCfg(prev => ({ ...prev, status_conexao: novoStatus }))
-      toast(data.connected ? 'ok' : 'erro', data.connected ? 'WhatsApp conectado!' : `Desconectado${data.error ? ': ' + data.error : ''}`)
+      toast(
+        data.connected ? 'ok' : 'erro',
+        data.connected
+          ? '✅ WhatsApp conectado!'
+          : `Desconectado${data.error ? ': ' + data.error : ' — verifique Instance ID e Token'}`,
+      )
     } catch {
       toast('erro', 'Erro ao testar conexão')
     }
@@ -290,7 +306,22 @@ export default function WhatsAppConfigClient({
             </div>
             <div className="grid grid-cols-2 gap-4">
               <F label="Client Token (opcional)" value={cfg.client_token} onChange={v => upd('client_token', v)} type="password" />
-              <F label="URL Base da Z-API" value={cfg.url_base} onChange={v => upd('url_base', v)} />
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">URL Base da Z-API</label>
+                <input
+                  value={cfg.url_base}
+                  onChange={e => {
+                    let v = e.target.value
+                    // Auto-sanitiza se o usuário colar a URL completa da instância
+                    const idx = v.indexOf('/instances/')
+                    if (idx > 0) v = v.substring(0, idx)
+                    upd('url_base', v)
+                  }}
+                  placeholder="https://api.z-api.io"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">Apenas o host — ex: <span className="font-mono">https://api.z-api.io</span></p>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <F label="Número WhatsApp conectado" value={cfg.numero_whatsapp} onChange={v => upd('numero_whatsapp', v)} placeholder="5511999999999" />
