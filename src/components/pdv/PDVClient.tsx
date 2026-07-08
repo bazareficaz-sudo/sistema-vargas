@@ -296,10 +296,16 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
   }
 
   const isFiado = formas.length === 1 && formas[0].tipo === 'fiado'
+  const isCarteira = formas.some(f => f.tipo === 'carteira')
 
   // ── Concluir venda (normal, mista ou troca) ───────────────────
   async function concluirVenda(tipoOp: 'venda' | 'troca' | 'devolucao' | 'mista' = 'venda') {
     if (itens.length === 0) return
+
+    if (isCarteira && !clienteSelecionado && tipoOp !== 'troca') {
+      setErrFiado('Selecione o cliente para pagamento via Carteira (F5).')
+      return
+    }
 
     if (isFiado && tipoOp !== 'troca') {
       if (!clienteSelecionado) { setErrFiado('Selecione o cliente para venda fiada.'); return }
@@ -909,10 +915,20 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
               </div>
             )}
 
+            {isCarteira && !clienteSelecionado && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 text-xs text-amber-800 font-medium">
+                👛 Carteira exige cliente identificado — pressione F5 para selecionar.
+              </div>
+            )}
+
+            {errFiado && !isFiado && (
+              <p className="text-xs text-red-600 font-medium">{errFiado}</p>
+            )}
+
             <div className="flex gap-2 pt-1">
               <button onClick={() => { setModalPag(false); setErrFiado('') }} className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cancelar (Esc)</button>
               <button onClick={() => concluirVenda(hasDevolucao ? 'mista' : 'venda')}
-                disabled={salvando || (!isFiado && totalPago < total)}
+                disabled={salvando || (!isFiado && totalPago < total) || (isCarteira && !clienteSelecionado)}
                 className={`flex-1 py-2.5 disabled:opacity-40 text-white font-semibold rounded-lg text-sm transition-colors ${isFiado ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                 {salvando ? 'Salvando...' : isFiado ? '📒 Confirmar Fiado (Enter)' : '✓ Confirmar (Enter)'}
               </button>
