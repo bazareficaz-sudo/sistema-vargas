@@ -6,10 +6,11 @@ const POR_PAGINA = 50
 export default async function ProdutosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; pagina?: string; aba?: string; promo?: string }>
+  searchParams: Promise<{ q?: string; pagina?: string; aba?: string; promo?: string; ativos?: string }>
 }) {
-  const { q = '', pagina = '1', aba = 'todos', promo = '' } = await searchParams
+  const { q = '', pagina = '1', aba = 'todos', promo = '', ativos = '1' } = await searchParams
   const promoFiltro = promo === '1'
+  const apenasAtivos = ativos !== '0'
   const pg = Math.max(1, parseInt(pagina))
   const offset = (pg - 1) * POR_PAGINA
 
@@ -25,6 +26,7 @@ export default async function ProdutosPage({
     .order('nome')
     .range(offset, offset + POR_PAGINA - 1)
 
+  if (apenasAtivos) query = query.eq('ativo', true)
   if (q) query = query.or(`nome.ilike.%${q}%,sku.ilike.%${q}%,ean.ilike.%${q}%`)
   if (aba !== 'todos') {
     if (aba === 'simples') query = query.in('tipo', ['simples', 'normal', null as unknown as string])
@@ -49,6 +51,7 @@ export default async function ProdutosPage({
   // Contagens para as abas — aplicam os mesmos filtros de busca e promoção
   function baseCount() {
     let q2 = supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId)
+    if (apenasAtivos) q2 = q2.eq('ativo', true)
     if (q) q2 = q2.or(`nome.ilike.%${q}%,sku.ilike.%${q}%,ean.ilike.%${q}%`)
     if (promoFiltro) q2 = q2.eq('promocao_ativa', true)
     return q2
@@ -84,6 +87,7 @@ export default async function ProdutosPage({
       q={q}
       abaAtiva={aba}
       promoFiltro={promoFiltro}
+      apenasAtivos={apenasAtivos}
       empresaId={empresaId}
     />
   )

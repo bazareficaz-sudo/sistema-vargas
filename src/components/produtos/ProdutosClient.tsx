@@ -43,6 +43,7 @@ type Props = {
   q: string
   abaAtiva: string
   promoFiltro: boolean
+  apenasAtivos: boolean
   empresaId: string
 }
 
@@ -57,7 +58,7 @@ const ABAS = [
 
 export default function ProdutosClient({
   produtos: inicial, imagensMap = {}, total, totalTodos, totalSimples, totalKits, totalEmPromocao,
-  pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, empresaId
+  pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, apenasAtivos: apenasAtivosInicial, empresaId
 }: Props) {
   const router = useRouter()
   const [produtos, setProdutos] = useState(inicial)
@@ -66,15 +67,17 @@ export default function ProdutosClient({
   const [q, setQ] = useState(qInicial)
   const [aba, setAba] = useState(abaInicial)
   const [promo, setPromo] = useState(promoInicial)
+  const [apenasAtivos, setApenasAtivos] = useState(apenasAtivosInicial)
 
   // Sincroniza quando o servidor traz novos dados (navegação entre abas/busca)
   useEffect(() => { setProdutos(inicial) }, [inicial])
   useEffect(() => { setQ(qInicial) }, [qInicial])
   useEffect(() => { setAba(abaInicial) }, [abaInicial])
   useEffect(() => { setPromo(promoInicial) }, [promoInicial])
+  useEffect(() => { setApenasAtivos(apenasAtivosInicial) }, [apenasAtivosInicial])
 
   function navegar(params: Record<string, string>) {
-    const sp = new URLSearchParams({ q, aba, pagina: String(pagina), promo: promo ? '1' : '', ...params })
+    const sp = new URLSearchParams({ q, aba, pagina: String(pagina), promo: promo ? '1' : '', ativos: apenasAtivos ? '1' : '0', ...params })
     router.push(`/dashboard/produtos?${sp.toString()}`)
   }
 
@@ -175,8 +178,20 @@ export default function ProdutosClient({
           Buscar
         </button>
         <div className="flex items-center gap-1 ml-2">
-          <button type="button" className="px-3 py-1.5 text-xs border border-blue-500 text-blue-600 rounded-full bg-blue-50">
-            produtos ativos
+          <button
+            type="button"
+            onClick={() => {
+              const next = !apenasAtivos
+              setApenasAtivos(next)
+              navegar({ ativos: next ? '1' : '0', pagina: '1' })
+            }}
+            className={`px-3 py-1.5 text-xs rounded-full border transition-colors flex items-center gap-1.5 ${
+              apenasAtivos
+                ? 'border-blue-500 text-blue-600 bg-blue-50 font-medium'
+                : 'border-gray-300 text-gray-500 bg-white hover:bg-gray-50 line-through'
+            }`}
+          >
+            {apenasAtivos ? '✓ ' : ''}produtos ativos
           </button>
           <button
             type="button"

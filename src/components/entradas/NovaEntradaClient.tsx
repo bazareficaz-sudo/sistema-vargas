@@ -174,6 +174,7 @@ export default function NovaEntradaClient({
       const { data } = await sb.from('produtos')
         .select('id, nome, sku, ean, preco_custo, preco_venda, markup, marca')
         .eq('empresa_id', empresaId)
+        .eq('ativo', true)
         .or(`nome.ilike.%${primeiraPalavra}%,sku.ilike.%${primeiraPalavra}%,ean.ilike.%${primeiraPalavra}%`)
         .limit(200)
 
