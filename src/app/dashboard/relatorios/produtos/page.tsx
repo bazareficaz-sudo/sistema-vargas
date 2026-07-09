@@ -69,7 +69,7 @@ export default async function RelatorioProdutosPage({
   const curvaABC = lista.map(p => {
     acum += p.faturamento
     const pctAcum = totalFat ? (acum / totalFat) * 100 : 0
-    const classe = pctAcum <= 80 ? 'A' : pctAcum <= 95 ? 'B' : 'C'
+    const classe: 'A' | 'B' | 'C' = pctAcum <= 80 ? 'A' : pctAcum <= 95 ? 'B' : 'C'
     return { ...p, pctAcum, classe }
   })
 
