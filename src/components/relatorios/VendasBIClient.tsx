@@ -109,7 +109,7 @@ export default function VendasBIClient({
               <XAxis dataKey="data" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false}
                 tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
-              <Tooltip formatter={(v: number, n) => [n === 'faturamento' ? brl(v) : v, n === 'faturamento' ? 'Faturamento' : 'Qtd vendas']}
+              <Tooltip formatter={(v: unknown, n: unknown) => [n === 'faturamento' ? brl(Number(v)) : String(v), n === 'faturamento' ? 'Faturamento' : 'Qtd vendas']}
                 contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }} />
               <Area type="monotone" dataKey="faturamento" stroke="#3b82f6" strokeWidth={2} fill="url(#gFat)" />
             </AreaChart>

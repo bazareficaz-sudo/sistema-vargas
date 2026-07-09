@@ -161,7 +161,7 @@ export default function DashboardBIClient({
               tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}
             />
             <Tooltip
-              formatter={(v: number) => [brl(v), 'Faturamento']}
+              formatter={(v: unknown) => [brl(Number(v)), 'Faturamento']}
               contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
             />
             <Area type="monotone" dataKey="faturamento" stroke="#3b82f6" strokeWidth={2} fill="url(#gradFat)" />
