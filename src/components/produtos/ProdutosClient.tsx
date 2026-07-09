@@ -292,7 +292,7 @@ export default function ProdutosClient({
                         📷
                       </div>
                     )}
-                    <button onClick={() => setEditando(p)} className="text-left text-gray-900 hover:text-blue-600 font-medium max-w-xs truncate block transition-colors">
+                    <button onClick={() => setEditando(p)} className="text-left text-gray-900 hover:text-blue-600 font-medium block transition-colors break-words">
                       {p.nome}
                     </button>
                     {p.promocao_ativa && (

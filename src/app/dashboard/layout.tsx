@@ -19,7 +19,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="min-h-screen flex" style={{ background: '#f1f5f9' }}>
       <Sidebar empresa={empresaNome} />
-      <main className="flex-1 ml-56 p-7 overflow-auto min-h-screen">
+      <main
+        id="main-content"
+        className="flex-1 p-7 overflow-auto min-h-screen transition-[margin] duration-300"
+        style={{ marginLeft: '15rem' }}
+      >
         {children}
       </main>
     </div>

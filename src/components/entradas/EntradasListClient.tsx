@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
 
 type Entrada = {
   id: string
@@ -55,16 +56,62 @@ export default function EntradasListClient({
   fornecedores: Fornecedor[]
   pendencias: { semRevisao: number; semContas: number; rascunho: number }
 }) {
+  const [lista, setLista] = useState<Entrada[]>(inicial)
   const [busca, setBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState('')
   const [filtroRevisao, setFiltroRevisao] = useState('')
   const [filtroForn, setFiltroForn] = useState('')
   const [dataInicio, setDataInicio] = useState('')
   const [dataFim, setDataFim] = useState('')
+  const [confirmando, setConfirmando] = useState<Entrada | null>(null)
+  const [excluindo, setExcluindo] = useState(false)
+  const [erroExclusao, setErroExclusao] = useState('')
+
+  async function excluirEntrada(entrada: Entrada) {
+    setExcluindo(true)
+    setErroExclusao('')
+    const supabase = createClient()
+    try {
+      if (entrada.status === 'confirmada') {
+        // Reverte estoque: busca itens e decrementa quantidade
+        const { data: itens } = await supabase
+          .from('entrada_itens')
+          .select('produto_id, quantidade')
+          .eq('entrada_id', entrada.id)
+        if (itens && itens.length > 0) {
+          for (const item of itens) {
+            const { data: prod } = await supabase
+              .from('produtos')
+              .select('quantidade_estoque')
+              .eq('id', item.produto_id)
+              .single()
+            if (prod) {
+              await supabase
+                .from('produtos')
+                .update({ quantidade_estoque: Math.max(0, (prod.quantidade_estoque ?? 0) - item.quantidade) })
+                .eq('id', item.produto_id)
+            }
+          }
+        }
+        // Remove contas a pagar vinculadas
+        await supabase.from('contas_pagar').delete().eq('entrada_id', entrada.id)
+      }
+      // Remove itens e a entrada (cascade via FK ou explícito)
+      await supabase.from('entrada_itens').delete().eq('entrada_id', entrada.id)
+      const { error } = await supabase.from('entradas').delete().eq('id', entrada.id)
+      if (error) throw error
+      setLista(prev => prev.filter(e => e.id !== entrada.id))
+      setConfirmando(null)
+    } catch (e: any) {
+      setErroExclusao(e.message ?? 'Erro ao excluir')
+    } finally {
+      setExcluindo(false)
+    }
+  }
 
   const filtradas = useMemo(() => {
     const q = busca.toLowerCase().trim()
-    return inicial.filter(e => {
+    return lista.filter(e => {
       if (filtroStatus && e.status !== filtroStatus) return false
       if (filtroRevisao && (e.status_revisao ?? 'pendente') !== filtroRevisao) return false
       if (filtroForn && e.fornecedores && !(e.fornecedores.razao_social + (e.fornecedores.nome_fantasia ?? '')).toLowerCase().includes(filtroForn.toLowerCase())) return false
@@ -76,7 +123,7 @@ export default function EntradasListClient({
       }
       return true
     })
-  }, [inicial, busca, filtroStatus, filtroRevisao, filtroForn, dataInicio, dataFim])
+  }, [lista, busca, filtroStatus, filtroRevisao, filtroForn, dataInicio, dataFim])
 
   const temFiltro = busca || filtroStatus || filtroRevisao || filtroForn || dataInicio || dataFim
   function limpar() { setBusca(''); setFiltroStatus(''); setFiltroRevisao(''); setFiltroForn(''); setDataInicio(''); setDataFim('') }
@@ -93,7 +140,7 @@ export default function EntradasListClient({
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Entradas de Mercadoria</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{filtradas.length} de {inicial.length} entradas</p>
+          <p className="text-gray-500 text-sm mt-0.5">{filtradas.length} de {lista.length} entradas</p>
         </div>
         <div className="flex gap-2">
           <Link href="/dashboard/entradas/produtos"
@@ -245,11 +292,21 @@ export default function EntradasListClient({
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={e.status === 'rascunho' ? `/dashboard/entradas/nova?rascunho=${e.id}` : `/dashboard/entradas/${e.id}`}
-                      className="opacity-0 group-hover:opacity-100 text-xs text-blue-600 hover:text-blue-800 transition-opacity font-medium whitespace-nowrap">
-                      {e.status === 'rascunho' ? 'Continuar →' : 'Abrir →'}
-                    </Link>
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-3">
+                      <Link
+                        href={e.status === 'rascunho' ? `/dashboard/entradas/nova?rascunho=${e.id}` : `/dashboard/entradas/${e.id}`}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">
+                        {e.status === 'rascunho' ? 'Continuar →' : 'Abrir →'}
+                      </Link>
+                      {e.status !== 'cancelada' && (
+                        <button
+                          onClick={() => { setErroExclusao(''); setConfirmando(e) }}
+                          title="Excluir entrada"
+                          className="text-red-400 hover:text-red-600 text-sm transition-colors">
+                          🗑
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )
@@ -266,6 +323,53 @@ export default function EntradasListClient({
           </tbody>
         </table>
       </div>
+
+      {/* Modal de confirmação de exclusão */}
+      {confirmando && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Excluir entrada?</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              {confirmando.numero_entrada ?? 'Rascunho'} —{' '}
+              {confirmando.fornecedores?.nome_fantasia ?? confirmando.fornecedores?.razao_social ?? 'Fornecedor não informado'}
+            </p>
+
+            {confirmando.status === 'confirmada' ? (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4 text-sm text-red-700">
+                <p className="font-semibold mb-1">⚠️ Atenção — entrada confirmada</p>
+                <ul className="list-disc list-inside space-y-0.5 text-xs">
+                  <li>O estoque dos produtos será revertido</li>
+                  <li>As contas a pagar vinculadas serão removidas</li>
+                  <li>Esta ação não pode ser desfeita</li>
+                </ul>
+              </div>
+            ) : (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 mb-4 text-sm text-yellow-700">
+                <p className="text-xs">O rascunho será excluído permanentemente.</p>
+              </div>
+            )}
+
+            {erroExclusao && (
+              <p className="text-xs text-red-600 mb-3">Erro: {erroExclusao}</p>
+            )}
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setConfirmando(null); setErroExclusao('') }}
+                disabled={excluindo}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                Cancelar
+              </button>
+              <button
+                onClick={() => excluirEntrada(confirmando)}
+                disabled={excluindo}
+                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50">
+                {excluindo ? 'Excluindo...' : 'Confirmar exclusão'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
