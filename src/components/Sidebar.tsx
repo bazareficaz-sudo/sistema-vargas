@@ -258,7 +258,7 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   useEffect(() => {
     const current = ALL_ITEMS.find(it => it.href === pathname || pathname.startsWith(it.href + '/'))
     if (!current) return
-    setRecentes(prev => {
+    setRecentes((prev: { href: string; label: string; icon: string }[]) => {
       const filtered = prev.filter(r => r.href !== current.href)
       return [{ href: current.href, label: current.label, icon: current.icon ?? '📄' }, ...filtered].slice(0, 5)
     })
