@@ -133,6 +133,12 @@ const NAV: NavGroup[] = [
     defaultOpen: false,
     subGroups: [
       {
+        label: 'Visão Geral',
+        items: [
+          { href: '/dashboard/financeiro', label: 'Hub Financeiro', icon: '⚖️', modulo: 'financeiro' },
+        ],
+      },
+      {
         label: 'Receber',
         items: [
           { href: '/dashboard/contas-receber',    label: 'Contas a Receber', icon: '💰', modulo: 'contas_receber' },
