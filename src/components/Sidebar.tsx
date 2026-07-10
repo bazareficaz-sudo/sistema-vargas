@@ -4,19 +4,22 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { usePlan } from '@/contexts/PlanContext'
+import { PlanBannerSidebar } from '@/components/plan/PlanBanner'
 
 // ─── Estrutura do menu ────────────────────────────────────────────────────────
 
-type NavItem = { href: string; label: string; icon?: string }
+type NavItem = { href: string; label: string; icon?: string; modulo?: string }
 type SubGroup = { label: string; items: NavItem[] }
 type NavGroup = {
   id: string
   label: string
   icon: string
-  color: string        // tailwind bg para o ícone
-  textColor: string    // tailwind text para badge
-  badgeColor: string   // tailwind bg para badge
-  badge?: string       // chave de badge dinâmico
+  color: string
+  textColor: string
+  badgeColor: string
+  badge?: string
+  modulo?: string       // se definido, o grupo inteiro é bloqueado se o módulo não estiver no plano
   items?: NavItem[]
   subGroups?: SubGroup[]
   defaultOpen?: boolean
@@ -32,9 +35,9 @@ const NAV: NavGroup[] = [
     badgeColor: 'bg-blue-500',
     defaultOpen: true,
     items: [
-      { href: '/dashboard',                        label: 'Visão Geral',         icon: '🏠' },
-      { href: '/dashboard/relatorios',             label: 'Indicadores BI',      icon: '📊' },
-      { href: '/dashboard/relatorios/alertas',     label: 'Alertas Inteligentes', icon: '🔔' },
+      { href: '/dashboard',                        label: 'Visão Geral',          icon: '🏠' },
+      { href: '/dashboard/relatorios',             label: 'Indicadores BI',       icon: '📊', modulo: 'relatorios' },
+      { href: '/dashboard/relatorios/alertas',     label: 'Alertas Inteligentes', icon: '🔔', modulo: 'relatorios_avancados' },
     ],
   },
   {
@@ -46,9 +49,9 @@ const NAV: NavGroup[] = [
     badgeColor: 'bg-blue-500',
     defaultOpen: true,
     items: [
-      { href: '/pdv',                              label: 'PDV',                icon: '🖥' },
-      { href: '/dashboard/vendas',                 label: 'Vendas',             icon: '💳' },
-      { href: '/dashboard/orcamentos',             label: 'Orçamentos',         icon: '📋' },
+      { href: '/pdv',                              label: 'PDV',                icon: '🖥',  modulo: 'pdv' },
+      { href: '/dashboard/vendas',                 label: 'Vendas',             icon: '💳',  modulo: 'vendas' },
+      { href: '/dashboard/orcamentos',             label: 'Orçamentos',         icon: '📋',  modulo: 'orcamentos' },
       { href: '/dashboard/incentivos',             label: 'Incentivos',         icon: '🏆' },
       { href: '/dashboard/configuracoes/saude-venda', label: 'Saúde da Venda', icon: '💚' },
     ],
@@ -65,23 +68,23 @@ const NAV: NavGroup[] = [
       {
         label: 'Produtos',
         items: [
-          { href: '/dashboard/produtos',    label: 'Produtos',    icon: '📦' },
-          { href: '/dashboard/categorias',  label: 'Categorias',  icon: '🗂' },
-          { href: '/dashboard/marcas',      label: 'Marcas',      icon: '🏷' },
+          { href: '/dashboard/produtos',    label: 'Produtos',    icon: '📦', modulo: 'produtos' },
+          { href: '/dashboard/categorias',  label: 'Categorias',  icon: '🗂', modulo: 'categorias' },
+          { href: '/dashboard/marcas',      label: 'Marcas',      icon: '🏷', modulo: 'marcas' },
         ],
       },
       {
         label: 'Pessoas',
         items: [
-          { href: '/dashboard/clientes',     label: 'Clientes',     icon: '👥' },
-          { href: '/dashboard/fornecedores', label: 'Fornecedores', icon: '🏭' },
-          { href: '/dashboard/vendedores',   label: 'Vendedores',   icon: '🤝' },
+          { href: '/dashboard/clientes',     label: 'Clientes',     icon: '👥', modulo: 'clientes' },
+          { href: '/dashboard/fornecedores', label: 'Fornecedores', icon: '🏭', modulo: 'fornecedores' },
+          { href: '/dashboard/vendedores',   label: 'Vendedores',   icon: '🤝', modulo: 'vendedores' },
         ],
       },
       {
         label: 'Preços',
         items: [
-          { href: '/dashboard/precos', label: 'Tabelas de Preço', icon: '💲' },
+          { href: '/dashboard/precos', label: 'Tabelas de Preço', icon: '💲', modulo: 'precos' },
         ],
       },
     ],
@@ -93,13 +96,14 @@ const NAV: NavGroup[] = [
     color: 'bg-amber-900',
     textColor: 'text-amber-300',
     badgeColor: 'bg-amber-500',
+    modulo: 'estoque',
     defaultOpen: false,
     items: [
-      { href: '/dashboard/relatorios/estoque',     label: 'Visão do Estoque',   icon: '📊' },
-      { href: '/dashboard/depositos',              label: 'Depósitos',           icon: '🏭' },
-      { href: '/dashboard/inventarios',            label: 'Inventário',          icon: '🔢' },
-      { href: '/dashboard/entradas',               label: 'Entradas',            icon: '📥' },
-      { href: '/dashboard/entradas/produtos',      label: 'Produtos Comprados',  icon: '🛍' },
+      { href: '/dashboard/relatorios/estoque',     label: 'Visão do Estoque',   icon: '📊', modulo: 'relatorios_avancados' },
+      { href: '/dashboard/depositos',              label: 'Depósitos',           icon: '🏭', modulo: 'depositos' },
+      { href: '/dashboard/inventarios',            label: 'Inventário',          icon: '🔢', modulo: 'inventario' },
+      { href: '/dashboard/entradas',               label: 'Entradas',            icon: '📥', modulo: 'entradas' },
+      { href: '/dashboard/entradas/produtos',      label: 'Produtos Comprados',  icon: '🛍', modulo: 'entradas' },
     ],
   },
   {
@@ -109,12 +113,13 @@ const NAV: NavGroup[] = [
     color: 'bg-orange-900',
     textColor: 'text-orange-300',
     badgeColor: 'bg-orange-500',
+    modulo: 'entradas',
     defaultOpen: false,
     items: [
-      { href: '/dashboard/pedidos-compra',          label: 'Pedido ao Fornecedor', icon: '📋' },
-      { href: '/dashboard/entradas/nova',          label: 'Nova Entrada',       icon: '➕' },
-      { href: '/dashboard/entradas-xml',           label: 'XML / NF-e',         icon: '📄' },
-      { href: '/dashboard/fornecedores',           label: 'Fornecedores',       icon: '🏭' },
+      { href: '/dashboard/pedidos-compra',  label: 'Pedido ao Fornecedor', icon: '📋', modulo: 'pedidos_compra' },
+      { href: '/dashboard/entradas/nova',   label: 'Nova Entrada',         icon: '➕', modulo: 'entradas' },
+      { href: '/dashboard/entradas-xml',    label: 'XML / NF-e',           icon: '📄', modulo: 'entradas' },
+      { href: '/dashboard/fornecedores',    label: 'Fornecedores',         icon: '🏭', modulo: 'fornecedores' },
     ],
   },
   {
@@ -124,26 +129,27 @@ const NAV: NavGroup[] = [
     color: 'bg-emerald-900',
     textColor: 'text-emerald-300',
     badgeColor: 'bg-emerald-500',
+    modulo: 'financeiro',
     defaultOpen: false,
     subGroups: [
       {
         label: 'Receber',
         items: [
-          { href: '/dashboard/contas-receber',    label: 'Contas a Receber', icon: '💰' },
-          { href: '/dashboard/cobranca',          label: 'Cobranças',        icon: '📞' },
-          { href: '/dashboard/creditos-clientes', label: 'Créditos',         icon: '🎫' },
+          { href: '/dashboard/contas-receber',    label: 'Contas a Receber', icon: '💰', modulo: 'contas_receber' },
+          { href: '/dashboard/cobranca',          label: 'Cobranças',        icon: '📞', modulo: 'contas_receber' },
+          { href: '/dashboard/creditos-clientes', label: 'Créditos',         icon: '🎫', modulo: 'financeiro' },
         ],
       },
       {
         label: 'Pagar',
         items: [
-          { href: '/dashboard/contas-pagar', label: 'Contas a Pagar', icon: '💳' },
+          { href: '/dashboard/contas-pagar', label: 'Contas a Pagar', icon: '💳', modulo: 'contas_pagar' },
         ],
       },
       {
         label: 'Relatórios',
         items: [
-          { href: '/dashboard/relatorios/financeiro', label: 'Fluxo Financeiro', icon: '📈' },
+          { href: '/dashboard/relatorios/financeiro', label: 'Fluxo Financeiro', icon: '📈', modulo: 'relatorios_avancados' },
         ],
       },
     ],
@@ -155,9 +161,10 @@ const NAV: NavGroup[] = [
     color: 'bg-pink-900',
     textColor: 'text-pink-300',
     badgeColor: 'bg-pink-500',
+    modulo: 'marketplace',
     defaultOpen: false,
     items: [
-      { href: '/dashboard/marketplaces', label: 'Marketplaces', icon: '🏪' },
+      { href: '/dashboard/marketplaces', label: 'Marketplaces', icon: '🏪', modulo: 'marketplace' },
     ],
   },
   {
@@ -167,10 +174,11 @@ const NAV: NavGroup[] = [
     color: 'bg-teal-900',
     textColor: 'text-teal-300',
     badgeColor: 'bg-teal-500',
+    modulo: 'whatsapp',
     defaultOpen: false,
     items: [
-      { href: '/dashboard/integracoes/whatsapp',           label: 'WhatsApp / Z-API',   icon: '📱' },
-      { href: '/dashboard/integracoes/whatsapp/historico', label: 'Histórico',          icon: '📋' },
+      { href: '/dashboard/integracoes/whatsapp',           label: 'WhatsApp / Z-API', icon: '📱', modulo: 'whatsapp' },
+      { href: '/dashboard/integracoes/whatsapp/historico', label: 'Histórico',        icon: '📋', modulo: 'whatsapp' },
     ],
   },
   {
@@ -181,14 +189,15 @@ const NAV: NavGroup[] = [
     textColor: 'text-indigo-300',
     badgeColor: 'bg-indigo-500',
     defaultOpen: false,
+    modulo: 'relatorios',
     items: [
-      { href: '/dashboard/relatorios',             label: 'Dashboard Executivo',    icon: '📊' },
-      { href: '/dashboard/relatorios/vendas',      label: 'Análise de Vendas',      icon: '📈' },
-      { href: '/dashboard/relatorios/produtos',    label: 'Produtos & Curva ABC',   icon: '🏆' },
-      { href: '/dashboard/relatorios/estoque',     label: 'Estoque & Giro',         icon: '📦' },
-      { href: '/dashboard/relatorios/financeiro',  label: 'Fluxo Financeiro',       icon: '💰' },
-      { href: '/dashboard/relatorios/clientes',    label: 'Inteligência Clientes',  icon: '👥' },
-      { href: '/dashboard/relatorios/alertas',     label: 'Alertas Inteligentes',   icon: '🔔' },
+      { href: '/dashboard/relatorios',             label: 'Dashboard Executivo',    icon: '📊', modulo: 'relatorios' },
+      { href: '/dashboard/relatorios/vendas',      label: 'Análise de Vendas',      icon: '📈', modulo: 'relatorios_avancados' },
+      { href: '/dashboard/relatorios/produtos',    label: 'Produtos & Curva ABC',   icon: '🏆', modulo: 'relatorios_avancados' },
+      { href: '/dashboard/relatorios/estoque',     label: 'Estoque & Giro',         icon: '📦', modulo: 'relatorios_avancados' },
+      { href: '/dashboard/relatorios/financeiro',  label: 'Fluxo Financeiro',       icon: '💰', modulo: 'relatorios_avancados' },
+      { href: '/dashboard/relatorios/clientes',    label: 'Inteligência Clientes',  icon: '👥', modulo: 'relatorios_avancados' },
+      { href: '/dashboard/relatorios/alertas',     label: 'Alertas Inteligentes',   icon: '🔔', modulo: 'relatorios_avancados' },
     ],
   },
   {
@@ -198,11 +207,12 @@ const NAV: NavGroup[] = [
     color: 'bg-slate-800',
     textColor: 'text-slate-300',
     badgeColor: 'bg-slate-500',
+    modulo: 'configuracoes',
     defaultOpen: false,
     items: [
-      { href: '/dashboard/empresas',                  label: 'Empresas',        icon: '🏢' },
-      { href: '/dashboard/terminais',                 label: 'Terminais PDV',   icon: '🖥️' },
-      { href: '/dashboard/configuracoes/integracoes', label: 'Integrações',     icon: '🔌' },
+      { href: '/dashboard/empresas',                  label: 'Empresas',        icon: '🏢', modulo: 'multiempresa' },
+      { href: '/dashboard/terminais',                 label: 'Terminais PDV',   icon: '🖥️', modulo: 'pdv' },
+      { href: '/dashboard/configuracoes/integracoes', label: 'Integrações',     icon: '🔌', modulo: 'configuracoes' },
     ],
   },
 ]
@@ -236,6 +246,17 @@ function useLS<T>(key: string, def: T): [T, (v: T) => void] {
 export default function Sidebar({ empresa }: { empresa: string }) {
   const pathname = usePathname()
   const router = useRouter()
+  const plan = usePlan()
+
+  function temModulo(modulo?: string) {
+    if (!modulo) return true
+    if (plan.isSystemAdmin) return true
+    return plan.modulos.includes(modulo)
+  }
+
+  function filtrarItens(items: NavItem[]) {
+    return items.filter(it => temModulo(it.modulo))
+  }
 
   const [collapsed, setCollapsed] = useLS<boolean>('sb_collapsed', false)
   const [openGroups, setOpenGroups] = useLS<Record<string, boolean>>('sb_open', {})
@@ -412,12 +433,20 @@ export default function Sidebar({ empresa }: { empresa: string }) {
         )}
 
         {/* ── Grupos principais ─────────────────────────────────────────── */}
-        {NAV.map(group => {
-          const isOpen = openGroups[group.id] ?? group.defaultOpen ?? false
+        {NAV.filter(group => temModulo(group.modulo)).map(group => {
+          const visibleItems = filtrarItens(group.items ?? [])
+          const visibleSubGroups = group.subGroups?.map(sg => ({
+            ...sg,
+            items: filtrarItens(sg.items),
+          })).filter(sg => sg.items.length > 0) ?? []
+
           const allGroupItems = [
-            ...(group.items ?? []),
-            ...(group.subGroups?.flatMap(sg => sg.items) ?? []),
+            ...visibleItems,
+            ...visibleSubGroups.flatMap(sg => sg.items),
           ]
+          if (allGroupItems.length === 0) return null
+
+          const isOpen = openGroups[group.id] ?? group.defaultOpen ?? false
           const hasActive = allGroupItems.some(it => isActive(it.href))
 
           return (
@@ -447,13 +476,13 @@ export default function Sidebar({ empresa }: { empresa: string }) {
               {isOpen && !collapsed && (
                 <div className="mt-0.5 ml-2 space-y-0.5">
                   {/* Itens diretos */}
-                  {group.items?.map(it => (
+                  {visibleItems.map(it => (
                     <NavLink key={it.href} item={it} active={isActive(it.href)} collapsed={false}
                       isFav={favorites.includes(it.href)} onToggleFav={() => toggleFav(it.href)} />
                   ))}
 
                   {/* Sub-grupos */}
-                  {group.subGroups?.map(sg => (
+                  {visibleSubGroups.map(sg => (
                     <div key={sg.label} className="mt-2 mb-1">
                       <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest px-2 mb-1">{sg.label}</p>
                       {sg.items.map(it => (
@@ -480,6 +509,7 @@ export default function Sidebar({ empresa }: { empresa: string }) {
 
       {/* ── Rodapé ─────────────────────────────────────────────────────────── */}
       <div className="px-2 py-2 border-t border-white/10 flex-shrink-0">
+        <PlanBannerSidebar collapsed={collapsed} />
         <button
           onClick={logout}
           title="Sair"
