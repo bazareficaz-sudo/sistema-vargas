@@ -25,19 +25,10 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   const { pathname } = request.nextUrl
 
-  // ── SaaS Admin routes: require system_admins membership ──────────────────────
+  // ── SaaS Admin routes: require auth only (layout handles admin check) ─────────
   if (pathname.startsWith('/saas-admin')) {
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url))
-    }
-    const { data: admin } = await supabase
-      .from('system_admins')
-      .select('id')
-      .eq('id', user.id)
-      .eq('ativo', true)
-      .single()
-    if (!admin) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
     }
     return response
   }
