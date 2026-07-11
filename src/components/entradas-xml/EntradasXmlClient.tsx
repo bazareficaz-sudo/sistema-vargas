@@ -90,7 +90,7 @@ export default function EntradasXmlClient({
   })
   const [salvandoConfig, setSalvandoConfig] = useState(false)
 
-  const depositoPrincipal = depositos.find(d => d.principal)?.id ?? depositos[0]?.id ?? ''
+  const depositoPrincipal = depositos.find(d => d.principal)?.id ?? depositos[0]?.id ?? null
 
   const entradasFiltradas = useMemo(() => {
     let list = [...entradas]
@@ -110,6 +110,10 @@ export default function EntradasXmlClient({
   // ── Importar XML ─────────────────────────────────────────────
   async function processarXmls() {
     if (arquivos.length === 0) return
+    if (!depositoPrincipal) {
+      setResultados(arquivos.map(a => ({ arquivo: a.name, status: 'erro', msg: 'Nenhum depósito cadastrado. Cadastre um depósito em Estoque → Depósitos antes de importar.' })))
+      return
+    }
     setProcessando(true)
     setResultados([])
     const novos: typeof resultados = []
