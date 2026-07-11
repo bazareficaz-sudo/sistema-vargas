@@ -76,50 +76,57 @@ export default function DepositosClient({ empresaId, operador, depositosIniciais
 
   async function salvar() {
     if (!form.nome.trim()) { setErro('Nome é obrigatório'); return }
+    if (!empresaId) { setErro('Não foi possível identificar sua empresa. Faça login novamente ou contate o suporte.'); return }
     setSalvando(true); setErro('')
 
-    // Se principal = true, remove de outros
-    if (form.principal) {
-      await sb.from('depositos').update({ principal: false }).eq('empresa_id', empresaId).neq('id', editando?.id ?? '')
-    }
-
-    if (modal === 'novo') {
-      const { data, error } = await sb.from('depositos').insert({
-        empresa_id: empresaId,
-        nome: form.nome, codigo: form.codigo || null, tipo: form.tipo,
-        principal: form.principal, responsavel: form.responsavel || null,
-        telefone: form.telefone || null, email: form.email || null,
-        logradouro: form.logradouro || null, numero: form.numero || null,
-        bairro: form.bairro || null, cidade: form.cidade || null,
-        uf: form.uf || null, cep: form.cep || null,
-        observacao: form.observacao || null, ativo: true,
-        criado_por: operador,
-      }).select().single()
-      if (error) { setErro(error.message); setSalvando(false); return }
+    try {
+      // Se principal = true, remove de outros
       if (form.principal) {
-        setLista(p => p.map(d => ({ ...d, principal: false })))
+        await sb.from('depositos').update({ principal: false }).eq('empresa_id', empresaId).neq('id', editando?.id ?? '')
       }
-      setLista(p => [...p, data as Deposito])
-    } else if (editando) {
-      const { error } = await sb.from('depositos').update({
-        nome: form.nome, codigo: form.codigo || null, tipo: form.tipo,
-        principal: form.principal, responsavel: form.responsavel || null,
-        telefone: form.telefone || null, email: form.email || null,
-        logradouro: form.logradouro || null, numero: form.numero || null,
-        bairro: form.bairro || null, cidade: form.cidade || null,
-        uf: form.uf || null, cep: form.cep || null,
-        observacao: form.observacao || null, ativo: form.ativo,
-        updated_at: new Date().toISOString(),
-      }).eq('id', editando.id)
-      if (error) { setErro(error.message); setSalvando(false); return }
-      if (form.principal) {
-        setLista(p => p.map(d => ({ ...d, principal: d.id === editando.id })))
-      } else {
-        setLista(p => p.map(d => d.id === editando.id ? { ...d, ...form } : d))
-      }
-    }
 
-    setModal(null); setSalvando(false)
+      if (modal === 'novo') {
+        const { data, error } = await sb.from('depositos').insert({
+          empresa_id: empresaId,
+          nome: form.nome, codigo: form.codigo || null, tipo: form.tipo,
+          principal: form.principal, responsavel: form.responsavel || null,
+          telefone: form.telefone || null, email: form.email || null,
+          logradouro: form.logradouro || null, numero: form.numero || null,
+          bairro: form.bairro || null, cidade: form.cidade || null,
+          uf: form.uf || null, cep: form.cep || null,
+          observacao: form.observacao || null, ativo: true,
+          criado_por: operador,
+        }).select().single()
+        if (error) { setErro(error.message); return }
+        if (form.principal) {
+          setLista(p => p.map(d => ({ ...d, principal: false })))
+        }
+        setLista(p => [...p, data as Deposito])
+      } else if (editando) {
+        const { error } = await sb.from('depositos').update({
+          nome: form.nome, codigo: form.codigo || null, tipo: form.tipo,
+          principal: form.principal, responsavel: form.responsavel || null,
+          telefone: form.telefone || null, email: form.email || null,
+          logradouro: form.logradouro || null, numero: form.numero || null,
+          bairro: form.bairro || null, cidade: form.cidade || null,
+          uf: form.uf || null, cep: form.cep || null,
+          observacao: form.observacao || null, ativo: form.ativo,
+          updated_at: new Date().toISOString(),
+        }).eq('id', editando.id)
+        if (error) { setErro(error.message); return }
+        if (form.principal) {
+          setLista(p => p.map(d => ({ ...d, principal: d.id === editando.id })))
+        } else {
+          setLista(p => p.map(d => d.id === editando.id ? { ...d, ...form } : d))
+        }
+      }
+
+      setModal(null)
+    } catch (e: any) {
+      setErro(e?.message ?? 'Erro inesperado ao salvar depósito')
+    } finally {
+      setSalvando(false)
+    }
   }
 
   async function alternarAtivo(dep: Deposito) {
