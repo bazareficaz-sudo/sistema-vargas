@@ -297,9 +297,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="flex-1 bg-black/40" onClick={onClose} />
-      <div className="w-[620px] bg-white h-full overflow-y-auto shadow-2xl flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-4xl max-h-[92vh] bg-white rounded-2xl overflow-y-auto shadow-2xl flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">

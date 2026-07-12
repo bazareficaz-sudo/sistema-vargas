@@ -62,6 +62,8 @@ export default function EntradaXmlDetalheClient({
   // Preços
   const [precosNovos, setPrecosNovos] = useState<Record<string, number>>({})
   const [margemPadrao, setMargemPadrao] = useState(40)
+  const [modoPreco, setModoPreco] = useState<'margem' | 'preco'>('margem')
+  const [produtosAtuais, setProdutosAtuais] = useState<Record<string, Produto>>({})
 
   // Finalizar
   const [depositoId, setDepositoId] = useState(entrada.deposito_id ?? depositos.find(d => d.principal)?.id ?? '')
@@ -74,6 +76,25 @@ export default function EntradaXmlDetalheClient({
   const mapeados = itens.filter(i => i.status_mapeamento !== 'nao_mapeado').length
   const naoMapeados = itens.filter(i => i.status_mapeamento === 'nao_mapeado').length
   const todosMapeados = naoMapeados === 0
+
+  // ── Dados atuais dos produtos mapeados (preço/custo vigentes) ───────────
+  // Busca direto no banco em vez de usar a lista inicial (limitada a 2000),
+  // que pode não conter o produto e fazer preço/margem aparecerem zerados.
+  useEffect(() => {
+    const ids = Array.from(new Set(itens.map(i => i.produto_id).filter(Boolean)))
+    if (ids.length === 0) { setProdutosAtuais({}); return }
+    let ativo = true
+    sb.from('produtos')
+      .select('id, nome, sku, ean, estoque, unidade, preco_venda, preco_custo, marca, categoria')
+      .in('id', ids)
+      .then(({ data }) => {
+        if (!ativo) return
+        const mapa: Record<string, Produto> = {}
+        for (const p of (data ?? []) as Produto[]) mapa[p.id] = p
+        setProdutosAtuais(mapa)
+      })
+    return () => { ativo = false }
+  }, [itens])
 
   // ── Busca produto p/ mapeamento ──────────────────────────────────────────
   // Busca no banco a cada digitação em vez de filtrar só a lista inicial
@@ -207,13 +228,19 @@ export default function EntradaXmlDetalheClient({
     finally { setSalvando(false) }
   }
 
-  // ── Aplicar margem automática ────────────────────────────────────────────
+  // ── Aplicar (margem padrão OU preço atual) a todos ───────────────────────
   function aplicarMargem() {
     const novos: Record<string, number> = {}
     for (const item of itens) {
       if (!item.produto_id || item.status_mapeamento === 'ignorado') continue
       const custo = custoComAdic(item)
-      novos[item.id] = Math.ceil(custo * (1 + margemPadrao / 100) * 100) / 100
+      if (modoPreco === 'preco') {
+        // Mantém o preço de venda atual — a margem muda em função do novo custo
+        novos[item.id] = produtosAtuais[item.produto_id]?.preco_venda ?? 0
+      } else {
+        // Mantém a margem padrão — o preço de venda é recalculado a partir do novo custo
+        novos[item.id] = Math.ceil(custo * (1 + margemPadrao / 100) * 100) / 100
+      }
     }
     setPrecosNovos(novos)
   }
@@ -622,10 +649,26 @@ export default function EntradaXmlDetalheClient({
       {/* ── ABA REVISÃO PREÇOS ────────────────────────────────────── */}
       {aba === 'precos' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-            <label className="text-slate-500 text-sm">Margem padrão (%)</label>
-            <input type="number" value={margemPadrao} onChange={e => setMargemPadrao(+e.target.value)}
-              className="w-24 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-sm" />
+          <div className="flex items-center gap-3 bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex-wrap">
+            <div className="flex bg-slate-100 rounded-xl p-1">
+              <button onClick={() => setModoPreco('margem')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${modoPreco === 'margem' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+                Manter margem
+              </button>
+              <button onClick={() => setModoPreco('preco')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${modoPreco === 'preco' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+                Manter preço
+              </button>
+            </div>
+            {modoPreco === 'margem' ? (
+              <>
+                <label className="text-slate-500 text-sm">Margem padrão (%)</label>
+                <input type="number" value={margemPadrao} onChange={e => setMargemPadrao(+e.target.value)}
+                  className="w-24 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-sm" />
+              </>
+            ) : (
+              <p className="text-slate-400 text-xs">O preço de venda é mantido; a margem se ajusta ao novo custo.</p>
+            )}
             <button onClick={aplicarMargem} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-sm rounded-xl">
               Aplicar a todos
             </button>
@@ -634,22 +677,33 @@ export default function EntradaXmlDetalheClient({
             <table className="w-full text-sm">
               <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                 <th className="px-3 py-2 text-left">Produto</th>
-                <th className="px-3 py-2 text-right">Custo</th>
+                <th className="px-3 py-2 text-right">Custo Novo</th>
                 <th className="px-3 py-2 text-right">Preço Atual</th>
+                <th className="px-3 py-2 text-right">Margem Atual</th>
                 <th className="px-3 py-2 text-right">Novo Preço</th>
-                <th className="px-3 py-2 text-right">Margem</th>
+                <th className="px-3 py-2 text-right">Nova Margem</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {itens.filter(i => i.produto_id && i.status_mapeamento !== 'ignorado').map(item => {
-                  const prod = produtos.find(p => p.id === item.produto_id)
+                  const prod = produtosAtuais[item.produto_id]
                   const custo = custoComAdic(item)
-                  const novoPr = precosNovos[item.id] ?? (prod?.preco_venda ?? 0)
-                  const margem = custo > 0 ? ((novoPr - custo) / custo * 100).toFixed(1) : '—'
+                  const precoAtual = prod?.preco_venda ?? 0
+                  const custoAtual = prod?.preco_custo ?? 0
+                  const margemAtual = custoAtual > 0 ? ((precoAtual - custoAtual) / custoAtual * 100) : null
+                  const novoPr = precosNovos[item.id] ?? precoAtual
+                  const novaMargem = custo > 0 ? ((novoPr - custo) / custo * 100) : 0
                   return (
                     <tr key={item.id} className="text-slate-700">
                       <td className="px-3 py-2 text-xs max-w-[200px] truncate">{item.descricao_sistema || item.descricao_xml}</td>
                       <td className="px-3 py-2 text-right text-xs text-slate-500">{fmt(custo)}</td>
-                      <td className="px-3 py-2 text-right text-xs text-slate-500">{fmt(prod?.preco_venda ?? 0)}</td>
+                      <td className="px-3 py-2 text-right text-xs text-slate-500">{fmt(precoAtual)}</td>
+                      <td className="px-3 py-2 text-right text-xs">
+                        {margemAtual === null ? (
+                          <span className="text-slate-400">—</span>
+                        ) : (
+                          <span className={margemAtual > 0 ? 'text-slate-500' : 'text-red-500'}>{margemAtual.toFixed(1)}%</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         {readonly ? (
                           <span className="text-sm">{fmt(novoPr)}</span>
@@ -659,8 +713,18 @@ export default function EntradaXmlDetalheClient({
                             className="w-24 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs">
-                        <span className={+margem > 0 ? 'text-emerald-600' : 'text-red-500'}>{margem}%</span>
+                      <td className="px-3 py-2 text-right">
+                        {readonly ? (
+                          <span className={`text-xs ${novaMargem > 0 ? 'text-emerald-600' : 'text-red-500'}`}>{novaMargem.toFixed(1)}%</span>
+                        ) : (
+                          <input type="number" step="0.1" value={novaMargem.toFixed(1)}
+                            onChange={e => {
+                              const m = +e.target.value
+                              const preco = custo > 0 ? Math.ceil(custo * (1 + m / 100) * 100) / 100 : 0
+                              setPrecosNovos(p => ({ ...p, [item.id]: preco }))
+                            }}
+                            className="w-20 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                        )}
                       </td>
                     </tr>
                   )

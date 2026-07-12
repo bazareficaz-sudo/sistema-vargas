@@ -248,10 +248,15 @@ export function parseNFeXml(xmlString: string): NFeData | null {
 }
 
 // Calcular custo unitário final de um item (com rateios)
+// Divide pela quantidade já convertida para a unidade do sistema
+// (quantidade_entrada = quantidade_xml * fator_conversao) quando disponível,
+// pois 1 unidade da NF-e pode corresponder a várias unidades do sistema
+// (ex: 1 caixa de 20kg mapeada para um produto vendido por kg).
 export function calcularCustoItem(item: NFeItem, incluirIpi = true, incluirIcmsSt = true): number {
   const base   = item.valor_produto - item.desconto_item
   const rateios= item.frete_item + item.seguro_item + item.outras_desp_item
   const impostos = (incluirIpi ? item.ipi : 0) + (incluirIcmsSt ? item.icms_st : 0)
   const total  = base + rateios + impostos
-  return item.quantidade_xml > 0 ? total / item.quantidade_xml : 0
+  const quantidade = (item as any).quantidade_entrada || item.quantidade_xml
+  return quantidade > 0 ? total / quantidade : 0
 }
