@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { calcularCustoItem, type NFeItem as NFeItemParser } from '@/lib/nfe-parser'
@@ -76,13 +76,35 @@ export default function EntradaXmlDetalheClient({
   const todosMapeados = naoMapeados === 0
 
   // ── Busca produto p/ mapeamento ──────────────────────────────────────────
-  const produtosFiltrados = useMemo(() => {
-    if (!mapBusca) return produtos.slice(0, 50)
-    const b = mapBusca.toLowerCase()
-    return produtos.filter(p =>
-      p.nome.toLowerCase().includes(b) || (p.sku ?? '').toLowerCase().includes(b) || (p.ean ?? '').includes(b)
-    ).slice(0, 50)
-  }, [mapBusca, produtos])
+  // Busca no banco a cada digitação em vez de filtrar só a lista inicial
+  // (limitada a 2000 produtos), pois catálogos grandes podem deixar o produto
+  // certo fora dessa janela quando ordenado por nome.
+  const [produtosBusca, setProdutosBusca] = useState<Produto[] | null>(null)
+  const [buscandoProduto, setBuscandoProduto] = useState(false)
+
+  useEffect(() => {
+    if (!mapModal) { setProdutosBusca(null); return }
+    let ativo = true
+    setBuscandoProduto(true)
+    const termo = mapBusca.trim()
+    const timer = setTimeout(async () => {
+      let query = sb.from('produtos')
+        .select('id, nome, sku, ean, estoque, unidade, preco_venda, preco_custo, marca, categoria')
+        .eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(50)
+      if (termo) {
+        const palavras = termo.toLowerCase().split(/\s+/).map(p => p.replace(/[,()%]/g, ''))
+        for (const palavra of palavras) {
+          if (!palavra) continue
+          query = query.or(`nome.ilike.%${palavra}%,sku.ilike.%${palavra}%,ean.ilike.%${palavra}%`)
+        }
+      }
+      const { data } = await query
+      if (ativo) { setProdutosBusca(data ?? []); setBuscandoProduto(false) }
+    }, 250)
+    return () => { ativo = false; clearTimeout(timer) }
+  }, [mapBusca, mapModal, empresaId])
+
+  const produtosFiltrados = produtosBusca ?? produtos.slice(0, 50)
 
   // ── Mapear item ──────────────────────────────────────────────────────────
   async function mapearItem(item: Item, produto: Produto) {
@@ -773,7 +795,9 @@ export default function EntradaXmlDetalheClient({
               </div>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {produtosFiltrados.length === 0 ? (
+              {buscandoProduto ? (
+                <p className="text-slate-400 text-center py-8 text-sm">Buscando...</p>
+              ) : produtosFiltrados.length === 0 ? (
                 <p className="text-slate-400 text-center py-8 text-sm">Nenhum produto encontrado</p>
               ) : (
                 <table className="w-full text-sm">
