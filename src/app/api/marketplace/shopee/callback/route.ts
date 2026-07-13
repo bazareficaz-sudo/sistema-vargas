@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getIntegracaoCredentials } from '@/lib/shopee/client'
-import { buildPublicBaseString, buildShopBaseString, signRequest } from '@/lib/shopee/signing'
+import { getIntegracaoCredentials, shopeeGet, shopeePost } from '@/lib/shopee/client'
+import { ShopeeApiError } from '@/lib/shopee/types'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -32,38 +32,38 @@ export async function GET(req: Request) {
     return erro('Credenciais não configuradas', 'sem-credenciais')
   }
 
-  const timest = Math.floor(Date.now() / 1000)
-  const path = '/api/v2/auth/token/get'
+  // Troca o código de autorização por um access_token. A Shopee exige
+  // partner_id/timestamp/sign também na query string (não só no corpo),
+  // mesmo em POST — sem isso ela responde "There is no partner_id in query".
+  let tokenData: any
+  try {
+    tokenData = await shopeePost(
+      '/api/v2/auth/token/get',
+      { code, shop_id: Number(shopId), partner_id: partnerId },
+      { partnerId, partnerKey }
+    )
+  } catch (e) {
+    const msg = e instanceof ShopeeApiError ? e.message : 'Erro ao trocar código por token'
+    console.error('Shopee token error:', e)
+    return erro(`Erro Shopee: ${msg}`, 'token-invalido')
+  }
 
-  const sign = signRequest(partnerKey, buildPublicBaseString(partnerId, path, timest))
-
-  const tokenRes = await fetch(`https://partner.shopeemobile.com${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      code,
-      shop_id: Number(shopId),
-      partner_id: partnerId,
-      sign,
-      timestamp: timest,
-    }),
-  })
-  const tokenData = await tokenRes.json()
-
-  if (tokenData.error || !tokenData.access_token) {
+  if (!tokenData.access_token) {
     console.error('Shopee token error:', tokenData)
-    return erro(`Erro Shopee: ${tokenData.message ?? tokenData.error}`, 'token-invalido')
+    return erro(`Erro Shopee: ${tokenData.message ?? 'access_token ausente na resposta'}`, 'token-invalido')
   }
 
   // Busca nome da loja
-  const timest2 = Math.floor(Date.now() / 1000)
-  const pathShop = '/api/v2/shop/get_shop_info'
-  const sign2 = signRequest(partnerKey, buildShopBaseString(partnerId, pathShop, timest2, tokenData.access_token, shopId!))
-
-  const shopRes = await fetch(
-    `https://partner.shopeemobile.com${pathShop}?partner_id=${partnerId}&shop_id=${shopId}&access_token=${tokenData.access_token}&timestamp=${timest2}&sign=${sign2}`
-  )
-  const shopData = await shopRes.json()
+  let shopData: any = {}
+  try {
+    shopData = await shopeeGet(
+      '/api/v2/shop/get_shop_info',
+      {},
+      { partnerId, partnerKey, accessToken: tokenData.access_token, shopId: String(shopId) }
+    )
+  } catch (e) {
+    console.error('Shopee get_shop_info error:', e)
+  }
 
   let nome = shopData.response?.shop_name ?? `Shopee ${shopId}`
   let markup = '0'
