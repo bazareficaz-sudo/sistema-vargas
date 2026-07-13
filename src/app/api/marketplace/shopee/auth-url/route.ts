@@ -1,33 +1,27 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import crypto from 'crypto'
+import { getIntegracaoCredentials } from '@/lib/shopee/client'
+import { buildPublicBaseString, signRequest } from '@/lib/shopee/signing'
 
 export async function GET(req: Request) {
   const sb = await createClient()
 
-  // Busca credenciais do sistema
-  const { data: integracao } = await sb
-    .from('sistema_integracoes')
-    .select('partner_id, partner_key')
-    .eq('plataforma', 'shopee')
-    .single()
-
-  if (!integracao?.partner_id || !integracao?.partner_key) {
-    return NextResponse.json({ error: 'Credenciais Shopee não configuradas em Configurações → Integrações.' }, { status: 400 })
+  let partnerId: number, partnerKey: string
+  try {
+    ;({ partnerId, partnerKey } = await getIntegracaoCredentials(sb))
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 400 })
   }
 
   const { searchParams } = new URL(req.url)
   const canalNome = searchParams.get('nome') ?? 'nova-loja'
   const markup = searchParams.get('markup') ?? '0'
 
-  const partnerId = Number(integracao.partner_id)
-  const partnerKey = integracao.partner_key
   const timest = Math.floor(Date.now() / 1000)
   const path = '/api/v2/shop/auth_partner'
 
   // Assinatura HMAC-SHA256 exigida pela Shopee
-  const baseStr = `${partnerId}${path}${timest}`
-  const sign = crypto.createHmac('sha256', partnerKey).update(baseStr).digest('hex')
+  const sign = signRequest(partnerKey, buildPublicBaseString(partnerId, path, timest))
 
   // Em dev usa sistemavargas.com.br (registrado no Shopee) que redireciona para localhost
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://sistemavargas.com.br'

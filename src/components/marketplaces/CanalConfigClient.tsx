@@ -21,6 +21,7 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
   const [salvando, setSalvando] = useState(false)
   const [ok, setOk] = useState('')
   const [erro, setErro] = useState('')
+  const [testando, setTestando] = useState(false)
   const [form, setForm] = useState({
     nome: canalInicial.nome,
     markup_canal: String(canalInicial.markup_canal ?? 0),
@@ -47,6 +48,25 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
     setSalvando(false)
     flash('Configurações salvas.')
     router.refresh()
+  }
+
+  async function testarConexao() {
+    setTestando(true); setErro(''); setOk('')
+    try {
+      const resp = await fetch('/api/marketplace/shopee/testar-conexao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: canalInicial.id }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao testar conexão'); return }
+      flash(`Conectado — loja "${data.shopName}"`)
+    } catch (e: any) {
+      setErro(e.message ?? 'Erro ao testar conexão')
+    } finally {
+      setTestando(false)
+      router.refresh()
+    }
   }
 
   async function excluir() {
@@ -150,6 +170,12 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
                     )}
                   </div>
                 </div>
+              )}
+              {canalInicial.plataforma === 'shopee' && canalInicial.access_token && (
+                <button onClick={testarConexao} disabled={testando}
+                  className="mt-3 px-3 py-1.5 bg-white border border-blue-300 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
+                  {testando ? 'Testando...' : '🔌 Testar conexão'}
+                </button>
               )}
             </div>
           </div>

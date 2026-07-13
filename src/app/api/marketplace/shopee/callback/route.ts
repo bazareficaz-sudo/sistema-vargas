@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import crypto from 'crypto'
+import { getIntegracaoCredentials } from '@/lib/shopee/client'
+import { buildPublicBaseString, buildShopBaseString, signRequest } from '@/lib/shopee/signing'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -24,22 +25,17 @@ export async function GET(req: Request) {
   const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
   const empresaId = profile?.empresa_id
 
-  const { data: integracao } = await sb
-    .from('sistema_integracoes')
-    .select('partner_id, partner_key')
-    .eq('plataforma', 'shopee')
-    .single()
+  let partnerId: number, partnerKey: string
+  try {
+    ;({ partnerId, partnerKey } = await getIntegracaoCredentials(sb))
+  } catch {
+    return erro('Credenciais não configuradas', 'sem-credenciais')
+  }
 
-  if (!integracao) return erro('Credenciais não configuradas', 'sem-credenciais')
-
-  const partnerId = Number(integracao.partner_id)
-  const partnerKey = integracao.partner_key
   const timest = Math.floor(Date.now() / 1000)
   const path = '/api/v2/auth/token/get'
 
-  const sign = crypto.createHmac('sha256', partnerKey)
-    .update(`${partnerId}${path}${timest}`)
-    .digest('hex')
+  const sign = signRequest(partnerKey, buildPublicBaseString(partnerId, path, timest))
 
   const tokenRes = await fetch(`https://partner.shopeemobile.com${path}`, {
     method: 'POST',
@@ -62,9 +58,7 @@ export async function GET(req: Request) {
   // Busca nome da loja
   const timest2 = Math.floor(Date.now() / 1000)
   const pathShop = '/api/v2/shop/get_shop_info'
-  const sign2 = crypto.createHmac('sha256', partnerKey)
-    .update(`${partnerId}${pathShop}${timest2}${tokenData.access_token}${shopId}`)
-    .digest('hex')
+  const sign2 = signRequest(partnerKey, buildShopBaseString(partnerId, pathShop, timest2, tokenData.access_token, shopId!))
 
   const shopRes = await fetch(
     `https://partner.shopeemobile.com${pathShop}?partner_id=${partnerId}&shop_id=${shopId}&access_token=${tokenData.access_token}&timestamp=${timest2}&sign=${sign2}`
@@ -79,7 +73,9 @@ export async function GET(req: Request) {
     if (decoded.markup) markup = decoded.markup
   } catch (_) {}
 
-  await sb.from('marketplace_canais').insert({
+  // upsert (não insert): reconectar uma loja já vinculada atualiza o token em
+  // vez de criar um canal duplicado (uq_canais_empresa_plataforma_seller).
+  const { error: canalError } = await sb.from('marketplace_canais').upsert({
     empresa_id: empresaId,
     nome,
     plataforma: 'shopee',
@@ -91,7 +87,9 @@ export async function GET(req: Request) {
     sincronizar_estoque: true,
     sincronizar_preco: true,
     ativo: true,
-  })
+  }, { onConflict: 'empresa_id,plataforma,seller_id' })
+
+  if (canalError) return erro(`Erro ao salvar canal: ${canalError.message}`, 'token-invalido')
 
   if (viaFetch) return NextResponse.json({ ok: true, nome })
   return NextResponse.redirect(new URL('/dashboard/marketplaces?sucesso=shopee', req.url))

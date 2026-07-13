@@ -29,6 +29,8 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   const [buscaProd, setBuscaProd] = useState('')
+  const [sincronizando, setSincronizando] = useState(false)
+  const [resumoSync, setResumoSync] = useState('')
 
   const formVazio = {
     produto_id: '', titulo: '', descricao: '', preco_venda: '',
@@ -109,6 +111,29 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
     router.refresh()
   }
 
+  async function sincronizar() {
+    setSincronizando(true); setResumoSync(''); setErro('')
+    try {
+      const resp = await fetch('/api/marketplace/shopee/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: canal.id }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao sincronizar'); return }
+      setResumoSync(
+        `Encontrados: ${data.totalFound} · Sincronizados: ${data.upserted} · Falharam: ${data.failedCount}` +
+        (data.truncated ? ' · Catálogo maior que o limite — sincronize novamente para continuar' : '') +
+        ' · dados importados serão sobrescritos a cada sincronização'
+      )
+    } catch (e: any) {
+      setErro(e.message ?? 'Erro ao sincronizar')
+    } finally {
+      setSincronizando(false)
+      router.refresh()
+    }
+  }
+
   async function excluir(id: string) {
     if (!confirm('Excluir este anúncio?')) return
     const sb = createClient()
@@ -146,11 +171,26 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
           <h1 className="text-gray-900 text-xl font-semibold">Anúncios — {canal.nome}</h1>
           <p className="text-gray-500 text-sm mt-0.5">{anuncios.length} anúncio(s) cadastrados</p>
         </div>
-        <button onClick={abrirNovo}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-          + Novo anúncio
-        </button>
+        <div className="flex gap-2">
+          {canal.plataforma === 'shopee' && (
+            <button onClick={sincronizar} disabled={sincronizando}
+              className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
+              {sincronizando ? 'Sincronizando...' : '↺ Sincronizar agora'}
+            </button>
+          )}
+          <button onClick={abrirNovo}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+            + Novo anúncio
+          </button>
+        </div>
       </div>
+
+      {resumoSync && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 text-xs px-4 py-2.5 rounded-lg mb-4">{resumoSync}</div>
+      )}
+      {erro && !modal && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-2.5 rounded-lg mb-4">{erro}</div>
+      )}
 
       {/* Filtros */}
       <div className="flex items-center gap-3 mb-4">
