@@ -46,6 +46,13 @@ const REVISAO_LABEL: Record<string, string> = {
 }
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
+function fmtData(d: string | null | undefined) {
+  if (!d) return '—'
+  // data_entrada é TIMESTAMPTZ (já vem com hora/timezone) — só datas puras
+  // "YYYY-MM-DD" (10 chars, ex: data_emissao) precisam do T00:00:00 anexado.
+  const date = d.length <= 10 ? new Date(d + 'T00:00:00') : new Date(d)
+  return isNaN(date.getTime()) ? '—' : date.toLocaleDateString('pt-BR')
+}
 
 export default function EntradasListClient({
   entradas: inicial,
@@ -274,7 +281,7 @@ export default function EntradasListClient({
                     <span className="text-xs text-gray-500">{e.qtd_itens ?? '—'}</span>
                   </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
-                    {e.data_entrada ? new Date(e.data_entrada + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                    {fmtData(e.data_entrada)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900">
                     {fmt(Number(e.valor_total))}

@@ -164,6 +164,10 @@ export default function NovaEntradaClient({
   const [etapa, setEtapa] = useState<Etapa>('dados')
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  // Trava síncrona contra clique duplo (o estado "salvando" só bloqueia o
+  // botão após o próximo render, então dois cliques muito rápidos podiam
+  // disparar duas inserções antes do disabled= surtir efeito).
+  const enviandoRef = useRef(false)
 
   useEffect(() => {
     if (etapa === 'itens' && faseItem === 'busca') {
@@ -398,115 +402,130 @@ export default function NovaEntradaClient({
       mostrarRascunhoMsg('⚠ Adicione pelo menos um fornecedor ou item para salvar o rascunho.')
       return
     }
+    if (enviandoRef.current) return
+    enviandoRef.current = true
     setSalvandoRascunho(true)
-    const sb = createClient()
-    const dadosEntrada = {
-      empresa_id: empresaId, fornecedor_id: fornecedorId || null,
-      numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
-      valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
-      valor_outros: outros, valor_total: totalGeral,
-      observacoes: observacoes || null, status: 'rascunho',
-    }
+    try {
+      const sb = createClient()
+      const dadosEntrada = {
+        empresa_id: empresaId, fornecedor_id: fornecedorId || null,
+        numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
+        data_entrada: new Date().toISOString(),
+        valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
+        valor_outros: outros, valor_total: totalGeral,
+        observacoes: observacoes || null, status: 'rascunho',
+      }
 
-    let entradaId = rascunhoId
-    if (entradaId) {
-      await sb.from('entradas').update(dadosEntrada).eq('id', entradaId)
-      await sb.from('entrada_itens').delete().eq('entrada_id', entradaId)
-    } else {
-      const { data: nova, error } = await sb.from('entradas').insert(dadosEntrada).select('id').single()
-      if (error || !nova) { setSalvandoRascunho(false); mostrarRascunhoMsg('❌ Erro ao salvar rascunho.'); return }
-      entradaId = nova.id
-      setRascunhoId(entradaId)
-    }
+      let entradaId = rascunhoId
+      if (entradaId) {
+        await sb.from('entradas').update(dadosEntrada).eq('id', entradaId)
+        await sb.from('entrada_itens').delete().eq('entrada_id', entradaId)
+      } else {
+        const { data: nova, error } = await sb.from('entradas').insert(dadosEntrada).select('id').single()
+        if (error || !nova) { mostrarRascunhoMsg('❌ Erro ao salvar rascunho.'); return }
+        entradaId = nova.id
+        setRascunhoId(entradaId)
+      }
 
-    if (itens.length > 0) {
+      if (itens.length > 0) {
+        await sb.from('entrada_itens').insert(itens.map(i => ({
+          entrada_id: entradaId, produto_id: i.produto_id, nome_produto: i.nome_produto,
+          sku: i.sku, quantidade: i.quantidade, preco_custo_anterior: i.preco_custo_anterior,
+          preco_custo_novo: i.preco_custo_novo, markup: i.markup, preco_venda_novo: i.preco_venda_novo,
+          atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
+          subtotal: i.preco_custo_novo * i.quantidade,
+        })))
+      }
+
+      mostrarRascunhoMsg('✓ Rascunho salvo! Você pode continuar depois em Entradas.')
+    } finally {
+      enviandoRef.current = false
+      setSalvandoRascunho(false)
+    }
+  }
+
+  async function confirmarEntrada() {
+    if (!fornecedorId) { setErro('Selecione o fornecedor.'); return }
+    if (enviandoRef.current) return
+    enviandoRef.current = true
+    setSalvando(true); setErro('')
+    try {
+      const sb = createClient()
+      const agora = new Date().toISOString()
+
+      let entrada: any
+      if (rascunhoId) {
+        // Atualiza o rascunho existente para confirmada
+        const { data, error: errEntrada } = await sb.from('entradas').update({
+          fornecedor_id: fornecedorId,
+          numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
+          data_entrada: agora,
+          valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
+          valor_outros: outros, valor_total: totalGeral,
+          observacoes: observacoes || null, status: 'confirmada',
+        }).eq('id', rascunhoId).select().single()
+        if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao confirmar.'); return }
+        entrada = data
+        await sb.from('entrada_itens').delete().eq('entrada_id', rascunhoId)
+      } else {
+        const { data, error: errEntrada } = await sb.from('entradas').insert({
+          empresa_id: empresaId, fornecedor_id: fornecedorId,
+          numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
+          data_entrada: agora,
+          valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
+          valor_outros: outros, valor_total: totalGeral,
+          observacoes: observacoes || null, status: 'confirmada',
+        }).select().single()
+        if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao salvar.'); return }
+        entrada = data
+      }
+
       await sb.from('entrada_itens').insert(itens.map(i => ({
-        entrada_id: entradaId, produto_id: i.produto_id, nome_produto: i.nome_produto,
+        entrada_id: entrada.id, produto_id: i.produto_id, nome_produto: i.nome_produto,
         sku: i.sku, quantidade: i.quantidade, preco_custo_anterior: i.preco_custo_anterior,
         preco_custo_novo: i.preco_custo_novo, markup: i.markup, preco_venda_novo: i.preco_venda_novo,
         atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
         subtotal: i.preco_custo_novo * i.quantidade,
       })))
-    }
 
-    setSalvandoRascunho(false)
-    mostrarRascunhoMsg('✓ Rascunho salvo! Você pode continuar depois em Entradas.')
-  }
-
-  async function confirmarEntrada() {
-    if (!fornecedorId) { setErro('Selecione o fornecedor.'); return }
-    setSalvando(true); setErro('')
-    const sb = createClient()
-
-    let entrada: any
-    if (rascunhoId) {
-      // Atualiza o rascunho existente para confirmada
-      const { data, error: errEntrada } = await sb.from('entradas').update({
-        fornecedor_id: fornecedorId,
-        numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
-        valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
-        valor_outros: outros, valor_total: totalGeral,
-        observacoes: observacoes || null, status: 'confirmada',
-      }).eq('id', rascunhoId).select().single()
-      if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao confirmar.'); setSalvando(false); return }
-      entrada = data
-      await sb.from('entrada_itens').delete().eq('entrada_id', rascunhoId)
-    } else {
-      const { data, error: errEntrada } = await sb.from('entradas').insert({
-        empresa_id: empresaId, fornecedor_id: fornecedorId,
-        numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
-        valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
-        valor_outros: outros, valor_total: totalGeral,
-        observacoes: observacoes || null, status: 'confirmada',
-      }).select().single()
-      if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao salvar.'); setSalvando(false); return }
-      entrada = data
-    }
-
-
-    await sb.from('entrada_itens').insert(itens.map(i => ({
-      entrada_id: entrada.id, produto_id: i.produto_id, nome_produto: i.nome_produto,
-      sku: i.sku, quantidade: i.quantidade, preco_custo_anterior: i.preco_custo_anterior,
-      preco_custo_novo: i.preco_custo_novo, markup: i.markup, preco_venda_novo: i.preco_venda_novo,
-      atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
-      subtotal: i.preco_custo_novo * i.quantidade,
-    })))
-
-    // Atualiza estoque: busca valores atuais e soma a quantidade recebida
-    const produtosComId = itens.filter(i => i.produto_id)
-    if (produtosComId.length > 0) {
-      const { data: estoqueAtual } = await sb.from('produtos')
-        .select('id, estoque')
-        .in('id', produtosComId.map(i => i.produto_id!))
-      const estoqueMap = (estoqueAtual ?? []).reduce((acc: Record<string, number>, p) => {
-        acc[p.id] = p.estoque ?? 0
-        return acc
-      }, {})
-      for (const item of produtosComId) {
-        const qtdAtual = estoqueMap[item.produto_id!] ?? 0
-        await sb.from('produtos').update({ estoque: qtdAtual + item.quantidade }).eq('id', item.produto_id!)
+      // Atualiza estoque: busca valores atuais e soma a quantidade recebida
+      const produtosComId = itens.filter(i => i.produto_id)
+      if (produtosComId.length > 0) {
+        const { data: estoqueAtual } = await sb.from('produtos')
+          .select('id, estoque')
+          .in('id', produtosComId.map(i => i.produto_id!))
+        const estoqueMap = (estoqueAtual ?? []).reduce((acc: Record<string, number>, p) => {
+          acc[p.id] = p.estoque ?? 0
+          return acc
+        }, {})
+        for (const item of produtosComId) {
+          const qtdAtual = estoqueMap[item.produto_id!] ?? 0
+          await sb.from('produtos').update({ estoque: qtdAtual + item.quantidade }).eq('id', item.produto_id!)
+        }
       }
+
+      for (const r of reajustes) {
+        const upd: any = { updated_at: new Date().toISOString() }
+        if (r.atualizar_custo && !r.is_kit) upd.preco_custo = r.preco_custo_novo
+        if (r.atualizar_preco) { upd.preco_venda = r.preco_venda_novo; upd.markup = r.markup }
+        if (Object.keys(upd).length > 1) await sb.from('produtos').update(upd).eq('id', r.produto_id)
+      }
+
+      const parcelasFinais = parcelasGeradas ? parcelas : [{ numero: 1, vencimento: primeiroVenc, valor: totalGeral }]
+      await sb.from('contas_pagar').insert(parcelasFinais.map(p => ({
+        empresa_id: empresaId, entrada_id: entrada.id, fornecedor_id: fornecedorId,
+        descricao: `NF ${numeroNf || entrada.id.slice(0, 8)} — ${fornecedores.find(f => f.id === fornecedorId)?.razao_social}` +
+          (parcelasFinais.length > 1 ? ` (${p.numero}/${parcelasFinais.length})` : ''),
+        valor: p.valor, vencimento: p.vencimento, parcela: p.numero,
+        total_parcelas: parcelasFinais.length, forma_pagamento: formaPag, status: 'pendente',
+      })))
+
+      router.push('/dashboard/entradas')
+      router.refresh()
+    } finally {
+      enviandoRef.current = false
+      setSalvando(false)
     }
-
-    for (const r of reajustes) {
-      const upd: any = { updated_at: new Date().toISOString() }
-      if (r.atualizar_custo && !r.is_kit) upd.preco_custo = r.preco_custo_novo
-      if (r.atualizar_preco) { upd.preco_venda = r.preco_venda_novo; upd.markup = r.markup }
-      if (Object.keys(upd).length > 1) await sb.from('produtos').update(upd).eq('id', r.produto_id)
-    }
-
-    const parcelasFinais = parcelasGeradas ? parcelas : [{ numero: 1, vencimento: primeiroVenc, valor: totalGeral }]
-    await sb.from('contas_pagar').insert(parcelasFinais.map(p => ({
-      empresa_id: empresaId, entrada_id: entrada.id, fornecedor_id: fornecedorId,
-      descricao: `NF ${numeroNf || entrada.id.slice(0, 8)} — ${fornecedores.find(f => f.id === fornecedorId)?.razao_social}` +
-        (parcelasFinais.length > 1 ? ` (${p.numero}/${parcelasFinais.length})` : ''),
-      valor: p.valor, vencimento: p.vencimento, parcela: p.numero,
-      total_parcelas: parcelasFinais.length, forma_pagamento: formaPag, status: 'pendente',
-    })))
-
-    setSalvando(false)
-    router.push('/dashboard/entradas')
-    router.refresh()
   }
 
   const etapaIdx = ETAPAS.indexOf(etapa)

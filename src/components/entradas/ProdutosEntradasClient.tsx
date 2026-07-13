@@ -232,8 +232,12 @@ export default function ProdutosEntradasClient({
                 const varCusto = Number(i.preco_custo_anterior) > 0
                   ? ((Number(i.preco_custo_novo) - Number(i.preco_custo_anterior)) / Number(i.preco_custo_anterior)) * 100 : null
                 const fornNome = i.entradas.fornecedores?.nome_fantasia ?? i.entradas.fornecedores?.razao_social ?? '—'
-                const data = i.entradas.data_entrada
-                  ? new Date(i.entradas.data_entrada + 'T00:00:00').toLocaleDateString('pt-BR')
+                const dataEntradaRaw = i.entradas.data_entrada
+                const dataEntradaDate = dataEntradaRaw
+                  ? new Date(dataEntradaRaw.length <= 10 ? dataEntradaRaw + 'T00:00:00' : dataEntradaRaw)
+                  : null
+                const data = dataEntradaDate && !isNaN(dataEntradaDate.getTime())
+                  ? dataEntradaDate.toLocaleDateString('pt-BR')
                   : new Date(i.created_at).toLocaleDateString('pt-BR')
                 return (
                   <tr key={i.id} className="group hover:bg-gray-50">
