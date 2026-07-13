@@ -3,10 +3,15 @@
 -- Execute no Supabase Dashboard → SQL Editor
 -- ============================================================
 
--- 1. marketplace_canais: reconectar a mesma loja não deve duplicar canal
-CREATE UNIQUE INDEX IF NOT EXISTS uq_canais_empresa_plataforma_seller
-  ON marketplace_canais (empresa_id, plataforma, seller_id)
-  WHERE seller_id IS NOT NULL;
+-- 1. marketplace_canais: reconectar a mesma loja não deve duplicar canal.
+--    Índice NÃO parcial: Postgres não usa índice parcial como alvo de
+--    ON CONFLICT a menos que a cláusula WHERE seja repetida na própria
+--    query de upsert (o que o Supabase/PostgREST não faz). Um índice único
+--    "normal" já permite múltiplas linhas com seller_id NULL (NULL não é
+--    igual a NULL), então não perdemos nada com isso.
+DROP INDEX IF EXISTS uq_canais_empresa_plataforma_seller;
+CREATE UNIQUE INDEX uq_canais_empresa_plataforma_seller
+  ON marketplace_canais (empresa_id, plataforma, seller_id);
 
 -- 2. marketplace_anuncios: campos Shopee-específicos (nullable, não afeta
 --    outras plataformas) + constraint de idempotência para upsert
@@ -20,10 +25,11 @@ ALTER TABLE marketplace_anuncios
   ADD COLUMN IF NOT EXISTS ultima_atualizacao_externa TIMESTAMPTZ;
 
 -- Idempotência do upsert (mesmo padrão já usado em marketplace_pedidos).
--- Índice parcial: não afeta rascunhos manuais criados sem id_externo.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_anuncios_canal_idexterno
-  ON marketplace_anuncios (canal_id, id_externo)
-  WHERE id_externo IS NOT NULL;
+-- Mesmo motivo acima: índice não-parcial para servir de alvo de ON CONFLICT.
+-- Rascunhos manuais com id_externo NULL continuam permitidos (NULL ≠ NULL).
+DROP INDEX IF EXISTS uq_anuncios_canal_idexterno;
+CREATE UNIQUE INDEX uq_anuncios_canal_idexterno
+  ON marketplace_anuncios (canal_id, id_externo);
 
 CREATE INDEX IF NOT EXISTS idx_anuncios_dados_brutos_gin
   ON marketplace_anuncios USING GIN (dados_brutos);
