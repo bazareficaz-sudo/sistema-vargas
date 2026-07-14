@@ -91,6 +91,60 @@ async function upsertVariacao(sb: any, row: Record<string, any>): Promise<void> 
   if (error) throw new Error(error.message)
 }
 
+// Processa um item já buscado (get_item_base_info): grava o anúncio e, se
+// houver variações, busca e grava cada uma isoladamente (falha de variação
+// não invalida o anúncio já salvo). Reaproveitado por syncCatalogo (lote) e
+// syncSingleItem (um item só) para não duplicar essa lógica.
+async function processRawItem(
+  ctx: { sb: any; canal: ShopeeChannel },
+  rawItem: any
+): Promise<{ anuncioId: string; failed: SyncFailure[] }> {
+  const itemIdStr = String(rawItem.item_id)
+  const failed: SyncFailure[] = []
+
+  const { row } = mapItemToAnuncioRow(rawItem, ctx.canal)
+  const anuncio = await upsertAnuncio(ctx.sb, row)
+
+  if (rawItem.has_model) {
+    try {
+      const modelData = await getModelList(ctx, Number(rawItem.item_id))
+      const models: any[] = modelData?.model ?? []
+      for (const rawModel of models) {
+        try {
+          const variRow = mapModelToVariacaoRow(rawModel, anuncio.id, ctx.canal.empresaId)
+          await upsertVariacao(ctx.sb, variRow)
+        } catch (eModel: any) {
+          failed.push({ itemId: `${itemIdStr}:${rawModel?.model_id ?? '?'}`, error: eModel?.message ?? 'Erro ao processar variação' })
+        }
+      }
+    } catch (eModels: any) {
+      failed.push({ itemId: itemIdStr, error: `Falha ao buscar variações: ${eModels?.message ?? eModels}` })
+    }
+  }
+
+  return { anuncioId: anuncio.id, failed }
+}
+
+// Ressincroniza um único anúncio (ação individual na tela de anúncios),
+// sem passar pela paginação/lote da sincronização completa.
+export async function syncSingleItem(
+  sb: any,
+  canalInicial: ShopeeChannel,
+  idExterno: string
+): Promise<{ ok: true; anuncioId: string; warnings: SyncFailure[] } | { ok: false; error: string }> {
+  try {
+    const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
+    const ctx = { sb, canal }
+    const rawItems = await getItemBaseInfoBatch(ctx, [Number(idExterno)])
+    if (!rawItems[0]) return { ok: false, error: 'Item não encontrado ou indisponível na Shopee' }
+
+    const { anuncioId, failed } = await processRawItem(ctx, rawItems[0])
+    return { ok: true, anuncioId, warnings: failed }
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? 'Erro ao sincronizar item' }
+  }
+}
+
 export async function testarConexao(
   sb: any,
   canalInicial: ShopeeChannel
@@ -149,26 +203,9 @@ export async function syncCatalogo(
   for (const rawItem of rawItems) {
     const itemIdStr = String(rawItem.item_id)
     try {
-      const { row } = mapItemToAnuncioRow(rawItem, canal)
-      const anuncio = await upsertAnuncio(sb, row)
+      const { failed: itemFailed } = await processRawItem(ctx, rawItem)
       upserted++
-
-      if (rawItem.has_model) {
-        try {
-          const modelData = await getModelList(ctx, Number(rawItem.item_id))
-          const models: any[] = modelData?.model ?? []
-          for (const rawModel of models) {
-            try {
-              const variRow = mapModelToVariacaoRow(rawModel, anuncio.id, canal.empresaId)
-              await upsertVariacao(sb, variRow)
-            } catch (eModel: any) {
-              failed.push({ itemId: `${itemIdStr}:${rawModel?.model_id ?? '?'}`, error: eModel?.message ?? 'Erro ao processar variação' })
-            }
-          }
-        } catch (eModels: any) {
-          failed.push({ itemId: itemIdStr, error: `Falha ao buscar variações: ${eModels?.message ?? eModels}` })
-        }
-      }
+      failed.push(...itemFailed)
     } catch (e: any) {
       failed.push({ itemId: itemIdStr, error: e?.message ?? 'Erro desconhecido ao processar item' })
     }

@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import AnuncioDetalheModal from './AnuncioDetalheModal'
+import { fmt, temDivergencia } from './utils'
 
 const STATUS_CORES: Record<string, string> = {
   rascunho: 'bg-gray-100 text-gray-600',
@@ -15,7 +17,14 @@ const STATUS_LABELS: Record<string, string> = {
   rascunho: 'Rascunho', ativo: 'Ativo', pausado: 'Pausado', encerrado: 'Encerrado', erro: 'Erro',
 }
 
-function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
+const FACETAS: { key: string; label: string }[] = [
+  { key: 'mapeado', label: 'Mapeado' },
+  { key: 'nao_mapeado', label: 'Não mapeado' },
+  { key: 'sem_sku', label: 'Sem SKU' },
+  { key: 'sem_estoque', label: 'Sem estoque' },
+  { key: 'com_variacao', label: 'Com variações' },
+  { key: 'divergente', label: 'Divergente' },
+]
 
 export default function AnunciosClient({ canal, anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial }: {
   canal: any; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string
@@ -31,6 +40,16 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
   const [buscaProd, setBuscaProd] = useState('')
   const [sincronizando, setSincronizando] = useState(false)
   const [resumoSync, setResumoSync] = useState('')
+  const [facetas, setFacetas] = useState<Set<string>>(new Set())
+  const [detalheAberto, setDetalheAberto] = useState<any | null>(null)
+
+  function alternarFaceta(key: string) {
+    setFacetas(prev => {
+      const novo = new Set(prev)
+      if (novo.has(key)) novo.delete(key); else novo.add(key)
+      return novo
+    })
+  }
 
   const formVazio = {
     produto_id: '', titulo: '', descricao: '', preco_venda: '',
@@ -149,7 +168,17 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
   const filtrados = anuncios.filter(a => {
     const matchQ = !q || a.titulo.toLowerCase().includes(q.toLowerCase())
     const matchS = !statusFiltro || a.status === statusFiltro
-    return matchQ && matchS
+    if (!matchQ || !matchS) return false
+
+    for (const faceta of facetas) {
+      if (faceta === 'mapeado' && !a.produto_id) return false
+      if (faceta === 'nao_mapeado' && a.produto_id) return false
+      if (faceta === 'sem_sku' && a.sku_canal) return false
+      if (faceta === 'sem_estoque' && (a.estoque_externo ?? null) !== 0) return false
+      if (faceta === 'com_variacao' && !a.tem_variacao) return false
+      if (faceta === 'divergente' && !temDivergencia(a)) return false
+    }
+    return true
   })
 
   // Busca produto ao vivo no banco (não filtra a lista inicial, que é só um
@@ -213,7 +242,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
       )}
 
       {/* Filtros */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por título..."
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-64 bg-white" />
         <div className="flex gap-1">
@@ -224,6 +253,18 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             </button>
           ))}
         </div>
+      </div>
+      <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+        <span className="text-xs text-gray-400 mr-1">Filtrar:</span>
+        {FACETAS.map(fac => (
+          <button key={fac.key} onClick={() => alternarFaceta(fac.key)}
+            className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${facetas.has(fac.key) ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+            {fac.label}
+          </button>
+        ))}
+        {facetas.size > 0 && (
+          <button onClick={() => setFacetas(new Set())} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ limpar</button>
+        )}
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -242,7 +283,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filtrados.map(a => (
-              <tr key={a.id} className="group hover:bg-gray-50 transition-colors">
+              <tr key={a.id} className={`group hover:bg-gray-50 transition-colors ${temDivergencia(a) ? 'border-l-2 border-amber-300' : ''}`}>
                 <td className="px-4 py-3">
                   {a.imagens?.[0] ? (
                     <img src={a.imagens[0]} alt="" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
@@ -258,7 +299,11 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                       {a.marca_externa}{a.marca_externa && a.categoria_externa && ' · '}{a.categoria_externa && `Categoria ${a.categoria_externa}`}
                     </p>
                   )}
-                  {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
+                  <div className="flex gap-1 flex-wrap mt-0.5">
+                    {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
+                    {!a.produtos && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
+                    {temDivergencia(a) && <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠ Diverge do produto</span>}
+                  </div>
                   {a.id_externo && <p className="text-xs text-gray-400 font-mono">ID: {a.id_externo}</p>}
                   {a.url_anuncio && (
                     <a href={a.url_anuncio} target="_blank" rel="noreferrer"
@@ -287,6 +332,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setDetalheAberto(a)} className="text-xs text-gray-600 hover:text-gray-900 font-medium">Detalhes</button>
                     <button onClick={() => abrirEditar(a)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Editar</button>
                     <button onClick={() => excluir(a.id)} className="text-xs text-red-500 hover:text-red-700">Excluir</button>
                   </div>
@@ -424,6 +470,18 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             </div>
           </div>
         </div>
+      )}
+
+      {detalheAberto && (
+        <AnuncioDetalheModal
+          anuncio={detalheAberto}
+          canal={canal}
+          onClose={() => setDetalheAberto(null)}
+          onAtualizado={(anuncioAtualizado) => {
+            setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
+            setDetalheAberto(anuncioAtualizado)
+          }}
+        />
       )}
     </div>
   )
