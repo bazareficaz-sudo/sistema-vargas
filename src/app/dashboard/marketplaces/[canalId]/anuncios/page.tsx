@@ -54,6 +54,7 @@ export default async function AnunciosPage({ params, searchParams }: {
       empresaId={empresaId}
       qInicial={q}
       statusInicial={status}
+      operador={user?.email ?? ''}
     />
   )
 }

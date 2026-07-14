@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AnuncioDetalheModal from './AnuncioDetalheModal'
+import MapearAnuncioModal from './MapearAnuncioModal'
 import { fmt, temDivergencia } from './utils'
 
 const STATUS_CORES: Record<string, string> = {
@@ -26,8 +27,8 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'divergente', label: 'Divergente' },
 ]
 
-export default function AnunciosClient({ canal, anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial }: {
-  canal: any; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string
+export default function AnunciosClient({ canal, anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador }: {
+  canal: any; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
 }) {
   const router = useRouter()
   const [anuncios, setAnuncios] = useState(anunciosIniciais)
@@ -42,6 +43,63 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
   const [resumoSync, setResumoSync] = useState('')
   const [facetas, setFacetas] = useState<Set<string>>(new Set())
   const [detalheAberto, setDetalheAberto] = useState<any | null>(null)
+  const [mapeandoAberto, setMapeandoAberto] = useState<any | null>(null)
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [previewMassa, setPreviewMassa] = useState<{ encontrados: any[]; naoEncontrados: any[] } | null>(null)
+  const [aplicandoMassa, setAplicandoMassa] = useState(false)
+
+  function toggleSelecionado(id: string) {
+    setSelecionados(prev => {
+      const novo = new Set(prev)
+      if (novo.has(id)) novo.delete(id); else novo.add(id)
+      return novo
+    })
+  }
+
+  async function prepararMapeamentoMassa() {
+    const sb = createClient()
+    const alvos = filtrados.filter(a => selecionados.has(a.id) && a.sku_canal)
+    const skus = [...new Set(alvos.map(a => a.sku_canal))]
+    const { data: candidatos } = skus.length > 0
+      ? await sb.from('produtos').select('id, nome, sku, preco_venda, estoque').eq('empresa_id', empresaId).eq('ativo', true).in('sku', skus)
+      : { data: [] as any[] }
+
+    const encontrados: any[] = []
+    const naoEncontrados: any[] = []
+    for (const a of filtrados.filter(a => selecionados.has(a.id))) {
+      const match = a.sku_canal ? candidatos?.find(c => c.sku === a.sku_canal) : null
+      if (match) encontrados.push({ anuncio: a, produto: match })
+      else naoEncontrados.push(a)
+    }
+    setPreviewMassa({ encontrados, naoEncontrados })
+  }
+
+  async function confirmarMapeamentoMassa() {
+    if (!previewMassa) return
+    setAplicandoMassa(true)
+    const sb = createClient()
+    for (const { anuncio, produto } of previewMassa.encontrados) {
+      await sb.from('marketplace_anuncios').update({ produto_id: produto.id }).eq('id', anuncio.id)
+    }
+    if (previewMassa.encontrados.length > 0) {
+      await sb.from('marketplace_mapeamentos').upsert(
+        previewMassa.encontrados.map(({ anuncio, produto }) => ({
+          empresa_id: empresaId, canal_id: canal.id, nivel: 'anuncio', chave: anuncio.sku_canal,
+          anuncio_id: anuncio.id, produto_id: produto.id,
+          produto_nome_snapshot: produto.nome, produto_sku_snapshot: produto.sku,
+          metodo: 'automatico_sku', operador, updated_at: new Date().toISOString(),
+        })),
+        { onConflict: 'empresa_id,canal_id,nivel,chave' }
+      )
+    }
+    setAnuncios(prev => prev.map(a => {
+      const match = previewMassa.encontrados.find((e: any) => e.anuncio.id === a.id)
+      return match ? { ...a, produto_id: match.produto.id, produtos: match.produto } : a
+    }))
+    setSelecionados(new Set())
+    setPreviewMassa(null)
+    setAplicandoMassa(false)
+  }
 
   function alternarFaceta(key: string) {
     setFacetas(prev => {
@@ -267,10 +325,27 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
         )}
       </div>
 
+      {selecionados.size > 0 && (
+        <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-4 py-2.5 mb-4">
+          <span className="text-sm text-purple-700 font-medium">{selecionados.size} selecionado(s)</span>
+          <button onClick={prepararMapeamentoMassa}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg">
+            Mapear selecionados por SKU
+          </button>
+          <button onClick={() => setSelecionados(new Set())} className="text-xs text-purple-400 hover:text-purple-600 ml-auto">✕ limpar seleção</button>
+        </div>
+      )}
+
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="px-4 py-3 w-10">
+                <input type="checkbox"
+                  checked={filtrados.length > 0 && filtrados.every(a => selecionados.has(a.id))}
+                  onChange={e => setSelecionados(e.target.checked ? new Set(filtrados.map(a => a.id)) : new Set())}
+                  className="w-4 h-4 accent-purple-600" />
+              </th>
               <th className="px-4 py-3 w-16"></th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Título / Produto</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">SKU canal</th>
@@ -284,6 +359,10 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
           <tbody className="divide-y divide-gray-100">
             {filtrados.map(a => (
               <tr key={a.id} className={`group hover:bg-gray-50 transition-colors ${temDivergencia(a) ? 'border-l-2 border-amber-300' : ''}`}>
+                <td className="px-4 py-3">
+                  <input type="checkbox" checked={selecionados.has(a.id)} onChange={() => toggleSelecionado(a.id)}
+                    className="w-4 h-4 accent-purple-600" />
+                </td>
                 <td className="px-4 py-3">
                   {a.imagens?.[0] ? (
                     <img src={a.imagens[0]} alt="" className="w-14 h-14 rounded-lg object-contain bg-gray-50 border border-gray-200" />
@@ -332,6 +411,10 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => setMapeandoAberto(a)}
+                      className={`text-xs font-medium ${!a.produtos ? 'text-purple-600 hover:text-purple-800' : 'text-gray-500 hover:text-gray-700'}`}>
+                      Mapear
+                    </button>
                     <button onClick={() => setDetalheAberto(a)} className="text-xs text-gray-600 hover:text-gray-900 font-medium">Detalhes</button>
                     <button onClick={() => abrirEditar(a)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Editar</button>
                     <button onClick={() => excluir(a.id)} className="text-xs text-red-500 hover:text-red-700">Excluir</button>
@@ -340,7 +423,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
               </tr>
             ))}
             {filtrados.length === 0 && (
-              <tr><td colSpan={8} className="py-12 text-center text-gray-400">
+              <tr><td colSpan={9} className="py-12 text-center text-gray-400">
                 {anuncios.length === 0 ? 'Nenhum anúncio cadastrado.' : 'Nenhum anúncio encontrado para os filtros aplicados.'}
               </td></tr>
             )}
@@ -482,6 +565,67 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             setDetalheAberto(anuncioAtualizado)
           }}
         />
+      )}
+
+      {mapeandoAberto && (
+        <MapearAnuncioModal
+          anuncio={mapeandoAberto}
+          canal={canal}
+          empresaId={empresaId}
+          operador={operador}
+          onClose={() => setMapeandoAberto(null)}
+          onAtualizado={(anuncioAtualizado) => {
+            setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
+            setMapeandoAberto(anuncioAtualizado)
+          }}
+        />
+      )}
+
+      {previewMassa && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setPreviewMassa(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] overflow-y-auto flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-lg font-semibold text-gray-900">Mapear em massa por SKU</h2>
+              <button onClick={() => setPreviewMassa(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-sm text-gray-600">
+                <span className="text-emerald-600 font-medium">{previewMassa.encontrados.length} encontrado(s)</span>
+                {' · '}
+                <span className="text-gray-400">{previewMassa.naoEncontrados.length} sem produto com SKU correspondente</span>
+              </p>
+              {previewMassa.encontrados.length > 0 && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  {previewMassa.encontrados.map(({ anuncio, produto }: any) => (
+                    <div key={anuncio.id} className="px-4 py-2.5 border-b border-gray-100 last:border-0 flex items-center justify-between text-sm">
+                      <span className="text-gray-700 truncate max-w-[45%]">{anuncio.titulo}</span>
+                      <span className="text-gray-400">→</span>
+                      <span className="text-emerald-700 font-medium truncate max-w-[45%]">{produto.nome}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {previewMassa.naoEncontrados.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Sem correspondência (não serão alterados):</p>
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    {previewMassa.naoEncontrados.map((a: any) => (
+                      <div key={a.id} className="px-4 py-2 border-b border-gray-100 last:border-0 text-xs text-gray-500">{a.titulo} — SKU: {a.sku_canal || '—'}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
+              <button onClick={() => setPreviewMassa(null)} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
+              <button onClick={confirmarMapeamentoMassa} disabled={aplicandoMassa || previewMassa.encontrados.length === 0}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                {aplicandoMassa ? 'Aplicando...' : `Confirmar mapeamento (${previewMassa.encontrados.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

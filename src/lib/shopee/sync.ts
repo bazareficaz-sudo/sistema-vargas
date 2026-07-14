@@ -76,19 +76,45 @@ export function mapModelToVariacaoRow(rawModel: any, anuncioId: string, empresaI
   }
 }
 
-export async function upsertAnuncio(sb: any, row: Record<string, any>): Promise<{ id: string }> {
+export async function upsertAnuncio(sb: any, row: Record<string, any>): Promise<{ id: string; produtoId: string | null }> {
   const { data, error } = await sb
     .from('marketplace_anuncios')
     .upsert(row, { onConflict: 'canal_id,id_externo' })
-    .select('id')
+    .select('id, produto_id')
     .single()
   if (error) throw new Error(error.message)
-  return { id: data.id }
+  return { id: data.id, produtoId: data.produto_id }
 }
 
-async function upsertVariacao(sb: any, row: Record<string, any>): Promise<void> {
-  const { error } = await sb.from('marketplace_anuncio_variacoes').upsert(row, { onConflict: 'anuncio_id,model_id' })
+async function upsertVariacao(sb: any, row: Record<string, any>): Promise<{ id: string; produtoId: string | null }> {
+  const { data, error } = await sb
+    .from('marketplace_anuncio_variacoes')
+    .upsert(row, { onConflict: 'anuncio_id,model_id' })
+    .select('id, produto_id')
+    .single()
   if (error) throw new Error(error.message)
+  return { id: data.id, produtoId: data.produto_id }
+}
+
+// Se a linha (anúncio ou variação) ainda não tiver produto vinculado, olha
+// se já existe um mapeamento aprendido (canal + nível + chave = SKU) e
+// aplica sozinho — sem nunca sobrescrever um vínculo já existente. Mesmo
+// princípio de EntradasXmlClient.tsx's autoMapearItens (NF-e), só que do
+// lado do servidor porque a importação Shopee roda em processRawItem.
+async function applyLearnedMapping(
+  sb: any,
+  opts: { canalId: string; nivel: 'anuncio' | 'variacao'; chave: string | null; tabela: string; rowId: string; jaMapeado: boolean }
+): Promise<void> {
+  if (opts.jaMapeado || !opts.chave) return
+  try {
+    const { data: mapa } = await sb.from('marketplace_mapeamentos')
+      .select('produto_id')
+      .eq('canal_id', opts.canalId).eq('nivel', opts.nivel).eq('chave', opts.chave)
+      .maybeSingle()
+    if (mapa?.produto_id) {
+      await sb.from(opts.tabela).update({ produto_id: mapa.produto_id }).eq('id', opts.rowId)
+    }
+  } catch { /* não-fatal — mesma filosofia defensiva do restante deste arquivo */ }
 }
 
 // Processa um item já buscado (get_item_base_info): grava o anúncio e, se
@@ -105,6 +131,14 @@ async function processRawItem(
   const { row } = mapItemToAnuncioRow(rawItem, ctx.canal)
   const anuncio = await upsertAnuncio(ctx.sb, row)
 
+  // anuncio.produtoId reflete o estado real após o upsert (upsert nunca
+  // inclui produto_id no payload, então um vínculo manual já existente
+  // é preservado) — só aplica o mapeamento aprendido se ainda não houver um.
+  await applyLearnedMapping(ctx.sb, {
+    canalId: ctx.canal.id, nivel: 'anuncio', chave: row.sku_canal, tabela: 'marketplace_anuncios',
+    rowId: anuncio.id, jaMapeado: !!anuncio.produtoId,
+  })
+
   if (rawItem.has_model) {
     try {
       const modelData = await getModelList(ctx, Number(rawItem.item_id))
@@ -112,7 +146,11 @@ async function processRawItem(
       for (const rawModel of models) {
         try {
           const variRow = mapModelToVariacaoRow(rawModel, anuncio.id, ctx.canal.empresaId)
-          await upsertVariacao(ctx.sb, variRow)
+          const variacao = await upsertVariacao(ctx.sb, variRow)
+          await applyLearnedMapping(ctx.sb, {
+            canalId: ctx.canal.id, nivel: 'variacao', chave: variRow.sku_variacao, tabela: 'marketplace_anuncio_variacoes',
+            rowId: variacao.id, jaMapeado: !!variacao.produtoId,
+          })
         } catch (eModel: any) {
           failed.push({ itemId: `${itemIdStr}:${rawModel?.model_id ?? '?'}`, error: eModel?.message ?? 'Erro ao processar variação' })
         }

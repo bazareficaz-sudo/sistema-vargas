@@ -59,7 +59,7 @@ export async function POST(req: Request) {
 
   const { data: variacoes } = await sb
     .from('marketplace_anuncio_variacoes')
-    .select('*')
+    .select('*, produtos(id, nome, sku)')
     .eq('anuncio_id', resultado.anuncioId)
     .order('nome_variacao')
 

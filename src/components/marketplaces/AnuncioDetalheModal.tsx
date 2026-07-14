@@ -19,7 +19,7 @@ export default function AnuncioDetalheModal({ anuncio, canal, onClose, onAtualiz
     setCarregandoVariacoes(true)
     const sb = createClient()
     sb.from('marketplace_anuncio_variacoes')
-      .select('*')
+      .select('*, produtos(id, nome, sku)')
       .eq('anuncio_id', anuncio.id)
       .order('nome_variacao')
       .then(({ data }: any) => { if (ativo) { setVariacoes(data ?? []); setCarregandoVariacoes(false) } })
@@ -131,6 +131,7 @@ export default function AnuncioDetalheModal({ anuncio, canal, onClose, onAtualiz
                         <th className="text-left px-3 py-2">SKU</th>
                         <th className="text-right px-3 py-2">Preço</th>
                         <th className="text-right px-3 py-2">Estoque</th>
+                        <th className="text-left px-3 py-2">Produto</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -140,6 +141,13 @@ export default function AnuncioDetalheModal({ anuncio, canal, onClose, onAtualiz
                           <td className="px-3 py-2 text-gray-500 font-mono text-xs">{v.sku_variacao || '—'}</td>
                           <td className="px-3 py-2 text-right text-gray-900">{v.preco != null ? fmt(v.preco) : '—'}</td>
                           <td className="px-3 py-2 text-right text-gray-900">{v.estoque ?? '—'}</td>
+                          <td className="px-3 py-2 text-xs">
+                            {v.produtos ? (
+                              <span className="text-emerald-700">{v.produtos.nome}</span>
+                            ) : (
+                              <span className="text-gray-400">Não vinculado</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
