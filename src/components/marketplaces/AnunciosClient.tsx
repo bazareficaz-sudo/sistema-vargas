@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AnuncioDetalheModal from './AnuncioDetalheModal'
 import MapearAnuncioModal from './MapearAnuncioModal'
+import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import { fmt, temDivergencia } from './utils'
 
 const STATUS_CORES: Record<string, string> = {
@@ -44,6 +45,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
   const [facetas, setFacetas] = useState<Set<string>>(new Set())
   const [detalheAberto, setDetalheAberto] = useState<any | null>(null)
   const [mapeandoAberto, setMapeandoAberto] = useState<any | null>(null)
+  const [enriquecendoAberto, setEnriquecendoAberto] = useState<any | null>(null)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [previewMassa, setPreviewMassa] = useState<{ encontrados: any[]; naoEncontrados: any[] } | null>(null)
   const [aplicandoMassa, setAplicandoMassa] = useState(false)
@@ -415,6 +417,9 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                       className={`text-xs font-medium ${!a.produtos ? 'text-purple-600 hover:text-purple-800' : 'text-gray-500 hover:text-gray-700'}`}>
                       Mapear
                     </button>
+                    {a.produtos && (
+                      <button onClick={() => setEnriquecendoAberto(a)} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium">Enriquecer</button>
+                    )}
                     <button onClick={() => setDetalheAberto(a)} className="text-xs text-gray-600 hover:text-gray-900 font-medium">Detalhes</button>
                     <button onClick={() => abrirEditar(a)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Editar</button>
                     <button onClick={() => excluir(a.id)} className="text-xs text-red-500 hover:text-red-700">Excluir</button>
@@ -577,6 +582,19 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
           onAtualizado={(anuncioAtualizado) => {
             setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
             setMapeandoAberto(anuncioAtualizado)
+          }}
+        />
+      )}
+
+      {enriquecendoAberto && (
+        <EnriquecerProdutoModal
+          anuncio={enriquecendoAberto}
+          empresaId={empresaId}
+          operador={operador}
+          onClose={() => setEnriquecendoAberto(null)}
+          onAtualizado={(anuncioAtualizado) => {
+            setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
+            setEnriquecendoAberto(anuncioAtualizado)
           }}
         />
       )}
