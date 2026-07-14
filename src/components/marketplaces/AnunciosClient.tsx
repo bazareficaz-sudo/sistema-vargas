@@ -286,9 +286,9 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
               <tr key={a.id} className={`group hover:bg-gray-50 transition-colors ${temDivergencia(a) ? 'border-l-2 border-amber-300' : ''}`}>
                 <td className="px-4 py-3">
                   {a.imagens?.[0] ? (
-                    <img src={a.imagens[0]} alt="" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
+                    <img src={a.imagens[0]} alt="" className="w-14 h-14 rounded-lg object-contain bg-gray-50 border border-gray-200" />
                   ) : (
-                    <div className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">📷</div>
+                    <div className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">📷</div>
                   )}
                 </td>
                 <td className="px-4 py-3">
