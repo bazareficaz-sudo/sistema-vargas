@@ -22,7 +22,14 @@ export default function RootLayout({
       lang="pt-BR"
       className={`${inter.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var v=localStorage.getItem('layout_menu');if(v==='topbar')document.documentElement.dataset.layoutMenu='topbar'}catch(e){}`,
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
