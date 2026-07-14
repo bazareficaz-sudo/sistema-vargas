@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import EditarProdutoModal from './EditarProdutoModal'
 import DuplicarProdutoModal from './DuplicarProdutoModal'
 import AcoesEmMassaModal from './AcoesEmMassaModal'
 import AdicionarImagemMassaModal from './AdicionarImagemMassaModal'
+import CriarKitModal from './CriarKitModal'
+import NovoProdutoModal from './NovoProdutoModal'
 
 type Produto = {
   id: string
@@ -88,8 +90,13 @@ export default function ProdutosClient({
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [editando, setEditando] = useState<Produto | null>(null)
   const [duplicando, setDuplicando] = useState<Produto | null>(null)
+  const [criandoKit, setCriandoKit] = useState<Produto | null>(null)
+  const [criandoNovo, setCriandoNovo] = useState(false)
   const [acoesEmMassa, setAcoesEmMassa] = useState(false)
   const [imagemEmMassa, setImagemEmMassa] = useState(false)
+  const [nomeEditando, setNomeEditando] = useState<string | null>(null)
+  const [nomeValor, setNomeValor] = useState('')
+  const cancelandoNomeRef = useRef(false)
   const [q, setQ] = useState(qInicial)
   const [aba, setAba] = useState(abaInicial)
   const [promo, setPromo] = useState(promoInicial)
@@ -158,6 +165,28 @@ export default function ProdutosClient({
     setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, ativo: !p.ativo } : p))
   }
 
+  function iniciarEdicaoNome(produto: Produto) {
+    setNomeEditando(produto.id)
+    setNomeValor(produto.nome)
+  }
+
+  function cancelarEdicaoNome() {
+    cancelandoNomeRef.current = true
+    setNomeEditando(null)
+  }
+
+  async function salvarNome(id: string) {
+    if (cancelandoNomeRef.current) { cancelandoNomeRef.current = false; return }
+    setNomeEditando(null)
+    const valor = nomeValor.trim()
+    const atual = produtos.find(p => p.id === id)
+    if (!valor || !atual || atual.nome === valor) return
+    const sb = createClient()
+    const { error } = await sb.from('produtos').update({ nome: valor, updated_at: new Date().toISOString() }).eq('id', id)
+    if (error) return
+    setProdutos(prev => prev.map(p => p.id === id ? { ...p, nome: valor } : p))
+  }
+
   async function togglePdv(produto: Produto) {
     const sb = createClient()
     await sb.from('produtos').update({ disponivel_pdv: !produto.disponivel_pdv, updated_at: new Date().toISOString() }).eq('id', produto.id)
@@ -194,6 +223,24 @@ export default function ProdutosClient({
           empresaId={empresaId}
           onClose={() => setDuplicando(null)}
           onDuplicado={() => { setDuplicando(null); router.refresh() }}
+        />
+      )}
+      {criandoKit && (
+        <CriarKitModal
+          produto={criandoKit}
+          empresaId={empresaId}
+          onClose={() => setCriandoKit(null)}
+          onCriado={() => { setCriandoKit(null); router.refresh() }}
+        />
+      )}
+      {criandoNovo && (
+        <NovoProdutoModal
+          empresaId={empresaId}
+          categoriasRaiz={categoriasRaiz}
+          categoriasTodas={categoriasTodas}
+          marcas={marcas}
+          onClose={() => setCriandoNovo(false)}
+          onCriado={() => { setCriandoNovo(false); router.refresh() }}
         />
       )}
       {acoesEmMassa && (
@@ -237,7 +284,7 @@ export default function ProdutosClient({
               <button onClick={() => setImagemEmMassa(true)} className="text-xs px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 transition-colors">🖼 Adicionar imagem</button>
             </div>
           )}
-          <button className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+          <button onClick={() => setCriandoNovo(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
             + Novo produto
           </button>
         </div>
@@ -463,6 +510,15 @@ export default function ProdutosClient({
                         ⧉
                       </button>
                     )}
+                    {p.tipo !== 'kit' && (
+                      <button
+                        onClick={() => setCriandoKit(p)}
+                        className="text-gray-400 hover:text-gray-600 text-sm leading-none"
+                        title="Criar kit a partir deste produto"
+                      >
+                        📦
+                      </button>
+                    )}
                   </div>
                 </td>
                 <td className="px-3 py-2.5">
@@ -476,9 +532,24 @@ export default function ProdutosClient({
                         📷
                       </div>
                     )}
-                    <button onClick={() => setEditando(p)} className="text-left text-gray-900 hover:text-blue-600 font-medium block transition-colors break-words">
-                      {p.nome}
-                    </button>
+                    {nomeEditando === p.id ? (
+                      <input
+                        autoFocus
+                        value={nomeValor}
+                        onChange={e => setNomeValor(e.target.value)}
+                        onBlur={() => salvarNome(p.id)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') e.currentTarget.blur()
+                          if (e.key === 'Escape') cancelarEdicaoNome()
+                        }}
+                        className="text-sm text-gray-900 font-medium border border-blue-400 rounded-md px-1.5 py-0.5 focus:outline-none min-w-[200px]"
+                      />
+                    ) : (
+                      <button onClick={() => iniciarEdicaoNome(p)} title="Clique para editar o nome"
+                        className="text-left text-gray-900 hover:text-blue-600 font-medium block transition-colors break-words">
+                        {p.nome}
+                      </button>
+                    )}
                     {p.promocao_ativa && (
                       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-orange-100 text-orange-600 border border-orange-200 shrink-0">
                         🏷 PROMOÇÃO
