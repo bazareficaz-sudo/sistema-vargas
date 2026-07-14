@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { createPortal } from 'react-dom'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useRef, useMemo } from 'react'
@@ -13,9 +14,15 @@ export default function TopMenu({ empresa }: { empresa: string }) {
   const plan = usePlan()
 
   const [openId, setOpenId] = useState<string | null>(null)
+  const [dropdownPos, setDropdownPos] = useState<{ left: number; top: number } | null>(null)
+  const [mounted, setMounted] = useState(false)
   const [busca, setBusca] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+
+  useEffect(() => { setMounted(true) }, [])
 
   function temModulo(modulo?: string) {
     return temModuloBase(plan, modulo)
@@ -27,22 +34,38 @@ export default function TopMenu({ empresa }: { empresa: string }) {
     return isActiveBase(pathname, href)
   }
 
+  function toggleGrupo(id: string) {
+    if (openId === id) { setOpenId(null); return }
+    const btn = buttonRefs.current[id]
+    if (btn) {
+      const rect = btn.getBoundingClientRect()
+      setDropdownPos({ left: rect.left, top: rect.bottom + 4 })
+    }
+    setOpenId(id)
+  }
+
   // Fecha dropdown ao trocar de página
   useEffect(() => { setOpenId(null) }, [pathname])
 
-  // Fecha ao clicar fora ou pressionar Esc
+  // Fecha ao clicar fora, pressionar Esc, ou redimensionar a janela
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpenId(null)
+      const target = e.target as Node
+      const insideBar = containerRef.current?.contains(target)
+      const insideDropdown = dropdownRef.current?.contains(target)
+      if (!insideBar && !insideDropdown) setOpenId(null)
     }
     function onEsc(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpenId(null)
     }
+    function onResize() { setOpenId(null) }
     document.addEventListener('mousedown', onClickOutside)
     document.addEventListener('keydown', onEsc)
+    window.addEventListener('resize', onResize)
     return () => {
       document.removeEventListener('mousedown', onClickOutside)
       document.removeEventListener('keydown', onEsc)
+      window.removeEventListener('resize', onResize)
     }
   }, [])
 
@@ -92,13 +115,14 @@ export default function TopMenu({ empresa }: { empresa: string }) {
 
         {/* Grupos — rola horizontalmente se não couber */}
         <nav className="flex items-center gap-0.5 overflow-x-auto flex-1 min-w-0 h-full">
-          {grupos.map(({ group, visibleItems, visibleSubGroups, allGroupItems }) => {
+          {grupos.map(({ group, allGroupItems }) => {
             const hasActive = allGroupItems.some(it => isActive(it.href))
             const isOpen = openId === group.id
             return (
-              <div key={group.id} className="relative flex-shrink-0 h-full flex items-center">
+              <div key={group.id} className="flex-shrink-0 h-full flex items-center">
                 <button
-                  onClick={() => setOpenId(isOpen ? null : group.id)}
+                  ref={el => { buttonRefs.current[group.id] = el }}
+                  onClick={() => toggleGrupo(group.id)}
                   className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
                     hasActive || isOpen ? 'text-white bg-white/10' : 'text-slate-400 hover:text-white hover:bg-white/5'
                   }`}
@@ -107,10 +131,35 @@ export default function TopMenu({ empresa }: { empresa: string }) {
                   <span>{group.label}</span>
                   <span className={`transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} style={{ fontSize: 9 }}>▾</span>
                 </button>
+              </div>
+            )
+          })}
+        </nav>
 
-                {isOpen && (
-                  <div className="absolute left-0 top-full mt-1 min-w-[220px] bg-slate-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 py-1.5">
-                    {visibleItems.map(it => (
+        {mounted && openId && dropdownPos && createPortal(
+          (() => {
+            const atual = grupos.find(g => g.group.id === openId)
+            if (!atual) return null
+            const { visibleItems, visibleSubGroups } = atual
+            return (
+              <div
+                ref={dropdownRef}
+                className="fixed min-w-[220px] bg-slate-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[60] py-1.5"
+                style={{ left: dropdownPos.left, top: dropdownPos.top }}
+              >
+                {visibleItems.map(it => (
+                  <Link key={it.href} href={it.href}
+                    className={`flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
+                      isActive(it.href) ? 'bg-white/10 text-white font-medium' : 'text-slate-300 hover:bg-white/8 hover:text-white'
+                    }`}>
+                    {it.icon && <span className="w-4 text-center flex-shrink-0">{it.icon}</span>}
+                    <span className="truncate">{it.label}</span>
+                  </Link>
+                ))}
+                {visibleSubGroups.map(sg => (
+                  <div key={sg.label} className="mt-1 first:mt-0">
+                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-3 pt-1.5 pb-1">{sg.label}</p>
+                    {sg.items.map(it => (
                       <Link key={it.href} href={it.href}
                         className={`flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
                           isActive(it.href) ? 'bg-white/10 text-white font-medium' : 'text-slate-300 hover:bg-white/8 hover:text-white'
@@ -119,26 +168,13 @@ export default function TopMenu({ empresa }: { empresa: string }) {
                         <span className="truncate">{it.label}</span>
                       </Link>
                     ))}
-                    {visibleSubGroups.map(sg => (
-                      <div key={sg.label} className="mt-1 first:mt-0">
-                        <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-3 pt-1.5 pb-1">{sg.label}</p>
-                        {sg.items.map(it => (
-                          <Link key={it.href} href={it.href}
-                            className={`flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
-                              isActive(it.href) ? 'bg-white/10 text-white font-medium' : 'text-slate-300 hover:bg-white/8 hover:text-white'
-                            }`}>
-                            {it.icon && <span className="w-4 text-center flex-shrink-0">{it.icon}</span>}
-                            <span className="truncate">{it.label}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    ))}
                   </div>
-                )}
+                ))}
               </div>
             )
-          })}
-        </nav>
+          })(),
+          document.body
+        )}
 
         {/* Busca */}
         <div className="relative flex-shrink-0 ml-1">
