@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import AnuncioDetalheModal from './AnuncioDetalheModal'
 import MapearAnuncioModal from './MapearAnuncioModal'
 import EnriquecerProdutoModal from './EnriquecerProdutoModal'
+import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import { fmt, temDivergencia } from './utils'
 
 const STATUS_CORES: Record<string, string> = {
@@ -46,9 +47,22 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
   const [detalheAberto, setDetalheAberto] = useState<any | null>(null)
   const [mapeandoAberto, setMapeandoAberto] = useState<any | null>(null)
   const [enriquecendoAberto, setEnriquecendoAberto] = useState<any | null>(null)
+  const [enviandoPrecoAberto, setEnviandoPrecoAberto] = useState<any | null>(null)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [previewMassa, setPreviewMassa] = useState<{ encontrados: any[]; naoEncontrados: any[] } | null>(null)
   const [aplicandoMassa, setAplicandoMassa] = useState(false)
+
+  // Envio de preço/estoque em massa para a Shopee
+  const [opcoesMassaPreco, setOpcoesMassaPreco] = useState<{
+    modoPreco: 'nao' | 'fixo' | 'percentual' | 'produto'; valorPreco: string
+    modoEstoque: 'nao' | 'fixo' | 'produto'; valorEstoque: string
+  } | null>(null)
+  const [previewMassaPreco, setPreviewMassaPreco] = useState<{
+    aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number }[]
+    pulados: { anuncio: any; motivo: string }[]
+  } | null>(null)
+  const [enviandoMassaPreco, setEnviandoMassaPreco] = useState(false)
+  const [resumoMassaPreco, setResumoMassaPreco] = useState('')
 
   function toggleSelecionado(id: string) {
     setSelecionados(prev => {
@@ -101,6 +115,75 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
     setSelecionados(new Set())
     setPreviewMassa(null)
     setAplicandoMassa(false)
+  }
+
+  function prepararPreviewMassaPreco() {
+    if (!opcoesMassaPreco) return
+    const { modoPreco, valorPreco, modoEstoque, valorEstoque } = opcoesMassaPreco
+    const aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number }[] = []
+    const pulados: { anuncio: any; motivo: string }[] = []
+
+    for (const a of filtrados.filter(a => selecionados.has(a.id))) {
+      if (a.tem_variacao) { pulados.push({ anuncio: a, motivo: 'Possui variações — envie individualmente' }); continue }
+      if (!a.id_externo) { pulados.push({ anuncio: a, motivo: 'Sem ID externo (não veio de sincronização)' }); continue }
+
+      let precoNovo: number | undefined
+      if (modoPreco === 'fixo') precoNovo = parseFloat(valorPreco) || 0
+      else if (modoPreco === 'percentual') precoNovo = Math.round(a.preco_venda * (1 + (parseFloat(valorPreco) || 0) / 100) * 100) / 100
+      else if (modoPreco === 'produto') {
+        if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Do produto vinculado")' }); continue }
+        precoNovo = a.produtos.preco_venda
+      }
+
+      let estoqueNovo: number | undefined
+      if (modoEstoque === 'fixo') estoqueNovo = parseInt(valorEstoque) || 0
+      else if (modoEstoque === 'produto') {
+        if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Do produto vinculado")' }); continue }
+        estoqueNovo = a.produtos.estoque
+      }
+
+      if (precoNovo === undefined && estoqueNovo === undefined) { pulados.push({ anuncio: a, motivo: 'Nenhuma alteração selecionada' }); continue }
+      aplicaveis.push({ anuncio: a, precoNovo, estoqueNovo })
+    }
+
+    setPreviewMassaPreco({ aplicaveis, pulados })
+  }
+
+  async function confirmarMassaPreco() {
+    if (!previewMassaPreco) return
+    setEnviandoMassaPreco(true)
+    const sb = createClient()
+    let sucesso = 0, falha = 0
+
+    for (const { anuncio, precoNovo, estoqueNovo } of previewMassaPreco.aplicaveis) {
+      const updates: Record<string, any> = { updated_at: new Date().toISOString() }
+      if (precoNovo !== undefined) updates.preco_venda = precoNovo
+      if (estoqueNovo !== undefined) updates.estoque_reservado = estoqueNovo
+      await sb.from('marketplace_anuncios').update(updates).eq('id', anuncio.id)
+
+      try {
+        const resp = await fetch('/api/marketplace/shopee/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canal.id, anuncioId: anuncio.id }),
+        })
+        const data = await resp.json()
+        if (data.ok) {
+          sucesso++
+          setAnuncios(prev => prev.map(a => a.id === anuncio.id ? { ...a, ...updates } : a))
+        } else {
+          falha++
+        }
+      } catch {
+        falha++
+      }
+    }
+
+    setResumoMassaPreco(`Enviados: ${sucesso} · Falharam: ${falha} · Pulados: ${previewMassaPreco.pulados.length}`)
+    setSelecionados(new Set())
+    setPreviewMassaPreco(null)
+    setOpcoesMassaPreco(null)
+    setEnviandoMassaPreco(false)
   }
 
   function alternarFaceta(key: string) {
@@ -334,7 +417,20 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg">
             Mapear selecionados por SKU
           </button>
+          {canal.plataforma === 'shopee' && (
+            <button onClick={() => setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', modoEstoque: 'nao', valorEstoque: '' })}
+              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg">
+              Atualizar preço/estoque na Shopee
+            </button>
+          )}
           <button onClick={() => setSelecionados(new Set())} className="text-xs text-purple-400 hover:text-purple-600 ml-auto">✕ limpar seleção</button>
+        </div>
+      )}
+
+      {resumoMassaPreco && (
+        <div className="bg-orange-50 border border-orange-200 text-orange-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>{resumoMassaPreco}</span>
+          <button onClick={() => setResumoMassaPreco('')} className="text-orange-400 hover:text-orange-600">✕</button>
         </div>
       )}
 
@@ -419,6 +515,9 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                     </button>
                     {a.produtos && (
                       <button onClick={() => setEnriquecendoAberto(a)} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium">Enriquecer</button>
+                    )}
+                    {canal.plataforma === 'shopee' && a.id_externo && (
+                      <button onClick={() => setEnviandoPrecoAberto(a)} className="text-xs text-orange-600 hover:text-orange-800 font-medium">Enviar p/ Shopee</button>
                     )}
                     <button onClick={() => setDetalheAberto(a)} className="text-xs text-gray-600 hover:text-gray-900 font-medium">Detalhes</button>
                     <button onClick={() => abrirEditar(a)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Editar</button>
@@ -597,6 +696,128 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             setEnriquecendoAberto(anuncioAtualizado)
           }}
         />
+      )}
+
+      {enviandoPrecoAberto && (
+        <EnviarPrecoEstoqueModal
+          anuncio={enviandoPrecoAberto}
+          canal={canal}
+          onClose={() => setEnviandoPrecoAberto(null)}
+          onEnviado={(anuncioAtualizado) => {
+            setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
+          }}
+        />
+      )}
+
+      {opcoesMassaPreco && !previewMassaPreco && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setOpcoesMassaPreco(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-lg font-semibold text-gray-900">Atualizar preço/estoque na Shopee</h2>
+              <button onClick={() => setOpcoesMassaPreco(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-5">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+                ⚠️ Só se aplica a anúncios sem variação. Anúncios com variação devem ser enviados individualmente.
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2">Preço de venda</p>
+                <div className="space-y-2">
+                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo (R$)'], ['percentual', 'Ajuste percentual sobre o atual (%)'], ['produto', 'Usar preço do produto vinculado']].map(([v, l]) => (
+                    <label key={v} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="radio" name="modoPreco" checked={opcoesMassaPreco.modoPreco === v}
+                        onChange={() => setOpcoesMassaPreco(p => p ? { ...p, modoPreco: v as any } : p)} className="accent-orange-600" />
+                      {l}
+                    </label>
+                  ))}
+                  {(opcoesMassaPreco.modoPreco === 'fixo' || opcoesMassaPreco.modoPreco === 'percentual') && (
+                    <input type="number" step="0.01" value={opcoesMassaPreco.valorPreco}
+                      onChange={e => setOpcoesMassaPreco(p => p ? { ...p, valorPreco: e.target.value } : p)}
+                      placeholder={opcoesMassaPreco.modoPreco === 'fixo' ? 'Ex: 49.90' : 'Ex: 10 ou -5'}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }} />
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2">Estoque</p>
+                <div className="space-y-2">
+                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo'], ['produto', 'Usar estoque do produto vinculado']].map(([v, l]) => (
+                    <label key={v} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                      <input type="radio" name="modoEstoque" checked={opcoesMassaPreco.modoEstoque === v}
+                        onChange={() => setOpcoesMassaPreco(p => p ? { ...p, modoEstoque: v as any } : p)} className="accent-orange-600" />
+                      {l}
+                    </label>
+                  ))}
+                  {opcoesMassaPreco.modoEstoque === 'fixo' && (
+                    <input type="number" value={opcoesMassaPreco.valorEstoque}
+                      onChange={e => setOpcoesMassaPreco(p => p ? { ...p, valorEstoque: e.target.value } : p)}
+                      placeholder="Ex: 10"
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }} />
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
+              <button onClick={() => setOpcoesMassaPreco(null)} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
+              <button onClick={prepararPreviewMassaPreco}
+                disabled={opcoesMassaPreco.modoPreco === 'nao' && opcoesMassaPreco.modoEstoque === 'nao'}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                Ver prévia
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewMassaPreco && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setPreviewMassaPreco(null); setOpcoesMassaPreco(null) }} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] overflow-y-auto flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-lg font-semibold text-gray-900">Prévia — envio para a Shopee</h2>
+              <button onClick={() => { setPreviewMassaPreco(null); setOpcoesMassaPreco(null) }} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-sm text-gray-600">
+                <span className="text-emerald-600 font-medium">{previewMassaPreco.aplicaveis.length} será(ão) enviado(s)</span>
+                {' · '}
+                <span className="text-gray-400">{previewMassaPreco.pulados.length} pulado(s)</span>
+              </p>
+              {previewMassaPreco.aplicaveis.length > 0 && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  {previewMassaPreco.aplicaveis.map(({ anuncio, precoNovo, estoqueNovo }) => (
+                    <div key={anuncio.id} className="px-4 py-2.5 border-b border-gray-100 last:border-0 text-sm">
+                      <p className="text-gray-800 truncate">{anuncio.titulo}</p>
+                      <p className="text-xs text-gray-500">
+                        {precoNovo !== undefined && <>Preço: {fmt(anuncio.preco_venda)} → <span className="text-emerald-600 font-medium">{fmt(precoNovo)}</span></>}
+                        {precoNovo !== undefined && estoqueNovo !== undefined && ' · '}
+                        {estoqueNovo !== undefined && <>Estoque: {anuncio.estoque_reservado ?? 0} → <span className="text-emerald-600 font-medium">{estoqueNovo}</span></>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {previewMassaPreco.pulados.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">Pulados:</p>
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    {previewMassaPreco.pulados.map(({ anuncio, motivo }) => (
+                      <div key={anuncio.id} className="px-4 py-2 border-b border-gray-100 last:border-0 text-xs text-gray-500">{anuncio.titulo} — {motivo}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
+              <button onClick={() => setPreviewMassaPreco(null)} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Voltar</button>
+              <button onClick={confirmarMassaPreco} disabled={enviandoMassaPreco || previewMassaPreco.aplicaveis.length === 0}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                {enviandoMassaPreco ? 'Enviando...' : `Enviar para a Shopee (${previewMassaPreco.aplicaveis.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {previewMassa && (
