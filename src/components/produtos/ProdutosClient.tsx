@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import EditarProdutoModal from './EditarProdutoModal'
 import DuplicarProdutoModal from './DuplicarProdutoModal'
+import AcoesEmMassaModal from './AcoesEmMassaModal'
+import AdicionarImagemMassaModal from './AdicionarImagemMassaModal'
 
 type Produto = {
   id: string
@@ -86,6 +88,8 @@ export default function ProdutosClient({
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [editando, setEditando] = useState<Produto | null>(null)
   const [duplicando, setDuplicando] = useState<Produto | null>(null)
+  const [acoesEmMassa, setAcoesEmMassa] = useState(false)
+  const [imagemEmMassa, setImagemEmMassa] = useState(false)
   const [q, setQ] = useState(qInicial)
   const [aba, setAba] = useState(abaInicial)
   const [promo, setPromo] = useState(promoInicial)
@@ -192,6 +196,24 @@ export default function ProdutosClient({
           onDuplicado={() => { setDuplicando(null); router.refresh() }}
         />
       )}
+      {acoesEmMassa && (
+        <AcoesEmMassaModal
+          ids={[...selecionados]}
+          categoriasRaiz={categoriasRaiz}
+          categoriasTodas={categoriasTodas}
+          marcas={marcas}
+          onClose={() => setAcoesEmMassa(false)}
+          onAplicado={() => { setAcoesEmMassa(false); setSelecionados(new Set()); router.refresh() }}
+        />
+      )}
+      {imagemEmMassa && (
+        <AdicionarImagemMassaModal
+          ids={[...selecionados]}
+          empresaId={empresaId}
+          onClose={() => setImagemEmMassa(false)}
+          onAplicado={() => { setImagemEmMassa(false); setSelecionados(new Set()); router.refresh() }}
+        />
+      )}
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-4">
@@ -211,6 +233,8 @@ export default function ProdutosClient({
               <span className="text-sm text-gray-600">{selecionados.size} selecionado(s)</span>
               <button onClick={() => ativarSelecionados(true)} className="text-xs px-3 py-1.5 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 transition-colors">Ativar</button>
               <button onClick={() => ativarSelecionados(false)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">Desativar</button>
+              <button onClick={() => setAcoesEmMassa(true)} className="text-xs px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">Ações em massa</button>
+              <button onClick={() => setImagemEmMassa(true)} className="text-xs px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 transition-colors">🖼 Adicionar imagem</button>
             </div>
           )}
           <button className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
