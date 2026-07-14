@@ -33,15 +33,18 @@ export default async function AnunciosPage({ params, searchParams }: {
   if (status) query = query.eq('status', status)
   if (q) query = query.ilike('titulo', `%${q}%`)
 
-  const { data: anuncios } = await query.limit(200)
+  const { data: anuncios } = await query.limit(5000)
 
+  // A busca de produto no modal de vínculo consulta o banco ao vivo
+  // (ver AnunciosClient.tsx), então essa lista só serve como valor inicial/
+  // fallback — não precisa (nem deve) tentar carregar o catálogo inteiro aqui.
   const { data: produtos } = await supabase
     .from('produtos')
     .select('id, nome, sku, preco_venda, preco_custo, estoque, ativo')
     .eq('empresa_id', empresaId)
     .eq('ativo', true)
     .order('nome')
-    .limit(500)
+    .limit(50)
 
   return (
     <AnunciosClient

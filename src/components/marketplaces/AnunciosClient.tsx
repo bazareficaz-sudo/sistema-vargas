@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -61,8 +61,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
       sku_canal: a.sku_canal ?? '',
       status: a.status,
     })
-    const prod = produtos.find(p => p.id === a.produto_id)
-    setBuscaProd(prod?.nome ?? '')
+    setBuscaProd(a.produtos?.nome ?? '')
     setModal(true)
   }
 
@@ -153,9 +152,30 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
     return matchQ && matchS
   })
 
-  const produtosFiltrados = buscaProd
-    ? produtos.filter(p => p.nome.toLowerCase().includes(buscaProd.toLowerCase()) || (p.sku ?? '').toLowerCase().includes(buscaProd.toLowerCase())).slice(0, 8)
-    : []
+  // Busca produto ao vivo no banco (não filtra a lista inicial, que é só um
+  // fallback pequeno) — evita não achar produtos fora de uma janela limitada
+  // e permite localizar por qualquer palavra do nome/SKU, não só um trecho
+  // contíguo exato.
+  const [produtosFiltrados, setProdutosFiltrados] = useState<any[]>([])
+  useEffect(() => {
+    if (!modal) { setProdutosFiltrados([]); return }
+    const termo = buscaProd.trim()
+    if (termo.length < 2) { setProdutosFiltrados([]); return }
+    let ativo = true
+    const timer = setTimeout(async () => {
+      const sb = createClient()
+      const palavras = termo.toLowerCase().split(/\s+/).map(p => p.replace(/[,()%]/g, '')).filter(Boolean)
+      let query = sb.from('produtos')
+        .select('id, nome, sku, preco_venda, preco_custo, estoque, ativo')
+        .eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(8)
+      for (const palavra of palavras) {
+        query = query.or(`nome.ilike.%${palavra}%,sku.ilike.%${palavra}%`)
+      }
+      const { data } = await query
+      if (ativo) setProdutosFiltrados(data ?? [])
+    }, 250)
+    return () => { ativo = false; clearTimeout(timer) }
+  }, [buscaProd, modal, empresaId])
 
   return (
     <div>
@@ -210,6 +230,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="px-4 py-3 w-16"></th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Título / Produto</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">SKU canal</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Estoque</th>
@@ -223,8 +244,21 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             {filtrados.map(a => (
               <tr key={a.id} className="group hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-3">
+                  {a.imagens?.[0] ? (
+                    <img src={a.imagens[0]} alt="" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">📷</div>
+                  )}
+                </td>
+                <td className="px-4 py-3">
                   <p className="font-medium text-gray-900 truncate max-w-xs">{a.titulo}</p>
                   {a.produtos && <p className="text-xs text-gray-400">{a.produtos.sku} · Preço base: {fmt(a.produtos.preco_venda)}</p>}
+                  {(a.marca_externa || a.categoria_externa) && (
+                    <p className="text-xs text-gray-400">
+                      {a.marca_externa}{a.marca_externa && a.categoria_externa && ' · '}{a.categoria_externa && `Categoria ${a.categoria_externa}`}
+                    </p>
+                  )}
+                  {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
                   {a.id_externo && <p className="text-xs text-gray-400 font-mono">ID: {a.id_externo}</p>}
                   {a.url_anuncio && (
                     <a href={a.url_anuncio} target="_blank" rel="noreferrer"
@@ -260,7 +294,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
               </tr>
             ))}
             {filtrados.length === 0 && (
-              <tr><td colSpan={7} className="py-12 text-center text-gray-400">
+              <tr><td colSpan={8} className="py-12 text-center text-gray-400">
                 {anuncios.length === 0 ? 'Nenhum anúncio cadastrado.' : 'Nenhum anúncio encontrado para os filtros aplicados.'}
               </td></tr>
             )}
