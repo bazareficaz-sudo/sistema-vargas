@@ -8,6 +8,17 @@ import MapearAnuncioModal from './MapearAnuncioModal'
 import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import { fmt, temDivergencia } from './utils'
+import { calcularKit } from '@/lib/produtos/kit'
+
+function arredondar(valor: number, regra: string): number {
+  if (regra === 'cima_inteiro') return Math.ceil(valor)
+  if (regra === 'terminar_90' || regra === 'terminar_99') {
+    const base = Math.floor(valor)
+    const decimal = regra === 'terminar_90' ? 0.90 : 0.99
+    return parseFloat((base + decimal).toFixed(2))
+  }
+  return Math.round(valor * 100) / 100
+}
 
 const STATUS_CORES: Record<string, string> = {
   rascunho: 'bg-gray-100 text-gray-600',
@@ -29,8 +40,9 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'divergente', label: 'Divergente' },
 ]
 
-export default function AnunciosClient({ canal, anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador }: {
+export default function AnunciosClient({ canal, anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [] }: {
   canal: any; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
+  regras?: any[]; depositos?: { id: string; nome: string }[]
 }) {
   const router = useRouter()
   const [anuncios, setAnuncios] = useState(anunciosIniciais)
@@ -54,9 +66,10 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
 
   // Envio de preço/estoque em massa para a Shopee
   const [opcoesMassaPreco, setOpcoesMassaPreco] = useState<{
-    modoPreco: 'nao' | 'fixo' | 'percentual' | 'produto'; valorPreco: string
-    modoEstoque: 'nao' | 'fixo' | 'produto'; valorEstoque: string
+    modoPreco: 'nao' | 'fixo' | 'percentual' | 'formula' | 'produto'; valorPreco: string; arredondamento: string
+    modoEstoque: 'nao' | 'fixo' | 'produto' | 'deposito'; valorEstoque: string; depositoId: string
   } | null>(null)
+  const [regraSelecionadaId, setRegraSelecionadaId] = useState('')
   const [previewMassaPreco, setPreviewMassaPreco] = useState<{
     aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number }[]
     pulados: { anuncio: any; motivo: string }[]
@@ -117,29 +130,83 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
     setAplicandoMassa(false)
   }
 
-  function prepararPreviewMassaPreco() {
-    if (!opcoesMassaPreco) return
-    const { modoPreco, valorPreco, modoEstoque, valorEstoque } = opcoesMassaPreco
+  function aplicarRegraSalva(regraId: string) {
+    setRegraSelecionadaId(regraId)
+    const regra = regras.find(r => r.id === regraId)
+    if (!regra) return
+    const novasOpcoes = {
+      modoPreco: regra.modo_preco, valorPreco: regra.valor_preco != null ? String(regra.valor_preco) : '',
+      arredondamento: regra.arredondamento,
+      modoEstoque: regra.modo_estoque, valorEstoque: regra.valor_estoque != null ? String(regra.valor_estoque) : '',
+      depositoId: regra.deposito_id ?? '',
+    }
+    setOpcoesMassaPreco(novasOpcoes)
+    prepararPreviewMassaPreco(novasOpcoes)
+  }
+
+  async function prepararPreviewMassaPreco(opcoesForcadas?: typeof opcoesMassaPreco) {
+    const opcoes = opcoesForcadas ?? opcoesMassaPreco
+    if (!opcoes) return
+    const { modoPreco, valorPreco, arredondamento, modoEstoque, valorEstoque, depositoId } = opcoes
     const aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number }[] = []
     const pulados: { anuncio: any; motivo: string }[] = []
 
-    for (const a of filtrados.filter(a => selecionados.has(a.id))) {
+    const alvos = filtrados.filter(a => selecionados.has(a.id))
+
+    // Estoque por depósito — busca em lote pra todos os produtos vinculados,
+    // em vez de uma query por anúncio.
+    let estoquePorDeposito = new Map<string, number>()
+    if (modoEstoque === 'deposito' && depositoId) {
+      const produtoIds = [...new Set(alvos.map(a => a.produtos?.id).filter(Boolean))]
+      if (produtoIds.length > 0) {
+        const sb = createClient()
+        const { data } = await sb.from('produto_estoque').select('produto_id, quantidade')
+          .eq('deposito_id', depositoId).in('produto_id', produtoIds)
+        estoquePorDeposito = new Map((data ?? []).map((r: any) => [r.produto_id, r.quantidade]))
+      }
+    }
+
+    // Kits: custo/estoque gravados no produto ficam obsoletos (nunca são
+    // recalculados ao editar a composição) — busca ao vivo pra não enviar
+    // valor velho pra Shopee.
+    const kitsCalculados = new Map<string, { custo: number; estoque: number }>()
+    const idsKit = [...new Set(alvos.filter(a => a.produtos?.tipo === 'kit').map(a => a.produtos.id))]
+    if (idsKit.length > 0) {
+      const sb = createClient()
+      for (const kitId of idsKit) {
+        const resultado = await calcularKit(sb, kitId, modoEstoque === 'deposito' ? (depositoId || null) : null)
+        if (resultado) kitsCalculados.set(kitId, resultado)
+      }
+    }
+
+    for (const a of alvos) {
       if (a.tem_variacao) { pulados.push({ anuncio: a, motivo: 'Possui variações — envie individualmente' }); continue }
       if (!a.id_externo) { pulados.push({ anuncio: a, motivo: 'Sem ID externo (não veio de sincronização)' }); continue }
 
+      const kitInfo = a.produtos?.tipo === 'kit' ? kitsCalculados.get(a.produtos.id) : undefined
+      const custoProduto = kitInfo ? kitInfo.custo : a.produtos?.preco_custo
+      const estoqueProduto = kitInfo ? kitInfo.estoque : a.produtos?.estoque
+
       let precoNovo: number | undefined
       if (modoPreco === 'fixo') precoNovo = parseFloat(valorPreco) || 0
-      else if (modoPreco === 'percentual') precoNovo = Math.round(a.preco_venda * (1 + (parseFloat(valorPreco) || 0) / 100) * 100) / 100
-      else if (modoPreco === 'produto') {
+      else if (modoPreco === 'percentual') precoNovo = arredondar(a.preco_venda * (1 + (parseFloat(valorPreco) || 0) / 100), arredondamento)
+      else if (modoPreco === 'formula') {
+        if (!custoProduto || custoProduto <= 0) { pulados.push({ anuncio: a, motivo: 'Produto vinculado sem custo cadastrado (necessário para "Fórmula")' }); continue }
+        precoNovo = arredondar(custoProduto * (1 + (parseFloat(valorPreco) || 0) / 100), arredondamento)
+      } else if (modoPreco === 'produto') {
         if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Do produto vinculado")' }); continue }
-        precoNovo = a.produtos.preco_venda
+        precoNovo = arredondar(a.produtos.preco_venda, arredondamento)
       }
 
       let estoqueNovo: number | undefined
       if (modoEstoque === 'fixo') estoqueNovo = parseInt(valorEstoque) || 0
       else if (modoEstoque === 'produto') {
         if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Do produto vinculado")' }); continue }
-        estoqueNovo = a.produtos.estoque
+        estoqueNovo = estoqueProduto ?? 0
+      } else if (modoEstoque === 'deposito') {
+        if (!depositoId) { pulados.push({ anuncio: a, motivo: 'Nenhum depósito selecionado' }); continue }
+        if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Depósito")' }); continue }
+        estoqueNovo = kitInfo ? kitInfo.estoque : (estoquePorDeposito.get(a.produtos.id) ?? 0)
       }
 
       if (precoNovo === undefined && estoqueNovo === undefined) { pulados.push({ anuncio: a, motivo: 'Nenhuma alteração selecionada' }); continue }
@@ -418,10 +485,16 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             Mapear selecionados por SKU
           </button>
           {canal.plataforma === 'shopee' && (
-            <button onClick={() => setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', modoEstoque: 'nao', valorEstoque: '' })}
+            <button onClick={() => { setRegraSelecionadaId(''); setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', arredondamento: 'nenhum', modoEstoque: 'nao', valorEstoque: '', depositoId: '' }) }}
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg">
               Atualizar preço/estoque na Shopee
             </button>
+          )}
+          {canal.plataforma === 'shopee' && (
+            <a href={`/dashboard/marketplaces/${canal.id}/regras`}
+              className="px-3 py-1.5 border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-medium rounded-lg">
+              Gerenciar regras
+            </a>
           )}
           <button onClick={() => setSelecionados(new Set())} className="text-xs text-purple-400 hover:text-purple-600 ml-auto">✕ limpar seleção</button>
         </div>
@@ -721,28 +794,48 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
                 ⚠️ Só se aplica a anúncios sem variação. Anúncios com variação devem ser enviados individualmente.
               </div>
+              {regras.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Usar regra salva</label>
+                  <select value={regraSelecionadaId} onChange={e => e.target.value ? aplicarRegraSalva(e.target.value) : setRegraSelecionadaId('')}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500">
+                    <option value="">Configurar manualmente...</option>
+                    {regras.map(r => <option key={r.id} value={r.id}>{r.nome}</option>)}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">Escolher uma regra já preenche as opções abaixo e mostra a prévia direto.</p>
+                </div>
+              )}
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-2">Preço de venda</p>
                 <div className="space-y-2">
-                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo (R$)'], ['percentual', 'Ajuste percentual sobre o atual (%)'], ['produto', 'Usar preço do produto vinculado']].map(([v, l]) => (
+                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo (R$)'], ['percentual', 'Ajuste percentual sobre o atual (%)'], ['formula', 'Fórmula: custo do produto vinculado × markup (%)'], ['produto', 'Usar preço do produto vinculado']].map(([v, l]) => (
                     <label key={v} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                       <input type="radio" name="modoPreco" checked={opcoesMassaPreco.modoPreco === v}
                         onChange={() => setOpcoesMassaPreco(p => p ? { ...p, modoPreco: v as any } : p)} className="accent-orange-600" />
                       {l}
                     </label>
                   ))}
-                  {(opcoesMassaPreco.modoPreco === 'fixo' || opcoesMassaPreco.modoPreco === 'percentual') && (
+                  {(opcoesMassaPreco.modoPreco === 'fixo' || opcoesMassaPreco.modoPreco === 'percentual' || opcoesMassaPreco.modoPreco === 'formula') && (
                     <input type="number" step="0.01" value={opcoesMassaPreco.valorPreco}
                       onChange={e => setOpcoesMassaPreco(p => p ? { ...p, valorPreco: e.target.value } : p)}
-                      placeholder={opcoesMassaPreco.modoPreco === 'fixo' ? 'Ex: 49.90' : 'Ex: 10 ou -5'}
+                      placeholder={opcoesMassaPreco.modoPreco === 'fixo' ? 'Ex: 49.90' : opcoesMassaPreco.modoPreco === 'formula' ? 'Markup, ex: 40' : 'Ex: 10 ou -5'}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }} />
+                  )}
+                  {(opcoesMassaPreco.modoPreco === 'percentual' || opcoesMassaPreco.modoPreco === 'formula' || opcoesMassaPreco.modoPreco === 'produto') && (
+                    <select value={opcoesMassaPreco.arredondamento} onChange={e => setOpcoesMassaPreco(p => p ? { ...p, arredondamento: e.target.value } : p)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }}>
+                      <option value="nenhum">Sem arredondamento</option>
+                      <option value="terminar_90">Terminar em ,90</option>
+                      <option value="terminar_99">Terminar em ,99</option>
+                      <option value="cima_inteiro">Arredondar para cima (inteiro)</option>
+                    </select>
                   )}
                 </div>
               </div>
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-2">Estoque</p>
                 <div className="space-y-2">
-                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo'], ['produto', 'Usar estoque do produto vinculado']].map(([v, l]) => (
+                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo'], ['produto', 'Usar estoque do produto vinculado'], ['deposito', 'Usar estoque de um depósito específico']].map(([v, l]) => (
                     <label key={v} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                       <input type="radio" name="modoEstoque" checked={opcoesMassaPreco.modoEstoque === v}
                         onChange={() => setOpcoesMassaPreco(p => p ? { ...p, modoEstoque: v as any } : p)} className="accent-orange-600" />
@@ -755,12 +848,19 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                       placeholder="Ex: 10"
                       className="border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }} />
                   )}
+                  {opcoesMassaPreco.modoEstoque === 'deposito' && (
+                    <select value={opcoesMassaPreco.depositoId} onChange={e => setOpcoesMassaPreco(p => p ? { ...p, depositoId: e.target.value } : p)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }}>
+                      <option value="">Selecione um depósito</option>
+                      {depositos.map(d => <option key={d.id} value={d.id}>{d.nome}</option>)}
+                    </select>
+                  )}
                 </div>
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
               <button onClick={() => setOpcoesMassaPreco(null)} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
-              <button onClick={prepararPreviewMassaPreco}
+              <button onClick={() => prepararPreviewMassaPreco()}
                 disabled={opcoesMassaPreco.modoPreco === 'nao' && opcoesMassaPreco.modoEstoque === 'nao'}
                 className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
                 Ver prévia

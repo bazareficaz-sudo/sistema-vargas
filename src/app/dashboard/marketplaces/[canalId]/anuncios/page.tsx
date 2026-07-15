@@ -26,7 +26,7 @@ export default async function AnunciosPage({ params, searchParams }: {
 
   let query = supabase
     .from('marketplace_anuncios')
-    .select('*, produtos(id, nome, sku, preco_venda, estoque)')
+    .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo)')
     .eq('canal_id', canalId)
     .order('created_at', { ascending: false })
 
@@ -46,6 +46,19 @@ export default async function AnunciosPage({ params, searchParams }: {
     .order('nome')
     .limit(50)
 
+  const { data: regras } = await supabase
+    .from('marketplace_regras_preco')
+    .select('*')
+    .eq('canal_id', canalId)
+    .eq('ativo', true)
+    .order('nome')
+
+  const { data: depositos } = await supabase
+    .from('depositos')
+    .select('id, nome')
+    .eq('empresa_id', empresaId)
+    .order('nome')
+
   return (
     <AnunciosClient
       canal={canal}
@@ -55,6 +68,8 @@ export default async function AnunciosPage({ params, searchParams }: {
       qInicial={q}
       statusInicial={status}
       operador={user?.email ?? ''}
+      regras={regras ?? []}
+      depositos={depositos ?? []}
     />
   )
 }

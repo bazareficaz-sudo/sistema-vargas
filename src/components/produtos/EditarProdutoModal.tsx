@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { calcularKit } from '@/lib/produtos/kit'
 
 const TIPOS = [
   { value: 'simples',   label: 'Simples',   desc: 'Produto unitário padrão' },
@@ -46,6 +47,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [categorias, setCategorias] = useState<{ id: string; nome: string }[]>([])
   const [marcas, setMarcas] = useState<{ id: string; nome: string }[]>([])
   const [kitItens, setKitItens] = useState<KitItem[]>([])
+  const [recalculandoKit, setRecalculandoKit] = useState(false)
   const [buscaKit, setBuscaKit] = useState('')
   const [resultadosKit, setResultadosKit] = useState<Produto[]>([])
   const [promocaoInfinita, setPromocaoInfinita] = useState(false)
@@ -161,6 +163,21 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     if (form?.id) {
       await sb.from('kit_itens').delete().eq('kit_id', form.id).eq('produto_id', produtoId)
     }
+  }
+
+  // Custo/estoque do kit ficam gravados no produto e nunca são recalculados
+  // sozinhos ao editar a composição — este botão busca ao vivo a partir dos
+  // componentes atuais. Só atualiza o formulário; ainda precisa Salvar.
+  async function recalcularKit() {
+    if (!form?.id) return
+    setRecalculandoKit(true)
+    const resultado = await calcularKit(sb, form.id)
+    if (resultado) {
+      const mk = form.markup ?? 0
+      const venda = mk > 0 ? parseFloat((resultado.custo * (1 + mk / 100)).toFixed(2)) : form.preco_venda
+      setForm(prev => prev ? { ...prev, preco_custo: resultado.custo, estoque: resultado.estoque, preco_venda: venda } : prev)
+    }
+    setRecalculandoKit(false)
   }
 
   // ── Imagens: Upload do dispositivo ──
@@ -745,7 +762,15 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
           {/* ── ABA KIT / COMPOSIÇÃO ── */}
           {aba === 'kit' && form.tipo === 'kit' && (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">Defina os produtos que compõem este kit. O preço do kit é definido manualmente na aba <strong>Preço</strong>.</p>
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm text-gray-600">Defina os produtos que compõem este kit. O preço do kit é definido manualmente na aba <strong>Preço</strong>.</p>
+                {kitItens.length > 0 && (
+                  <button onClick={recalcularKit} disabled={recalculandoKit}
+                    className="flex-shrink-0 text-xs px-3 py-1.5 border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors whitespace-nowrap">
+                    {recalculandoKit ? 'Recalculando...' : '↻ Recalcular a partir dos componentes'}
+                  </button>
+                )}
+              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Adicionar produto ao kit</label>
                 <input value={buscaKit} onChange={e => setBuscaKit(e.target.value)}
