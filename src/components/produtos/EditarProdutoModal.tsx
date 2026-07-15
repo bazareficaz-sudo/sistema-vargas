@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { calcularKit } from '@/lib/produtos/kit'
+import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 
 const TIPOS = [
   { value: 'simples',   label: 'Simples',   desc: 'Produto unitário padrão' },
@@ -137,6 +137,25 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     }, 300)
   }, [buscaKit, empresaId, form?.id])
 
+  // Recalcula custo/estoque a partir dos componentes atuais e já grava no
+  // produto do kit — chamado depois de toda alteração de composição
+  // (adicionar/remover/mudar quantidade), pra o kit nunca ficar desatualizado.
+  async function recalcularEPersistirKit() {
+    if (!form?.id) return
+    const resultado = await calcularKit(sb, form.id)
+    if (resultado) {
+      setForm(prev => {
+        if (!prev) return prev
+        const mk = prev.markup ?? 0
+        const venda = mk > 0 ? parseFloat((resultado.custo * (1 + mk / 100)).toFixed(2)) : prev.preco_venda
+        return { ...prev, preco_custo: resultado.custo, estoque: resultado.estoque, preco_venda: venda }
+      })
+      await sb.from('produtos')
+        .update({ preco_custo: resultado.custo, estoque: resultado.estoque, updated_at: new Date().toISOString() })
+        .eq('id', form.id)
+    }
+  }
+
   async function adicionarKitItem(prod: Produto) {
     if (kitItens.find(k => k.produto_id === prod.id)) return
     const novoItem: KitItem = { produto_id: prod.id, nome: prod.nome, unidade: prod.unidade, quantidade: 1 }
@@ -146,8 +165,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       const { data, error } = await sb.from('kit_itens')
         .insert({ kit_id: form.id, produto_id: prod.id, quantidade: 1 })
         .select().single()
-      if (error) setErro('Erro ao salvar item do kit: ' + error.message)
-      else if (data) setKitItens(prev => prev.map(k => k.produto_id === prod.id ? { ...k, id: data.id } : k))
+      if (error) { setErro('Erro ao salvar item do kit: ' + error.message); return }
+      if (data) setKitItens(prev => prev.map(k => k.produto_id === prod.id ? { ...k, id: data.id } : k))
+      await recalcularEPersistirKit()
     }
   }
 
@@ -155,6 +175,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     setKitItens(prev => prev.map(k => k.produto_id === produtoId ? { ...k, quantidade } : k))
     if (form?.id) {
       await sb.from('kit_itens').update({ quantidade }).eq('kit_id', form.id).eq('produto_id', produtoId)
+      await recalcularEPersistirKit()
     }
   }
 
@@ -162,21 +183,16 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     setKitItens(prev => prev.filter(k => k.produto_id !== produtoId))
     if (form?.id) {
       await sb.from('kit_itens').delete().eq('kit_id', form.id).eq('produto_id', produtoId)
+      await recalcularEPersistirKit()
     }
   }
 
-  // Custo/estoque do kit ficam gravados no produto e nunca são recalculados
-  // sozinhos ao editar a composição — este botão busca ao vivo a partir dos
-  // componentes atuais. Só atualiza o formulário; ainda precisa Salvar.
+  // Botão manual — útil se os componentes mudaram por fora (ex: outro
+  // usuário editou o custo de um componente enquanto este modal estava
+  // aberto). A automática acima já cobre o caso comum.
   async function recalcularKit() {
-    if (!form?.id) return
     setRecalculandoKit(true)
-    const resultado = await calcularKit(sb, form.id)
-    if (resultado) {
-      const mk = form.markup ?? 0
-      const venda = mk > 0 ? parseFloat((resultado.custo * (1 + mk / 100)).toFixed(2)) : form.preco_venda
-      setForm(prev => prev ? { ...prev, preco_custo: resultado.custo, estoque: resultado.estoque, preco_venda: venda } : prev)
-    }
+    await recalcularEPersistirKit()
     setRecalculandoKit(false)
   }
 
@@ -268,6 +284,18 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     if (!form) return
     setSalvando(true); setErro('')
     const isKit = form.tipo === 'kit'
+
+    // Kits: nunca confia no que está no formulário pro custo/estoque — sempre
+    // recalcula ao vivo a partir dos componentes atuais antes de gravar, pra
+    // não persistir um valor obsoleto (ex: usuário editou a composição sem
+    // clicar em "Recalcular").
+    let precoCusto = form.preco_custo
+    let estoque = form.estoque
+    if (isKit) {
+      const resultado = await calcularKit(sb, form.id)
+      if (resultado) { precoCusto = resultado.custo; estoque = resultado.estoque }
+    }
+
     const { error } = await sb.from('produtos').update({
       nome: form.nome,
       tipo: form.tipo,
@@ -275,7 +303,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       ean: form.ean || null,
       codigo_fornecedor: form.codigo_fornecedor || null,
       preco_venda: form.preco_venda,
-      ...(isKit ? {} : { preco_custo: form.preco_custo, markup: form.markup ?? null }),
+      preco_custo: precoCusto,
+      markup: isKit ? null : (form.markup ?? null),
       preco_promocional: form.preco_promocional ?? null,
       promocao_inicio: form.promocao_inicio ?? null,
       promocao_fim: promocaoInfinita ? null : (form.promocao_fim ?? null),
@@ -283,7 +312,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       unidade: form.unidade,
       categoria: form.categoria || null,
       marca: form.marca || null,
-      ...(isKit ? {} : { estoque: form.estoque, estoque_minimo: form.estoque_minimo }),
+      estoque,
+      estoque_minimo: form.estoque_minimo,
       ativo: form.ativo,
       disponivel_pdv: form.disponivel_pdv,
       permite_fracao: form.permite_fracao,
@@ -303,6 +333,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       )
       if (kitError) { setSalvando(false); setErro('Produto salvo, mas erro na composição: ' + kitError.message); return }
     }
+
+    // Se este produto (não-kit) é componente de algum kit, o custo/estoque
+    // pode ter mudado agora — propaga o recálculo pros kits que o usam.
+    if (!isKit) await recalcularKitsQueUsam(sb, form.id)
 
     setSalvando(false)
     onSaved(); onClose()

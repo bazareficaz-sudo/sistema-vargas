@@ -52,3 +52,24 @@ export async function calcularKit(
 
   return { custo, estoque: estoqueMinimo === Infinity ? 0 : Math.max(0, estoqueMinimo) }
 }
+
+// Quando um componente muda de custo/estoque (salvo como produto normal),
+// os kits que o usam ficam desatualizados até alguém abrir e recalcular
+// manualmente. Isso propaga o recálculo pra todos os kits que usam esse
+// componente, gravando direto em `produtos`.
+export async function recalcularKitsQueUsam(sb: any, componenteId: string): Promise<void> {
+  const { data: itens } = await sb
+    .from('kit_itens')
+    .select('kit_id')
+    .eq('produto_id', componenteId)
+
+  const kitIds = [...new Set((itens ?? []).map((i: any) => i.kit_id))]
+  for (const kitId of kitIds) {
+    const resultado = await calcularKit(sb, kitId)
+    if (resultado) {
+      await sb.from('produtos')
+        .update({ preco_custo: resultado.custo, estoque: resultado.estoque, updated_at: new Date().toISOString() })
+        .eq('id', kitId)
+    }
+  }
+}
