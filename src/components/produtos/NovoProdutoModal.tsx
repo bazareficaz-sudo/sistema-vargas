@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { gerarProximoSku } from './sku'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -35,6 +36,13 @@ export default function NovoProdutoModal({ empresaId, categoriasRaiz, categorias
   const subcategoriasDisponiveis = categoria
     ? categoriasTodas.filter(c => c.pai_id && categoriasTodas.find(r => r.id === c.pai_id)?.nome === categoria)
     : []
+
+  // Sugere o próximo SKU sequencial (editável) ao abrir o modal
+  useEffect(() => {
+    const sb = createClient()
+    gerarProximoSku(sb, empresaId).then(v => setSku(prev => prev === '' ? v : prev))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaId])
 
   async function checarSku() {
     const valor = sku.trim()

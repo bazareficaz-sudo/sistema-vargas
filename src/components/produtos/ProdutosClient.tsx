@@ -542,7 +542,7 @@ export default function ProdutosClient({
                           if (e.key === 'Enter') e.currentTarget.blur()
                           if (e.key === 'Escape') cancelarEdicaoNome()
                         }}
-                        className="text-sm text-gray-900 font-medium border border-blue-400 rounded-md px-1.5 py-0.5 focus:outline-none min-w-[200px]"
+                        className="text-sm text-gray-900 font-medium border border-blue-400 rounded-md px-1.5 py-0.5 focus:outline-none flex-1 min-w-[260px]"
                       />
                     ) : (
                       <button onClick={() => iniciarEdicaoNome(p)} title="Clique para editar o nome"

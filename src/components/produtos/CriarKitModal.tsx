@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { gerarProximoSku } from './sku'
 
 type ProdutoBase = {
   id: string
@@ -24,8 +25,27 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
   const [quantidade, setQuantidade] = useState(2)
   const [nome, setNome] = useState(`${produto.nome} - Kit 2un`)
   const [nomeEditadoManualmente, setNomeEditadoManualmente] = useState(false)
+  const [sku, setSku] = useState('')
+  const [skuDuplicado, setSkuDuplicado] = useState<any | null>(null)
+  const [checandoSku, setChecandoSku] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+
+  useEffect(() => {
+    const sb = createClient()
+    gerarProximoSku(sb, empresaId).then(v => setSku(prev => prev === '' ? v : prev))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaId])
+
+  async function checarSku() {
+    const valor = sku.trim()
+    if (!valor) { setSkuDuplicado(null); return }
+    setChecandoSku(true)
+    const sb = createClient()
+    const { data } = await sb.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('sku', valor).maybeSingle()
+    setSkuDuplicado(data ?? null)
+    setChecandoSku(false)
+  }
 
   function alterarQuantidade(v: number) {
     setQuantidade(v)
@@ -43,11 +63,22 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
     setSalvando(true); setErro('')
     const sb = createClient()
 
+    const skuFinal = sku.trim() || null
+    if (skuFinal) {
+      const { data: existente } = await sb.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('sku', skuFinal).maybeSingle()
+      if (existente) {
+        setErro(`Já existe um produto com este SKU: "${existente.nome}".`)
+        setSalvando(false)
+        return
+      }
+    }
+
     const estoqueKit = produto.estoque > 0 ? Math.floor(produto.estoque / quantidade) : 0
 
     const { data: novoProduto, error } = await sb.from('produtos').insert({
       empresa_id: empresaId,
       nome: nome.trim(),
+      sku: skuFinal,
       tipo: 'kit',
       unidade: produto.unidade,
       categoria: produto.categoria,
@@ -103,6 +134,17 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
           </div>
 
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">SKU</label>
+            <input value={sku} onChange={e => { setSku(e.target.value); setSkuDuplicado(null) }} onBlur={checarSku}
+              placeholder="Sugestão automática — pode editar"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500" />
+            {checandoSku && <p className="text-xs text-gray-400 mt-1">Verificando...</p>}
+            {skuDuplicado && (
+              <p className="text-xs text-red-600 mt-1">Já existe: "{skuDuplicado.nome}" — troque o SKU.</p>
+            )}
+          </div>
+
           <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700">
             1 kit = {quantidade}x "{produto.nome}". Preço de venda sugerido: {(produto.preco_venda * quantidade).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — pode ser ajustado depois editando o kit.
           </div>
@@ -112,7 +154,7 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
-          <button onClick={salvar} disabled={salvando}
+          <button onClick={salvar} disabled={salvando || !!skuDuplicado}
             className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
             {salvando ? 'Criando...' : 'Criar kit'}
           </button>

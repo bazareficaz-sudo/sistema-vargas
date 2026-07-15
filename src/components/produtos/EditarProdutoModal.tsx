@@ -297,9 +297,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-4xl max-h-[92vh] bg-white rounded-2xl overflow-y-auto shadow-2xl flex flex-col">
+      <div className="relative w-full h-full sm:h-auto max-w-none sm:max-w-4xl max-h-none sm:max-h-[92vh] bg-white sm:rounded-2xl overflow-y-auto shadow-2xl flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
@@ -331,10 +331,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         </div>
 
         {/* Abas */}
-        <div className="flex border-b border-gray-200 px-6 overflow-x-auto">
+        <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-gray-200 px-6">
           {abas.filter(a => a.show !== false).map(a => (
             <button key={a.key} onClick={() => setAba(a.key)}
-              className={`py-3 px-1 mr-5 text-sm transition-colors whitespace-nowrap ${aba === a.key ? abaAtiva : abaInativa}`}>
+              className={`py-3 px-1 text-sm transition-colors whitespace-nowrap ${aba === a.key ? abaAtiva : abaInativa}`}>
               {a.label}
             </button>
           ))}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { gerarProximoSku } from './sku'
 
 type ProdutoResumo = { id: string; nome: string; tipo: string }
 
@@ -56,18 +57,21 @@ export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDu
     let ativo = true
     async function carregar() {
       const sb = createClient()
-      const [{ data: prod }, { count }] = await Promise.all([
+      const [{ data: prod }, { count }, proximoSku] = await Promise.all([
         sb.from('produtos').select('*').eq('id', produto.id).single(),
         sb.from('produto_imagens').select('id', { count: 'exact', head: true }).eq('produto_id', produto.id),
+        gerarProximoSku(sb, empresaId),
       ])
       if (!ativo) return
       setOrigem(prod)
       setQtdImagens(count ?? 0)
+      setSku(prev => prev === '' ? proximoSku : prev)
       setCarregando(false)
     }
     carregar()
     return () => { ativo = false }
-  }, [produto.id])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produto.id, empresaId])
 
   async function checarSku() {
     const valor = sku.trim()
@@ -187,9 +191,9 @@ export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDu
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">SKU (opcional)</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">SKU</label>
               <input value={sku} onChange={e => { setSku(e.target.value); setSkuDuplicado(null) }} onBlur={checarSku}
-                placeholder="Deixe em branco para definir depois"
+                placeholder="Sugestão automática — pode editar"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500" />
               {checandoSku && <p className="text-xs text-gray-400 mt-1">Verificando...</p>}
               {skuDuplicado && (
