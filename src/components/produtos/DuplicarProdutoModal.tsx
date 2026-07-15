@@ -25,6 +25,10 @@ type ProdutoCompleto = {
   pis_cst: string | null
   cofins_cst: string | null
   codigo_fornecedor: string | null
+  ibs_cst: string | null
+  ibs_cclasstrib: string | null
+  ibs_aliquota: number | null
+  cbs_aliquota: number | null
 }
 
 type ProdutoImagem = { url: string; ordem: number; principal: boolean }
@@ -148,6 +152,10 @@ export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDu
       pis_cst: copiarFiscal ? origem.pis_cst : null,
       cofins_cst: copiarFiscal ? origem.cofins_cst : null,
       codigo_fornecedor: copiarFiscal ? origem.codigo_fornecedor : null,
+      ibs_cst: copiarFiscal ? origem.ibs_cst : null,
+      ibs_cclasstrib: copiarFiscal ? origem.ibs_cclasstrib : null,
+      ibs_aliquota: copiarFiscal ? origem.ibs_aliquota : null,
+      cbs_aliquota: copiarFiscal ? origem.cbs_aliquota : null,
     }
 
     const { data: novoProduto, error } = await sb.from('produtos').insert(payload).select().single()
@@ -165,7 +173,7 @@ export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDu
     { key: 'categoriaMarca', label: 'Categoria e marca', valor: copiarCategoriaMarca, set: setCopiarCategoriaMarca },
     { key: 'preco', label: 'Preço e custo', valor: copiarPreco, set: setCopiarPreco },
     { key: 'estoque', label: 'Estoque atual e mínimo', valor: copiarEstoque, set: setCopiarEstoque },
-    { key: 'fiscal', label: 'Dados fiscais (NCM, CFOP, CST...)', valor: copiarFiscal, set: setCopiarFiscal },
+    { key: 'fiscal', label: 'Dados fiscais (NCM, CFOP, CST, IBS/CBS...)', valor: copiarFiscal, set: setCopiarFiscal },
   ] as const
 
   return (

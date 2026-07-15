@@ -81,7 +81,7 @@ export default async function ProdutosPage({
 
   let query = supabase
     .from('produtos')
-    .select('id, nome, sku, ean, preco_venda, preco_custo, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, unidade, categoria, marca, estoque, estoque_minimo, ativo, disponivel_pdv, permite_fracao, ncm, tipo', { count: 'exact' })
+    .select('id, nome, sku, ean, preco_venda, preco_custo, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, unidade, categoria, marca, estoque, estoque_minimo, ativo, disponivel_pdv, permite_fracao, ncm, tipo, ibs_cst, ibs_cclasstrib, ibs_aliquota, cbs_aliquota', { count: 'exact' })
     .eq('empresa_id', empresaId)
     .order('nome')
     .range(offset, offset + POR_PAGINA - 1)

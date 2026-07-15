@@ -31,6 +31,10 @@ type Produto = {
   permite_fracao: boolean
   ncm: string | null
   tipo: string
+  ibs_cst?: string | null
+  ibs_cclasstrib?: string | null
+  ibs_aliquota?: number | null
+  cbs_aliquota?: number | null
 }
 
 type Categoria = { id: string; nome: string; pai_id: string | null }

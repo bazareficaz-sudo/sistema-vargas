@@ -24,6 +24,10 @@ type Produto = {
   promocao_fim?: string | null
   promocao_ativa?: boolean
   codigo_fornecedor?: string | null
+  ibs_cst?: string | null
+  ibs_cclasstrib?: string | null
+  ibs_aliquota?: number | null
+  cbs_aliquota?: number | null
 }
 
 type KitItem = { id?: string; produto_id: string; nome: string; unidade: string; quantidade: number }
@@ -87,10 +91,14 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   }
 
   async function carregarKitItens(kitId: string) {
-    const { data } = await sb
+    // kit_itens tem duas FKs pra produtos (kit_id e produto_id) — precisa
+    // desambiguar qual relação usar no embed, senão o PostgREST recusa a
+    // consulta por ambiguidade e "data" vem undefined/vazio silenciosamente.
+    const { data, error } = await sb
       .from('kit_itens')
-      .select('id, produto_id, quantidade, produtos(nome, unidade)')
+      .select('id, produto_id, quantidade, produtos!produto_id(nome, unidade)')
       .eq('kit_id', kitId)
+    if (error) { setErro('Erro ao carregar componentes do kit: ' + error.message); return }
     setKitItens((data ?? []).map((d: any) => ({
       id: d.id,
       produto_id: d.produto_id,
@@ -263,6 +271,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       disponivel_pdv: form.disponivel_pdv,
       permite_fracao: form.permite_fracao,
       ncm: form.ncm || null,
+      ibs_cst: form.ibs_cst || null,
+      ibs_cclasstrib: form.ibs_cclasstrib || null,
+      ibs_aliquota: form.ibs_aliquota ?? null,
+      cbs_aliquota: form.cbs_aliquota ?? null,
       updated_at: new Date().toISOString(),
     }).eq('id', form.id)
     if (error) { setSalvando(false); setErro(error.message); return }
@@ -775,9 +787,22 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                             <span className="text-gray-400 text-xs ml-1">{item.unidade}</span>
                           </td>
                           <td className="px-4 py-2.5 text-center">
-                            <input type="number" min="0.001" step="0.001" value={item.quantidade}
-                              onChange={e => atualizarQtdKit(item.produto_id, parseFloat(e.target.value) || 1)}
-                              className="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-center focus:outline-none focus:border-blue-500" />
+                            <div className="inline-flex items-center gap-1.5">
+                              <button type="button"
+                                onClick={() => atualizarQtdKit(item.produto_id, Math.max(1, Math.round(item.quantidade) - 1))}
+                                disabled={Math.round(item.quantidade) <= 1}
+                                className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                −
+                              </button>
+                              <input type="number" min="1" step="1" value={Math.round(item.quantidade)}
+                                onChange={e => atualizarQtdKit(item.produto_id, Math.max(1, parseInt(e.target.value) || 1))}
+                                className="w-14 border border-gray-300 rounded px-2 py-1 text-sm text-center focus:outline-none focus:border-blue-500" />
+                              <button type="button"
+                                onClick={() => atualizarQtdKit(item.produto_id, Math.round(item.quantidade) + 1)}
+                                className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
+                                +
+                              </button>
+                            </div>
                           </td>
                           <td className="px-4 py-2.5 text-center">
                             <button onClick={() => removerKitItem(item.produto_id)}
@@ -805,6 +830,40 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   <label className="block text-xs font-medium text-gray-600 mb-1">NCM</label>
                   <input value={form.ncm ?? ''} onChange={e => campo('ncm', e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold text-gray-700 mb-1">Reforma tributária — IBS/CBS</p>
+                <p className="text-xs text-gray-400 mb-3">
+                  Só cadastro para referência interna — o sistema não calcula automaticamente nem emite nota fiscal.
+                  Confirme os valores com a contabilidade antes de usar em apuração real.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">CST IBS/CBS</label>
+                    <input value={form.ibs_cst ?? ''} onChange={e => campo('ibs_cst', e.target.value)}
+                      placeholder="Ex: 000"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Classificação Tributária (cClassTrib)</label>
+                    <input value={form.ibs_cclasstrib ?? ''} onChange={e => campo('ibs_cclasstrib', e.target.value)}
+                      placeholder="Ex: 000001"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Alíquota IBS (%)</label>
+                    <input type="number" step="0.0001" value={form.ibs_aliquota ?? ''}
+                      onChange={e => campo('ibs_aliquota', e.target.value === '' ? null : parseFloat(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Alíquota CBS (%)</label>
+                    <input type="number" step="0.0001" value={form.cbs_aliquota ?? ''}
+                      onChange={e => campo('cbs_aliquota', e.target.value === '' ? null : parseFloat(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
                 </div>
               </div>
               <p className="text-xs text-gray-400">Demais configurações fiscais (CFOP, CST, ICMS) são gerenciadas diretamente no PDV.</p>
