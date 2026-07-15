@@ -9,6 +9,7 @@ import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
+import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
 
 function arredondar(valor: number, regra: string): number {
   if (regra === 'cima_inteiro') return Math.ceil(valor)
@@ -66,7 +67,8 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
 
   // Envio de preço/estoque em massa para a Shopee
   const [opcoesMassaPreco, setOpcoesMassaPreco] = useState<{
-    modoPreco: 'nao' | 'fixo' | 'percentual' | 'formula' | 'produto'; valorPreco: string; arredondamento: string
+    modoPreco: 'nao' | 'fixo' | 'percentual' | 'formula' | 'shopee_liquido' | 'produto'; valorPreco: string; arredondamento: string
+    considerarPix: boolean
     modoEstoque: 'nao' | 'fixo' | 'produto' | 'deposito'; valorEstoque: string; depositoId: string
   } | null>(null)
   const [regraSelecionadaId, setRegraSelecionadaId] = useState('')
@@ -137,6 +139,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
     const novasOpcoes = {
       modoPreco: regra.modo_preco, valorPreco: regra.valor_preco != null ? String(regra.valor_preco) : '',
       arredondamento: regra.arredondamento,
+      considerarPix: regra.considerar_subsidio_pix ?? false,
       modoEstoque: regra.modo_estoque, valorEstoque: regra.valor_estoque != null ? String(regra.valor_estoque) : '',
       depositoId: regra.deposito_id ?? '',
     }
@@ -147,7 +150,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
   async function prepararPreviewMassaPreco(opcoesForcadas?: typeof opcoesMassaPreco) {
     const opcoes = opcoesForcadas ?? opcoesMassaPreco
     if (!opcoes) return
-    const { modoPreco, valorPreco, arredondamento, modoEstoque, valorEstoque, depositoId } = opcoes
+    const { modoPreco, valorPreco, arredondamento, considerarPix, modoEstoque, valorEstoque, depositoId } = opcoes
     const aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number }[] = []
     const pulados: { anuncio: any; motivo: string }[] = []
 
@@ -193,6 +196,9 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
       else if (modoPreco === 'formula') {
         if (!custoProduto || custoProduto <= 0) { pulados.push({ anuncio: a, motivo: 'Produto vinculado sem custo cadastrado (necessário para "Fórmula")' }); continue }
         precoNovo = arredondar(custoProduto * (1 + (parseFloat(valorPreco) || 0) / 100), arredondamento)
+      } else if (modoPreco === 'shopee_liquido') {
+        if (!custoProduto || custoProduto <= 0) { pulados.push({ anuncio: a, motivo: 'Produto vinculado sem custo cadastrado (necessário para "Margem líquida")' }); continue }
+        precoNovo = arredondar(calcularPrecoParaMargem(custoProduto, parseFloat(valorPreco) || 0, considerarPix), arredondamento)
       } else if (modoPreco === 'produto') {
         if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Do produto vinculado")' }); continue }
         precoNovo = arredondar(a.produtos.preco_venda, arredondamento)
@@ -485,7 +491,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
             Mapear selecionados por SKU
           </button>
           {canal.plataforma === 'shopee' && (
-            <button onClick={() => { setRegraSelecionadaId(''); setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', arredondamento: 'nenhum', modoEstoque: 'nao', valorEstoque: '', depositoId: '' }) }}
+            <button onClick={() => { setRegraSelecionadaId(''); setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', arredondamento: 'nenhum', considerarPix: false, modoEstoque: 'nao', valorEstoque: '', depositoId: '' }) }}
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg">
               Atualizar preço/estoque na Shopee
             </button>
@@ -808,20 +814,27 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-2">Preço de venda</p>
                 <div className="space-y-2">
-                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo (R$)'], ['percentual', 'Ajuste percentual sobre o atual (%)'], ['formula', 'Fórmula: custo do produto vinculado × markup (%)'], ['produto', 'Usar preço do produto vinculado']].map(([v, l]) => (
+                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo (R$)'], ['percentual', 'Ajuste percentual sobre o atual (%)'], ['formula', 'Fórmula: custo do produto vinculado × markup (%)'], ['shopee_liquido', 'Margem líquida sobre custo (considera comissão + taxas da Shopee)'], ['produto', 'Usar preço do produto vinculado']].map(([v, l]) => (
                     <label key={v} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                       <input type="radio" name="modoPreco" checked={opcoesMassaPreco.modoPreco === v}
                         onChange={() => setOpcoesMassaPreco(p => p ? { ...p, modoPreco: v as any } : p)} className="accent-orange-600" />
                       {l}
                     </label>
                   ))}
-                  {(opcoesMassaPreco.modoPreco === 'fixo' || opcoesMassaPreco.modoPreco === 'percentual' || opcoesMassaPreco.modoPreco === 'formula') && (
+                  {(opcoesMassaPreco.modoPreco === 'fixo' || opcoesMassaPreco.modoPreco === 'percentual' || opcoesMassaPreco.modoPreco === 'formula' || opcoesMassaPreco.modoPreco === 'shopee_liquido') && (
                     <input type="number" step="0.01" value={opcoesMassaPreco.valorPreco}
                       onChange={e => setOpcoesMassaPreco(p => p ? { ...p, valorPreco: e.target.value } : p)}
-                      placeholder={opcoesMassaPreco.modoPreco === 'fixo' ? 'Ex: 49.90' : opcoesMassaPreco.modoPreco === 'formula' ? 'Markup, ex: 40' : 'Ex: 10 ou -5'}
+                      placeholder={opcoesMassaPreco.modoPreco === 'fixo' ? 'Ex: 49.90' : opcoesMassaPreco.modoPreco === 'formula' ? 'Markup, ex: 40' : opcoesMassaPreco.modoPreco === 'shopee_liquido' ? 'Margem desejada, ex: 30' : 'Ex: 10 ou -5'}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }} />
                   )}
-                  {(opcoesMassaPreco.modoPreco === 'percentual' || opcoesMassaPreco.modoPreco === 'formula' || opcoesMassaPreco.modoPreco === 'produto') && (
+                  {opcoesMassaPreco.modoPreco === 'shopee_liquido' && (
+                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer ml-6">
+                      <input type="checkbox" checked={opcoesMassaPreco.considerarPix}
+                        onChange={e => setOpcoesMassaPreco(p => p ? { ...p, considerarPix: e.target.checked } : p)} className="w-4 h-4 accent-orange-600" />
+                      Considerar subsídio Pix (5% a 8% adicional)
+                    </label>
+                  )}
+                  {(opcoesMassaPreco.modoPreco === 'percentual' || opcoesMassaPreco.modoPreco === 'formula' || opcoesMassaPreco.modoPreco === 'shopee_liquido' || opcoesMassaPreco.modoPreco === 'produto') && (
                     <select value={opcoesMassaPreco.arredondamento} onChange={e => setOpcoesMassaPreco(p => p ? { ...p, arredondamento: e.target.value } : p)}
                       className="border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }}>
                       <option value="nenhum">Sem arredondamento</option>

@@ -14,12 +14,13 @@ const ARREDONDAMENTO_LABEL: Record<string, string> = {
 type Regra = {
   id: string
   nome: string
-  modo_preco: 'nao' | 'fixo' | 'percentual' | 'formula' | 'produto'
+  modo_preco: 'nao' | 'fixo' | 'percentual' | 'formula' | 'shopee_liquido' | 'produto'
   valor_preco: number | null
   arredondamento: 'nenhum' | 'terminar_90' | 'terminar_99' | 'cima_inteiro'
   modo_estoque: 'nao' | 'fixo' | 'produto' | 'deposito'
   valor_estoque: number | null
   deposito_id: string | null
+  considerar_subsidio_pix: boolean
   ativo: boolean
 }
 
@@ -33,6 +34,7 @@ const FORM_VAZIO = {
   modo_estoque: 'nao' as Regra['modo_estoque'],
   valor_estoque: '',
   deposito_id: '',
+  considerar_subsidio_pix: false,
   ativo: true,
 }
 
@@ -61,6 +63,7 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
     if (r.modo_preco === 'fixo') partes.push(`Preço fixo: ${fmt(Number(r.valor_preco ?? 0))}`)
     else if (r.modo_preco === 'percentual') partes.push(`Ajuste sobre o atual: ${Number(r.valor_preco ?? 0) > 0 ? '+' : ''}${r.valor_preco}%`)
     else if (r.modo_preco === 'formula') partes.push(`Fórmula: custo × markup ${r.valor_preco}%`)
+    else if (r.modo_preco === 'shopee_liquido') partes.push(`Margem líquida ${r.valor_preco}% sobre custo (Shopee${r.considerar_subsidio_pix ? ' + Pix' : ''})`)
     else if (r.modo_preco === 'produto') partes.push('Preço do produto vinculado')
     if (r.modo_preco !== 'nao' && r.modo_preco !== 'fixo' && r.arredondamento !== 'nenhum') {
       partes.push(ARREDONDAMENTO_LABEL[r.arredondamento])
@@ -88,6 +91,7 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
       modo_estoque: r.modo_estoque,
       valor_estoque: r.valor_estoque != null ? String(r.valor_estoque) : '',
       deposito_id: r.deposito_id ?? '',
+      considerar_subsidio_pix: r.considerar_subsidio_pix,
       ativo: r.ativo,
     })
     setErro('')
@@ -109,6 +113,7 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
       modo_estoque: form.modo_estoque,
       valor_estoque: form.valor_estoque !== '' ? parseFloat(form.valor_estoque) : null,
       deposito_id: form.deposito_id || null,
+      considerar_subsidio_pix: form.considerar_subsidio_pix,
       ativo: form.ativo,
       updated_at: new Date().toISOString(),
     }
@@ -215,6 +220,7 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
                     ['fixo', 'Valor fixo (R$)'],
                     ['percentual', 'Ajuste percentual sobre o preço atual (%)'],
                     ['formula', 'Fórmula: custo do produto vinculado × markup (%)'],
+                    ['shopee_liquido', 'Margem líquida sobre custo (considera comissão + taxas da Shopee)'],
                     ['produto', 'Usar preço do produto vinculado'],
                   ].map(([v, l]) => (
                     <label key={v} className="flex items-center gap-2 text-xs text-gray-700">
@@ -224,12 +230,19 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
                     </label>
                   ))}
                 </div>
-                {(form.modo_preco === 'fixo' || form.modo_preco === 'percentual' || form.modo_preco === 'formula') && (
+                {(form.modo_preco === 'fixo' || form.modo_preco === 'percentual' || form.modo_preco === 'formula' || form.modo_preco === 'shopee_liquido') && (
                   <input type="number" step="0.01" value={form.valor_preco} onChange={e => f('valor_preco', e.target.value)}
-                    placeholder={form.modo_preco === 'fixo' ? 'Ex: 49.90' : form.modo_preco === 'formula' ? 'Markup, ex: 40' : 'Ex: 10 ou -5'}
+                    placeholder={form.modo_preco === 'fixo' ? 'Ex: 49.90' : form.modo_preco === 'formula' ? 'Markup, ex: 40' : form.modo_preco === 'shopee_liquido' ? 'Margem desejada, ex: 30' : 'Ex: 10 ou -5'}
                     className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                 )}
-                {(form.modo_preco === 'percentual' || form.modo_preco === 'formula' || form.modo_preco === 'produto') && (
+                {form.modo_preco === 'shopee_liquido' && (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-gray-700">
+                    <input type="checkbox" checked={form.considerar_subsidio_pix}
+                      onChange={e => f('considerar_subsidio_pix', e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                    Considerar subsídio Pix (5% a 8% adicional)
+                  </label>
+                )}
+                {(form.modo_preco === 'percentual' || form.modo_preco === 'formula' || form.modo_preco === 'shopee_liquido' || form.modo_preco === 'produto') && (
                   <div className="mt-2">
                     <label className="block text-xs font-medium text-gray-600 mb-1">Arredondamento</label>
                     <select value={form.arredondamento} onChange={e => f('arredondamento', e.target.value)}
