@@ -269,7 +269,9 @@ export async function processRawOrder(
     const { id: itemId } = await upsertItemPedido(sb, pedido.id, {
       itemIdExterno: v.itemIdExterno,
       modelIdExterno: v.modelIdExterno,
-      nomeProduto: v.raw.item_name ?? v.raw.model_name ?? `Item ${v.itemIdExterno}`,
+      nomeProduto: v.raw.model_name
+        ? `${v.raw.item_name ?? 'Item'} — ${v.raw.model_name}`
+        : (v.raw.item_name ?? `Item ${v.itemIdExterno}`),
       sku: v.raw.model_sku ?? v.raw.item_sku ?? null,
       quantidade,
       precoUnitario,
