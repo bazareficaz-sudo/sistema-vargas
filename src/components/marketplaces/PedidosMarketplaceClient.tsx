@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
+import { calcularEtapaExibicao, ETAPA_EXIBICAO_CORES, ETAPA_EXIBICAO_LABEL, type EtapaExibicao } from './utils'
 
 const STATUS_CORES: Record<string, string> = {
   novo:       'bg-blue-100 text-blue-700',
@@ -19,21 +20,16 @@ const STATUS_LABEL: Record<string, string> = {
   enviado: 'Enviado', entregue: 'Entregue', cancelado: 'Cancelado', devolvido: 'Devolvido',
 }
 
-const ETAPA_CORES: Record<string, string> = {
-  novo:                 'bg-blue-100 text-blue-700',
-  pendencia_mapeamento: 'bg-amber-100 text-amber-700',
-  separacao:            'bg-indigo-100 text-indigo-700',
-  pronto_expedicao:     'bg-teal-100 text-teal-700',
-  enviado:              'bg-cyan-100 text-cyan-700',
-  concluido:            'bg-green-100 text-green-800',
-  cancelado:            'bg-gray-100 text-gray-500',
-  com_pendencia:        'bg-red-100 text-red-600',
-}
-const ETAPA_LABEL: Record<string, string> = {
-  novo: 'Novo', pendencia_mapeamento: 'Pendência de mapeamento', separacao: 'Separação',
-  pronto_expedicao: 'Pronto p/ expedição', enviado: 'Enviado', concluido: 'Concluído',
-  cancelado: 'Cancelado', com_pendencia: 'Com pendência',
-}
+const ABAS_ETAPA: { key: EtapaExibicao | ''; label: string }[] = [
+  { key: '', label: 'Todos' },
+  { key: 'reservar', label: ETAPA_EXIBICAO_LABEL.reservar },
+  { key: 'mapear', label: ETAPA_EXIBICAO_LABEL.mapear },
+  { key: 'emitir', label: ETAPA_EXIBICAO_LABEL.emitir },
+  { key: 'enviar', label: ETAPA_EXIBICAO_LABEL.enviar },
+  { key: 'imprimir', label: ETAPA_EXIBICAO_LABEL.imprimir },
+  { key: 'enviado', label: ETAPA_EXIBICAO_LABEL.enviado },
+  { key: 'com_pendencia', label: ETAPA_EXIBICAO_LABEL.com_pendencia },
+]
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 function fmtData(v: string | null) {
@@ -60,7 +56,7 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
   const [pedidos, setPedidos] = useState(pedidosIniciais)
   const [q, setQ] = useState(qInicial)
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
-  const [etapaFiltro, setEtapaFiltro] = useState('')
+  const [etapaFiltro, setEtapaFiltro] = useState<EtapaExibicao | ''>('')
   const [somenteAtrasados, setSomenteAtrasados] = useState(false)
   const [detalhe, setDetalhe] = useState<any | null>(null)
   const [modal, setModal] = useState(false)
@@ -83,6 +79,10 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
   const [carregandoEtiqueta, setCarregandoEtiqueta] = useState(false)
   const [pollingEtiqueta, setPollingEtiqueta] = useState(false)
   const [erroEtiqueta, setErroEtiqueta] = useState('')
+
+  // Informar NF-e (registro manual — não emite de verdade)
+  const [nfeForm, setNfeForm] = useState({ numero: '', chave: '' })
+  const [salvandoNfe, setSalvandoNfe] = useState(false)
 
   const formPedidoVazio = {
     id_externo: '', numero_pedido: '', cliente_nome: '', cliente_email: '', cliente_doc: '',
@@ -163,6 +163,20 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
     if (detalhe?.id === pedido.id) setDetalhe((p: any) => ({ ...p, ...rastreioForm, status: 'enviado' }))
     setRastreioForm({ transportadora: '', codigo_rastreio: '' })
     setSalvando(false)
+  }
+
+  // Só registra número/chave informados manualmente — não emite NF-e de
+  // verdade (nenhuma infra fiscal de saída existe no sistema hoje).
+  async function salvarNfe(pedido: any) {
+    if (!nfeForm.numero.trim()) { alert('Informe ao menos o número da NF-e.'); return }
+    setSalvandoNfe(true)
+    const sb = createClient()
+    const patch = { nfe_numero: nfeForm.numero.trim(), nfe_chave: nfeForm.chave.trim() || null, nfe_informada_em: new Date().toISOString() }
+    await sb.from('marketplace_pedidos').update(patch).eq('id', pedido.id)
+    setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, ...patch } : p))
+    if (detalhe?.id === pedido.id) setDetalhe((p: any) => ({ ...p, ...patch }))
+    setNfeForm({ numero: '', chave: '' })
+    setSalvandoNfe(false)
   }
 
   async function sincronizarPedidos() {
@@ -372,13 +386,13 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
   const filtrados = pedidos.filter(p => {
     const matchQ = !q || (p.cliente_nome ?? '').toLowerCase().includes(q.toLowerCase()) || (p.numero_pedido ?? '').includes(q) || p.id_externo.includes(q)
     const matchS = !statusFiltro || p.status === statusFiltro
-    const matchE = !etapaFiltro || p.etapa_interna === etapaFiltro
+    const matchE = !etapaFiltro || calcularEtapaExibicao(p) === etapaFiltro
     const matchAtraso = !somenteAtrasados || !!prazoInfo(p)?.texto.startsWith('Atrasado')
     return matchQ && matchS && matchE && matchAtraso
   })
 
   const contagemEtapas: Record<string, number> = {}
-  for (const p of pedidos) contagemEtapas[p.etapa_interna ?? 'novo'] = (contagemEtapas[p.etapa_interna ?? 'novo'] ?? 0) + 1
+  for (const p of pedidos) { const e = calcularEtapaExibicao(p); contagemEtapas[e] = (contagemEtapas[e] ?? 0) + 1 }
   const atrasados = pedidos.filter(p => prazoInfo(p)?.texto.startsWith('Atrasado')).length
 
   const totalNovos = pedidos.filter(p => p.status === 'novo').length
@@ -433,22 +447,22 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
         })}
       </div>
 
-      {/* Indicadores por etapa operacional interna */}
-      <div className="flex items-center gap-1.5 mb-5 flex-wrap">
-        <span className="text-xs text-gray-400 mr-1">Etapa:</span>
-        {(['pendencia_mapeamento','pronto_expedicao','com_pendencia'] as const).map(e => (
-          <button key={e} onClick={() => setEtapaFiltro(etapaFiltro === e ? '' : e)}
-            className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${etapaFiltro === e ? `${ETAPA_CORES[e]} border-transparent font-medium` : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
-            {ETAPA_LABEL[e]} ({contagemEtapas[e] ?? 0})
-          </button>
-        ))}
+      {/* Abas por etapa operacional */}
+      <div className="flex items-center gap-1 mb-5 border-b border-gray-200 flex-wrap">
+        {ABAS_ETAPA.map(aba => {
+          const ativo = etapaFiltro === aba.key
+          const n = aba.key === '' ? pedidos.length : (contagemEtapas[aba.key] ?? 0)
+          return (
+            <button key={aba.key || 'todos'} onClick={() => setEtapaFiltro(aba.key)}
+              className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${ativo ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              {aba.label} <span className={ativo ? 'text-blue-400' : 'text-gray-400'}>({n})</span>
+            </button>
+          )
+        })}
         <button onClick={() => setSomenteAtrasados(v => !v)}
-          className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteAtrasados ? 'bg-red-600 text-white border-red-600 font-medium' : atrasados > 0 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-400 border-gray-200'}`}>
+          className={`ml-auto mb-1 px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteAtrasados ? 'bg-red-600 text-white border-red-600 font-medium' : atrasados > 0 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-400 border-gray-200'}`}>
           Atrasados ({atrasados})
         </button>
-        {etapaFiltro && (
-          <button onClick={() => setEtapaFiltro('')} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ limpar etapa</button>
-        )}
       </div>
 
       {/* Filtros */}
@@ -479,20 +493,34 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
             <tbody className="divide-y divide-gray-100">
               {filtrados.map(p => {
                 const prazo = prazoInfo(p)
+                const primeiroItem = p.marketplace_pedido_itens?.[0]
+                const imagem = primeiroItem?.marketplace_anuncios?.imagens?.[0]
+                const qtdItens = p.marketplace_pedido_itens?.length ?? 0
+                const etapa = calcularEtapaExibicao(p)
                 return (
-                <tr key={p.id} onClick={() => { setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}) }}
+                <tr key={p.id} onClick={() => { setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }) }}
                   className={`hover:bg-blue-50 transition-colors cursor-pointer ${detalhe?.id === p.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900 text-xs">{p.numero_pedido || p.id_externo}</p>
-                    <p className="text-xs text-gray-500">{p.cliente_nome || '—'}</p>
-                    <p className="text-[11px] text-gray-400 mt-0.5">{fmtData(p.data_pedido)}</p>
+                    <div className="flex items-center gap-2">
+                      <div className="w-9 h-9 flex-shrink-0 rounded-lg overflow-hidden bg-gray-50 border border-gray-200">
+                        {imagem ? <img src={imagem} alt="" className="w-full h-full object-cover" /> : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">📦</div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 text-xs truncate">{p.numero_pedido || p.id_externo}</p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {primeiroItem?.produtos?.nome ?? primeiroItem?.nome_produto ?? p.cliente_nome ?? '—'}
+                          {qtdItens > 1 ? ` +${qtdItens - 1}` : ''}
+                        </p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">{fmtData(p.data_pedido)}</p>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-3">
-                    {p.etapa_interna && p.etapa_interna !== 'novo' && (
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${ETAPA_CORES[p.etapa_interna] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {ETAPA_LABEL[p.etapa_interna] ?? p.etapa_interna}
-                      </span>
-                    )}
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${ETAPA_EXIBICAO_CORES[etapa]}`}>
+                      {ETAPA_EXIBICAO_LABEL[etapa]}
+                    </span>
                   </td>
                   <td className={`px-4 py-3 text-xs ${prazo?.cor ?? 'text-gray-300'}`}>{prazo?.texto ?? '—'}</td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">{fmt(Number(p.valor_total))}</td>
@@ -553,10 +581,27 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Itens</p>
                   <div className="space-y-2">
                     {detalhe.marketplace_pedido_itens.map((item: any) => (
-                      <div key={item.id} className="text-xs border border-gray-100 rounded-lg px-2.5 py-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-700">{item.quantidade}× {item.nome_produto}</span>
-                          <span className="text-gray-900 font-medium">{fmt(Number(item.subtotal))}</span>
+                      <div key={item.id} className="flex gap-2 text-xs border border-gray-100 rounded-lg px-2.5 py-2">
+                        <div className="w-11 h-11 flex-shrink-0 rounded-lg overflow-hidden bg-gray-50 border border-gray-200">
+                          {item.marketplace_anuncios?.imagens?.[0] ? (
+                            <img src={item.marketplace_anuncios.imagens[0]} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-gray-300">📦</div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            {item.produtos?.nome ? (
+                              <>
+                                <p className="text-gray-900 font-semibold truncate">{item.quantidade}× {item.produtos.nome}</p>
+                                <p className="text-gray-400 truncate">{item.nome_produto}</p>
+                              </>
+                            ) : (
+                              <p className="text-gray-700 truncate">{item.quantidade}× {item.nome_produto}</p>
+                            )}
+                          </div>
+                          <span className="text-gray-900 font-medium flex-shrink-0">{fmt(Number(item.subtotal))}</span>
                         </div>
                         <div className="flex items-center justify-between mt-1">
                           {item.status_mapeamento === 'mapeado' ? (
@@ -589,6 +634,7 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
                             <button onClick={() => setBuscaItemId(null)} className="text-[11px] text-gray-400 hover:text-gray-600">cancelar</button>
                           </div>
                         )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -614,6 +660,29 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
                   <span>Total</span><span>{fmt(Number(detalhe.valor_total))}</span>
                 </div>
               </div>
+
+              {/* Informar NF-e — só registro manual, não emite de verdade */}
+              {(calcularEtapaExibicao(detalhe) === 'emitir' || calcularEtapaExibicao(detalhe) === 'reservar') && (
+                <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-600">Informar NF-e</p>
+                  <input value={nfeForm.numero} onChange={e => setNfeForm(p => ({ ...p, numero: e.target.value }))}
+                    placeholder="Número da nota"
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500" />
+                  <input value={nfeForm.chave} onChange={e => setNfeForm(p => ({ ...p, chave: e.target.value }))}
+                    placeholder="Chave de acesso (opcional)"
+                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-blue-500" />
+                  <button onClick={() => salvarNfe(detalhe)} disabled={salvandoNfe}
+                    className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                    {salvandoNfe ? 'Salvando...' : 'Marcar como emitida'}
+                  </button>
+                </div>
+              )}
+              {detalhe.nfe_numero && (
+                <div className="text-xs text-gray-600">
+                  <p className="font-semibold text-gray-500 uppercase tracking-wide mb-1">NF-e</p>
+                  <p>Nº <span className="font-mono">{detalhe.nfe_numero}</span>{detalhe.nfe_chave && <> · <span className="font-mono">{detalhe.nfe_chave}</span></>}</p>
+                </div>
+              )}
 
               {/* Etiqueta de envio (Shopee) */}
               {canal.plataforma === 'shopee' && (

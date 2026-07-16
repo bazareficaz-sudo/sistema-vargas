@@ -26,7 +26,7 @@ export default async function PedidosMarketplacePage({ params, searchParams }: {
 
   let query = supabase
     .from('marketplace_pedidos')
-    .select('*, marketplace_pedido_itens(*), marketplace_pedido_pacotes(*)')
+    .select('*, marketplace_pedido_itens(*, produtos(nome, sku), marketplace_anuncios(imagens)), marketplace_pedido_pacotes(*)')
     .eq('canal_id', canalId)
     .order('data_pedido', { ascending: false })
 
