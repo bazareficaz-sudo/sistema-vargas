@@ -42,6 +42,7 @@ export default async function PedidosMarketplacePage({ params, searchParams }: {
       empresaId={empresaId}
       statusInicial={status}
       qInicial={q}
+      operador={user?.email ?? ''}
     />
   )
 }

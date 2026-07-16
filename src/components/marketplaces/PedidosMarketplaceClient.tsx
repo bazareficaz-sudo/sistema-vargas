@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import MapearAnuncioModal from './MapearAnuncioModal'
 
 const STATUS_CORES: Record<string, string> = {
   novo:       'bg-blue-100 text-blue-700',
@@ -18,19 +19,59 @@ const STATUS_LABEL: Record<string, string> = {
   enviado: 'Enviado', entregue: 'Entregue', cancelado: 'Cancelado', devolvido: 'Devolvido',
 }
 
+const ETAPA_CORES: Record<string, string> = {
+  novo:                 'bg-blue-100 text-blue-700',
+  pendencia_mapeamento: 'bg-amber-100 text-amber-700',
+  separacao:            'bg-indigo-100 text-indigo-700',
+  pronto_expedicao:     'bg-teal-100 text-teal-700',
+  enviado:              'bg-cyan-100 text-cyan-700',
+  concluido:            'bg-green-100 text-green-800',
+  cancelado:            'bg-gray-100 text-gray-500',
+  com_pendencia:        'bg-red-100 text-red-600',
+}
+const ETAPA_LABEL: Record<string, string> = {
+  novo: 'Novo', pendencia_mapeamento: 'Pendência de mapeamento', separacao: 'Separação',
+  pronto_expedicao: 'Pronto p/ expedição', enviado: 'Enviado', concluido: 'Concluído',
+  cancelado: 'Cancelado', com_pendencia: 'Com pendência',
+}
+
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 
-export default function PedidosMarketplaceClient({ canal, pedidos: pedidosIniciais, empresaId, statusInicial, qInicial }: {
-  canal: any; pedidos: any[]; empresaId: string; statusInicial: string; qInicial: string
+// Prazo de postagem: quanto falta (ou quanto já passou) até `prazo_postagem`.
+// Etapas finais (enviado/concluído/cancelado) não têm mais prazo relevante.
+function prazoInfo(pedido: any): { texto: string; cor: string } | null {
+  if (!pedido.prazo_postagem) return null
+  if (['enviado', 'concluido', 'cancelado'].includes(pedido.etapa_interna)) return null
+  const diffMs = new Date(pedido.prazo_postagem).getTime() - Date.now()
+  const diffH = diffMs / (1000 * 60 * 60)
+  if (diffH < 0) return { texto: `Atrasado ${Math.abs(diffH) < 24 ? Math.round(Math.abs(diffH)) + 'h' : Math.round(Math.abs(diffH) / 24) + 'd'}`, cor: 'text-red-600 font-medium' }
+  if (diffH < 24) return { texto: `${Math.round(diffH)}h restantes`, cor: 'text-orange-600 font-medium' }
+  return { texto: `${Math.round(diffH / 24)}d restantes`, cor: 'text-gray-500' }
+}
+
+export default function PedidosMarketplaceClient({ canal, pedidos: pedidosIniciais, empresaId, statusInicial, qInicial, operador }: {
+  canal: any; pedidos: any[]; empresaId: string; statusInicial: string; qInicial: string; operador: string
 }) {
   const router = useRouter()
   const [pedidos, setPedidos] = useState(pedidosIniciais)
   const [q, setQ] = useState(qInicial)
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
+  const [etapaFiltro, setEtapaFiltro] = useState('')
+  const [somenteAtrasados, setSomenteAtrasados] = useState(false)
   const [detalhe, setDetalhe] = useState<any | null>(null)
   const [modal, setModal] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [rastreioForm, setRastreioForm] = useState({ transportadora: '', codigo_rastreio: '' })
+  const [sincronizando, setSincronizando] = useState(false)
+  const [resumoSync, setResumoSync] = useState('')
+
+  // Mapear item sem sair do pedido
+  const [mapeandoItem, setMapeandoItem] = useState<any | null>(null)
+  const [anuncioParaMapear, setAnuncioParaMapear] = useState<any | null>(null)
+  const [carregandoAnuncio, setCarregandoAnuncio] = useState(false)
+  const [buscaItemId, setBuscaItemId] = useState<string | null>(null)
+  const [termoBuscaItem, setTermoBuscaItem] = useState('')
+  const [resultadosBuscaItem, setResultadosBuscaItem] = useState<any[]>([])
 
   const formPedidoVazio = {
     id_externo: '', numero_pedido: '', cliente_nome: '', cliente_email: '', cliente_doc: '',
@@ -113,11 +154,98 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
     setSalvando(false)
   }
 
+  async function sincronizarPedidos() {
+    setSincronizando(true); setResumoSync('')
+    try {
+      const resp = await fetch('/api/marketplace/shopee/sync-pedidos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: canal.id }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setResumoSync(`Erro: ${data.erro ?? 'falha ao sincronizar'}`); return }
+      setResumoSync(`Encontrados: ${data.totalFound} · Sincronizados: ${data.upserted} · Falhas: ${data.failedCount}${data.truncated ? ' · catálogo maior que o limite — sincronize novamente' : ''}`)
+    } catch (e: any) {
+      setResumoSync(`Erro: ${e.message ?? 'falha ao sincronizar'}`)
+    } finally {
+      setSincronizando(false)
+      router.refresh()
+    }
+  }
+
+  function atualizarItemLocal(pedidoId: string, itemId: string, patch: any) {
+    setPedidos(prev => prev.map(p => p.id !== pedidoId ? p : {
+      ...p, marketplace_pedido_itens: (p.marketplace_pedido_itens ?? []).map((i: any) => i.id === itemId ? { ...i, ...patch } : i),
+    }))
+    if (detalhe?.id === pedidoId) {
+      setDetalhe((p: any) => ({ ...p, marketplace_pedido_itens: (p.marketplace_pedido_itens ?? []).map((i: any) => i.id === itemId ? { ...i, ...patch } : i) }))
+    }
+  }
+
+  // Item já tem anúncio resolvido na importação → reaproveita o modal de
+  // mapeamento existente (mesmo usado na tela de Anúncios). Item órfão (sem
+  // anúncio sincronizado) → cai na busca inline abaixo.
+  async function abrirMapeamentoItem(item: any) {
+    if (!item.anuncio_id) { setBuscaItemId(item.id); setTermoBuscaItem(''); setResultadosBuscaItem([]); return }
+    setCarregandoAnuncio(true)
+    const sb = createClient()
+    const { data } = await sb.from('marketplace_anuncios').select('*').eq('id', item.anuncio_id).single()
+    setCarregandoAnuncio(false)
+    if (data) { setAnuncioParaMapear(data); setMapeandoItem(item) }
+  }
+
+  async function dispararBaixaSeNecessario(item: any) {
+    if (detalhe?.status === 'novo' || detalhe?.status === 'cancelado') return // ainda não pago, ou cancelado
+    try {
+      await fetch('/api/marketplace/shopee/baixar-estoque-item', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pedidoItemId: item.id }),
+      })
+    } catch { /* falha aqui não deve travar o mapeamento já salvo — fica pendente pra próxima sincronização */ }
+  }
+
+  async function onAnuncioMapeado(anuncioAtualizado: any) {
+    if (!mapeandoItem) return
+    const item = mapeandoItem
+    const sb = createClient()
+    await sb.from('marketplace_pedido_itens').update({ produto_id: anuncioAtualizado.produto_id, status_mapeamento: 'mapeado' }).eq('id', item.id)
+    atualizarItemLocal(item.pedido_id, item.id, { produto_id: anuncioAtualizado.produto_id, status_mapeamento: 'mapeado' })
+    await dispararBaixaSeNecessario(item)
+    setMapeandoItem(null); setAnuncioParaMapear(null)
+    router.refresh()
+  }
+
+  async function vincularItemDireto(item: any, produto: any) {
+    const sb = createClient()
+    await sb.from('marketplace_pedido_itens').update({ produto_id: produto.id, status_mapeamento: 'mapeado' }).eq('id', item.id)
+    atualizarItemLocal(item.pedido_id, item.id, { produto_id: produto.id, status_mapeamento: 'mapeado' })
+    await dispararBaixaSeNecessario(item)
+    setBuscaItemId(null); setTermoBuscaItem(''); setResultadosBuscaItem([])
+    router.refresh()
+  }
+
+  async function buscarProdutoParaItem(termo: string) {
+    setTermoBuscaItem(termo)
+    if (termo.trim().length < 2) { setResultadosBuscaItem([]); return }
+    const sb = createClient()
+    const { data } = await sb.from('produtos')
+      .select('id, nome, sku, preco_venda, estoque')
+      .eq('empresa_id', empresaId).eq('ativo', true)
+      .or(`nome.ilike.%${termo}%,sku.ilike.%${termo}%,ean.ilike.%${termo}%`)
+      .limit(8)
+    setResultadosBuscaItem(data ?? [])
+  }
+
   const filtrados = pedidos.filter(p => {
     const matchQ = !q || (p.cliente_nome ?? '').toLowerCase().includes(q.toLowerCase()) || (p.numero_pedido ?? '').includes(q) || p.id_externo.includes(q)
     const matchS = !statusFiltro || p.status === statusFiltro
-    return matchQ && matchS
+    const matchE = !etapaFiltro || p.etapa_interna === etapaFiltro
+    const matchAtraso = !somenteAtrasados || !!prazoInfo(p)?.texto.startsWith('Atrasado')
+    return matchQ && matchS && matchE && matchAtraso
   })
+
+  const contagemEtapas: Record<string, number> = {}
+  for (const p of pedidos) contagemEtapas[p.etapa_interna ?? 'novo'] = (contagemEtapas[p.etapa_interna ?? 'novo'] ?? 0) + 1
+  const atrasados = pedidos.filter(p => prazoInfo(p)?.texto.startsWith('Atrasado')).length
 
   const totalNovos = pedidos.filter(p => p.status === 'novo').length
   const faturamento = pedidos.filter(p => !['cancelado', 'devolvido'].includes(p.status)).reduce((s, p) => s + Number(p.valor_total), 0)
@@ -136,14 +264,29 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
           <h1 className="text-gray-900 text-xl font-semibold">Pedidos — {canal.nome}</h1>
           <p className="text-gray-500 text-sm mt-0.5">{pedidos.length} pedidos · {fmt(faturamento)} faturados</p>
         </div>
-        <button onClick={() => setModal(true)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-          + Lançar pedido manual
-        </button>
+        <div className="flex gap-2">
+          {canal.plataforma === 'shopee' && (
+            <button onClick={sincronizarPedidos} disabled={sincronizando}
+              className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
+              {sincronizando ? 'Sincronizando...' : '↺ Sincronizar pedidos'}
+            </button>
+          )}
+          <button onClick={() => setModal(true)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+            + Lançar pedido manual
+          </button>
+        </div>
       </div>
 
-      {/* Cards status */}
-      <div className="grid grid-cols-5 gap-3 mb-5">
+      {resumoSync && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>{resumoSync}</span>
+          <button onClick={() => setResumoSync('')} className="text-blue-400 hover:text-blue-600">✕</button>
+        </div>
+      )}
+
+      {/* Cards status (comercial) */}
+      <div className="grid grid-cols-5 gap-3 mb-3">
         {[['novo','Novos','blue'],['confirmado','Confirmados','green'],['enviado','Enviados','cyan'],['entregue','Entregues','green'],['cancelado','Cancelados','red']].map(([s, l, c]) => {
           const n = pedidos.filter(p => p.status === s).length
           return (
@@ -154,6 +297,24 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
             </button>
           )
         })}
+      </div>
+
+      {/* Indicadores por etapa operacional interna */}
+      <div className="flex items-center gap-1.5 mb-5 flex-wrap">
+        <span className="text-xs text-gray-400 mr-1">Etapa:</span>
+        {(['pendencia_mapeamento','pronto_expedicao','com_pendencia'] as const).map(e => (
+          <button key={e} onClick={() => setEtapaFiltro(etapaFiltro === e ? '' : e)}
+            className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${etapaFiltro === e ? `${ETAPA_CORES[e]} border-transparent font-medium` : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+            {ETAPA_LABEL[e]} ({contagemEtapas[e] ?? 0})
+          </button>
+        ))}
+        <button onClick={() => setSomenteAtrasados(v => !v)}
+          className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteAtrasados ? 'bg-red-600 text-white border-red-600 font-medium' : atrasados > 0 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-400 border-gray-200'}`}>
+          Atrasados ({atrasados})
+        </button>
+        {etapaFiltro && (
+          <button onClick={() => setEtapaFiltro('')} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ limpar etapa</button>
+        )}
       </div>
 
       {/* Filtros */}
@@ -175,22 +336,30 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Pedido / Cliente</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Data</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Etapa</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Prazo</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Total</th>
                 <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filtrados.map(p => (
+              {filtrados.map(p => {
+                const prazo = prazoInfo(p)
+                return (
                 <tr key={p.id} onClick={() => setDetalhe(p)}
                   className={`hover:bg-blue-50 transition-colors cursor-pointer ${detalhe?.id === p.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900 text-xs">{p.numero_pedido || p.id_externo}</p>
                     <p className="text-xs text-gray-500">{p.cliente_nome || '—'}</p>
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500">
-                    {p.data_pedido ? new Date(p.data_pedido).toLocaleDateString('pt-BR') : '—'}
+                  <td className="px-4 py-3">
+                    {p.etapa_interna && p.etapa_interna !== 'novo' && (
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${ETAPA_CORES[p.etapa_interna] ?? 'bg-gray-100 text-gray-500'}`}>
+                        {ETAPA_LABEL[p.etapa_interna] ?? p.etapa_interna}
+                      </span>
+                    )}
                   </td>
+                  <td className={`px-4 py-3 text-xs ${prazo?.cor ?? 'text-gray-300'}`}>{prazo?.texto ?? '—'}</td>
                   <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">{fmt(Number(p.valor_total))}</td>
                   <td className="px-4 py-3 text-center">
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_CORES[p.status] ?? 'bg-gray-100 text-gray-500'}`}>
@@ -198,9 +367,9 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
                     </span>
                   </td>
                 </tr>
-              ))}
+              )})}
               {filtrados.length === 0 && (
-                <tr><td colSpan={4} className="py-12 text-center text-gray-400 text-sm">Nenhum pedido encontrado.</td></tr>
+                <tr><td colSpan={5} className="py-12 text-center text-gray-400 text-sm">Nenhum pedido encontrado.</td></tr>
               )}
             </tbody>
           </table>
@@ -247,11 +416,44 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
               {detalhe.marketplace_pedido_itens?.length > 0 && (
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Itens</p>
-                  <div className="space-y-1">
-                    {detalhe.marketplace_pedido_itens.map((item: any, i: number) => (
-                      <div key={i} className="flex items-center justify-between text-xs">
-                        <span className="text-gray-700">{item.quantidade}× {item.nome_produto}</span>
-                        <span className="text-gray-900 font-medium">{fmt(Number(item.subtotal))}</span>
+                  <div className="space-y-2">
+                    {detalhe.marketplace_pedido_itens.map((item: any) => (
+                      <div key={item.id} className="text-xs border border-gray-100 rounded-lg px-2.5 py-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-700">{item.quantidade}× {item.nome_produto}</span>
+                          <span className="text-gray-900 font-medium">{fmt(Number(item.subtotal))}</span>
+                        </div>
+                        <div className="flex items-center justify-between mt-1">
+                          {item.status_mapeamento === 'mapeado' ? (
+                            <span className="text-emerald-600">✓ mapeado{item.baixou_estoque ? ' · estoque baixado' : ''}</span>
+                          ) : (
+                            <span className="text-amber-600">⚠ sem produto vinculado</span>
+                          )}
+                          {item.status_mapeamento !== 'mapeado' && (
+                            <button onClick={() => abrirMapeamentoItem(item)} disabled={carregandoAnuncio}
+                              className="text-blue-600 hover:text-blue-800 font-medium">Mapear</button>
+                          )}
+                        </div>
+                        {buscaItemId === item.id && (
+                          <div className="mt-2 border border-blue-200 bg-blue-50/40 rounded-lg p-2 space-y-1.5">
+                            <p className="text-[11px] text-gray-500">Anúncio não sincronizado no catálogo — vincule direto a um produto:</p>
+                            <input value={termoBuscaItem} onChange={e => buscarProdutoParaItem(e.target.value)} autoFocus
+                              placeholder="Nome, SKU ou EAN..."
+                              className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white" />
+                            {resultadosBuscaItem.length > 0 && (
+                              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                                {resultadosBuscaItem.map(prod => (
+                                  <button key={prod.id} onClick={() => vincularItemDireto(item, prod)}
+                                    className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 border-b border-gray-100 last:border-0">
+                                    <p className="text-gray-900 font-medium">{prod.nome}</p>
+                                    <p className="text-[11px] text-gray-400">{prod.sku} · {fmt(prod.preco_venda)} · Estoque: {prod.estoque}</p>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            <button onClick={() => setBuscaItemId(null)} className="text-[11px] text-gray-400 hover:text-gray-600">cancelar</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -386,6 +588,17 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
             </div>
           </div>
         </div>
+      )}
+
+      {mapeandoItem && anuncioParaMapear && (
+        <MapearAnuncioModal
+          anuncio={anuncioParaMapear}
+          canal={canal}
+          empresaId={empresaId}
+          operador={operador}
+          onClose={() => { setMapeandoItem(null); setAnuncioParaMapear(null) }}
+          onAtualizado={onAnuncioMapeado}
+        />
       )}
     </div>
   )
