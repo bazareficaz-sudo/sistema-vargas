@@ -41,8 +41,8 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'divergente', label: 'Divergente' },
 ]
 
-export default function AnunciosClient({ canal, anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [] }: {
-  canal: any; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [] }: {
+  canal: any; canais?: { id: string; nome: string }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
   regras?: any[]; depositos?: { id: string; nome: string }[]
 }) {
   const router = useRouter()
@@ -436,7 +436,13 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
           <h1 className="text-gray-900 text-xl font-semibold">Anúncios — {canal.nome}</h1>
           <p className="text-gray-500 text-sm mt-0.5">{anuncios.length} anúncio(s) cadastrados</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {canais.length > 1 && (
+            <select value={canal.id} onChange={e => router.push(`/dashboard/marketplaces/${e.target.value}/anuncios`)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+              {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          )}
           {canal.plataforma === 'shopee' && (
             <button onClick={sincronizar} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
@@ -523,7 +529,6 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                   onChange={e => setSelecionados(e.target.checked ? new Set(filtrados.map(a => a.id)) : new Set())}
                   className="w-4 h-4 accent-purple-600" />
               </th>
-              <th className="px-4 py-3 w-16"></th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Título / Produto</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">SKU canal</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Estoque</th>
@@ -541,30 +546,32 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
                     className="w-4 h-4 accent-purple-600" />
                 </td>
                 <td className="px-4 py-3">
-                  {a.imagens?.[0] ? (
-                    <img src={a.imagens[0]} alt="" className="w-14 h-14 rounded-lg object-contain bg-gray-50 border border-gray-200" />
-                  ) : (
-                    <div className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">📷</div>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <p className="font-medium text-gray-900 truncate max-w-xs">{a.titulo}</p>
-                  {a.produtos && <p className="text-xs text-gray-400">{a.produtos.sku} · Preço base: {fmt(a.produtos.preco_venda)}</p>}
-                  {(a.marca_externa || a.categoria_externa) && (
-                    <p className="text-xs text-gray-400">
-                      {a.marca_externa}{a.marca_externa && a.categoria_externa && ' · '}{a.categoria_externa && `Categoria ${a.categoria_externa}`}
-                    </p>
-                  )}
-                  <div className="flex gap-1 flex-wrap mt-0.5">
-                    {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
-                    {!a.produtos && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
-                    {temDivergencia(a) && <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠ Diverge do produto</span>}
+                  <div className="flex gap-3">
+                    {a.imagens?.[0] ? (
+                      <img src={a.imagens[0]} alt="" className="w-20 h-20 flex-shrink-0 rounded-lg object-cover bg-white border border-gray-200" />
+                    ) : (
+                      <div className="w-20 h-20 flex-shrink-0 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300 text-2xl">📷</div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900">{a.titulo}</p>
+                      {a.produtos && <p className="text-xs text-gray-400">{a.produtos.sku} · Preço base: {fmt(a.produtos.preco_venda)}</p>}
+                      {(a.marca_externa || a.categoria_externa) && (
+                        <p className="text-xs text-gray-400">
+                          {a.marca_externa}{a.marca_externa && a.categoria_externa && ' · '}{a.categoria_externa && `Categoria ${a.categoria_externa}`}
+                        </p>
+                      )}
+                      <div className="flex gap-1 flex-wrap mt-0.5">
+                        {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
+                        {!a.produtos && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
+                        {temDivergencia(a) && <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠ Diverge do produto</span>}
+                      </div>
+                      {a.id_externo && <p className="text-xs text-gray-400 font-mono">ID: {a.id_externo}</p>}
+                      {a.url_anuncio && (
+                        <a href={a.url_anuncio} target="_blank" rel="noreferrer"
+                          className="text-xs text-blue-500 hover:underline">Ver no marketplace ↗</a>
+                      )}
+                    </div>
                   </div>
-                  {a.id_externo && <p className="text-xs text-gray-400 font-mono">ID: {a.id_externo}</p>}
-                  {a.url_anuncio && (
-                    <a href={a.url_anuncio} target="_blank" rel="noreferrer"
-                      className="text-xs text-blue-500 hover:underline">Ver no marketplace ↗</a>
-                  )}
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-500 font-mono">{a.sku_canal || '—'}</td>
                 <td className="px-4 py-3 text-right">
@@ -936,7 +943,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
       {previewMassa && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setPreviewMassa(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] overflow-y-auto flex flex-col">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] overflow-y-auto flex flex-col">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
               <h2 className="text-lg font-semibold text-gray-900">Mapear em massa por SKU</h2>
               <button onClick={() => setPreviewMassa(null)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
@@ -950,10 +957,9 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
               {previewMassa.encontrados.length > 0 && (
                 <div className="border border-gray-200 rounded-xl overflow-hidden">
                   {previewMassa.encontrados.map(({ anuncio, produto }: any) => (
-                    <div key={anuncio.id} className="px-4 py-2.5 border-b border-gray-100 last:border-0 flex items-center justify-between text-sm">
-                      <span className="text-gray-700 truncate max-w-[45%]">{anuncio.titulo}</span>
-                      <span className="text-gray-400">→</span>
-                      <span className="text-emerald-700 font-medium truncate max-w-[45%]">{produto.nome}</span>
+                    <div key={anuncio.id} className="px-4 py-2.5 border-b border-gray-100 last:border-0 text-sm">
+                      <p className="text-gray-700">{anuncio.titulo}</p>
+                      <p className="text-emerald-700 font-medium mt-0.5">→ {produto.nome}</p>
                     </div>
                   ))}
                 </div>

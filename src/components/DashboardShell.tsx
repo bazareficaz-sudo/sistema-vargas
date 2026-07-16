@@ -25,7 +25,7 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
 
   if (layout === 'topbar') {
     return (
-      <div className="min-h-screen flex flex-col" style={{ background: '#f1f5f9' }} suppressHydrationWarning>
+      <div className="min-h-screen flex flex-col" style={{ background: '#ffffff' }} suppressHydrationWarning>
         <TopMenu empresa={empresa} />
         <main
           id="main-content"
@@ -40,7 +40,7 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
   }
 
   return (
-    <div className="min-h-screen flex" style={{ background: '#f1f5f9' }} suppressHydrationWarning>
+    <div className="min-h-screen flex" style={{ background: '#ffffff' }} suppressHydrationWarning>
       <Sidebar empresa={empresa} />
       <main
         id="main-content"

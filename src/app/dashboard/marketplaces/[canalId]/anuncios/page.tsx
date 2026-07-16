@@ -24,6 +24,12 @@ export default async function AnunciosPage({ params, searchParams }: {
 
   if (!canal) notFound()
 
+  const { data: canais } = await supabase
+    .from('marketplace_canais')
+    .select('id, nome')
+    .eq('empresa_id', empresaId)
+    .order('created_at', { ascending: true })
+
   let query = supabase
     .from('marketplace_anuncios')
     .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo)')
@@ -62,6 +68,7 @@ export default async function AnunciosPage({ params, searchParams }: {
   return (
     <AnunciosClient
       canal={canal}
+      canais={canais ?? []}
       anuncios={anuncios ?? []}
       produtos={produtos ?? []}
       empresaId={empresaId}
