@@ -173,7 +173,7 @@ export default function AnunciosClient({ canal, anuncios: anunciosIniciais, prod
     // recalculados ao editar a composição) — busca ao vivo pra não enviar
     // valor velho pra Shopee.
     const kitsCalculados = new Map<string, { custo: number; estoque: number }>()
-    const idsKit = [...new Set(alvos.filter(a => a.produtos?.tipo === 'kit').map(a => a.produtos.id))]
+    const idsKit = Array.from(new Set<string>(alvos.filter(a => a.produtos?.tipo === 'kit').map(a => String(a.produtos.id))))
     if (idsKit.length > 0) {
       const sb = createClient()
       for (const kitId of idsKit) {

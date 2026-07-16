@@ -63,7 +63,7 @@ export async function recalcularKitsQueUsam(sb: any, componenteId: string): Prom
     .select('kit_id')
     .eq('produto_id', componenteId)
 
-  const kitIds = [...new Set((itens ?? []).map((i: any): string => i.kit_id))]
+  const kitIds = Array.from(new Set<string>((itens ?? []).map((i: any) => String(i.kit_id))))
   for (const kitId of kitIds) {
     const resultado = await calcularKit(sb, kitId)
     if (resultado) {
