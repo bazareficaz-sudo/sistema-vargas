@@ -36,6 +36,10 @@ const ETAPA_LABEL: Record<string, string> = {
 }
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
+function fmtData(v: string | null) {
+  if (!v) return '—'
+  return new Date(v).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 // Prazo de postagem: quanto falta (ou quanto já passou) até `prazo_postagem`.
 // Etapas finais (enviado/concluído/cancelado) não têm mais prazo relevante.
@@ -389,6 +393,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900 text-xs">{p.numero_pedido || p.id_externo}</p>
                     <p className="text-xs text-gray-500">{p.cliente_nome || '—'}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">{fmtData(p.data_pedido)}</p>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[6rem]" title={p.marketplace_canais?.nome}>
                     {p.marketplace_canais?.nome ?? '—'}
