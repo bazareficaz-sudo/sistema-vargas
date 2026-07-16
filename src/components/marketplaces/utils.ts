@@ -45,6 +45,14 @@ export const ETAPA_EXIBICAO_LABEL: Record<EtapaExibicao, string> = {
   enviado: 'Enviado', concluido: 'Concluído', cancelado: 'Cancelado', com_pendencia: 'Com pendência',
 }
 
+// "Pedidos do dia" — data_pedido caiu no calendário local de hoje.
+export function ehHoje(dataIso: string | null): boolean {
+  if (!dataIso) return false
+  const d = new Date(dataIso)
+  const hoje = new Date()
+  return d.getFullYear() === hoje.getFullYear() && d.getMonth() === hoje.getMonth() && d.getDate() === hoje.getDate()
+}
+
 export const ETAPA_EXIBICAO_CORES: Record<EtapaExibicao, string> = {
   reservar: 'bg-slate-100 text-slate-600',
   mapear: 'bg-amber-100 text-amber-700',

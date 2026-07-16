@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
-import { calcularEtapaExibicao, ETAPA_EXIBICAO_CORES, ETAPA_EXIBICAO_LABEL, type EtapaExibicao } from './utils'
+import { calcularEtapaExibicao, ehHoje, ETAPA_EXIBICAO_CORES, ETAPA_EXIBICAO_LABEL, type EtapaExibicao } from './utils'
 
 const STATUS_CORES: Record<string, string> = {
   novo:       'bg-blue-100 text-blue-700',
@@ -58,6 +58,7 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
   const [etapaFiltro, setEtapaFiltro] = useState<EtapaExibicao | ''>('')
   const [somenteAtrasados, setSomenteAtrasados] = useState(false)
+  const [somenteHoje, setSomenteHoje] = useState(false)
   const [detalhe, setDetalhe] = useState<any | null>(null)
   const [modal, setModal] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -388,7 +389,8 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
     const matchS = !statusFiltro || p.status === statusFiltro
     const matchE = !etapaFiltro || calcularEtapaExibicao(p) === etapaFiltro
     const matchAtraso = !somenteAtrasados || !!prazoInfo(p)?.texto.startsWith('Atrasado')
-    return matchQ && matchS && matchE && matchAtraso
+    const matchHoje = !somenteHoje || ehHoje(p.data_pedido)
+    return matchQ && matchS && matchE && matchAtraso && matchHoje
   })
 
   const contagemEtapas: Record<string, number> = {}
@@ -459,8 +461,12 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
             </button>
           )
         })}
+        <button onClick={() => setSomenteHoje(v => !v)}
+          className={`ml-auto mb-1 px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteHoje ? 'bg-blue-600 text-white border-blue-600 font-medium' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+          Hoje
+        </button>
         <button onClick={() => setSomenteAtrasados(v => !v)}
-          className={`ml-auto mb-1 px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteAtrasados ? 'bg-red-600 text-white border-red-600 font-medium' : atrasados > 0 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-400 border-gray-200'}`}>
+          className={`mb-1 px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteAtrasados ? 'bg-red-600 text-white border-red-600 font-medium' : atrasados > 0 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-400 border-gray-200'}`}>
           Atrasados ({atrasados})
         </button>
       </div>
