@@ -9,6 +9,7 @@ import AcoesEmMassaModal from './AcoesEmMassaModal'
 import AdicionarImagemMassaModal from './AdicionarImagemMassaModal'
 import CriarKitModal from './CriarKitModal'
 import NovoProdutoModal from './NovoProdutoModal'
+import ImportarProdutoUrlModal from './ImportarProdutoUrlModal'
 
 type Produto = {
   id: string
@@ -96,6 +97,7 @@ export default function ProdutosClient({
   const [duplicando, setDuplicando] = useState<Produto | null>(null)
   const [criandoKit, setCriandoKit] = useState<Produto | null>(null)
   const [criandoNovo, setCriandoNovo] = useState(false)
+  const [importandoUrl, setImportandoUrl] = useState(false)
   const [acoesEmMassa, setAcoesEmMassa] = useState(false)
   const [imagemEmMassa, setImagemEmMassa] = useState(false)
   const [nomeEditando, setNomeEditando] = useState<string | null>(null)
@@ -247,6 +249,16 @@ export default function ProdutosClient({
           onCriado={() => { setCriandoNovo(false); router.refresh() }}
         />
       )}
+      {importandoUrl && (
+        <ImportarProdutoUrlModal
+          empresaId={empresaId}
+          categoriasRaiz={categoriasRaiz}
+          categoriasTodas={categoriasTodas}
+          marcas={marcas}
+          onClose={() => setImportandoUrl(false)}
+          onImportado={(produto) => { setImportandoUrl(false); setEditando(produto); router.refresh() }}
+        />
+      )}
       {acoesEmMassa && (
         <AcoesEmMassaModal
           ids={[...selecionados]}
@@ -288,6 +300,9 @@ export default function ProdutosClient({
               <button onClick={() => setImagemEmMassa(true)} className="text-xs px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 transition-colors">🖼 Adicionar imagem</button>
             </div>
           )}
+          <button onClick={() => setImportandoUrl(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+            🔗 Importar de URL
+          </button>
           <button onClick={() => setCriandoNovo(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
             + Novo produto
           </button>
