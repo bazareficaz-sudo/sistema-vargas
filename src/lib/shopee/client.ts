@@ -79,6 +79,38 @@ export async function shopeePost(path: string, body: Record<string, any>, opts: 
   return parseShopeeResponse(res, path)
 }
 
+// download_shipping_document é o único endpoint conhecido desta integração
+// que foge do padrão JSON — devolve o PDF em bytes crus. Se a Shopee
+// retornar um erro em vez do documento, o content-type vem como JSON;
+// nesse caso faz o parse normal e lança, em vez de devolver "bytes de erro".
+export async function shopeePostBinary(path: string, body: Record<string, any>, opts: CallOpts): Promise<ArrayBuffer> {
+  const ts = timestamp()
+  const baseStr = opts.accessToken
+    ? buildShopBaseString(opts.partnerId, path, ts, opts.accessToken, opts.shopId ?? '')
+    : buildPublicBaseString(opts.partnerId, path, ts)
+  const sign = signRequest(opts.partnerKey, baseStr)
+
+  const qs = new URLSearchParams({
+    partner_id: String(opts.partnerId),
+    timestamp: String(ts),
+    sign,
+    ...(opts.accessToken ? { access_token: opts.accessToken, shop_id: String(opts.shopId ?? '') } : {}),
+  })
+
+  const res = await fetch(`${API_BASE}${path}?${qs.toString()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('application/json')) {
+    await parseShopeeResponse(res, path) // sempre lança — resposta JSON aqui só ocorre em erro
+    throw new ShopeeApiError(`Resposta inesperada (JSON) em ${path}`)
+  }
+  return res.arrayBuffer()
+}
+
 // Garante um access_token válido para o canal, renovando via refresh_token
 // quando estiver perto de expirar. Deve ser chamado antes de qualquer
 // chamada autenticada (get_item_list, get_item_base_info, get_model_list,

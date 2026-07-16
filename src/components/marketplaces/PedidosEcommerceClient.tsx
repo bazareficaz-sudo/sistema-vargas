@@ -78,6 +78,13 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [termoBuscaItem, setTermoBuscaItem] = useState('')
   const [resultadosBuscaItem, setResultadosBuscaItem] = useState<any[]>([])
 
+  // Etiqueta de envio (Shopee)
+  const [etiquetaOpcoes, setEtiquetaOpcoes] = useState<{ modalidade: string | null; enderecosColeta: any[]; filiaisDropoff: any[]; slugsDropoff: any[] } | null>(null)
+  const [escolhaEnvio, setEscolhaEnvio] = useState<{ addressId?: string; branchId?: string; slug?: string; trackingNumber?: string }>({})
+  const [carregandoEtiqueta, setCarregandoEtiqueta] = useState(false)
+  const [pollingEtiqueta, setPollingEtiqueta] = useState(false)
+  const [erroEtiqueta, setErroEtiqueta] = useState('')
+
   const canaisShopee = canais.filter(c => c.plataforma === 'shopee' && c.ativo && c.access_token)
 
   const formPedidoVazio = {
@@ -272,6 +279,111 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     setResultadosBuscaItem(data ?? [])
   }
 
+  function atualizarPacoteLocal(pedidoId: string, patch: any) {
+    const aplicar = (p: any) => ({
+      ...p,
+      marketplace_pedido_pacotes: p.marketplace_pedido_pacotes?.length
+        ? p.marketplace_pedido_pacotes.map((pac: any, i: number) => i === 0 ? { ...pac, ...patch } : pac)
+        : [{ ...patch }],
+    })
+    setPedidos(prev => prev.map(p => p.id === pedidoId ? aplicar(p) : p))
+    if (detalhe?.id === pedidoId) setDetalhe((p: any) => aplicar(p))
+  }
+
+  async function prepararEtiqueta() {
+    if (!detalhe) return
+    setCarregandoEtiqueta(true); setErroEtiqueta(''); setEtiquetaOpcoes(null)
+    try {
+      const resp = await fetch('/api/marketplace/shopee/etiqueta/preparar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: detalhe.canal_id, pedidoId: detalhe.id }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErroEtiqueta(data.erro ?? 'Erro ao preparar envio'); return }
+      setEtiquetaOpcoes(data)
+      setEscolhaEnvio({})
+    } catch (e: any) {
+      setErroEtiqueta(e.message ?? 'Erro ao preparar envio')
+    } finally {
+      setCarregandoEtiqueta(false)
+    }
+  }
+
+  async function pollStatusEtiqueta(canalId: string, pedidoId: string, tentativa: number) {
+    setPollingEtiqueta(true)
+    try {
+      const resp = await fetch('/api/marketplace/shopee/etiqueta/status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canalId, pedidoId }),
+      })
+      const data = await resp.json()
+      if (data.ok && data.status === 'pronta') {
+        atualizarPacoteLocal(pedidoId, { status_etiqueta: 'pronta' })
+        setPollingEtiqueta(false); setCarregandoEtiqueta(false); router.refresh()
+        return
+      }
+      if (data.ok && data.status === 'erro') {
+        atualizarPacoteLocal(pedidoId, { status_etiqueta: 'erro' })
+        setErroEtiqueta(data.erro ?? 'Falha ao gerar etiqueta')
+        setPollingEtiqueta(false); setCarregandoEtiqueta(false)
+        return
+      }
+    } catch { /* tenta de novo na próxima rodada */ }
+    if (tentativa >= 19) {
+      setPollingEtiqueta(false); setCarregandoEtiqueta(false)
+      setErroEtiqueta('A etiqueta ainda está sendo processada — tente novamente em instantes.')
+      return
+    }
+    setTimeout(() => pollStatusEtiqueta(canalId, pedidoId, tentativa + 1), 3000)
+  }
+
+  async function confirmarEtiqueta() {
+    if (!detalhe || !etiquetaOpcoes?.modalidade) return
+    setErroEtiqueta('')
+    let escolha: any
+    if (etiquetaOpcoes.modalidade === 'pickup') {
+      if (!escolhaEnvio.addressId) { setErroEtiqueta('Escolha o endereço de coleta.'); return }
+      escolha = { modalidade: 'pickup', addressId: Number(escolhaEnvio.addressId) }
+    } else if (etiquetaOpcoes.modalidade === 'dropoff') {
+      escolha = { modalidade: 'dropoff', branchId: escolhaEnvio.branchId ? Number(escolhaEnvio.branchId) : undefined, slug: escolhaEnvio.slug || undefined }
+    } else {
+      escolha = { modalidade: 'non_integrated', trackingNumber: escolhaEnvio.trackingNumber || undefined }
+    }
+
+    setCarregandoEtiqueta(true)
+    try {
+      const resp = await fetch('/api/marketplace/shopee/etiqueta/confirmar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: detalhe.canal_id, pedidoId: detalhe.id, escolha }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErroEtiqueta(data.erro ?? 'Erro ao confirmar envio'); setCarregandoEtiqueta(false); return }
+      atualizarPacoteLocal(detalhe.id, { status_etiqueta: 'processando' })
+      setEtiquetaOpcoes(null)
+      pollStatusEtiqueta(detalhe.canal_id, detalhe.id, 0)
+    } catch (e: any) {
+      setErroEtiqueta(e.message ?? 'Erro ao confirmar envio')
+      setCarregandoEtiqueta(false)
+    }
+  }
+
+  async function baixarEtiquetaAction() {
+    if (!detalhe) return
+    setCarregandoEtiqueta(true); setErroEtiqueta('')
+    try {
+      const resp = await fetch('/api/marketplace/shopee/etiqueta/baixar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: detalhe.canal_id, pedidoId: detalhe.id }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErroEtiqueta(data.erro ?? 'Erro ao baixar etiqueta'); return }
+      window.open(data.url, '_blank')
+    } catch (e: any) {
+      setErroEtiqueta(e.message ?? 'Erro ao baixar etiqueta')
+    } finally {
+      setCarregandoEtiqueta(false)
+    }
+  }
+
   const filtrados = pedidos.filter(p => {
     const matchQ = !q || (p.cliente_nome ?? '').toLowerCase().includes(q.toLowerCase()) || (p.numero_pedido ?? '').includes(q) || p.id_externo.includes(q)
     const matchS = !statusFiltro || p.status === statusFiltro
@@ -388,7 +500,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
               {filtrados.map(p => {
                 const prazo = prazoInfo(p)
                 return (
-                <tr key={p.id} onClick={() => setDetalhe(p)}
+                <tr key={p.id} onClick={() => { setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}) }}
                   className={`hover:bg-blue-50 transition-colors cursor-pointer ${detalhe?.id === p.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3">
                     <p className="font-medium text-gray-900 text-xs">{p.numero_pedido || p.id_externo}</p>
@@ -526,6 +638,76 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                   <span>Total</span><span>{fmt(Number(detalhe.valor_total))}</span>
                 </div>
               </div>
+
+              {/* Etiqueta de envio (Shopee) */}
+              {detalhe.marketplace_canais?.plataforma === 'shopee' && (
+                <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-600">Etiqueta de envio</p>
+                  {(() => {
+                    const pacote = detalhe.marketplace_pedido_pacotes?.[0]
+                    if (pacote?.status_etiqueta === 'pronta') {
+                      return (
+                        <>
+                          {pacote.codigo_rastreio && <p className="text-xs text-gray-600">Rastreio: <span className="font-mono">{pacote.codigo_rastreio}</span></p>}
+                          <button onClick={baixarEtiquetaAction} disabled={carregandoEtiqueta}
+                            className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                            {carregandoEtiqueta ? 'Abrindo...' : '🖨 Baixar / reimprimir etiqueta'}
+                          </button>
+                        </>
+                      )
+                    }
+                    if (pollingEtiqueta || pacote?.status_etiqueta === 'processando') {
+                      return <p className="text-xs text-gray-500">Gerando etiqueta na Shopee... isso pode levar alguns segundos.</p>
+                    }
+                    if (etiquetaOpcoes) {
+                      return (
+                        <div className="space-y-2">
+                          {etiquetaOpcoes.modalidade === 'pickup' && (
+                            <div>
+                              <label className="block text-[11px] text-gray-500 mb-1">Endereço de coleta</label>
+                              <select value={escolhaEnvio.addressId ?? ''} onChange={e => setEscolhaEnvio(p => ({ ...p, addressId: e.target.value }))}
+                                className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs">
+                                <option value="">Selecione...</option>
+                                {etiquetaOpcoes.enderecosColeta.map((a: any, i: number) => (
+                                  <option key={a.address_id ?? i} value={a.address_id}>{a.address ?? a.full_address ?? `Endereço ${i + 1}`}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          {etiquetaOpcoes.modalidade === 'dropoff' && etiquetaOpcoes.filiaisDropoff.length > 0 && (
+                            <div>
+                              <label className="block text-[11px] text-gray-500 mb-1">Filial de postagem</label>
+                              <select value={escolhaEnvio.branchId ?? ''} onChange={e => setEscolhaEnvio(p => ({ ...p, branchId: e.target.value }))}
+                                className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs">
+                                <option value="">Selecione...</option>
+                                {etiquetaOpcoes.filiaisDropoff.map((b: any, i: number) => (
+                                  <option key={b.branch_id ?? i} value={b.branch_id}>{b.name ?? b.branch_name ?? `Filial ${i + 1}`}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          {etiquetaOpcoes.modalidade === 'non_integrated' && (
+                            <input value={escolhaEnvio.trackingNumber ?? ''} onChange={e => setEscolhaEnvio(p => ({ ...p, trackingNumber: e.target.value }))}
+                              placeholder="Código de rastreio (opcional)"
+                              className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs" />
+                          )}
+                          <button onClick={confirmarEtiqueta} disabled={carregandoEtiqueta}
+                            className="w-full py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                            {carregandoEtiqueta ? 'Confirmando...' : 'Confirmar e gerar etiqueta'}
+                          </button>
+                        </div>
+                      )
+                    }
+                    return (
+                      <button onClick={prepararEtiqueta} disabled={carregandoEtiqueta}
+                        className="w-full py-1.5 border border-blue-300 text-blue-600 hover:bg-blue-50 disabled:opacity-50 text-xs font-medium rounded-lg transition-colors">
+                        {carregandoEtiqueta ? 'Consultando...' : 'Preparar envio'}
+                      </button>
+                    )
+                  })()}
+                  {erroEtiqueta && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{erroEtiqueta}</p>}
+                </div>
+              )}
 
               {/* Rastreio */}
               {['confirmado','faturado'].includes(detalhe.status) && (
