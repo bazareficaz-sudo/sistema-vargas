@@ -99,7 +99,7 @@ function mapStatus(orderStatus?: string): string {
 // status da Shopee. Pendência de mapeamento tem prioridade sobre o avanço
 // normal do fluxo (não faz sentido considerar "pronto pra expedição" um
 // pedido com item sem produto vinculado).
-function calcularEtapaInterna(orderStatus: string | undefined, algumItemPendente: boolean): string {
+export function calcularEtapaInterna(orderStatus: string | undefined, algumItemPendente: boolean): string {
   if (orderStatus === 'CANCELLED' || orderStatus === 'IN_CANCEL') return 'cancelado'
   if (orderStatus === 'COMPLETED') return 'concluido'
   if (orderStatus === 'SHIPPED' || orderStatus === 'TO_CONFIRM_RECEIVE') return 'enviado'
@@ -351,4 +351,21 @@ export async function syncPedidos(
   }
 
   return { totalFound: orderSns.length, upserted, failed, truncated }
+}
+
+// A etapa_interna só é calculada dentro de processRawOrder (na sincronização).
+// Quando um item é mapeado manualmente DEPOIS da importação (sem novo sync),
+// o pedido ficava travado em "pendencia_mapeamento" para sempre — esta função
+// recalcula a etapa a partir do estado atual (status_externo salvo + itens),
+// para ser chamada logo após qualquer mapeamento manual.
+export async function recalcularEtapaPedido(sb: any, pedidoId: string): Promise<string | null> {
+  const { data: pedido } = await sb.from('marketplace_pedidos').select('id, status_externo').eq('id', pedidoId).single()
+  if (!pedido) return null
+
+  const { data: itens } = await sb.from('marketplace_pedido_itens').select('produto_id').eq('pedido_id', pedidoId)
+  const algumItemPendente = (itens ?? []).some((i: any) => !i.produto_id)
+
+  const etapa = calcularEtapaInterna(pedido.status_externo ?? undefined, algumItemPendente)
+  await sb.from('marketplace_pedidos').update({ etapa_interna: etapa }).eq('id', pedidoId)
+  return etapa
 }

@@ -218,6 +218,22 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     } catch { /* falha aqui não deve travar o mapeamento já salvo — fica pendente pra próxima sincronização */ }
   }
 
+  // etapa_interna só é recalculada automaticamente durante a sincronização —
+  // sem isto, um pedido mapeado manualmente ficava travado em "pendência de
+  // mapeamento" pra sempre até o próximo sync.
+  async function recalcularEtapaLocal(pedidoId: string) {
+    try {
+      const resp = await fetch('/api/marketplace/shopee/recalcular-etapa-pedido', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pedidoId }),
+      })
+      const data = await resp.json()
+      if (data.ok && data.etapa) {
+        setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, etapa_interna: data.etapa } : p))
+        if (detalhe?.id === pedidoId) setDetalhe((p: any) => ({ ...p, etapa_interna: data.etapa }))
+      }
+    } catch { /* não crítico — próxima sincronização recalcula de novo */ }
+  }
+
   async function onAnuncioMapeado(anuncioAtualizado: any) {
     if (!mapeandoItem) return
     const item = mapeandoItem
@@ -225,6 +241,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     await sb.from('marketplace_pedido_itens').update({ produto_id: anuncioAtualizado.produto_id, status_mapeamento: 'mapeado' }).eq('id', item.id)
     atualizarItemLocal(item.pedido_id, item.id, { produto_id: anuncioAtualizado.produto_id, status_mapeamento: 'mapeado' })
     await dispararBaixaSeNecessario(item)
+    await recalcularEtapaLocal(item.pedido_id)
     setMapeandoItem(null); setAnuncioParaMapear(null)
     router.refresh()
   }
@@ -234,6 +251,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     await sb.from('marketplace_pedido_itens').update({ produto_id: produto.id, status_mapeamento: 'mapeado' }).eq('id', item.id)
     atualizarItemLocal(item.pedido_id, item.id, { produto_id: produto.id, status_mapeamento: 'mapeado' })
     await dispararBaixaSeNecessario(item)
+    await recalcularEtapaLocal(item.pedido_id)
     setBuscaItemId(null); setTermoBuscaItem(''); setResultadosBuscaItem([])
     router.refresh()
   }
