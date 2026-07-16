@@ -164,6 +164,7 @@ export const NAV: NavGroup[] = [
     defaultOpen: false,
     items: [
       { href: '/dashboard/marketplaces', label: 'Marketplaces', icon: '🏪', modulo: 'marketplace' },
+      { href: '/dashboard/pedidos-ecommerce', label: 'Pedidos', icon: '📦', modulo: 'marketplace' },
     ],
   },
   {
