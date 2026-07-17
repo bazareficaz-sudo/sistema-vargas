@@ -55,6 +55,7 @@ interface Props {
   ativos: number
   comissionados: number
   role: string
+  erroCarregamento?: string
 }
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
@@ -79,7 +80,7 @@ function formatTelefone(t?: string) {
   return t
 }
 
-export default function VendedoresClient({ vendedores: inicial, empresas, empresaAtualId, total, ativos, comissionados }: Props) {
+export default function VendedoresClient({ vendedores: inicial, empresas, empresaAtualId, total, ativos, comissionados, erroCarregamento }: Props) {
   const router = useRouter()
   const [vendedores, setVendedores] = useState<Vendedor[]>(inicial)
   const [busca, setBusca] = useState('')
@@ -152,6 +153,12 @@ export default function VendedoresClient({ vendedores: inicial, empresas, empres
             Novo Vendedor
           </button>
         </div>
+
+        {erroCarregamento && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
+            Erro ao carregar vendedores: {erroCarregamento}
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-6">

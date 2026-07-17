@@ -15,7 +15,12 @@ export default async function VendedoresPage() {
 
   const empresaAtualId = profile?.empresa_id ?? ''
 
-  const { data: vendedores } = await supabase
+  // Sem embed aninhado aqui de propósito — o mesmo tipo de relacionamento
+  // (via FK) já se mostrou não confiável no PostgREST desta base em outro
+  // ponto do sistema (venda_itens -> vendas), fazendo a consulta inteira
+  // falhar em silêncio e a tela mostrar "0 encontrado" sem nenhum aviso.
+  // Aqui buscamos as tabelas separadas e montamos o vínculo manualmente.
+  const { data: vendedores, error: erroVendedores } = await supabase
     .from('vendedores')
     .select(`
       id, codigo, matricula, nome, apelido, cpf, rg,
@@ -25,14 +30,7 @@ export default async function VendedoresPage() {
       permite_todas_empresas, permite_login, obs,
       tenant_id, empresa_id, user_id,
       identificador_externo,
-      created_at, updated_at,
-      vendedor_empresas(
-        empresa_id,
-        empresa_principal,
-        pode_vender,
-        ativo,
-        empresas(id, nome, nome_fantasia)
-      )
+      created_at, updated_at
     `)
     .eq('empresa_id', empresaAtualId)
     .order('nome')
@@ -42,19 +40,36 @@ export default async function VendedoresPage() {
     .select('id, nome, nome_fantasia')
     .order('nome')
 
-  const total = vendedores?.length ?? 0
-  const ativos = (vendedores ?? []).filter(v => v.status === 'ativo').length
-  const comissionados = (vendedores ?? []).filter(v => v.participa_comissao).length
+  const vendedorIds = (vendedores ?? []).map(v => v.id)
+  let vendedorEmpresasPorVendedor: Record<string, any[]> = {}
+  if (vendedorIds.length > 0) {
+    const { data: vinculos } = await supabase
+      .from('vendedor_empresas')
+      .select('vendedor_id, empresa_id, empresa_principal, pode_vender, ativo')
+      .in('vendedor_id', vendedorIds)
+    const empresasMap = new Map((empresas ?? []).map(e => [e.id, e]))
+    for (const v of vinculos ?? []) {
+      const entry = { empresa_id: v.empresa_id, empresa_principal: v.empresa_principal, pode_vender: v.pode_vender, ativo: v.ativo, empresas: empresasMap.get(v.empresa_id) ?? null }
+      ;(vendedorEmpresasPorVendedor[v.vendedor_id] ??= []).push(entry)
+    }
+  }
+
+  const vendedoresCompletos = (vendedores ?? []).map(v => ({ ...v, vendedor_empresas: vendedorEmpresasPorVendedor[v.id] ?? [] }))
+
+  const total = vendedoresCompletos.length
+  const ativos = vendedoresCompletos.filter(v => v.status === 'ativo').length
+  const comissionados = vendedoresCompletos.filter(v => v.participa_comissao).length
 
   return (
     <VendedoresClient
-      vendedores={(vendedores ?? []) as any[]}
+      vendedores={vendedoresCompletos as any[]}
       empresas={(empresas ?? []) as any[]}
       empresaAtualId={empresaAtualId}
       total={total}
       ativos={ativos}
       comissionados={comissionados}
       role={profile?.role ?? 'gerente'}
+      erroCarregamento={erroVendedores?.message}
     />
   )
 }
