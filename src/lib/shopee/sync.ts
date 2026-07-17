@@ -1,5 +1,5 @@
 import { getIntegracaoCredentials, refreshAccessTokenIfNeeded, shopeeGet } from './client'
-import { getItemBaseInfoBatch, getModelList, listItemIds } from './catalog'
+import { getItemBaseInfoBatch, getItemExtraInfoBatch, getModelList, listItemIds } from './catalog'
 import type { ShopeeChannel, SyncFailure, SyncResult } from './types'
 
 // Teto de itens processados por chamada de sincronização — não existe fila/
@@ -21,7 +21,7 @@ function mapStatus(itemStatus?: string) {
 // Mapeia o item bruto da Shopee para a linha de marketplace_anuncios.
 // Deliberadamente defensivo: campos ausentes viram warnings, não exceções —
 // dados_brutos guarda o payload completo para conferência/ajuste posterior.
-export function mapItemToAnuncioRow(rawItem: any, canal: ShopeeChannel): { row: Record<string, any>; warnings: string[] } {
+export function mapItemToAnuncioRow(rawItem: any, canal: ShopeeChannel, vendas?: number | null): { row: Record<string, any>; warnings: string[] } {
   const warnings: string[] = []
 
   const precoInfo = rawItem.price_info?.[0]
@@ -47,6 +47,7 @@ export function mapItemToAnuncioRow(rawItem: any, canal: ShopeeChannel): { row: 
     marca_externa: rawItem.brand?.original_brand_name ?? null,
     imagens: rawItem.image?.image_url_list ?? [],
     tem_variacao: !!rawItem.has_model,
+    ...(vendas != null ? { vendas } : {}),
     dados_brutos: rawItem,
     ultima_atualizacao_externa: rawItem.update_time ? new Date(rawItem.update_time * 1000).toISOString() : null,
     sincronizado_em: new Date().toISOString(),
@@ -123,12 +124,13 @@ async function applyLearnedMapping(
 // syncSingleItem (um item só) para não duplicar essa lógica.
 async function processRawItem(
   ctx: { sb: any; canal: ShopeeChannel },
-  rawItem: any
+  rawItem: any,
+  vendas?: number | null
 ): Promise<{ anuncioId: string; failed: SyncFailure[] }> {
   const itemIdStr = String(rawItem.item_id)
   const failed: SyncFailure[] = []
 
-  const { row } = mapItemToAnuncioRow(rawItem, ctx.canal)
+  const { row } = mapItemToAnuncioRow(rawItem, ctx.canal, vendas)
   const anuncio = await upsertAnuncio(ctx.sb, row)
 
   // anuncio.produtoId reflete o estado real após o upsert (upsert nunca
@@ -176,7 +178,16 @@ export async function syncSingleItem(
     const rawItems = await getItemBaseInfoBatch(ctx, [Number(idExterno)])
     if (!rawItems[0]) return { ok: false, error: 'Item não encontrado ou indisponível na Shopee' }
 
-    const { anuncioId, failed } = await processRawItem(ctx, rawItems[0])
+    // Falha ao buscar vendas não pode derrubar o resto da sincronização do
+    // item — é uma métrica a mais, não um dado essencial (mesma filosofia
+    // defensiva do restante deste arquivo).
+    let vendas: number | null = null
+    try {
+      const extra = await getItemExtraInfoBatch(ctx, [Number(idExterno)])
+      vendas = extra[0]?.sale ?? null
+    } catch { /* segue sem vendas */ }
+
+    const { anuncioId, failed } = await processRawItem(ctx, rawItems[0], vendas)
     return { ok: true, anuncioId, warnings: failed }
   } catch (e: any) {
     return { ok: false, error: e?.message ?? 'Erro ao sincronizar item' }
@@ -238,10 +249,22 @@ export async function syncCatalogo(
     }
   }
 
+  // Vendas é uma chamada à parte (get_item_extra_info) — falha aqui não pode
+  // travar o sync inteiro, só faz os anúncios ficarem sem essa métrica desta
+  // vez (ficam com o valor antigo, se houver, já que mapItemToAnuncioRow só
+  // inclui `vendas` no upsert quando o valor veio preenchido).
+  const vendasPorItem = new Map<string, number>()
+  try {
+    const extraInfo = await getItemExtraInfoBatch(ctx, encontrados.map(e => e.itemId))
+    for (const info of extraInfo) {
+      if (info?.item_id != null && info?.sale != null) vendasPorItem.set(String(info.item_id), Number(info.sale))
+    }
+  } catch { /* segue sem vendas nesta rodada */ }
+
   for (const rawItem of rawItems) {
     const itemIdStr = String(rawItem.item_id)
     try {
-      const { failed: itemFailed } = await processRawItem(ctx, rawItem)
+      const { failed: itemFailed } = await processRawItem(ctx, rawItem, vendasPorItem.get(itemIdStr) ?? null)
       upserted++
       failed.push(...itemFailed)
     } catch (e: any) {

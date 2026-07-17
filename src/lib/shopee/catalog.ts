@@ -18,6 +18,32 @@ export function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+// Limite de 50 item_id por chamada confirmado no schema do endpoint (fonte
+// secundária, mas explícito — "item_id list, limit [0,50]" — diferente do
+// resto deste arquivo, que usa valores conservadores por falta de confirmação).
+export const EXTRA_INFO_BATCH_SIZE = 50
+
+// get_item_extra_info: métricas que get_item_base_info não traz (vendas,
+// visualizações, curtidas, avaliação, comentários). Chamada separada porque
+// é um endpoint diferente — não dá pra pedir junto do base info.
+export async function getItemExtraInfoBatch(ctx: CallCtx, itemIds: number[]): Promise<any[]> {
+  const callOptions = await callOpts(ctx)
+  const resultados: any[] = []
+
+  for (let i = 0; i < itemIds.length; i += EXTRA_INFO_BATCH_SIZE) {
+    const lote = itemIds.slice(i, i + EXTRA_INFO_BATCH_SIZE)
+    const data = await shopeeGet(
+      '/api/v2/product/get_item_extra_info',
+      { item_id_list: lote.join(',') },
+      callOptions
+    )
+    resultados.push(...(data?.response?.item_list ?? []))
+    await sleep(THROTTLE_MS)
+  }
+
+  return resultados
+}
+
 type CallCtx = { sb: any; canal: ShopeeChannel }
 
 async function callOpts(ctx: CallCtx) {

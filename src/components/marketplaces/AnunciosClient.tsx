@@ -84,6 +84,14 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [pausandoAtivando, setPausandoAtivando] = useState(false)
   const [resumoPausarAtivar, setResumoPausarAtivar] = useState('')
 
+  // Sincronizar só os selecionados (em vez do catálogo inteiro) — duas
+  // direções: puxar da Shopee (atualizar aqui) e mandar pra Shopee (enviar
+  // o que já está salvo aqui, sem regra/fórmula nenhuma).
+  const [sincronizandoSelecionados, setSincronizandoSelecionados] = useState(false)
+  const [resumoSincSelecionados, setResumoSincSelecionados] = useState('')
+  const [enviandoSelecionados, setEnviandoSelecionados] = useState(false)
+  const [resumoEnvioSelecionados, setResumoEnvioSelecionados] = useState('')
+
   function toggleSelecionado(id: string) {
     setSelecionados(prev => {
       const novo = new Set(prev)
@@ -262,6 +270,93 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setPreviewMassaPreco(null)
     setOpcoesMassaPreco(null)
     setEnviandoMassaPreco(false)
+  }
+
+  // Chama sync-item (o mesmo usado no modal de detalhe pra resincronizar um
+  // anúncio) um a um pros selecionados — sequencial com um pequeno intervalo
+  // entre chamadas, em vez de disparar tudo de uma vez, pra não estourar
+  // limite de taxa da Shopee com uma seleção grande.
+  async function sincronizarSelecionados() {
+    const alvos = filtrados.filter(a => selecionados.has(a.id))
+    if (alvos.length === 0) return
+    setSincronizandoSelecionados(true); setResumoSincSelecionados('')
+    let sucesso = 0, falha = 0, semIdExterno = 0
+    const erros: string[] = []
+
+    for (const a of alvos) {
+      if (!a.id_externo) { semIdExterno++; continue }
+      try {
+        const resp = await fetch('/api/marketplace/shopee/sync-item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canal.id, idExterno: a.id_externo }),
+        })
+        const data = await resp.json()
+        if (data.ok) {
+          sucesso++
+          setAnuncios(prev => prev.map(x => x.id === data.anuncio.id ? data.anuncio : x))
+        } else {
+          falha++
+          if (data.erro) erros.push(data.erro)
+        }
+      } catch (e: any) {
+        falha++
+        erros.push(e.message ?? 'falha de rede')
+      }
+      await new Promise(r => setTimeout(r, 150))
+    }
+
+    const partes = [`${sucesso} sincronizado(s)`]
+    if (falha > 0) partes.push(`${falha} falha(s)${erros[0] ? `: ${erros[0]}` : ''}`)
+    if (semIdExterno > 0) partes.push(`${semIdExterno} ignorado(s) (sem ID externo)`)
+    setResumoSincSelecionados(partes.join(' · '))
+    setSelecionados(new Set())
+    setSincronizandoSelecionados(false)
+  }
+
+  // Sistema → Shopee: manda o preço/estoque que JÁ está salvo aqui, sem
+  // aplicar regra/fórmula nenhuma (isso é o botão "Atualizar preço/estoque
+  // na Shopee", separado). Mesma rota usada no envio individual
+  // (EnviarPrecoEstoqueModal), só que sem abrir modal por item.
+  async function enviarSelecionadosParaShopee() {
+    const alvos = filtrados.filter(a => selecionados.has(a.id))
+    if (alvos.length === 0) return
+    if (!confirm(`Enviar preço/estoque atuais de ${alvos.length} anúncio(s) pra Shopee?`)) return
+
+    setEnviandoSelecionados(true); setResumoEnvioSelecionados('')
+    let sucesso = 0, falha = 0, semIdExterno = 0
+    const erros: string[] = []
+
+    for (const a of alvos) {
+      if (!a.id_externo) { semIdExterno++; continue }
+      try {
+        const resp = await fetch('/api/marketplace/shopee/push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canal.id, anuncioId: a.id }),
+        })
+        const data = await resp.json()
+        if (data.ok) {
+          sucesso++
+          setAnuncios(prev => prev.map(x => x.id === a.id ? { ...x, ultima_atualizacao: new Date().toISOString(), sincronizado_em: new Date().toISOString() } : x))
+        } else {
+          falha++
+          const msg = [data.erroPreco, data.erroEstoque, data.erro].filter(Boolean)[0]
+          if (msg) erros.push(msg)
+        }
+      } catch (e: any) {
+        falha++
+        erros.push(e.message ?? 'falha de rede')
+      }
+      await new Promise(r => setTimeout(r, 150))
+    }
+
+    const partes = [`${sucesso} enviado(s)`]
+    if (falha > 0) partes.push(`${falha} falha(s)${erros[0] ? `: ${erros[0]}` : ''}`)
+    if (semIdExterno > 0) partes.push(`${semIdExterno} ignorado(s) (sem ID externo)`)
+    setResumoEnvioSelecionados(partes.join(' · '))
+    setSelecionados(new Set())
+    setEnviandoSelecionados(false)
   }
 
   async function pausarOuAtivarSelecionados(acao: 'pausar' | 'ativar') {
@@ -567,6 +662,20 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       {selecionados.size > 0 && (
         <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-4 py-2.5 mb-4">
           <span className="text-sm text-purple-700 font-medium">{selecionados.size} selecionado(s)</span>
+          {canal.plataforma === 'shopee' && (
+            <button onClick={sincronizarSelecionados} disabled={sincronizandoSelecionados}
+              title="Puxa da Shopee pro sistema: status, preço, estoque, imagens..."
+              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+              {sincronizandoSelecionados ? 'Atualizando...' : '⇣ Atualizar do Shopee'}
+            </button>
+          )}
+          {canal.plataforma === 'shopee' && (
+            <button onClick={enviarSelecionadosParaShopee} disabled={enviandoSelecionados}
+              title="Manda o preço/estoque que já está salvo aqui pra Shopee"
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+              {enviandoSelecionados ? 'Enviando...' : '⇡ Enviar p/ Shopee'}
+            </button>
+          )}
           <button onClick={prepararMapeamentoMassa}
             className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg">
             Mapear selecionados por SKU
@@ -613,6 +722,20 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         </div>
       )}
 
+      {resumoSincSelecionados && (
+        <div className="bg-cyan-50 border border-cyan-200 text-cyan-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>{resumoSincSelecionados}</span>
+          <button onClick={() => setResumoSincSelecionados('')} className="text-cyan-500 hover:text-cyan-700">✕</button>
+        </div>
+      )}
+
+      {resumoEnvioSelecionados && (
+        <div className="bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>{resumoEnvioSelecionados}</span>
+          <button onClick={() => setResumoEnvioSelecionados('')} className="text-indigo-500 hover:text-indigo-700">✕</button>
+        </div>
+      )}
+
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -626,6 +749,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Título / Produto</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">SKU canal</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Estoque</th>
+              <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Vendas</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço venda</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço promo</th>
               <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Status</th>
@@ -675,6 +799,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   <p className="text-gray-900 font-mono text-sm">{a.estoque_reservado ?? 0}</p>
                   {a.produtos && <p className="text-xs text-gray-400">estoque: {a.produtos.estoque ?? 0}</p>}
                 </td>
+                <td className="px-4 py-3 text-right text-gray-600 font-mono text-sm">{a.vendas ?? '—'}</td>
                 <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(a.preco_venda)}</td>
                 <td className="px-4 py-3 text-right">
                   {a.preco_promocional ? (
@@ -710,7 +835,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               </tr>
             ))}
             {filtrados.length === 0 && (
-              <tr><td colSpan={9} className="py-12 text-center text-gray-400">
+              <tr><td colSpan={10} className="py-12 text-center text-gray-400">
                 {anuncios.length === 0 ? 'Nenhum anúncio cadastrado.' : 'Nenhum anúncio encontrado para os filtros aplicados.'}
               </td></tr>
             )}
