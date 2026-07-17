@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 
 const TIPOS = [
   { value: 'simples',   label: 'Simples',   desc: 'Produto unitário padrão' },
@@ -51,6 +52,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [buscaKit, setBuscaKit] = useState('')
   const [resultadosKit, setResultadosKit] = useState<Produto[]>([])
   const [promocaoInfinita, setPromocaoInfinita] = useState(false)
+  const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
 
   // Imagens
   const [imagens, setImagens] = useState<ProdutoImagem[]>([])
@@ -939,6 +941,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
             {aba === 'imagens' && imagens.length > 0 && `${imagens.length} imagem(ns)`}
           </div>
           <div className="flex gap-2">
+            <button onClick={() => setImprimindoEtiqueta(true)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+              🏷 Imprimir Etiqueta
+            </button>
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
               Cancelar
             </button>
@@ -949,6 +954,19 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
           </div>
         </div>
       </div>
+
+      {imprimindoEtiqueta && (
+        <ImprimirEtiquetaModal
+          produtos={[{
+            id: form.id, nome: form.nome, sku: form.sku, ean: form.ean,
+            preco_venda: form.preco_venda, preco_promocional: form.preco_promocional ?? null,
+            marca: form.marca, unidade: form.unidade, categoria: form.categoria,
+            estoque: form.estoque,
+          }]}
+          empresaId={empresaId}
+          onClose={() => setImprimindoEtiqueta(false)}
+        />
+      )}
     </div>
   )
 }

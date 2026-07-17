@@ -396,12 +396,13 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
       if (error) throw error
 
       // Salvar itens com tipo
-      await sb.from('venda_itens').insert(itens.map(i => ({
+      const { error: erroItens } = await sb.from('venda_itens').insert(itens.map(i => ({
         venda_id: venda.id,
         produto_id: i.produto_id, produto_nome: i.nome, produto_sku: i.sku,
         quantidade: i.quantidade, preco_unitario: i.preco_unitario, desconto: i.desconto, total: i.total,
         tipo: i.tipo,
       })))
+      if (erroItens) throw erroItens
 
       // Movimentação de estoque
       for (const item of itens) {

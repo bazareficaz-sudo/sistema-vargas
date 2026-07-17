@@ -11,6 +11,7 @@ import CriarKitModal from './CriarKitModal'
 import NovoProdutoModal from './NovoProdutoModal'
 import ImportarProdutoUrlModal from './ImportarProdutoUrlModal'
 import GerenciarTagsModal from './GerenciarTagsModal'
+import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import EstoqueDetalhadoModal from './EstoqueDetalhadoModal'
 
 type Produto = {
@@ -124,6 +125,7 @@ export default function ProdutosClient({
   const [tagF, setTagF] = useState(tagInicial)
   const [entradaF, setEntradaF] = useState(entradaInicial)
   const [gerenciandoTags, setGerenciandoTags] = useState(false)
+  const [imprimindoEtiquetas, setImprimindoEtiquetas] = useState(false)
   const [vendoEstoque, setVendoEstoque] = useState<Produto | null>(null)
 
   // Sincroniza quando o servidor traz novos dados (navegação entre abas/busca)
@@ -299,6 +301,18 @@ export default function ProdutosClient({
           onAplicado={() => { setGerenciandoTags(false); setSelecionados(new Set()); router.refresh() }}
         />
       )}
+      {imprimindoEtiquetas && (
+        <ImprimirEtiquetaModal
+          produtos={produtos.filter(p => selecionados.has(p.id)).map(p => ({
+            id: p.id, nome: p.nome, sku: p.sku, ean: p.ean,
+            preco_venda: p.preco_venda, preco_promocional: p.preco_promocional ?? null,
+            marca: p.marca, unidade: p.unidade, categoria: p.categoria,
+            estoque: p.estoque,
+          }))}
+          empresaId={empresaId}
+          onClose={() => setImprimindoEtiquetas(false)}
+        />
+      )}
       {vendoEstoque && (
         <EstoqueDetalhadoModal
           produto={vendoEstoque}
@@ -328,6 +342,7 @@ export default function ProdutosClient({
               <button onClick={() => setAcoesEmMassa(true)} className="text-xs px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">Ações em massa</button>
               <button onClick={() => setImagemEmMassa(true)} className="text-xs px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 transition-colors">🖼 Adicionar imagem</button>
               <button onClick={() => setGerenciandoTags(true)} className="text-xs px-3 py-1.5 border border-teal-300 text-teal-700 rounded-lg hover:bg-teal-50 transition-colors">🏷 Tags</button>
+              <button onClick={() => setImprimindoEtiquetas(true)} className="text-xs px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition-colors">🏷️ Emitir Etiquetas</button>
             </div>
           )}
           <button onClick={() => setImportandoUrl(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
