@@ -36,7 +36,7 @@ export default async function VendasPage({
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-white text-xl font-semibold">Vendas</h1>
+          <h1 className="text-gray-900 text-xl font-semibold">Vendas</h1>
           <p className="text-gray-500 text-sm mt-0.5">
             {count} transações · {totalFaturado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} faturados
           </p>
@@ -46,18 +46,18 @@ export default async function VendasPage({
             type="date"
             name="data"
             defaultValue={dataFiltro ?? dataBase.toISOString().slice(0, 10)}
-            className="bg-gray-900 border border-gray-800 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+            className="bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
           />
-          <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
             Filtrar
           </button>
         </form>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-gray-500 border-b border-gray-800">
+            <tr className="text-gray-500 bg-gray-50 border-b border-gray-200">
               <th className="text-left px-4 py-3 font-medium">#</th>
               <th className="text-left px-4 py-3 font-medium">Horário</th>
               <th className="text-left px-4 py-3 font-medium">Cliente</th>
@@ -66,34 +66,34 @@ export default async function VendasPage({
               <th className="text-center px-4 py-3 font-medium">Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800">
+          <tbody className="divide-y divide-gray-100">
             {(vendas ?? []).map(v => (
-              <tr key={v.id} className="text-gray-300 hover:bg-gray-800/40 transition-colors">
-                <td className="px-4 py-2.5 text-gray-500 font-mono">{v.numero}</td>
+              <tr key={v.id} className="text-gray-600 hover:bg-gray-50 transition-colors">
+                <td className="px-4 py-2.5 text-gray-400 font-mono">{v.numero}</td>
                 <td className="px-4 py-2.5 text-gray-400 text-xs">
                   {new Date(v.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </td>
-                <td className="px-4 py-2.5 text-white">{(v.clientes as unknown as { nome: string } | null)?.nome ?? 'Consumidor'}</td>
+                <td className="px-4 py-2.5 text-gray-900">{(v.clientes as unknown as { nome: string } | null)?.nome ?? 'Consumidor'}</td>
                 <td className="px-4 py-2.5 text-right text-gray-400">
                   {(v.desconto ?? 0) > 0
                     ? (v.desconto ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
                     : '—'}
                 </td>
-                <td className="px-4 py-2.5 text-right text-white font-medium">
+                <td className="px-4 py-2.5 text-right text-gray-900 font-medium">
                   {(v.total ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </td>
                 <td className="px-4 py-2.5 text-center">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    v.status === 'concluida' ? 'bg-green-500/20 text-green-400' :
-                    v.status === 'cancelada' ? 'bg-red-500/20 text-red-400' :
-                    'bg-yellow-500/20 text-yellow-400'
+                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                    v.status === 'concluida' ? 'bg-green-100 text-green-700 border-green-200' :
+                    v.status === 'cancelada' ? 'bg-red-100 text-red-600 border-red-200' :
+                    'bg-yellow-100 text-yellow-700 border-yellow-200'
                   }`}>{v.status}</span>
                 </td>
               </tr>
             ))}
             {(!vendas || vendas.length === 0) && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-600">
+                <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
                   Nenhuma venda nesta data.
                 </td>
               </tr>
@@ -102,11 +102,11 @@ export default async function VendasPage({
         </table>
 
         {totalPaginas > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-800">
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
             <p className="text-gray-500 text-xs">Página {pg} de {totalPaginas}</p>
             <div className="flex gap-2">
-              {pg > 1 && <a href={`?data=${dataFiltro}&pagina=${pg - 1}`} className="text-xs px-3 py-1.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700">← Anterior</a>}
-              {pg < totalPaginas && <a href={`?data=${dataFiltro}&pagina=${pg + 1}`} className="text-xs px-3 py-1.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700">Próxima →</a>}
+              {pg > 1 && <a href={`?data=${dataFiltro}&pagina=${pg - 1}`} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">← Anterior</a>}
+              {pg < totalPaginas && <a href={`?data=${dataFiltro}&pagina=${pg + 1}`} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">Próxima →</a>}
             </div>
           </div>
         )}

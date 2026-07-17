@@ -32,7 +32,7 @@ export default async function ClientesPage({
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-white text-xl font-semibold">Clientes</h1>
+          <h1 className="text-gray-900 text-xl font-semibold">Clientes</h1>
           <p className="text-gray-500 text-sm mt-0.5">{count?.toLocaleString('pt-BR')} clientes cadastrados</p>
         </div>
       </div>
@@ -42,17 +42,17 @@ export default async function ClientesPage({
           name="q"
           defaultValue={q}
           placeholder="Buscar por nome..."
-          className="bg-gray-900 border border-gray-800 text-white rounded-lg px-4 py-2 text-sm w-72 focus:outline-none focus:border-blue-500 placeholder-gray-600"
+          className="bg-white border border-gray-300 text-gray-800 rounded-lg px-4 py-2 text-sm w-72 focus:outline-none focus:border-blue-500 placeholder-gray-400"
         />
-        <button type="submit" className="ml-2 bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+        <button type="submit" className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
           Buscar
         </button>
       </form>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-gray-500 border-b border-gray-800">
+            <tr className="text-gray-500 bg-gray-50 border-b border-gray-200">
               <th className="text-left px-4 py-3 font-medium">Nome</th>
               <th className="text-left px-4 py-3 font-medium">CPF/CNPJ</th>
               <th className="text-left px-4 py-3 font-medium">Telefone</th>
@@ -62,30 +62,30 @@ export default async function ClientesPage({
               <th className="text-center px-4 py-3 font-medium">Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800">
+          <tbody className="divide-y divide-gray-100">
             {(clientes ?? []).map(c => (
-              <tr key={c.id} className="text-gray-300 hover:bg-gray-800/40 transition-colors">
-                <td className="px-4 py-2.5 text-white font-medium">
-                  <Link href={`/dashboard/clientes/${c.id}`} className="hover:text-blue-400 transition-colors">{c.nome}</Link>
+              <tr key={c.id} className="text-gray-600 hover:bg-gray-50 transition-colors">
+                <td className="px-4 py-2.5 text-gray-900 font-medium">
+                  <Link href={`/dashboard/clientes/${c.id}`} className="hover:text-blue-600 transition-colors">{c.nome}</Link>
                 </td>
-                <td className="px-4 py-2.5 text-gray-500 font-mono text-xs">{c.cpf_cnpj ?? '—'}</td>
+                <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{c.cpf_cnpj ?? '—'}</td>
                 <td className="px-4 py-2.5 text-gray-400">{c.telefone ?? '—'}</td>
                 <td className="px-4 py-2.5 text-gray-400">{c.cidade ? `${c.cidade}/${c.estado}` : '—'}</td>
-                <td className="px-4 py-2.5 text-right text-green-400">
+                <td className="px-4 py-2.5 text-right text-emerald-600">
                   {(c.saldo_credito ?? 0) > 0
                     ? (c.saldo_credito ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
                     : '—'}
                 </td>
-                <td className="px-4 py-2.5 text-right text-red-400">
+                <td className="px-4 py-2.5 text-right text-red-600">
                   {(c.saldo_devedor ?? 0) > 0
                     ? (c.saldo_devedor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
                     : '—'}
                 </td>
                 <td className="px-4 py-2.5 text-center">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    c.status_credito === 'liberado' ? 'bg-green-500/20 text-green-400' :
-                    c.status_credito === 'bloqueado' ? 'bg-red-500/20 text-red-400' :
-                    'bg-yellow-500/20 text-yellow-400'
+                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                    c.status_credito === 'liberado' ? 'bg-green-100 text-green-700 border-green-200' :
+                    c.status_credito === 'bloqueado' ? 'bg-red-100 text-red-600 border-red-200' :
+                    'bg-yellow-100 text-yellow-700 border-yellow-200'
                   }`}>
                     {c.status_credito ?? 'liberado'}
                   </span>
@@ -96,11 +96,11 @@ export default async function ClientesPage({
         </table>
 
         {totalPaginas > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-800">
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
             <p className="text-gray-500 text-xs">Página {pg} de {totalPaginas}</p>
             <div className="flex gap-2">
-              {pg > 1 && <a href={`?q=${q}&pagina=${pg - 1}`} className="text-xs px-3 py-1.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700">← Anterior</a>}
-              {pg < totalPaginas && <a href={`?q=${q}&pagina=${pg + 1}`} className="text-xs px-3 py-1.5 bg-gray-800 text-gray-300 rounded-lg hover:bg-gray-700">Próxima →</a>}
+              {pg > 1 && <a href={`?q=${q}&pagina=${pg - 1}`} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">← Anterior</a>}
+              {pg < totalPaginas && <a href={`?q=${q}&pagina=${pg + 1}`} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">Próxima →</a>}
             </div>
           </div>
         )}
