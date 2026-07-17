@@ -481,24 +481,25 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         }).eq('id', clienteSelecionado.id)
       }
 
-      // Crédito gerado por devolução maior que compra
+      // Crédito gerado por devolução maior que compra — colunas alinhadas
+      // com o schema real de creditos_cliente (o mesmo usado em "Novo
+      // Crédito" na tela Créditos de Clientes). O schema antigo usado aqui
+      // antes (cliente_nome, saldo_atual, status:'ativo', id como string
+      // não-UUID) não existe mais na tabela e o insert falhava sem avisar.
       if (valorCredito > 0 && clienteSelecionado) {
-        const credId = uid()
-        await sb.from('creditos_cliente').insert({
-          id: credId,
+        const { error: erroCredito } = await sb.from('creditos_cliente').insert({
           empresa_id: empresaId,
           cliente_id: clienteSelecionado.id,
-          cliente_nome: clienteSelecionado.nome,
-          cliente_telefone: clienteSelecionado.telefone,
-          venda_origem_id: venda.id,
           valor_original: valorCredito,
-          saldo_atual: valorCredito,
-          status: 'ativo',
-          origem: 'devolucao_pdv',
+          valor_utilizado: 0,
+          origem: 'devolucao',
+          origem_id: venda.id,
+          descricao: venda.numero ? `Devolução no PDV — venda #${venda.numero}` : 'Devolução no PDV',
+          status: 'disponivel',
           observacao: `Crédito gerado por devolução em ${new Date().toLocaleString('pt-BR')}`,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          operador_nome: operadorNome,
         })
+        if (erroCredito) throw erroCredito
         await sb.from('clientes').update({
           saldo_credito: (clienteSelecionado.saldo_credito ?? 0) + valorCredito,
         }).eq('id', clienteSelecionado.id)
