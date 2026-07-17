@@ -80,6 +80,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [enviandoMassaPreco, setEnviandoMassaPreco] = useState(false)
   const [resumoMassaPreco, setResumoMassaPreco] = useState('')
 
+  // Pausar/ativar em massa na Shopee
+  const [pausandoAtivando, setPausandoAtivando] = useState(false)
+  const [resumoPausarAtivar, setResumoPausarAtivar] = useState('')
+
   function toggleSelecionado(id: string) {
     setSelecionados(prev => {
       const novo = new Set(prev)
@@ -260,6 +264,37 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setEnviandoMassaPreco(false)
   }
 
+  async function pausarOuAtivarSelecionados(acao: 'pausar' | 'ativar') {
+    const ids = filtrados.filter(a => selecionados.has(a.id)).map(a => a.id)
+    if (ids.length === 0) return
+    const verbo = acao === 'pausar' ? 'pausar' : 'ativar'
+    if (!confirm(`${verbo === 'pausar' ? 'Pausar' : 'Ativar'} ${ids.length} anúncio(s) na Shopee? Isso muda a visibilidade pros clientes imediatamente.`)) return
+
+    setPausandoAtivando(true); setResumoPausarAtivar('')
+    try {
+      const resp = await fetch('/api/marketplace/shopee/pausar-ativar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: canal.id, anuncioIds: ids, acao }),
+      })
+      const data = await resp.json()
+      if (data.atualizados?.length > 0) {
+        const novoStatus = acao === 'pausar' ? 'pausado' : 'ativo'
+        setAnuncios(prev => prev.map(a => data.atualizados.includes(a.id) ? { ...a, status: novoStatus } : a))
+      }
+      const partes = [`${data.atualizados?.length ?? 0} ${verbo === 'pausar' ? 'pausado(s)' : 'ativado(s)'}`]
+      if (data.falhasCount > 0) partes.push(`${data.falhasCount} falha(s)${data.erros?.[0] ? `: ${data.erros[0]}` : ''}`)
+      if (data.semIdExterno > 0) partes.push(`${data.semIdExterno} ignorado(s) (sem ID externo)`)
+      if (!data.ok && !data.atualizados) partes.push(data.erro ?? 'Falha ao atualizar')
+      setResumoPausarAtivar(partes.join(' · '))
+      setSelecionados(new Set())
+    } catch (e: any) {
+      setResumoPausarAtivar(`Erro: ${e.message ?? 'falha ao atualizar status'}`)
+    } finally {
+      setPausandoAtivando(false)
+    }
+  }
+
   function alternarFaceta(key: string) {
     setFacetas(prev => {
       const novo = new Set(prev)
@@ -376,7 +411,36 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setAnuncios(prev => prev.filter(a => a.id !== id))
   }
 
+  // Trocar entre ativo/pausado num anúncio Shopee já sincronizado precisa
+  // refletir na Shopee de verdade — esse dropdown historicamente só mudava
+  // a coluna local (nada avisava a Shopee), então o anúncio continuava do
+  // jeito que estava lá mesmo depois de "pausar" aqui. rascunho/encerrado
+  // não têm equivalente em unlist_item, continuam só locais.
   async function alterarStatus(id: string, novoStatus: string) {
+    const anuncio = anuncios.find(a => a.id === id)
+    const ehTogglePausarAtivar = (novoStatus === 'pausado' || novoStatus === 'ativo')
+      && (anuncio?.status === 'pausado' || anuncio?.status === 'ativo')
+
+    if (canal.plataforma === 'shopee' && ehTogglePausarAtivar && anuncio?.id_externo) {
+      const acao = novoStatus === 'pausado' ? 'pausar' : 'ativar'
+      try {
+        const resp = await fetch('/api/marketplace/shopee/pausar-ativar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canal.id, anuncioIds: [id], acao }),
+        })
+        const data = await resp.json()
+        if (data.atualizados?.length > 0) {
+          setAnuncios(prev => prev.map(a => a.id === id ? { ...a, status: novoStatus } : a))
+        } else {
+          alert(`Não foi possível ${acao} na Shopee: ${data.erros?.[0] ?? data.erro ?? 'erro desconhecido'}`)
+        }
+      } catch (e: any) {
+        alert(`Erro ao ${acao} na Shopee: ${e.message ?? 'falha de rede'}`)
+      }
+      return
+    }
+
     const sb = createClient()
     await sb.from('marketplace_anuncios').update({ status: novoStatus }).eq('id', id)
     setAnuncios(prev => prev.map(a => a.id === id ? { ...a, status: novoStatus } : a))
@@ -519,6 +583,18 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               Gerenciar regras
             </a>
           )}
+          {canal.plataforma === 'shopee' && (
+            <button onClick={() => pausarOuAtivarSelecionados('pausar')} disabled={pausandoAtivando}
+              className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+              Pausar
+            </button>
+          )}
+          {canal.plataforma === 'shopee' && (
+            <button onClick={() => pausarOuAtivarSelecionados('ativar')} disabled={pausandoAtivando}
+              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+              Ativar
+            </button>
+          )}
           <button onClick={() => setSelecionados(new Set())} className="text-xs text-purple-400 hover:text-purple-600 ml-auto">✕ limpar seleção</button>
         </div>
       )}
@@ -527,6 +603,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         <div className="bg-orange-50 border border-orange-200 text-orange-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
           <span>{resumoMassaPreco}</span>
           <button onClick={() => setResumoMassaPreco('')} className="text-orange-400 hover:text-orange-600">✕</button>
+        </div>
+      )}
+
+      {resumoPausarAtivar && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>{resumoPausarAtivar}</span>
+          <button onClick={() => setResumoPausarAtivar('')} className="text-yellow-500 hover:text-yellow-700">✕</button>
         </div>
       )}
 

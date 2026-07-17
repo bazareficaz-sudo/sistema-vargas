@@ -1,4 +1,5 @@
 import { shopeePost, getIntegracaoCredentials } from './client'
+import { sleep, THROTTLE_MS } from './catalog'
 import { ShopeeApiError, type ShopeeChannel } from './types'
 
 // Limitações conhecidas (documentação oficial inacessível durante a
@@ -60,4 +61,39 @@ export async function pushPrecoEstoque(ctx: CallCtx, itemId: number, alvos: Alvo
   }
 
   return resultado
+}
+
+export type ResultadoUnlist = { itemId: number; ok: boolean; erro?: string }
+
+const UNLIST_BATCH_SIZE = 50
+
+// Liga/desliga o anúncio inteiro na Shopee (pausar = unlist:true, ativar =
+// unlist:false) — diferente de preço/estoque, é por item, não por variação.
+// Mesmo nível de confiança do resto deste arquivo (shape confirmado por
+// fonte secundária, não pela doc oficial).
+export async function unlistItems(ctx: CallCtx, itemIds: number[], unlist: boolean): Promise<ResultadoUnlist[]> {
+  const callOptions = await callOpts(ctx)
+  const resultados: ResultadoUnlist[] = []
+
+  for (let i = 0; i < itemIds.length; i += UNLIST_BATCH_SIZE) {
+    const lote = itemIds.slice(i, i + UNLIST_BATCH_SIZE)
+    try {
+      const data = await shopeePost('/api/v2/product/unlist_item', {
+        item_list: lote.map(item_id => ({ item_id, unlist })),
+      }, callOptions)
+      const falhas = new Map<number, string>(
+        (data?.response?.failure_list ?? []).map((f: any) => [Number(f.item_id), f.failed_reason ?? 'Falha ao atualizar status'])
+      )
+      for (const itemId of lote) {
+        const erro = falhas.get(itemId)
+        resultados.push(erro ? { itemId, ok: false, erro } : { itemId, ok: true })
+      }
+    } catch (e: any) {
+      const erro = e instanceof ShopeeApiError ? e.message : (e?.message ?? 'Erro ao atualizar status')
+      for (const itemId of lote) resultados.push({ itemId, ok: false, erro })
+    }
+    if (i + UNLIST_BATCH_SIZE < itemIds.length) await sleep(THROTTLE_MS)
+  }
+
+  return resultados
 }
