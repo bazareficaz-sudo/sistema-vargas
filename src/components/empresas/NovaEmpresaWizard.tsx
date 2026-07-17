@@ -710,7 +710,17 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
               </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
-                <p className="text-xs font-semibold text-slate-600">Emissão de notas — credenciais e certificado</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-600">Emissão de notas — credenciais e certificado</p>
+                  <span className="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-full px-2 py-0.5">
+                    Provedor: <strong className="text-slate-700">
+                      {editando
+                        ? (empresaEditando?.nfe_config?.provider === 'brasilnfe' ? 'Brasil NFe' : 'Focus NFe')
+                        : 'definido automaticamente ao salvar'}
+                    </strong>
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 -mt-2">O provedor é definido pelo administrador do sistema, não é escolhido aqui — só o token e o certificado.</p>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Token — Produção">
                     <input type="password" value={form.token_producao} onChange={e => set('token_producao', e.target.value)}

@@ -1,25 +1,30 @@
 import type { FiscalProvider } from '../provider'
+import type { BrasilNFeCredentials } from './client'
+import * as emissao from './emissao'
 
-// Stub — por decisão explícita do usuário, sem documentação/credenciais de
-// teste da Brasil NFe em mãos ainda. Implementação real fica pra quando
-// houver isso, evitando inventar endpoints/payloads sem fonte confiável
-// (mesmo princípio já aplicado às outras integrações desta sessão).
-function naoImplementado(): never {
-  throw new Error('BrasilNFeProvider ainda não implementado — aguardando documentação/credenciais de teste da Brasil NFe')
+// Distribuição DFe / manifesto do destinatário: não encontramos nenhum
+// endpoint documentado pra isso na Brasil NFe (nem na doc em prosa nem nos
+// módulos do SDK oficial — NotaFiscal/Eventos/Consultas/Arquivos/Empresa,
+// nenhum cobre "documentos recebidos"). Diferente de emissão, aqui não é
+// uma questão de confiança baixa — é ausência confirmada da capacidade.
+// Empresa que usa Brasil NFe continua precisando da Focus (ou config
+// separada) pro fluxo de entrada/XML de fornecedor.
+function semDistribuicao(): never {
+  throw new Error('Brasil NFe não oferece distribuição DFe/manifesto do destinatário — use a Focus NFe para o fluxo de entrada (XML de fornecedor).')
 }
 
-export function createBrasilNFeProvider(): FiscalProvider {
+export function createBrasilNFeProvider(creds: BrasilNFeCredentials): FiscalProvider {
   return {
     nome: 'brasilnfe',
     distribuicao: {
-      listarDfe: async () => naoImplementado(),
-      manifestar: async () => naoImplementado(),
-      baixarXml: async () => naoImplementado(),
+      listarDfe: async () => semDistribuicao(),
+      manifestar: async () => semDistribuicao(),
+      baixarXml: async () => semDistribuicao(),
     },
     emissao: {
-      emitirNFCe: async () => naoImplementado(),
-      consultarNFCe: async () => naoImplementado(),
-      cancelarNFCe: async () => naoImplementado(),
+      emitirNFCe: (input) => emissao.emitirNFCe(creds, input),
+      consultarNFCe: () => emissao.consultarNFCe(),
+      cancelarNFCe: (alvo, justificativa) => emissao.cancelarNFCe(creds, alvo.chave, alvo.protocolo, justificativa),
     },
   }
 }

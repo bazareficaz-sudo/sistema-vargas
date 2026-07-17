@@ -15,6 +15,11 @@ export interface FiscalProvider {
   emissao: {
     emitirNFCe(input: EmissaoNFCeInput): Promise<EmissaoNFCeResultado>
     consultarNFCe(referencia: string): Promise<EmissaoNFCeResultado>
-    cancelarNFCe(referencia: string, justificativa: string): Promise<{ ok: boolean; erro?: string }>
+    // referencia = nosso id (usado pela Focus, que identifica a nota pela
+    // referência que você mandou na emissão); chave/protocolo = usados pela
+    // Brasil NFe, que pede a chave de acesso e o número de protocolo da
+    // SEFAZ direto no payload de cancelamento, não uma referência nossa.
+    // Cada provider usa só o que precisa.
+    cancelarNFCe(alvo: { referencia: string; chave?: string; protocolo?: string }, justificativa: string): Promise<{ ok: boolean; erro?: string }>
   }
 }

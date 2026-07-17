@@ -20,7 +20,7 @@ export async function POST(req: Request) {
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 
-  const { data: venda } = await sb.from('vendas').select('id, nfce_status, nfce_chave, created_at').eq('id', vendaId).eq('empresa_id', empresaId).single()
+  const { data: venda } = await sb.from('vendas').select('id, nfce_status, nfce_chave, nfce_protocolo, created_at').eq('id', vendaId).eq('empresa_id', empresaId).single()
   if (!venda) return NextResponse.json({ ok: false, erro: 'Venda não encontrada' }, { status: 404 })
   if (venda.nfce_status !== 'autorizada') {
     return NextResponse.json({ ok: false, erro: 'Esta venda não tem uma NFC-e autorizada para cancelar' }, { status: 400 })
@@ -36,7 +36,10 @@ export async function POST(req: Request) {
 
   try {
     const provider = await getFiscalProvider(sb, empresaId)
-    const resultado = await provider.emissao.cancelarNFCe(vendaId, justificativa.trim())
+    const resultado = await provider.emissao.cancelarNFCe(
+      { referencia: vendaId, chave: venda.nfce_chave, protocolo: venda.nfce_protocolo },
+      justificativa.trim()
+    )
 
     if (!resultado.ok) {
       return NextResponse.json({ ok: false, erro: resultado.erro ?? 'Erro ao cancelar NFC-e' }, { status: 400 })

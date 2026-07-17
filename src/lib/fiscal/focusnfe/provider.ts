@@ -14,7 +14,7 @@ export function createFocusNFeProvider(creds: FocusCredentials): FiscalProvider 
     emissao: {
       emitirNFCe: (input) => emissao.emitirNFCe(creds, input),
       consultarNFCe: (referencia) => emissao.consultarNFCe(creds, referencia),
-      cancelarNFCe: (referencia, justificativa) => emissao.cancelarNFCe(creds, referencia, justificativa),
+      cancelarNFCe: (alvo, justificativa) => emissao.cancelarNFCe(creds, alvo.referencia, justificativa),
     },
   }
 }
