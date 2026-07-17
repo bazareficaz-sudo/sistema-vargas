@@ -32,16 +32,27 @@ type Empresa = {
   grupos_empresariais: { id: string; nome: string } | null
   empresa_config_fiscal: ConfigFiscal | null
   empresa_config_comercial: { id: string } | null
-  empresa_config_estoque: { id: string } | null
+  empresa_config_estoque: {
+    id: string
+    permite_multiplos_depositos: boolean | null
+    reservar_em_orcamento: boolean | null
+    reservar_em_pedido: boolean | null
+    baixar_estoque_em: string | null
+    tipo_custo: string | null
+    controlar_lote: boolean | null
+    deposito_devolucao_id: string | null
+  } | null
 }
 
 type Grupo = { id: string; nome: string }
+type Deposito = { id: string; nome: string; empresa_id: string }
 
 type Props = {
   empresas: Empresa[]
   grupos: Grupo[]
   empresaAtualId: string
   depositosPorEmpresa: string[]
+  depositos: Deposito[]
   role: string
 }
 
@@ -217,6 +228,7 @@ export default function EmpresasClient({
   grupos,
   empresaAtualId,
   depositosPorEmpresa,
+  depositos,
   role,
 }: Props) {
   const router = useRouter()
@@ -262,6 +274,7 @@ export default function EmpresasClient({
         <NovaEmpresaWizard
           grupos={grupos}
           empresaEditando={editando}
+          depositos={editando ? depositos.filter(d => d.empresa_id === editando.id) : []}
           onClose={() => { setWizardAberto(false); setEditando(null) }}
           onSaved={onSaved}
         />

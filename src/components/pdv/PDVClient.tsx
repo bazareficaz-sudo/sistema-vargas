@@ -106,6 +106,14 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
   // Modais de devolução
   const [modalTroca, setModalTroca] = useState(false)
   const [modalCredito, setModalCredito] = useState(false)
+  const [depositoDevolucaoId, setDepositoDevolucaoId] = useState<string | null>(null)
+
+  useEffect(() => {
+    let ativo = true
+    sb.from('empresa_config_estoque').select('deposito_devolucao_id').eq('empresa_id', empresaId).maybeSingle()
+      .then(({ data }) => { if (ativo) setDepositoDevolucaoId(data?.deposito_devolucao_id ?? null) })
+    return () => { ativo = false }
+  }, [empresaId])
 
   // Fiado
   const [fiadoParcelas, setFiadoParcelas]   = useState('1')
@@ -405,6 +413,21 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         } else {
           // Entrada por devolução (qty é negativa, usar abs)
           await sb.from('produtos').update({ estoque: p.estoque + Math.abs(item.quantidade) }).eq('id', item.produto_id)
+          if (depositoDevolucaoId) {
+            const { data: pe } = await sb.from('produto_estoque').select('quantidade')
+              .eq('deposito_id', depositoDevolucaoId).eq('produto_id', item.produto_id).maybeSingle()
+            if (pe) {
+              await sb.from('produto_estoque').update({
+                quantidade: Number(pe.quantidade) + Math.abs(item.quantidade),
+                ultima_movimentacao: new Date().toISOString(),
+              }).eq('deposito_id', depositoDevolucaoId).eq('produto_id', item.produto_id)
+            } else {
+              await sb.from('produto_estoque').insert({
+                empresa_id: empresaId, deposito_id: depositoDevolucaoId, produto_id: item.produto_id,
+                quantidade: Math.abs(item.quantidade),
+              })
+            }
+          }
         }
       }
 

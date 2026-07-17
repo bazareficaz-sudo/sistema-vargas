@@ -53,11 +53,18 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
     async function carregar() {
       const sb = createClient()
 
-      const [estoqueRes, vendasRes, entradasRes, movRes] = await Promise.all([
+      const vendaItensSelect = 'id, quantidade, tipo, created_at, vendas(created_at, numero, vendedor_nome, operador_nome)'
+
+      const [estoqueRes, vendasRes, devolucoesRes, entradasRes, movRes] = await Promise.all([
         sb.from('produto_estoque').select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome)')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id),
-        sb.from('venda_itens').select('id, quantidade, tipo, created_at, vendas(created_at, numero, vendedor_nome, operador_nome)')
-          .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(100),
+        sb.from('venda_itens').select(vendaItensSelect)
+          .eq('produto_id', produto.id).eq('tipo', 'venda').order('created_at', { ascending: false }).limit(100),
+        // Consulta separada da de vendas — se não fosse assim, um SKU com muitas
+        // vendas empurraria as devoluções pra fora do .limit(100) e elas
+        // nunca apareceriam na aba "Devoluções", mesmo existindo.
+        sb.from('venda_itens').select(vendaItensSelect)
+          .eq('produto_id', produto.id).eq('tipo', 'devolucao').order('created_at', { ascending: false }).limit(100),
         sb.from('entrada_itens').select('id, quantidade, entradas(numero_entrada, numero_nf, data_entrada, fornecedores(razao_social, nome_fantasia))')
           .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(100),
         sb.from('estoque_movimentacoes').select('id, tipo, quantidade, motivo, observacao, created_at')
@@ -75,7 +82,7 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
         localizacao: r.localizacao,
       })))
 
-      const movVendas: Movimento[] = (vendasRes.data ?? []).map((v: any) => {
+      function mapVendaItem(v: any): Movimento {
         const data = v.vendas?.created_at ?? v.created_at
         const quem = v.vendas?.vendedor_nome || v.vendas?.operador_nome || ''
         const numero = v.vendas?.numero ? `#${v.vendas.numero}` : ''
@@ -86,7 +93,8 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
           quantidade: Number(v.quantidade) || 0,
           detalhe: [numero, quem].filter(Boolean).join(' · ') || (v.tipo === 'devolucao' ? 'Devolução no PDV' : 'Venda no PDV'),
         }
-      })
+      }
+      const movVendas: Movimento[] = [...(vendasRes.data ?? []), ...(devolucoesRes.data ?? [])].map(mapVendaItem)
 
       const movEntradas: Movimento[] = (entradasRes.data ?? []).map((e: any) => {
         const ent = e.entradas

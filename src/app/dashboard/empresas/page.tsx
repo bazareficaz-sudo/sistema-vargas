@@ -24,7 +24,7 @@ export default async function EmpresasPage() {
       grupos_empresariais(id, nome),
       empresa_config_fiscal(ambiente, certificado_validade, serie_nfe, proximo_nfe),
       empresa_config_comercial(id, limite_desconto, permite_estoque_negativo),
-      empresa_config_estoque(id, baixar_estoque_em, tipo_custo)
+      empresa_config_estoque(id, permite_multiplos_depositos, reservar_em_orcamento, reservar_em_pedido, baixar_estoque_em, tipo_custo, controlar_lote, deposito_devolucao_id)
     `)
     .order('empresa_principal', { ascending: false })
     .order('nome')
@@ -37,7 +37,9 @@ export default async function EmpresasPage() {
 
   const { data: depositos } = await supabase
     .from('depositos')
-    .select('empresa_id')
+    .select('id, nome, empresa_id')
+    .eq('ativo', true)
+    .order('nome')
 
   const depositosPorEmpresa = new Set((depositos ?? []).map(d => d.empresa_id))
 
@@ -47,6 +49,7 @@ export default async function EmpresasPage() {
       grupos={grupos ?? []}
       empresaAtualId={empresaAtualId}
       depositosPorEmpresa={[...depositosPorEmpresa]}
+      depositos={depositos ?? []}
       role={profile?.role ?? 'gerente'}
     />
   )

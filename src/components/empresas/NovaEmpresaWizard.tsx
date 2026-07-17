@@ -66,6 +66,7 @@ type WizardForm = {
   baixar_estoque_em: string
   tipo_custo: string
   controlar_lote: boolean
+  deposito_devolucao_id: string
   // Etapa 7 — Compartilhamento
   compartilhar_produtos: boolean
   compartilhar_clientes: boolean
@@ -92,7 +93,7 @@ const FORM_INICIAL: WizardForm = {
   permite_estoque_negativo: false, permite_fiado: false, permite_credito: true,
   permite_multiplos_depositos: false, reservar_em_orcamento: false,
   reservar_em_pedido: true, baixar_estoque_em: 'faturamento',
-  tipo_custo: 'ultimo', controlar_lote: false,
+  tipo_custo: 'ultimo', controlar_lote: false, deposito_devolucao_id: '',
   compartilhar_produtos: false, compartilhar_clientes: false,
   compartilhar_fornecedores: false, compartilhar_marcas: false,
   compartilhar_categorias: false, compartilhar_tabelas_preco: false,
@@ -139,14 +140,17 @@ function Field({ label, children, half }: { label: string; children: React.React
 const INPUT = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-400 bg-white placeholder-slate-400'
 const SELECT = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-400 bg-white'
 
+type Deposito = { id: string; nome: string }
+
 type Props = {
   grupos: Grupo[]
   empresaEditando: any | null
+  depositos?: Deposito[]
   onClose: () => void
   onSaved: () => void
 }
 
-export default function NovaEmpresaWizard({ grupos, empresaEditando, onClose, onSaved }: Props) {
+export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos = [], onClose, onSaved }: Props) {
   const [etapa, setEtapa] = useState(1)
   const [form, setForm] = useState<WizardForm>(FORM_INICIAL)
   const [salvando, setSalvando] = useState(false)
@@ -189,6 +193,13 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, onClose, on
         contador: empresaEditando.contador ?? '',
         email_contador: empresaEditando.email_contador ?? '',
         telefone_contador: empresaEditando.telefone_contador ?? '',
+        permite_multiplos_depositos: empresaEditando.empresa_config_estoque?.permite_multiplos_depositos ?? false,
+        reservar_em_orcamento: empresaEditando.empresa_config_estoque?.reservar_em_orcamento ?? false,
+        reservar_em_pedido: empresaEditando.empresa_config_estoque?.reservar_em_pedido ?? true,
+        baixar_estoque_em: empresaEditando.empresa_config_estoque?.baixar_estoque_em ?? 'faturamento',
+        tipo_custo: empresaEditando.empresa_config_estoque?.tipo_custo ?? 'ultimo',
+        controlar_lote: empresaEditando.empresa_config_estoque?.controlar_lote ?? false,
+        deposito_devolucao_id: empresaEditando.empresa_config_estoque?.deposito_devolucao_id ?? '',
       })
     } else {
       setForm(FORM_INICIAL)
@@ -314,6 +325,7 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, onClose, on
         baixar_estoque_em: form.baixar_estoque_em,
         tipo_custo: form.tipo_custo,
         controlar_lote: form.controlar_lote,
+        deposito_devolucao_id: form.deposito_devolucao_id || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id' })
 
@@ -330,14 +342,19 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, onClose, on
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id' })
 
-      // Se nova empresa: criar depósito principal automaticamente
+      // Se nova empresa: criar depósito principal automaticamente — só se
+      // ela ainda não tiver nenhum (evita duplicar depósito com
+      // principal=true, o que não tem trava única no banco).
       if (!editando) {
-        await sb.from('depositos').insert({
-          empresa_id: empresaId,
-          nome: 'Depósito Principal',
-          principal: true,
-          ativo: true,
-        })
+        const { data: jaTemPrincipal } = await sb.from('depositos').select('id').eq('empresa_id', empresaId).eq('principal', true).limit(1).maybeSingle()
+        if (!jaTemPrincipal) {
+          await sb.from('depositos').insert({
+            empresa_id: empresaId,
+            nome: 'Depósito Principal',
+            principal: true,
+            ativo: true,
+          })
+        }
       }
 
       onSaved()
@@ -746,6 +763,14 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, onClose, on
                   </select>
                 </Field>
               </div>
+
+              <Field label="Depósito para devoluções de venda">
+                <select value={form.deposito_devolucao_id} onChange={e => set('deposito_devolucao_id', e.target.value)} className={SELECT} disabled={depositos.length === 0}>
+                  <option value="">{depositos.length === 0 ? 'Nenhum depósito cadastrado ainda' : 'Selecione um depósito'}</option>
+                  {depositos.map(d => <option key={d.id} value={d.id}>{d.nome}</option>)}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">Quando uma devolução é feita no PDV, o estoque devolvido é creditado neste depósito.</p>
+              </Field>
 
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
                 <p className="font-medium mb-1">💡 Criação automática</p>
