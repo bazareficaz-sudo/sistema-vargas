@@ -1,8 +1,19 @@
-// Proxy para API FocusNFe — Manifesto do Destinatário
+// Proxy para distribuição DFe / manifesto do destinatário — hoje delega
+// pro FiscalProvider (Focus NFe é o único funcional). Contrato de
+// request/response mantido idêntico ao que existia antes desta camada
+// existir, pra não quebrar o único consumidor (EntradasXmlClient.tsx).
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getFiscalProvider } from '@/lib/fiscal/factory'
+import { FiscalProviderError } from '@/lib/fiscal/types'
+import type { TipoManifesto } from '@/lib/fiscal/types'
 
-const FOCUSNFE_BASE = 'https://api.focusnfe.com.br'
+const ACOES_MANIFESTO: Record<string, TipoManifesto> = {
+  ciencia: 'ciencia',
+  confirmacao: 'confirmacao',
+  desconhecimento: 'desconhecimento',
+  nao_realizada: 'nao_realizada',
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,66 +27,33 @@ export async function POST(req: NextRequest) {
 
     const { acao, chave, ultimo_nsu, justificativa } = await req.json()
 
-    const { data: config } = await sb.from('nfe_config').select('*').eq('empresa_id', empresaId).single()
-    if (!config?.focusnfe_token) {
-      return NextResponse.json({ error: 'Token FocusNFe não configurado. Configure em Configurações > Integrações.' }, { status: 400 })
+    const provider = await getFiscalProvider(sb, empresaId)
+
+    if (acao === 'listar') {
+      const resultado = await provider.distribuicao.listarDfe(ultimo_nsu ?? '0')
+      if (resultado.ultimoNsu) {
+        await sb.from('nfe_config').update({ ultimo_nsu: resultado.ultimoNsu, updated_at: new Date().toISOString() }).eq('empresa_id', empresaId)
+      }
+      return NextResponse.json(resultado.raw)
     }
 
-    const token = config.focusnfe_token
-    const auth  = 'Basic ' + Buffer.from(token + ':').toString('base64')
-    const headers = { 'Authorization': auth, 'Content-Type': 'application/json' }
-
-    let url = '', method = 'GET', body: string | undefined
-
-    switch (acao) {
-      case 'listar':
-        url = `${FOCUSNFE_BASE}/v2/distribuicao/dfe?ultimo_nsu=${ultimo_nsu ?? config.ultimo_nsu ?? '0'}`
-        break
-      case 'ciencia':
-        url = `${FOCUSNFE_BASE}/v2/nfe/${chave}/manifesto`
-        method = 'POST'
-        body = JSON.stringify({ tipo: 'ciencia_operacao' })
-        break
-      case 'confirmacao':
-        url = `${FOCUSNFE_BASE}/v2/nfe/${chave}/manifesto`
-        method = 'POST'
-        body = JSON.stringify({ tipo: 'confirmacao_operacao' })
-        break
-      case 'desconhecimento':
-        url = `${FOCUSNFE_BASE}/v2/nfe/${chave}/manifesto`
-        method = 'POST'
-        body = JSON.stringify({ tipo: 'desconhecimento_operacao', justificativa })
-        break
-      case 'nao_realizada':
-        url = `${FOCUSNFE_BASE}/v2/nfe/${chave}/manifesto`
-        method = 'POST'
-        body = JSON.stringify({ tipo: 'operacao_nao_realizada', justificativa })
-        break
-      case 'download_xml':
-        url = `${FOCUSNFE_BASE}/v2/nfe/${chave}.xml`
-        break
-      default:
-        return NextResponse.json({ error: 'Ação inválida' }, { status: 400 })
+    if (acao in ACOES_MANIFESTO) {
+      if (!chave) return NextResponse.json({ error: 'chave ausente' }, { status: 400 })
+      await provider.distribuicao.manifestar(chave, ACOES_MANIFESTO[acao], justificativa)
+      return NextResponse.json({ ok: true })
     }
 
-    const resp = await fetch(url, { method, headers, body })
-    const text = await resp.text()
-
-    // Atualizar NSU após listagem
-    if (acao === 'listar' && resp.ok) {
-      try {
-        const json = JSON.parse(text)
-        if (json.ultimo_nsu) {
-          await sb.from('nfe_config').update({ ultimo_nsu: json.ultimo_nsu, updated_at: new Date().toISOString() }).eq('empresa_id', empresaId)
-        }
-      } catch {}
+    if (acao === 'download_xml') {
+      if (!chave) return NextResponse.json({ error: 'chave ausente' }, { status: 400 })
+      const xml = await provider.distribuicao.baixarXml(chave)
+      return new NextResponse(xml, { status: 200, headers: { 'Content-Type': 'application/xml' } })
     }
 
-    return new NextResponse(text, {
-      status: resp.status,
-      headers: { 'Content-Type': resp.headers.get('Content-Type') ?? 'application/json' },
-    })
+    return NextResponse.json({ error: 'Ação inválida' }, { status: 400 })
   } catch (e: any) {
+    if (e instanceof FiscalProviderError) {
+      return NextResponse.json({ error: e.message }, { status: 400 })
+    }
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }

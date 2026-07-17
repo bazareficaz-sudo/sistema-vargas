@@ -19,7 +19,7 @@ type Produto = {
   categoria: string | null; marca: string | null
   estoque: number; estoque_minimo: number
   ativo: boolean; disponivel_pdv: boolean; permite_fracao: boolean
-  ncm: string | null; tipo: string
+  ncm: string | null; cest?: string | null; tipo: string
   markup?: number | null
   preco_promocional?: number | null
   promocao_inicio?: string | null
@@ -320,6 +320,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       disponivel_pdv: form.disponivel_pdv,
       permite_fracao: form.permite_fracao,
       ncm: form.ncm || null,
+      cest: form.cest || null,
       ibs_cst: form.ibs_cst || null,
       ibs_cclasstrib: form.ibs_cclasstrib || null,
       ibs_aliquota: form.ibs_aliquota ?? null,
@@ -890,6 +891,13 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">NCM</label>
                   <input value={form.ncm ?? ''} onChange={e => campo('ncm', e.target.value)}
+                    placeholder="Obrigatório para emitir NFC-e"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">CEST</label>
+                  <input value={form.cest ?? ''} onChange={e => campo('cest', e.target.value)}
+                    placeholder="Se aplicável (substituição tributária)"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
                 </div>
               </div>

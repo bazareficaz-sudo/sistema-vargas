@@ -37,6 +37,27 @@ const FORMAS = [
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 function uid() { return Math.random().toString(36).slice(2) }
+
+// Emissão fiscal nunca pode travar nem derrubar a venda — timeout curto e
+// captura de erro isolada de quem chama (mesmo padrão de AbortController já
+// usado em src/app/api/cnpj/route.ts).
+async function emitirNfceComTimeout(vendaId: string, ms = 15000): Promise<any> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    const res = await fetch('/api/fiscal/emitir-nfce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vendaId }),
+      signal: controller.signal,
+    })
+    return await res.json()
+  } catch (e: any) {
+    return { ok: false, erro: e?.name === 'AbortError' ? 'Tempo esgotado ao emitir a NFC-e' : (e?.message ?? 'Erro ao emitir NFC-e') }
+  } finally {
+    clearTimeout(timer)
+  }
+}
 function SaudeCard({ label, valor, cor }: { label: string; valor: string; cor?: string }) {
   return (
     <div className="bg-white rounded border border-gray-100 px-3 py-2">
@@ -91,7 +112,9 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
     msg: string; vendaId: string; total: number
     clienteNome: string | null; clienteTelefone: string | null; clienteId: string | null
     itensResumo: string
+    nfce: { status: string; chave?: string; numero?: string; danfeUrl?: string; erro?: string } | null
   } | null>(null)
+  const [emitindoNfce, setEmitindoNfce] = useState(false)
   const [wppTel, setWppTel] = useState('')
   const [wppEnviando, setWppEnviando] = useState(false)
   const [wppStatus, setWppStatus] = useState<'idle' | 'ok' | 'erro'>('idle')
@@ -391,6 +414,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         tem_devolucao: hasDevolucao,
         total_devolucoes: totalDevolucoes,
         credito_gerado: valorCredito,
+        pagamentos: tipoOp === 'troca' ? [] : (isFiado ? [{ forma: 'fiado', valor: total }] : formas.map(f => ({ forma: f.tipo, valor: f.valor }))),
         created_at: new Date().toISOString(),
       }).select().single()
       if (error) throw error
@@ -403,6 +427,22 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         tipo: i.tipo,
       })))
       if (erroItens) throw erroItens
+
+      // Emissão de NFC-e — só pra venda "pura" (sem troca/devolução
+      // misturada), e nunca pode travar nem derrubar a venda em si: a
+      // venda já está salva e é a fonte de verdade comercial, a nota é
+      // um efeito colateral fiscal.
+      let capNfce: { status: string; chave?: string; numero?: string; danfeUrl?: string; erro?: string } | null = null
+      if (operacaoFinal === 'venda') {
+        const resultadoFiscal = await emitirNfceComTimeout(venda.id)
+        capNfce = {
+          status: resultadoFiscal.status ?? (resultadoFiscal.ok ? 'autorizada' : 'erro'),
+          chave: resultadoFiscal.chave,
+          numero: resultadoFiscal.numero,
+          danfeUrl: resultadoFiscal.danfeUrl,
+          erro: resultadoFiscal.ok ? undefined : (resultadoFiscal.erro ?? resultadoFiscal.motivoRejeicao),
+        }
+      }
 
       // Movimentação de estoque
       for (const item of itens) {
@@ -536,11 +576,29 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         clienteTelefone: capClienteTel,
         clienteId: capClienteId,
         itensResumo: resumoItens,
+        nfce: capNfce,
       })
     } catch (e: any) {
       alert('Erro: ' + e.message)
       setSalvando(false)
     }
+  }
+
+  async function tentarEmitirNfceNovamente() {
+    if (!vendaConcluidaModal) return
+    setEmitindoNfce(true)
+    const resultadoFiscal = await emitirNfceComTimeout(vendaConcluidaModal.vendaId)
+    setVendaConcluidaModal(prev => prev && ({
+      ...prev,
+      nfce: {
+        status: resultadoFiscal.status ?? (resultadoFiscal.ok ? 'autorizada' : 'erro'),
+        chave: resultadoFiscal.chave,
+        numero: resultadoFiscal.numero,
+        danfeUrl: resultadoFiscal.danfeUrl,
+        erro: resultadoFiscal.ok ? undefined : (resultadoFiscal.erro ?? resultadoFiscal.motivoRejeicao),
+      },
+    }))
+    setEmitindoNfce(false)
   }
 
   async function enviarComprovantWpp() {
@@ -1358,6 +1416,31 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
                       {vendaConcluidaModal.clienteNome && <p className="text-xs text-gray-500">Cliente: {vendaConcluidaModal.clienteNome}</p>}
                     </div>
                   </div>
+
+                  {vendaConcluidaModal.nfce && (
+                    <div className={`rounded-lg px-3 py-2.5 mb-4 text-sm ${
+                      vendaConcluidaModal.nfce.status === 'autorizada' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                        : 'bg-amber-50 border border-amber-200 text-amber-700'
+                    }`}>
+                      {vendaConcluidaModal.nfce.status === 'autorizada' ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <span>🧾 NFC-e emitida — nº {vendaConcluidaModal.nfce.numero}</span>
+                          {vendaConcluidaModal.nfce.danfeUrl && (
+                            <a href={vendaConcluidaModal.nfce.danfeUrl} target="_blank" rel="noreferrer" className="underline font-medium whitespace-nowrap">Ver DANFE</a>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <span>⚠ NFC-e não emitida{vendaConcluidaModal.nfce.erro ? ` — ${vendaConcluidaModal.nfce.erro}` : ''}</span>
+                          <button onClick={tentarEmitirNfceNovamente} disabled={emitindoNfce}
+                            className="text-amber-800 underline font-medium disabled:opacity-50 whitespace-nowrap">
+                            {emitindoNfce ? 'Emitindo...' : 'Emitir agora'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="border-t border-gray-100 pt-4">
                     <p className="text-sm font-medium text-gray-700 mb-3">📲 Enviar comprovante por WhatsApp?</p>
                     <div className="flex gap-2">

@@ -12,7 +12,11 @@ type Entrada = {
   origem: string; operador_nome: string | null; created_at: string
 }
 type Deposito = { id: string; nome: string; principal: boolean }
-type ConfigSefaz = { focusnfe_token: string | null; ultimo_nsu: string | null; ativo: boolean } | null
+type ConfigSefaz = {
+  focusnfe_token: string | null; ultimo_nsu: string | null; ativo: boolean
+  provider: string | null; credenciais: { token_producao?: string; token_homologacao?: string } | null
+  ambiente: string | null
+} | null
 
 const STATUS_LABEL: Record<string, string> = {
   xml_importado:        'XML Importado',
@@ -84,9 +88,11 @@ export default function EntradasXmlClient({
   // Modal configuração FocusNFe
   const [modalConfig, setModalConfig] = useState(false)
   const [configForm, setConfigForm] = useState({
-    focusnfe_token: configSefaz?.focusnfe_token ?? '',
+    provider: configSefaz?.provider ?? 'focusnfe',
+    token_producao: configSefaz?.credenciais?.token_producao ?? (configSefaz?.ambiente === 'producao' ? configSefaz?.focusnfe_token ?? '' : ''),
+    token_homologacao: configSefaz?.credenciais?.token_homologacao ?? (configSefaz?.ambiente === 'homologacao' ? configSefaz?.focusnfe_token ?? '' : ''),
     cnpj: '',
-    ambiente: 'producao',
+    ambiente: configSefaz?.ambiente ?? 'producao',
   })
   const [salvandoConfig, setSalvandoConfig] = useState(false)
 
@@ -332,9 +338,12 @@ export default function EntradasXmlClient({
   async function salvarConfig() {
     setSalvandoConfig(true)
     try {
+      const tokenAmbienteAtivo = configForm.ambiente === 'homologacao' ? configForm.token_homologacao : configForm.token_producao
       await sb.from('nfe_config').upsert({
         empresa_id: empresaId,
-        focusnfe_token: configForm.focusnfe_token,
+        provider: configForm.provider,
+        credenciais: { token_producao: configForm.token_producao, token_homologacao: configForm.token_homologacao },
+        focusnfe_token: tokenAmbienteAtivo, // mantido em espelho — outras checagens no sistema ainda leem este campo direto
         cnpj: configForm.cnpj,
         ambiente: configForm.ambiente,
         ativo: true,
@@ -620,18 +629,33 @@ export default function EntradasXmlClient({
               <button onClick={() => setModalConfig(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
             </div>
             <div className="px-5 py-4 space-y-3">
+              <div>
+                <label className="text-slate-500 text-xs font-medium">Provedor fiscal</label>
+                <select value={configForm.provider} onChange={e => setConfigForm(p => ({ ...p, provider: e.target.value }))}
+                  className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm">
+                  <option value="focusnfe">Focus NFe</option>
+                  <option value="brasilnfe" disabled>Brasil NFe (em breve)</option>
+                </select>
+              </div>
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
-                Crie sua conta em <strong>focusnfe.com.br</strong> e copie o token de autenticação.
+                Crie sua conta em <strong>focusnfe.com.br</strong> e copie o token de autenticação — a Focus usa um token diferente pra cada ambiente, preencha os dois se for testar em homologação antes de ir pra produção.
               </div>
               <div>
-                <label className="text-slate-500 text-xs font-medium">Token FocusNFe</label>
-                <input type="password" value={configForm.focusnfe_token}
-                  onChange={e => setConfigForm(p => ({ ...p, focusnfe_token: e.target.value }))}
-                  placeholder="seu-token-aqui"
+                <label className="text-slate-500 text-xs font-medium">Token — Produção</label>
+                <input type="password" value={configForm.token_producao}
+                  onChange={e => setConfigForm(p => ({ ...p, token_producao: e.target.value }))}
+                  placeholder="token de produção"
                   className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm font-mono" />
               </div>
               <div>
-                <label className="text-slate-500 text-xs font-medium">Ambiente</label>
+                <label className="text-slate-500 text-xs font-medium">Token — Homologação</label>
+                <input type="password" value={configForm.token_homologacao}
+                  onChange={e => setConfigForm(p => ({ ...p, token_homologacao: e.target.value }))}
+                  placeholder="token de homologação (testes)"
+                  className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm font-mono" />
+              </div>
+              <div>
+                <label className="text-slate-500 text-xs font-medium">Ambiente ativo</label>
                 <select value={configForm.ambiente} onChange={e => setConfigForm(p => ({ ...p, ambiente: e.target.value }))}
                   className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm">
                   <option value="producao">Produção</option>

@@ -110,6 +110,17 @@ const ETAPAS = [
   { num: 8, label: 'Revisão' },
 ]
 
+// CRT (Código de Regime Tributário) é o código numérico exigido no XML da
+// NFe/NFCe — diferente do campo "regime_tributario" (texto, cadastro geral
+// da empresa) já coletado na Etapa 1. Em vez de pedir de novo numa outra
+// etapa, deriva o CRT a partir do regime já escolhido. Tabela oficial:
+// 1 = Simples Nacional, 2 = Simples Nacional (excesso de sublimite),
+// 3 = Regime Normal (Lucro Presumido/Real e demais).
+function crtDoRegimeTributario(regime: string): string {
+  if (regime === 'simples_nacional' || regime === 'mei') return '1'
+  return '3'
+}
+
 function Toggle({ label, desc, value, onChange }: { label: string; desc?: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
     <div className="flex items-center justify-between py-2.5">
@@ -300,6 +311,7 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
         cfop_venda_fora: form.cfop_venda_fora,
         cfop_compra: form.cfop_compra,
         natureza_operacao: form.natureza_operacao,
+        crt: crtDoRegimeTributario(form.regime_tributario),
         observacoes: form.obs_fiscal || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id' })
