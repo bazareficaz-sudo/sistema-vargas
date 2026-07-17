@@ -137,6 +137,7 @@ export const NAV: NavGroup[] = [
         label: 'Receber',
         items: [
           { href: '/dashboard/contas-receber',    label: 'Contas a Receber', icon: '💰', modulo: 'contas_receber' },
+          { href: '/dashboard/carteira-clientes', label: 'Carteira de Clientes', icon: '🗂️', modulo: 'contas_receber' },
           { href: '/dashboard/cobranca',          label: 'Cobranças',        icon: '📞', modulo: 'contas_receber' },
           { href: '/dashboard/creditos-clientes', label: 'Créditos',         icon: '🎫', modulo: 'financeiro' },
         ],
