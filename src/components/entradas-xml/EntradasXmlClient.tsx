@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { parseNFeXml, calcularCustoItem, type NFeData } from '@/lib/nfe-parser'
 
 type Entrada = {
@@ -12,11 +13,7 @@ type Entrada = {
   origem: string; operador_nome: string | null; created_at: string
 }
 type Deposito = { id: string; nome: string; principal: boolean }
-type ConfigSefaz = {
-  focusnfe_token: string | null; ultimo_nsu: string | null; ativo: boolean
-  provider: string | null; credenciais: { token_producao?: string; token_homologacao?: string } | null
-  ambiente: string | null
-} | null
+type ConfigSefaz = { focusnfe_token: string | null; ultimo_nsu: string | null; ativo: boolean } | null
 
 const STATUS_LABEL: Record<string, string> = {
   xml_importado:        'XML Importado',
@@ -84,17 +81,6 @@ export default function EntradasXmlClient({
   const [consultandoSefaz, setConsultandoSefaz] = useState(false)
   const [nfesSefaz, setNfesSefaz] = useState<any[]>([])
   const [erroSefaz, setErroSefaz] = useState('')
-
-  // Modal configuração FocusNFe
-  const [modalConfig, setModalConfig] = useState(false)
-  const [configForm, setConfigForm] = useState({
-    provider: configSefaz?.provider ?? 'focusnfe',
-    token_producao: configSefaz?.credenciais?.token_producao ?? (configSefaz?.ambiente === 'producao' ? configSefaz?.focusnfe_token ?? '' : ''),
-    token_homologacao: configSefaz?.credenciais?.token_homologacao ?? (configSefaz?.ambiente === 'homologacao' ? configSefaz?.focusnfe_token ?? '' : ''),
-    cnpj: '',
-    ambiente: configSefaz?.ambiente ?? 'producao',
-  })
-  const [salvandoConfig, setSalvandoConfig] = useState(false)
 
   const depositoPrincipal = depositos.find(d => d.principal)?.id ?? depositos[0]?.id ?? null
 
@@ -335,25 +321,6 @@ export default function EntradasXmlClient({
     } catch (e: any) { alert('Erro manifesto: ' + e.message) }
   }
 
-  async function salvarConfig() {
-    setSalvandoConfig(true)
-    try {
-      const tokenAmbienteAtivo = configForm.ambiente === 'homologacao' ? configForm.token_homologacao : configForm.token_producao
-      await sb.from('nfe_config').upsert({
-        empresa_id: empresaId,
-        provider: configForm.provider,
-        credenciais: { token_producao: configForm.token_producao, token_homologacao: configForm.token_homologacao },
-        focusnfe_token: tokenAmbienteAtivo, // mantido em espelho — outras checagens no sistema ainda leem este campo direto
-        cnpj: configForm.cnpj,
-        ambiente: configForm.ambiente,
-        ativo: true,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'empresa_id' })
-      setModalConfig(false)
-    } catch (e: any) { alert('Erro: ' + e.message) }
-    finally { setSalvandoConfig(false) }
-  }
-
   const totalFinalizado = entradas.filter(e => e.status === 'finalizada').reduce((s, e) => s + (e.valor_total ?? 0), 0)
   const totalPendente   = entradas.filter(e => !['finalizada','cancelada','ignorada'].includes(e.status)).reduce((s, e) => s + (e.valor_total ?? 0), 0)
 
@@ -366,10 +333,11 @@ export default function EntradasXmlClient({
           <p className="text-slate-500 text-sm">{entradasFiltradas.length} registro(s)</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setModalConfig(true)}
-            className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm rounded-xl border border-slate-200 shadow-sm">
-            ⚙ FocusNFe
-          </button>
+          <Link href="/dashboard/empresas"
+            title="Token, ambiente e certificado ficam na configuração da empresa"
+            className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm rounded-xl border border-slate-200 shadow-sm flex items-center">
+            ⚙ Dados fiscais
+          </Link>
           <button onClick={() => { setModalSefaz(true); consultarSefaz() }}
             className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm rounded-xl">
             🔍 Consultar SEFAZ
@@ -565,10 +533,10 @@ export default function EntradasXmlClient({
                   <p className="font-semibold">Erro na consulta:</p>
                   <p className="mt-1">{erroSefaz}</p>
                   {!configSefaz?.focusnfe_token && (
-                    <button onClick={() => { setModalSefaz(false); setModalConfig(true) }}
-                      className="mt-3 px-3 py-1.5 bg-blue-600 text-white text-xs rounded">
-                      Configurar FocusNFe →
-                    </button>
+                    <Link href="/dashboard/empresas" onClick={() => setModalSefaz(false)}
+                      className="mt-3 inline-block px-3 py-1.5 bg-blue-600 text-white text-xs rounded">
+                      Configurar dados fiscais →
+                    </Link>
                   )}
                 </div>
               )}
@@ -620,59 +588,6 @@ export default function EntradasXmlClient({
         </div>
       )}
 
-      {/* ── MODAL CONFIG FOCUSNFE ──────────────────────────────── */}
-      {modalConfig && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md shadow-xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h2 className="text-slate-900 font-semibold">Configuração FocusNFe / SEFAZ</h2>
-              <button onClick={() => setModalConfig(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <div>
-                <label className="text-slate-500 text-xs font-medium">Provedor fiscal</label>
-                <select value={configForm.provider} onChange={e => setConfigForm(p => ({ ...p, provider: e.target.value }))}
-                  className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm">
-                  <option value="focusnfe">Focus NFe</option>
-                  <option value="brasilnfe" disabled>Brasil NFe (em breve)</option>
-                </select>
-              </div>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
-                Crie sua conta em <strong>focusnfe.com.br</strong> e copie o token de autenticação — a Focus usa um token diferente pra cada ambiente, preencha os dois se for testar em homologação antes de ir pra produção.
-              </div>
-              <div>
-                <label className="text-slate-500 text-xs font-medium">Token — Produção</label>
-                <input type="password" value={configForm.token_producao}
-                  onChange={e => setConfigForm(p => ({ ...p, token_producao: e.target.value }))}
-                  placeholder="token de produção"
-                  className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm font-mono" />
-              </div>
-              <div>
-                <label className="text-slate-500 text-xs font-medium">Token — Homologação</label>
-                <input type="password" value={configForm.token_homologacao}
-                  onChange={e => setConfigForm(p => ({ ...p, token_homologacao: e.target.value }))}
-                  placeholder="token de homologação (testes)"
-                  className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm font-mono" />
-              </div>
-              <div>
-                <label className="text-slate-500 text-xs font-medium">Ambiente ativo</label>
-                <select value={configForm.ambiente} onChange={e => setConfigForm(p => ({ ...p, ambiente: e.target.value }))}
-                  className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm">
-                  <option value="producao">Produção</option>
-                  <option value="homologacao">Homologação (testes)</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
-              <button onClick={() => setModalConfig(false)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-sm hover:bg-slate-200">Cancelar</button>
-              <button onClick={salvarConfig} disabled={salvandoConfig}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50">
-                {salvandoConfig ? 'Salvando...' : 'Salvar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

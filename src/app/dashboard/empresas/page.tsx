@@ -22,12 +22,22 @@ export default async function EmpresasPage() {
       telefone, email, logo_url, cor_primaria, created_at, updated_at,
       grupo_id,
       grupos_empresariais(id, nome),
-      empresa_config_fiscal(ambiente, certificado_validade, serie_nfe, proximo_nfe),
+      empresa_config_fiscal(ambiente, certificado_validade, certificado_ref, serie_nfe, proximo_nfe, serie_nfce, proximo_nfce, csc_nfce, id_csc_nfce, cfop_venda_dentro, cfop_venda_fora, cfop_compra, natureza_operacao, observacoes),
       empresa_config_comercial(id, limite_desconto, permite_estoque_negativo),
       empresa_config_estoque(id, permite_multiplos_depositos, reservar_em_orcamento, reservar_em_pedido, baixar_estoque_em, tipo_custo, controlar_lote, deposito_devolucao_id)
     `)
     .order('empresa_principal', { ascending: false })
     .order('nome')
+
+  // nfe_config não tem FK declarada pra empresas (não dá pra embutir no
+  // select acima) — busca separada e mescla na mão, mesmo padrão já usado
+  // pra vendedor_empresas em dashboard/vendedores/page.tsx.
+  const empresaIds = (empresas ?? []).map(e => e.id)
+  const { data: nfeConfigs } = empresaIds.length > 0
+    ? await supabase.from('nfe_config').select('empresa_id, ativo, ambiente, credenciais, cnpj').in('empresa_id', empresaIds)
+    : { data: [] as any[] }
+  const nfeConfigPorEmpresa = new Map((nfeConfigs ?? []).map(c => [c.empresa_id, c]))
+  const empresasComNfeConfig = (empresas ?? []).map(e => ({ ...e, nfe_config: nfeConfigPorEmpresa.get(e.id) ?? null }))
 
   const { data: grupos } = await supabase
     .from('grupos_empresariais')
@@ -45,7 +55,7 @@ export default async function EmpresasPage() {
 
   return (
     <EmpresasClient
-      empresas={(empresas ?? []) as any[]}
+      empresas={empresasComNfeConfig as any[]}
       grupos={grupos ?? []}
       empresaAtualId={empresaAtualId}
       depositosPorEmpresa={[...depositosPorEmpresa]}

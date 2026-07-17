@@ -52,6 +52,13 @@ type WizardForm = {
   cfop_compra: string
   natureza_operacao: string
   obs_fiscal: string
+  // Emissão — token por ambiente e certificado (movido de "XML/NF-e" pra
+  // cá a pedido do usuário: quem configura isso é o cliente, na tela da
+  // própria empresa, não numa tela solta de importação de XML)
+  token_producao: string
+  token_homologacao: string
+  certificado_ref: string
+  certificado_validade: string
   // Etapa 5 — Comercial
   limite_desconto: number
   margem_minima: number
@@ -89,6 +96,7 @@ const FORM_INICIAL: WizardForm = {
   proximo_nfe: 1, proximo_nfce: 1, csc_nfce: '', id_csc_nfce: '',
   cfop_venda_dentro: '5102', cfop_venda_fora: '6102', cfop_compra: '1102',
   natureza_operacao: 'Venda de Mercadorias', obs_fiscal: '',
+  token_producao: '', token_homologacao: '', certificado_ref: '', certificado_validade: '',
   limite_desconto: 10, margem_minima: 0, permite_venda_sem_cliente: true,
   permite_estoque_negativo: false, permite_fiado: false, permite_credito: true,
   permite_multiplos_depositos: false, reservar_em_orcamento: false,
@@ -204,6 +212,25 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
         contador: empresaEditando.contador ?? '',
         email_contador: empresaEditando.email_contador ?? '',
         telefone_contador: empresaEditando.telefone_contador ?? '',
+        // Fiscal — antes esta etapa inteira resetava pro default a cada
+        // edição, mesmo com dados já salvos (bug pré-existente, corrigido
+        // aqui de passagem já que mexi nesta etapa).
+        ambiente_fiscal: empresaEditando.empresa_config_fiscal?.ambiente ?? 'homologacao',
+        serie_nfe: empresaEditando.empresa_config_fiscal?.serie_nfe ?? 1,
+        serie_nfce: empresaEditando.empresa_config_fiscal?.serie_nfce ?? 1,
+        proximo_nfe: empresaEditando.empresa_config_fiscal?.proximo_nfe ?? 1,
+        proximo_nfce: empresaEditando.empresa_config_fiscal?.proximo_nfce ?? 1,
+        csc_nfce: empresaEditando.empresa_config_fiscal?.csc_nfce ?? '',
+        id_csc_nfce: empresaEditando.empresa_config_fiscal?.id_csc_nfce ?? '',
+        cfop_venda_dentro: empresaEditando.empresa_config_fiscal?.cfop_venda_dentro ?? '5102',
+        cfop_venda_fora: empresaEditando.empresa_config_fiscal?.cfop_venda_fora ?? '6102',
+        cfop_compra: empresaEditando.empresa_config_fiscal?.cfop_compra ?? '1102',
+        natureza_operacao: empresaEditando.empresa_config_fiscal?.natureza_operacao ?? 'Venda de Mercadorias',
+        obs_fiscal: empresaEditando.empresa_config_fiscal?.observacoes ?? '',
+        certificado_ref: empresaEditando.empresa_config_fiscal?.certificado_ref ?? '',
+        certificado_validade: empresaEditando.empresa_config_fiscal?.certificado_validade ?? '',
+        token_producao: empresaEditando.nfe_config?.credenciais?.token_producao ?? '',
+        token_homologacao: empresaEditando.nfe_config?.credenciais?.token_homologacao ?? '',
         permite_multiplos_depositos: empresaEditando.empresa_config_estoque?.permite_multiplos_depositos ?? false,
         reservar_em_orcamento: empresaEditando.empresa_config_estoque?.reservar_em_orcamento ?? false,
         reservar_em_pedido: empresaEditando.empresa_config_estoque?.reservar_em_pedido ?? true,
@@ -312,9 +339,33 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
         cfop_compra: form.cfop_compra,
         natureza_operacao: form.natureza_operacao,
         crt: crtDoRegimeTributario(form.regime_tributario),
+        certificado_ref: form.certificado_ref || null,
+        certificado_validade: form.certificado_validade || null,
         observacoes: form.obs_fiscal || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id' })
+
+      // Credenciais de emissão fiscal (token por ambiente). O provedor
+      // (Focus NFe / Brasil NFe) NÃO é definido aqui — é decisão do admin
+      // do sistema (saas-admin/fiscal), não do assinante. Numa empresa
+      // nova, herda o padrão configurado pelo admin; numa edição, o campo
+      // fica de fora do payload de propósito pra não sobrescrever o que
+      // já foi definido (aqui ou por um override manual do admin).
+      const tokenAtivo = form.ambiente_fiscal === 'homologacao' ? form.token_homologacao : form.token_producao
+      const nfeConfigPayload: Record<string, any> = {
+        empresa_id: empresaId,
+        cnpj: form.cnpj,
+        ambiente: form.ambiente_fiscal,
+        credenciais: { token_producao: form.token_producao, token_homologacao: form.token_homologacao },
+        focusnfe_token: tokenAtivo || null, // espelho — outras checagens no sistema ainda leem este campo direto
+        ativo: !!tokenAtivo,
+        updated_at: new Date().toISOString(),
+      }
+      if (!editando) {
+        const { data: configPadrao } = await sb.from('sistema_config_fiscal').select('provider_padrao').maybeSingle()
+        nfeConfigPayload.provider = configPadrao?.provider_padrao ?? 'focusnfe'
+      }
+      await sb.from('nfe_config').upsert(nfeConfigPayload, { onConflict: 'empresa_id' })
 
       // Config comercial
       await sb.from('empresa_config_comercial').upsert({
@@ -656,6 +707,32 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                <p className="text-xs font-semibold text-slate-600">Emissão de notas — credenciais e certificado</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Token — Produção">
+                    <input type="password" value={form.token_producao} onChange={e => set('token_producao', e.target.value)}
+                      className={`${INPUT} font-mono text-xs`} placeholder="token de produção" />
+                  </Field>
+                  <Field label="Token — Homologação">
+                    <input type="password" value={form.token_homologacao} onChange={e => set('token_homologacao', e.target.value)}
+                      className={`${INPUT} font-mono text-xs`} placeholder="token de homologação (testes)" />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Certificado digital (referência)">
+                    <input value={form.certificado_ref} onChange={e => set('certificado_ref', e.target.value)}
+                      className={INPUT} placeholder="cadastrado no painel do provedor" />
+                  </Field>
+                  <Field label="Validade do certificado">
+                    <input type="date" value={form.certificado_validade} onChange={e => set('certificado_validade', e.target.value)} className={INPUT} />
+                  </Field>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  O certificado A1 em si é cadastrado direto no painel do provedor fiscal (não aqui) — este campo é só uma referência/validade pra controle.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
