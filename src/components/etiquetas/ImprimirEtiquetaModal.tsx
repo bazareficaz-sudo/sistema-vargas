@@ -6,18 +6,22 @@ import type { ModeloEtiqueta, ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 
 type ProdutoComEstoque = ProdutoParaEtiqueta & { estoque?: number }
 
-export default function ImprimirEtiquetaModal({ produtos, empresaId, operadorNome, onClose }: {
+export default function ImprimirEtiquetaModal({ produtos, empresaId, operadorNome, onClose, modoQtdPadrao = 'fixa', labelModoEstoque = 'Igual ao estoque atual' }: {
   produtos: ProdutoComEstoque[]
   empresaId: string
   operadorNome?: string
   onClose: () => void
+  modoQtdPadrao?: 'fixa' | 'estoque'
+  labelModoEstoque?: string
 }) {
   const [modelos, setModelos] = useState<ModeloEtiqueta[]>([])
   const [modeloId, setModeloId] = useState('')
-  const [modoQtd, setModoQtd] = useState<'fixa' | 'estoque'>('fixa')
+  const [modoQtd, setModoQtd] = useState<'fixa' | 'estoque'>(modoQtdPadrao)
   const [qtdFixa, setQtdFixa] = useState('1')
   const [quantidades, setQuantidades] = useState<Record<string, number>>(
-    Object.fromEntries(produtos.map(p => [p.id, 1]))
+    modoQtdPadrao === 'estoque'
+      ? Object.fromEntries(produtos.map(p => [p.id, Math.max(0, p.estoque ?? 0)]))
+      : Object.fromEntries(produtos.map(p => [p.id, 1]))
   )
   const [carregando, setCarregando] = useState(true)
   const [gerando, setGerando] = useState(false)
@@ -128,7 +132,7 @@ export default function ImprimirEtiquetaModal({ produtos, empresaId, operadorNom
                   </button>
                   <button type="button" onClick={() => aplicarModo('estoque')}
                     className={`px-3 py-1.5 text-xs rounded-lg border ${modoQtd === 'estoque' ? 'border-blue-500 text-blue-600 bg-blue-50 font-medium' : 'border-gray-300 text-gray-500'}`}>
-                    Igual ao estoque atual
+                    {labelModoEstoque}
                   </button>
                 </div>
                 {modoQtd === 'fixa' && (

@@ -97,7 +97,8 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/inventarios',            label: 'Inventário',          icon: '🔢', modulo: 'inventario' },
       { href: '/dashboard/entradas',               label: 'Entradas',            icon: '📥', modulo: 'entradas' },
       { href: '/dashboard/entradas/produtos',      label: 'Produtos Comprados',  icon: '🛍', modulo: 'entradas' },
-      { href: '/dashboard/etiquetas/modelos',      label: 'Etiquetas',           icon: '🏷️' },
+      { href: '/dashboard/etiquetas/emitir',       label: 'Emitir Etiquetas',    icon: '🏷️' },
+      { href: '/dashboard/etiquetas/modelos',      label: 'Modelos de Etiqueta', icon: '📐' },
     ],
   },
   {

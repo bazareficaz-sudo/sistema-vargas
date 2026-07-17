@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
+import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -168,6 +170,8 @@ export default function NovaEntradaClient({
   // botão após o próximo render, então dois cliques muito rápidos podiam
   // disparar duas inserções antes do disabled= surtir efeito).
   const enviandoRef = useRef(false)
+  const [perguntandoEtiqueta, setPerguntandoEtiqueta] = useState<ProdutoParaEtiqueta[] | null>(null)
+  const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
 
   useEffect(() => {
     if (etapa === 'itens' && faseItem === 'busca') {
@@ -520,8 +524,34 @@ export default function NovaEntradaClient({
         total_parcelas: parcelasFinais.length, forma_pagamento: formaPag, status: 'pendente',
       })))
 
-      router.push('/dashboard/entradas')
-      router.refresh()
+      // Antes de sair, oferece imprimir etiquetas dos produtos recebidos
+      // (quantidade sugerida = quantidade da própria entrada).
+      const idsParaEtiqueta = produtosComId.map(i => i.produto_id!)
+      if (idsParaEtiqueta.length > 0) {
+        const { data: dadosProdutos } = await sb.from('produtos')
+          .select('id, nome, sku, ean, preco_venda, preco_promocional, marca, unidade, categoria')
+          .in('id', idsParaEtiqueta)
+        const porId = new Map((dadosProdutos ?? []).map(p => [p.id, p]))
+        const produtosEtiqueta: ProdutoParaEtiqueta[] = produtosComId.map(item => {
+          const p = porId.get(item.produto_id!)
+          return {
+            id: item.produto_id!,
+            nome: p?.nome ?? item.nome_produto,
+            sku: p?.sku ?? item.sku,
+            ean: p?.ean ?? null,
+            preco_venda: p?.preco_venda ?? item.preco_venda_novo,
+            preco_promocional: p?.preco_promocional ?? null,
+            marca: p?.marca ?? null,
+            unidade: p?.unidade ?? 'UN',
+            categoria: p?.categoria ?? null,
+            estoque: item.quantidade,
+          } as ProdutoParaEtiqueta & { estoque: number }
+        })
+        setPerguntandoEtiqueta(produtosEtiqueta)
+      } else {
+        router.push('/dashboard/entradas')
+        router.refresh()
+      }
     } finally {
       enviandoRef.current = false
       setSalvando(false)
@@ -1085,6 +1115,38 @@ export default function NovaEntradaClient({
             </div>
           </div>
         </div>
+      )}
+
+      {perguntandoEtiqueta && !imprimindoEtiqueta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Entrada salva com sucesso!</h2>
+            <p className="text-sm text-gray-500 mb-5">Deseja imprimir as etiquetas dos {perguntandoEtiqueta.length} produto(s) recebidos agora?</p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setPerguntandoEtiqueta(null); router.push('/dashboard/entradas'); router.refresh() }}
+                className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
+                Não, ir para a lista
+              </button>
+              <button
+                onClick={() => setImprimindoEtiqueta(true)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+                🏷️ Sim, imprimir etiquetas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {imprimindoEtiqueta && perguntandoEtiqueta && (
+        <ImprimirEtiquetaModal
+          produtos={perguntandoEtiqueta}
+          empresaId={empresaId}
+          modoQtdPadrao="estoque"
+          labelModoEstoque="Igual à quantidade recebida"
+          onClose={() => { setImprimindoEtiqueta(false); setPerguntandoEtiqueta(null); router.push('/dashboard/entradas'); router.refresh() }}
+        />
       )}
     </div>
   )
