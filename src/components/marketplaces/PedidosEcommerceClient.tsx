@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
@@ -49,11 +49,16 @@ function prazoInfo(pedido: any): { texto: string; cor: string } | null {
   return { texto: `${Math.round(diffH / 24)}d restantes`, cor: 'text-gray-500' }
 }
 
-export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, empresaId, statusInicial, qInicial, canalIdInicial, operador }: {
-  canais: any[]; pedidos: any[]; empresaId: string; statusInicial: string; qInicial: string; canalIdInicial: string; operador: string
+export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, statusInicial, qInicial, canalIdInicial, operador }: {
+  canais: any[]; pedidos: any[]; totalReal: number; empresaId: string; statusInicial: string; qInicial: string; canalIdInicial: string; operador: string
 }) {
   const router = useRouter()
   const [pedidos, setPedidos] = useState(pedidosIniciais)
+  // router.refresh() busca props novas do servidor, mas useState só usa o
+  // valor inicial — sem este efeito a lista fica travada na primeira carga
+  // mesmo depois de um sync bem-sucedido (o dado chega no banco, mas nunca
+  // aparece na tela até um F5 manual).
+  useEffect(() => { setPedidos(pedidosIniciais) }, [pedidosIniciais])
   const [q, setQ] = useState(qInicial)
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
   const [canalFiltro, setCanalFiltro] = useState(canalIdInicial)
@@ -193,8 +198,10 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     const alvos = canalFiltro ? canaisShopee.filter(c => c.id === canalFiltro) : canaisShopee
     if (alvos.length === 0) { setResumoSync('Nenhuma loja Shopee conectada para sincronizar.'); return }
     setSincronizando(true); setResumoSync('')
-    const partes: string[] = []
-    for (const c of alvos) {
+    // Cada loja é uma chamada independente à Shopee — rodar em paralelo em
+    // vez de sequencial evita que a espera total seja a soma do tempo de
+    // todas as lojas (antes, a 2ª loja só começava depois da 1ª terminar).
+    const resultados = await Promise.all(alvos.map(async c => {
       try {
         const resp = await fetch('/api/marketplace/shopee/sync-pedidos', {
           method: 'POST',
@@ -202,14 +209,14 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
           body: JSON.stringify({ canalId: c.id }),
         })
         const data = await resp.json()
-        partes.push(data.ok
+        return data.ok
           ? `${c.nome}: ${data.upserted} sincronizado(s), ${data.failedCount} falha(s)`
-          : `${c.nome}: erro — ${data.erro ?? 'falha ao sincronizar'}`)
+          : `${c.nome}: erro — ${data.erro ?? 'falha ao sincronizar'}`
       } catch (e: any) {
-        partes.push(`${c.nome}: erro — ${e.message ?? 'falha ao sincronizar'}`)
+        return `${c.nome}: erro — ${e.message ?? 'falha ao sincronizar'}`
       }
-    }
-    setResumoSync(partes.join(' · '))
+    }))
+    setResumoSync(resultados.join(' · '))
     setSincronizando(false)
     router.refresh()
   }
@@ -426,7 +433,9 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
       <div className="flex items-start justify-between mb-5">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Pedidos de E-commerce</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{pedidos.length} pedidos · {fmt(faturamento)} faturados · todas as lojas conectadas</p>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {totalReal} pedidos{totalReal > pedidos.length ? ` (${pedidos.length} mais recentes exibidos)` : ''} · {fmt(faturamento)} faturados · todas as lojas conectadas
+          </p>
         </div>
         <div className="flex gap-2">
           {canaisShopee.length > 0 && (

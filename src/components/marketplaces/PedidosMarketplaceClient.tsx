@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
@@ -49,11 +49,12 @@ function prazoInfo(pedido: any): { texto: string; cor: string } | null {
   return { texto: `${Math.round(diffH / 24)}d restantes`, cor: 'text-gray-500' }
 }
 
-export default function PedidosMarketplaceClient({ canal, pedidos: pedidosIniciais, empresaId, statusInicial, qInicial, operador }: {
-  canal: any; pedidos: any[]; empresaId: string; statusInicial: string; qInicial: string; operador: string
+export default function PedidosMarketplaceClient({ canal, pedidos: pedidosIniciais, totalReal, empresaId, statusInicial, qInicial, operador }: {
+  canal: any; pedidos: any[]; totalReal: number; empresaId: string; statusInicial: string; qInicial: string; operador: string
 }) {
   const router = useRouter()
   const [pedidos, setPedidos] = useState(pedidosIniciais)
+  useEffect(() => { setPedidos(pedidosIniciais) }, [pedidosIniciais])
   const [q, setQ] = useState(qInicial)
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
   const [etapaFiltro, setEtapaFiltro] = useState<EtapaExibicao | ''>('')
@@ -412,7 +413,9 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
       <div className="flex items-start justify-between mb-5">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Pedidos — {canal.nome}</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{pedidos.length} pedidos · {fmt(faturamento)} faturados</p>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {totalReal} pedidos{totalReal > pedidos.length ? ` (${pedidos.length} mais recentes exibidos)` : ''} · {fmt(faturamento)} faturados
+          </p>
         </div>
         <div className="flex gap-2">
           {canal.plataforma === 'shopee' && (

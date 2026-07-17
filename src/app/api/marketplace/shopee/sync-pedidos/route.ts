@@ -3,6 +3,12 @@ import { createClient } from '@/lib/supabase/server'
 import { syncPedidos } from '@/lib/shopee/orders'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 
+// Cada pedido processado gera vários round-trips de banco (resolver vínculo
+// de item, upsert de pedido/itens/pacote, baixa de estoque) — com uma loja
+// de algumas centenas de pedidos isso passa fácil do timeout padrão da
+// Vercel. Mesmo ajuste já feito no cron em /api/cron/shopee-sync.
+export const maxDuration = 300
+
 export async function POST(req: Request) {
   const { canalId, maxOrders } = await req.json()
   if (!canalId) return NextResponse.json({ ok: false, erro: 'canalId ausente' }, { status: 400 })

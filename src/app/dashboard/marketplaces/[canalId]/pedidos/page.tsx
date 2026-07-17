@@ -35,10 +35,19 @@ export default async function PedidosMarketplacePage({ params, searchParams }: {
 
   const { data: pedidos } = await query.limit(200)
 
+  let countQuery = supabase
+    .from('marketplace_pedidos')
+    .select('*', { count: 'exact', head: true })
+    .eq('canal_id', canalId)
+  if (status) countQuery = countQuery.eq('status', status)
+  if (q) countQuery = countQuery.or(`cliente_nome.ilike.%${q}%,numero_pedido.ilike.%${q}%,id_externo.ilike.%${q}%`)
+  const { count: totalReal } = await countQuery
+
   return (
     <PedidosMarketplaceClient
       canal={canal}
       pedidos={pedidos ?? []}
+      totalReal={totalReal ?? (pedidos ?? []).length}
       empresaId={empresaId}
       statusInicial={status}
       qInicial={q}
