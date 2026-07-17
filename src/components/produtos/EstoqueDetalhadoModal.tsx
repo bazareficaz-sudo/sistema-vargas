@@ -47,6 +47,15 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
   const [porDeposito, setPorDeposito] = useState<PorDeposito[]>([])
   const [movimentos, setMovimentos] = useState<Movimento[]>([])
   const [filtro, setFiltro] = useState('')
+  const [debug, setDebug] = useState<{
+    produtoId: string
+    vendasCount: number; vendasErro: string | null
+    devolucoesCount: number; devolucoesErro: string | null
+    entradasCount: number; entradasErro: string | null
+    movCount: number; movErro: string | null
+    brutoCount: number; brutoErro: string | null
+    brutoAmostra: any[]
+  } | null>(null)
 
   useEffect(() => {
     let ativo = true
@@ -55,7 +64,7 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
 
       const vendaItensSelect = 'id, quantidade, tipo, created_at, vendas(created_at, numero, vendedor_nome, operador_nome)'
 
-      const [estoqueRes, vendasRes, devolucoesRes, entradasRes, movRes] = await Promise.all([
+      const [estoqueRes, vendasRes, devolucoesRes, entradasRes, movRes, brutoRes] = await Promise.all([
         sb.from('produto_estoque').select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome)')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id),
         sb.from('venda_itens').select(vendaItensSelect)
@@ -71,8 +80,22 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
           .eq('empresa_id', empresaId).eq('produto_id', produto.id)
           .not('tipo', 'in', '(venda,devolucao)')
           .order('created_at', { ascending: false }).limit(50),
+        // Diagnóstico temporário: busca crua, sem filtro de tipo nem embed, só
+        // pra confirmar se existe QUALQUER linha em venda_itens pra esse produto.
+        sb.from('venda_itens').select('id, tipo, quantidade, venda_id, created_at')
+          .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(10),
       ])
       if (!ativo) return
+
+      setDebug({
+        produtoId: produto.id,
+        vendasCount: vendasRes.data?.length ?? 0, vendasErro: vendasRes.error?.message ?? null,
+        devolucoesCount: devolucoesRes.data?.length ?? 0, devolucoesErro: devolucoesRes.error?.message ?? null,
+        entradasCount: entradasRes.data?.length ?? 0, entradasErro: entradasRes.error?.message ?? null,
+        movCount: movRes.data?.length ?? 0, movErro: movRes.error?.message ?? null,
+        brutoCount: brutoRes.data?.length ?? 0, brutoErro: brutoRes.error?.message ?? null,
+        brutoAmostra: brutoRes.data ?? [],
+      })
 
       setPorDeposito((estoqueRes.data ?? []).map((r: any) => ({
         deposito_id: r.deposito_id,
@@ -229,6 +252,21 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
                 </div>
               )}
             </div>
+
+            {debug && (
+              <div className="border border-dashed border-amber-300 bg-amber-50 rounded-lg p-3 text-[11px] text-amber-800 space-y-1">
+                <p className="font-semibold">🔧 Diagnóstico (temporário)</p>
+                <p>produto_id consultado: <code className="bg-white px-1 rounded">{debug.produtoId}</code></p>
+                <p>Vendas: {debug.vendasCount} linha(s){debug.vendasErro ? ` · ERRO: ${debug.vendasErro}` : ''}</p>
+                <p>Devoluções: {debug.devolucoesCount} linha(s){debug.devolucoesErro ? ` · ERRO: ${debug.devolucoesErro}` : ''}</p>
+                <p>Entradas: {debug.entradasCount} linha(s){debug.entradasErro ? ` · ERRO: ${debug.entradasErro}` : ''}</p>
+                <p>Ajustes/outros: {debug.movCount} linha(s){debug.movErro ? ` · ERRO: ${debug.movErro}` : ''}</p>
+                <p>Consulta crua (sem filtro de tipo) em venda_itens: {debug.brutoCount} linha(s){debug.brutoErro ? ` · ERRO: ${debug.brutoErro}` : ''}</p>
+                {debug.brutoAmostra.length > 0 && (
+                  <pre className="bg-white rounded p-2 overflow-x-auto text-[10px]">{JSON.stringify(debug.brutoAmostra, null, 2)}</pre>
+                )}
+              </div>
+            )}
           </div>
         )}
 
