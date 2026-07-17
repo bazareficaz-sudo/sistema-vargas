@@ -47,24 +47,20 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
   const [porDeposito, setPorDeposito] = useState<PorDeposito[]>([])
   const [movimentos, setMovimentos] = useState<Movimento[]>([])
   const [filtro, setFiltro] = useState('')
-  const [debug, setDebug] = useState<{
-    produtoId: string
-    vendasCount: number; vendasErro: string | null
-    devolucoesCount: number; devolucoesErro: string | null
-    entradasCount: number; entradasErro: string | null
-    movCount: number; movErro: string | null
-    brutoCount: number; brutoErro: string | null
-    brutoAmostra: any[]
-  } | null>(null)
 
   useEffect(() => {
     let ativo = true
     async function carregar() {
       const sb = createClient()
 
-      const vendaItensSelect = 'id, quantidade, tipo, created_at, vendas(created_at, numero, vendedor_nome, operador_nome)'
+      // Sem embed de "vendas" aqui de propósito — o relacionamento
+      // venda_itens -> vendas não está sendo reconhecido pelo PostgREST
+      // nesta base (erro "Could not find a relationship..."), o que fazia a
+      // consulta inteira falhar e a movimentação sumir por completo. A
+      // junção com vendas é feita manualmente abaixo.
+      const vendaItensSelect = 'id, quantidade, tipo, created_at, venda_id'
 
-      const [estoqueRes, vendasRes, devolucoesRes, entradasRes, movRes, brutoRes] = await Promise.all([
+      const [estoqueRes, vendasRes, devolucoesRes, entradasRes, movRes] = await Promise.all([
         sb.from('produto_estoque').select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome)')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id),
         sb.from('venda_itens').select(vendaItensSelect)
@@ -74,28 +70,36 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
         // nunca apareceriam na aba "Devoluções", mesmo existindo.
         sb.from('venda_itens').select(vendaItensSelect)
           .eq('produto_id', produto.id).eq('tipo', 'devolucao').order('created_at', { ascending: false }).limit(100),
-        sb.from('entrada_itens').select('id, quantidade, entradas(numero_entrada, numero_nf, data_entrada, fornecedores(razao_social, nome_fantasia))')
+        // Sem embed de "entradas"/"fornecedores" pelo mesmo motivo do venda_itens acima.
+        sb.from('entrada_itens').select('id, quantidade, entrada_id, created_at')
           .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(100),
         sb.from('estoque_movimentacoes').select('id, tipo, quantidade, motivo, observacao, created_at')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id)
           .not('tipo', 'in', '(venda,devolucao)')
           .order('created_at', { ascending: false }).limit(50),
-        // Diagnóstico temporário: busca crua, sem filtro de tipo nem embed, só
-        // pra confirmar se existe QUALQUER linha em venda_itens pra esse produto.
-        sb.from('venda_itens').select('id, tipo, quantidade, venda_id, created_at')
-          .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(10),
       ])
       if (!ativo) return
 
-      setDebug({
-        produtoId: produto.id,
-        vendasCount: vendasRes.data?.length ?? 0, vendasErro: vendasRes.error?.message ?? null,
-        devolucoesCount: devolucoesRes.data?.length ?? 0, devolucoesErro: devolucoesRes.error?.message ?? null,
-        entradasCount: entradasRes.data?.length ?? 0, entradasErro: entradasRes.error?.message ?? null,
-        movCount: movRes.data?.length ?? 0, movErro: movRes.error?.message ?? null,
-        brutoCount: brutoRes.data?.length ?? 0, brutoErro: brutoRes.error?.message ?? null,
-        brutoAmostra: brutoRes.data ?? [],
-      })
+      const itensVenda = [...(vendasRes.data ?? []), ...(devolucoesRes.data ?? [])] as any[]
+      const vendaIds = Array.from(new Set<string>(itensVenda.map(v => v.venda_id).filter(Boolean)))
+      const vendasMap = new Map<string, { created_at: string; numero: number | null; vendedor_nome: string | null; operador_nome: string | null }>()
+      if (vendaIds.length > 0) {
+        const { data: vendasInfo } = await sb.from('vendas').select('id, created_at, numero, vendedor_nome, operador_nome').in('id', vendaIds)
+        for (const v of vendasInfo ?? []) vendasMap.set(v.id, v)
+      }
+      const entradaIds = Array.from(new Set<string>((entradasRes.data ?? []).map((e: any) => e.entrada_id).filter(Boolean)))
+      const entradasMap = new Map<string, { numero_entrada: string | null; numero_nf: string | null; data_entrada: string; fornecedor_id: string | null }>()
+      if (entradaIds.length > 0) {
+        const { data: entradasInfo } = await sb.from('entradas').select('id, numero_entrada, numero_nf, data_entrada, fornecedor_id').in('id', entradaIds)
+        for (const ent of entradasInfo ?? []) entradasMap.set(ent.id, ent)
+      }
+      const fornecedorIds = Array.from(new Set<string>(Array.from(entradasMap.values()).map(e => e.fornecedor_id).filter((v): v is string => Boolean(v))))
+      const fornecedoresMap = new Map<string, { razao_social: string | null; nome_fantasia: string | null }>()
+      if (fornecedorIds.length > 0) {
+        const { data: fornecedoresInfo } = await sb.from('fornecedores').select('id, razao_social, nome_fantasia').in('id', fornecedorIds)
+        for (const f of fornecedoresInfo ?? []) fornecedoresMap.set(f.id, f)
+      }
+      if (!ativo) return
 
       setPorDeposito((estoqueRes.data ?? []).map((r: any) => ({
         deposito_id: r.deposito_id,
@@ -106,9 +110,10 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
       })))
 
       function mapVendaItem(v: any): Movimento {
-        const data = v.vendas?.created_at ?? v.created_at
-        const quem = v.vendas?.vendedor_nome || v.vendas?.operador_nome || ''
-        const numero = v.vendas?.numero ? `#${v.vendas.numero}` : ''
+        const venda = vendasMap.get(v.venda_id)
+        const data = venda?.created_at ?? v.created_at
+        const quem = venda?.vendedor_nome || venda?.operador_nome || ''
+        const numero = venda?.numero ? `#${venda.numero}` : ''
         return {
           id: `venda-${v.id}`,
           data,
@@ -117,15 +122,16 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
           detalhe: [numero, quem].filter(Boolean).join(' · ') || (v.tipo === 'devolucao' ? 'Devolução no PDV' : 'Venda no PDV'),
         }
       }
-      const movVendas: Movimento[] = [...(vendasRes.data ?? []), ...(devolucoesRes.data ?? [])].map(mapVendaItem)
+      const movVendas: Movimento[] = itensVenda.map(mapVendaItem)
 
       const movEntradas: Movimento[] = (entradasRes.data ?? []).map((e: any) => {
-        const ent = e.entradas
-        const fornecedor = ent?.fornecedores?.nome_fantasia || ent?.fornecedores?.razao_social || ''
+        const ent = entradasMap.get(e.entrada_id)
+        const forn = ent?.fornecedor_id ? fornecedoresMap.get(ent.fornecedor_id) : undefined
+        const fornecedor = forn?.nome_fantasia || forn?.razao_social || ''
         const numero = ent?.numero_entrada || (ent?.numero_nf ? `NF ${ent.numero_nf}` : '')
         return {
           id: `entrada-${e.id}`,
-          data: ent?.data_entrada ?? new Date().toISOString(),
+          data: ent?.data_entrada ?? e.created_at ?? new Date().toISOString(),
           tipo: 'entrada',
           quantidade: Number(e.quantidade) || 0,
           detalhe: [numero, fornecedor].filter(Boolean).join(' · ') || 'Entrada de mercadoria',
@@ -252,21 +258,6 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
                 </div>
               )}
             </div>
-
-            {debug && (
-              <div className="border border-dashed border-amber-300 bg-amber-50 rounded-lg p-3 text-[11px] text-amber-800 space-y-1">
-                <p className="font-semibold">🔧 Diagnóstico (temporário)</p>
-                <p>produto_id consultado: <code className="bg-white px-1 rounded">{debug.produtoId}</code></p>
-                <p>Vendas: {debug.vendasCount} linha(s){debug.vendasErro ? ` · ERRO: ${debug.vendasErro}` : ''}</p>
-                <p>Devoluções: {debug.devolucoesCount} linha(s){debug.devolucoesErro ? ` · ERRO: ${debug.devolucoesErro}` : ''}</p>
-                <p>Entradas: {debug.entradasCount} linha(s){debug.entradasErro ? ` · ERRO: ${debug.entradasErro}` : ''}</p>
-                <p>Ajustes/outros: {debug.movCount} linha(s){debug.movErro ? ` · ERRO: ${debug.movErro}` : ''}</p>
-                <p>Consulta crua (sem filtro de tipo) em venda_itens: {debug.brutoCount} linha(s){debug.brutoErro ? ` · ERRO: ${debug.brutoErro}` : ''}</p>
-                {debug.brutoAmostra.length > 0 && (
-                  <pre className="bg-white rounded p-2 overflow-x-auto text-[10px]">{JSON.stringify(debug.brutoAmostra, null, 2)}</pre>
-                )}
-              </div>
-            )}
           </div>
         )}
 
