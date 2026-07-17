@@ -10,6 +10,8 @@ import AdicionarImagemMassaModal from './AdicionarImagemMassaModal'
 import CriarKitModal from './CriarKitModal'
 import NovoProdutoModal from './NovoProdutoModal'
 import ImportarProdutoUrlModal from './ImportarProdutoUrlModal'
+import GerenciarTagsModal from './GerenciarTagsModal'
+import EstoqueDetalhadoModal from './EstoqueDetalhadoModal'
 
 type Produto = {
   id: string
@@ -36,6 +38,7 @@ type Produto = {
   ibs_cclasstrib?: string | null
   ibs_aliquota?: number | null
   cbs_aliquota?: number | null
+  tags?: string[] | null
 }
 
 type Categoria = { id: string; nome: string; pai_id: string | null }
@@ -67,6 +70,9 @@ type Props = {
   estoqueFiltro: string
   imagemFiltro: string
   ncmFiltro: string
+  tagFiltro: string
+  entradaFiltro: string
+  tagsDisponiveis: string[]
 }
 
 function calcMarkup(produto: Produto): number | null {
@@ -89,6 +95,7 @@ export default function ProdutosClient({
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
+  tagFiltro: tagInicial, entradaFiltro: entradaInicial, tagsDisponiveis,
 }: Props) {
   const router = useRouter()
   const [produtos, setProdutos] = useState(inicial)
@@ -114,6 +121,10 @@ export default function ProdutosClient({
   const [estoqueF, setEstoqueF] = useState(estoqueInicial)
   const [imagemF, setImagemF] = useState(imagemInicial)
   const [ncmF, setNcmF] = useState(ncmInicial)
+  const [tagF, setTagF] = useState(tagInicial)
+  const [entradaF, setEntradaF] = useState(entradaInicial)
+  const [gerenciandoTags, setGerenciandoTags] = useState(false)
+  const [vendoEstoque, setVendoEstoque] = useState<Produto | null>(null)
 
   // Sincroniza quando o servidor traz novos dados (navegação entre abas/busca)
   useEffect(() => { setProdutos(inicial) }, [inicial])
@@ -127,25 +138,28 @@ export default function ProdutosClient({
   useEffect(() => { setEstoqueF(estoqueInicial) }, [estoqueInicial])
   useEffect(() => { setImagemF(imagemInicial) }, [imagemInicial])
   useEffect(() => { setNcmF(ncmInicial) }, [ncmInicial])
+  useEffect(() => { setTagF(tagInicial) }, [tagInicial])
+  useEffect(() => { setEntradaF(entradaInicial) }, [entradaInicial])
 
   const subcategoriasDisponiveis = categoriaF
     ? categoriasTodas.filter(c => c.pai_id && categoriasTodas.find(r => r.id === c.pai_id)?.nome === categoriaF)
     : []
 
-  const filtrosAtivos = [marcaF, categoriaF, subcategoriaF, estoqueF, imagemF, ncmF].filter(Boolean).length
+  const filtrosAtivos = [marcaF, categoriaF, subcategoriaF, estoqueF, imagemF, ncmF, tagF, entradaF].filter(Boolean).length
 
   function navegar(params: Record<string, string>) {
     const sp = new URLSearchParams({
       q, aba, pagina: String(pagina), promo: promo ? '1' : '', ativos: apenasAtivos ? '1' : '0',
       marca: marcaF, categoria: categoriaF, subcategoria: subcategoriaF, estoque: estoqueF, imagem: imagemF, ncm: ncmF,
+      tag: tagF, entrada: entradaF,
       ...params,
     })
     router.push(`/dashboard/produtos?${sp.toString()}`)
   }
 
   function limparFiltrosAvancados() {
-    setMarcaF(''); setCategoriaF(''); setSubcategoriaF(''); setEstoqueF(''); setImagemF(''); setNcmF('')
-    navegar({ marca: '', categoria: '', subcategoria: '', estoque: '', imagem: '', ncm: '', pagina: '1' })
+    setMarcaF(''); setCategoriaF(''); setSubcategoriaF(''); setEstoqueF(''); setImagemF(''); setNcmF(''); setTagF(''); setEntradaF('')
+    navegar({ marca: '', categoria: '', subcategoria: '', estoque: '', imagem: '', ncm: '', tag: '', entrada: '', pagina: '1' })
   }
 
   function buscar(e: React.FormEvent) {
@@ -277,6 +291,21 @@ export default function ProdutosClient({
           onAplicado={() => { setImagemEmMassa(false); setSelecionados(new Set()); router.refresh() }}
         />
       )}
+      {gerenciandoTags && (
+        <GerenciarTagsModal
+          produtos={produtos.filter(p => selecionados.has(p.id)).map(p => ({ id: p.id, tags: p.tags ?? [] }))}
+          tagsExistentes={tagsDisponiveis}
+          onClose={() => setGerenciandoTags(false)}
+          onAplicado={() => { setGerenciandoTags(false); setSelecionados(new Set()); router.refresh() }}
+        />
+      )}
+      {vendoEstoque && (
+        <EstoqueDetalhadoModal
+          produto={vendoEstoque}
+          empresaId={empresaId}
+          onClose={() => setVendoEstoque(null)}
+        />
+      )}
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-xs text-gray-400 mb-4">
@@ -298,6 +327,7 @@ export default function ProdutosClient({
               <button onClick={() => ativarSelecionados(false)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">Desativar</button>
               <button onClick={() => setAcoesEmMassa(true)} className="text-xs px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">Ações em massa</button>
               <button onClick={() => setImagemEmMassa(true)} className="text-xs px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 transition-colors">🖼 Adicionar imagem</button>
+              <button onClick={() => setGerenciandoTags(true)} className="text-xs px-3 py-1.5 border border-teal-300 text-teal-700 rounded-lg hover:bg-teal-50 transition-colors">🏷 Tags</button>
             </div>
           )}
           <button onClick={() => setImportandoUrl(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
@@ -456,6 +486,29 @@ export default function ProdutosClient({
               </div>
             </div>
           ))}
+
+          <div>
+            <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Tag</label>
+            <select
+              value={tagF}
+              onChange={e => { const v = e.target.value; setTagF(v); navegar({ tag: v, pagina: '1' }) }}
+              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[140px]"
+            >
+              <option value="">Todas</option>
+              {tagsDisponiveis.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Entrada (nº ou NF)</label>
+            <input
+              value={entradaF}
+              onChange={e => setEntradaF(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') navegar({ entrada: entradaF.trim(), pagina: '1' }) }}
+              onBlur={() => navegar({ entrada: entradaF.trim(), pagina: '1' })}
+              placeholder="Ex: 1234"
+              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[140px]"
+            />
+          </div>
         </div>
       )}
 
@@ -480,10 +533,10 @@ export default function ProdutosClient({
       </div>
 
       {/* Tabela */}
-      <div className="border border-gray-200 rounded-b-xl overflow-hidden" style={{ background: 'rgb(252, 251, 248)' }}>
+      <div className="border border-gray-200 rounded-b-xl overflow-hidden bg-white">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200" style={{ background: 'rgb(246, 245, 242)' }}>
+            <tr className="border-b border-gray-200 bg-gray-50">
               <th className="w-10 px-4 py-3">
                 <input type="checkbox"
                   checked={selecionados.size === produtos.length && produtos.length > 0}
@@ -579,6 +632,11 @@ export default function ProdutosClient({
                         🚫 OCULTO NO PDV
                       </span>
                     )}
+                    {(p.tags ?? []).map(t => (
+                      <span key={t} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-teal-50 text-teal-700 border border-teal-200 shrink-0">
+                        {t}
+                      </span>
+                    ))}
                   </div>
                   <div className="flex items-center gap-2">
                     {p.categoria && <span className="text-xs text-gray-400">{p.categoria}</span>}
@@ -606,7 +664,12 @@ export default function ProdutosClient({
                   })()}
                 </td>
                 <td className="px-3 py-2.5 text-gray-600 text-xs">{p.marca ?? '—'}</td>
-                <td className="px-3 py-2.5 text-right text-gray-700">{p.estoque ?? 0}</td>
+                <td className="px-3 py-2.5 text-right">
+                  <button onClick={() => setVendoEstoque(p)} title="Ver estoque detalhado"
+                    className="text-gray-700 hover:text-blue-600 hover:underline font-medium transition-colors">
+                    {p.estoque ?? 0}
+                  </button>
+                </td>
                 <td className="px-3 py-2.5 text-center">
                   <button onClick={() => toggleAtivo(p)}
                     className={`w-10 h-5 rounded-full transition-colors relative ${p.ativo ? 'bg-green-500' : 'bg-gray-300'}`}>

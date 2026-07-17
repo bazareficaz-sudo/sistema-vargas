@@ -9,12 +9,13 @@ export default async function ProdutosPage({
   searchParams: Promise<{
     q?: string; pagina?: string; aba?: string; promo?: string; ativos?: string
     marca?: string; categoria?: string; subcategoria?: string
-    estoque?: string; imagem?: string; ncm?: string
+    estoque?: string; imagem?: string; ncm?: string; tag?: string; entrada?: string
   }>
 }) {
   const {
     q = '', pagina = '1', aba = 'todos', promo = '', ativos = '1',
     marca = '', categoria = '', subcategoria = '', estoque = '', imagem = '', ncm = '',
+    tag = '', entrada = '',
   } = await searchParams
   const promoFiltro = promo === '1'
   const apenasAtivos = ativos !== '0'
@@ -59,6 +60,27 @@ export default async function ProdutosPage({
     categoriaNomes = [categoria, ...filhas]
   }
 
+  // Todas as tags já usadas na empresa, para alimentar o select de filtro.
+  const { data: tagsRows } = await supabase.from('produtos').select('tags').eq('empresa_id', empresaId).not('tags', 'eq', '{}')
+  const tagsDisponiveis = Array.from(new Set<string>((tagsRows ?? []).flatMap((r: any) => (r.tags ?? []) as string[]))).sort()
+
+  // Filtro por entrada de mercadoria — busca por número da entrada ou da NF,
+  // resolve para os produtos que aparecem nos itens dessas entradas.
+  let idsDaEntrada: string[] | null = null
+  if (entrada) {
+    const { data: entradasRows } = await supabase
+      .from('entradas')
+      .select('id')
+      .eq('empresa_id', empresaId)
+      .or(`numero_entrada.ilike.%${entrada}%,numero_nf.ilike.%${entrada}%`)
+      .limit(50)
+    const entradaIds = (entradasRows ?? []).map(e => e.id)
+    const { data: itensRows } = entradaIds.length
+      ? await supabase.from('entrada_itens').select('produto_id').in('entrada_id', entradaIds)
+      : { data: [] as { produto_id: string | null }[] }
+    idsDaEntrada = Array.from(new Set<string>((itensRows ?? []).map(r => r.produto_id).filter(Boolean) as string[]))
+  }
+
   function aplicarFiltros(qb: any): any {
     let out = qb
     if (apenasAtivos) out = out.eq('ativo', true)
@@ -72,16 +94,18 @@ export default async function ProdutosPage({
     // '' -> null ao salvar), então basta checar IS NULL / IS NOT NULL.
     if (ncm === 'com') out = out.not('ncm', 'is', null)
     if (ncm === 'sem') out = out.is('ncm', null)
+    if (tag) out = out.contains('tags', [tag])
     if (idsComImagem !== null) {
       if (imagem === 'com') out = out.in('id', idsComImagem.length ? idsComImagem : ['00000000-0000-0000-0000-000000000000'])
       if (imagem === 'sem') out = idsComImagem.length ? out.not('id', 'in', `(${idsComImagem.map(id => `"${id}"`).join(',')})`) : out
     }
+    if (idsDaEntrada !== null) out = out.in('id', idsDaEntrada.length ? idsDaEntrada : ['00000000-0000-0000-0000-000000000000'])
     return out
   }
 
   let query = supabase
     .from('produtos')
-    .select('id, nome, sku, ean, preco_venda, preco_custo, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, unidade, categoria, marca, estoque, estoque_minimo, ativo, disponivel_pdv, permite_fracao, ncm, tipo, ibs_cst, ibs_cclasstrib, ibs_aliquota, cbs_aliquota', { count: 'exact' })
+    .select('id, nome, sku, ean, preco_venda, preco_custo, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, unidade, categoria, marca, estoque, estoque_minimo, ativo, disponivel_pdv, permite_fracao, ncm, tipo, ibs_cst, ibs_cclasstrib, ibs_aliquota, cbs_aliquota, tags', { count: 'exact' })
     .eq('empresa_id', empresaId)
     .order('nome')
     .range(offset, offset + POR_PAGINA - 1)
@@ -154,6 +178,9 @@ export default async function ProdutosPage({
       estoqueFiltro={estoque}
       imagemFiltro={imagem}
       ncmFiltro={ncm}
+      tagFiltro={tag}
+      entradaFiltro={entrada}
+      tagsDisponiveis={tagsDisponiveis}
     />
   )
 }

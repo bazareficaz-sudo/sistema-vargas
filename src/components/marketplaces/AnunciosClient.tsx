@@ -57,6 +57,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [sincronizando, setSincronizando] = useState(false)
   const [resumoSync, setResumoSync] = useState('')
   const [facetas, setFacetas] = useState<Set<string>>(new Set())
+  const [tagFiltro, setTagFiltro] = useState('')
   const [detalheAberto, setDetalheAberto] = useState<any | null>(null)
   const [mapeandoAberto, setMapeandoAberto] = useState<any | null>(null)
   const [enriquecendoAberto, setEnriquecendoAberto] = useState<any | null>(null)
@@ -332,11 +333,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     }
 
     if (editando) {
-      const { data, error } = await sb.from('marketplace_anuncios').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editando.id).select('*, produtos(id,nome,sku,preco_venda,estoque)').single()
+      const { data, error } = await sb.from('marketplace_anuncios').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editando.id).select('*, produtos(id,nome,sku,preco_venda,estoque,tipo,tags)').single()
       if (error) { setErro(error.message); setSalvando(false); return }
       setAnuncios(prev => prev.map(a => a.id === editando.id ? data : a))
     } else {
-      const { data, error } = await sb.from('marketplace_anuncios').insert(payload).select('*, produtos(id,nome,sku,preco_venda,estoque)').single()
+      const { data, error } = await sb.from('marketplace_anuncios').insert(payload).select('*, produtos(id,nome,sku,preco_venda,estoque,tipo,tags)').single()
       if (error) { setErro(error.message); setSalvando(false); return }
       setAnuncios(prev => [data, ...prev])
     }
@@ -381,10 +382,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setAnuncios(prev => prev.map(a => a.id === id ? { ...a, status: novoStatus } : a))
   }
 
+  const tagsDisponiveis = Array.from(new Set<string>(anuncios.flatMap(a => (a.produtos?.tags ?? []) as string[]))).sort()
+
   const filtrados = anuncios.filter(a => {
     const matchQ = !q || a.titulo.toLowerCase().includes(q.toLowerCase())
     const matchS = !statusFiltro || a.status === statusFiltro
-    if (!matchQ || !matchS) return false
+    const matchTag = !tagFiltro || (a.produtos?.tags ?? []).includes(tagFiltro)
+    if (!matchQ || !matchS || !matchTag) return false
 
     for (const faceta of facetas) {
       if (faceta === 'mapeado' && !a.produto_id) return false
@@ -475,6 +479,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             </button>
           ))}
         </div>
+        {tagsDisponiveis.length > 0 && (
+          <select value={tagFiltro} onChange={e => setTagFiltro(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-600 focus:outline-none focus:border-blue-500 bg-white">
+            <option value="">Todas as tags</option>
+            {tagsDisponiveis.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
       </div>
       <div className="flex items-center gap-1.5 mb-4 flex-wrap">
         <span className="text-xs text-gray-400 mr-1">Filtrar:</span>
@@ -564,6 +575,9 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                         {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
                         {!a.produtos && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
                         {temDivergencia(a) && <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠ Diverge do produto</span>}
+                        {(a.produtos?.tags ?? []).map((t: string) => (
+                          <span key={t} className="text-xs text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded-full">{t}</span>
+                        ))}
                       </div>
                       {a.id_externo && <p className="text-xs text-gray-400 font-mono">ID: {a.id_externo}</p>}
                       {a.url_anuncio && (
