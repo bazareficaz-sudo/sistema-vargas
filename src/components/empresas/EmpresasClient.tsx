@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import NovaEmpresaWizard from './NovaEmpresaWizard'
 
@@ -233,6 +233,10 @@ export default function EmpresasClient({
 }: Props) {
   const router = useRouter()
   const [empresas, setEmpresas] = useState<Empresa[]>(inicial)
+  // router.refresh() busca props novas do servidor, mas useState só usa o
+  // valor inicial — sem isso a lista fica travada na primeira carga mesmo
+  // depois de salvar (mesmo bug já corrigido antes em PedidosEcommerceClient.tsx).
+  useEffect(() => { setEmpresas(inicial) }, [inicial])
   const [busca, setBusca] = useState('')
   const [filtroGrupo, setFiltroGrupo] = useState('')
   const [filtroStatus, setFiltroStatus] = useState('')
