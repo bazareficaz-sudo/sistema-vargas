@@ -1,15 +1,55 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ComponentType } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+
+function MercadoLivreIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="46" height="46" rx="12" fill="#FFE600" />
+      <path d="M9 19c3-6.5 8.5-10 15-10s12 3.5 15 10" fill="none" stroke="#2D3277" strokeWidth="3.2" strokeLinecap="round" />
+      <path d="M9 29c3 6.5 8.5 10 15 10s12-3.5 15-10" fill="none" stroke="#2D3277" strokeWidth="3.2" strokeLinecap="round" />
+      <circle cx="24" cy="24" r="3.4" fill="#2D3277" />
+    </svg>
+  )
+}
+
+function ShopeeIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="shopeeGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#FF9142" />
+          <stop offset="1" stopColor="#EE4D2D" />
+        </linearGradient>
+      </defs>
+      <rect x="1" y="1" width="46" height="46" rx="12" fill="url(#shopeeGrad)" />
+      <path d="M17.5 17.5a6.5 6.5 0 0 1 13 0" fill="none" stroke="#fff" strokeWidth="2.2" />
+      <rect x="13" y="17.5" width="22" height="19" rx="4" fill="#fff" />
+      <text x="24" y="31.5" fontSize="14" fontWeight="700" fill="#EE4D2D" textAnchor="middle" fontFamily="Arial, sans-serif">S</text>
+    </svg>
+  )
+}
+
+function AmazonIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="46" height="46" rx="12" fill="#131921" />
+      <text x="24" y="29" fontSize="20" fontWeight="700" fill="#fff" textAnchor="middle" fontFamily="Arial, sans-serif">a</text>
+      <path d="M13 33c6 4.5 16 4.5 22 0" fill="none" stroke="#FF9900" strokeWidth="2.4" strokeLinecap="round" />
+      <path d="M32.5 31.7l3.8-1.2-.6 4z" fill="#FF9900" />
+    </svg>
+  )
+}
 
 const PLATAFORMAS = [
   {
     id: 'mercadolivre',
     label: 'Mercado Livre',
     emoji: '🟡',
+    Icone: MercadoLivreIcon,
     cor: 'border-yellow-400 bg-yellow-50',
     corAtivo: 'border-yellow-500 bg-yellow-100 ring-2 ring-yellow-400',
     badge: 'bg-yellow-400',
@@ -20,6 +60,7 @@ const PLATAFORMAS = [
     id: 'shopee',
     label: 'Shopee',
     emoji: '🧡',
+    Icone: ShopeeIcon,
     cor: 'border-orange-400 bg-orange-50',
     corAtivo: 'border-orange-500 bg-orange-100 ring-2 ring-orange-400',
     badge: 'bg-orange-400',
@@ -30,6 +71,7 @@ const PLATAFORMAS = [
     id: 'amazon',
     label: 'Amazon',
     emoji: '📦',
+    Icone: AmazonIcon,
     cor: 'border-amber-400 bg-amber-50',
     corAtivo: 'border-amber-500 bg-amber-100 ring-2 ring-amber-400',
     badge: 'bg-amber-500',
@@ -40,6 +82,7 @@ const PLATAFORMAS = [
     id: 'magalu',
     label: 'Magazine Luiza',
     emoji: '🛍️',
+    Icone: null as ComponentType<{ className?: string }> | null,
     cor: 'border-blue-400 bg-blue-50',
     corAtivo: 'border-blue-500 bg-blue-100 ring-2 ring-blue-400',
     badge: 'bg-blue-600',
@@ -50,6 +93,7 @@ const PLATAFORMAS = [
     id: 'outro',
     label: 'Outro canal',
     emoji: '🏪',
+    Icone: null as ComponentType<{ className?: string }> | null,
     cor: 'border-gray-300 bg-gray-50',
     corAtivo: 'border-gray-500 bg-gray-100 ring-2 ring-gray-400',
     badge: 'bg-gray-500',
@@ -59,6 +103,9 @@ const PLATAFORMAS = [
 ]
 
 function platInfo(id: string) { return PLATAFORMAS.find(p => p.id === id) ?? PLATAFORMAS[4] }
+function PlatIcon({ p, className }: { p: typeof PLATAFORMAS[number]; className?: string }) {
+  return p.Icone ? <p.Icone className={className} /> : <span className="text-2xl leading-none">{p.emoji}</span>
+}
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 
 const STATUS_PEDIDO_COR: Record<string, string> = {
@@ -274,8 +321,8 @@ export default function MarketplacesClient({
             return (
               <div key={canal.id} className={`bg-white border rounded-2xl p-5 transition-all ${canal.ativo ? 'border-gray-200' : 'border-gray-100 opacity-60'}`}>
                 <div className="flex items-start gap-4">
-                  <div className={`w-12 h-12 ${p.badge} rounded-xl flex items-center justify-center text-2xl flex-shrink-0`}>
-                    {p.emoji}
+                  <div className={`w-12 h-12 ${p.badge} rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0`}>
+                    <PlatIcon p={p} className="w-12 h-12" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
@@ -355,7 +402,7 @@ export default function MarketplacesClient({
                     {PLATAFORMAS.map(p => (
                       <button key={p.id} onClick={() => { f('plataforma', p.id); setErro('') }}
                         className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border-2 text-left transition-all ${form.plataforma === p.id ? p.corAtivo : p.cor + ' hover:opacity-90'}`}>
-                        <span className="text-2xl">{p.emoji}</span>
+                        <PlatIcon p={p} className="w-9 h-9 flex-shrink-0" />
                         <span className="font-medium text-gray-800 text-sm">{p.label}</span>
                       </button>
                     ))}
@@ -367,7 +414,7 @@ export default function MarketplacesClient({
               {passo === 2 && (
                 <div className="space-y-4">
                   <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${plat.cor}`}>
-                    <span className="text-2xl">{plat.emoji}</span>
+                    <PlatIcon p={plat} className="w-9 h-9 flex-shrink-0" />
                     <div>
                       <p className="text-xs text-gray-500">Plataforma escolhida</p>
                       <p className="font-semibold text-gray-800 text-sm">{plat.label}</p>
@@ -410,7 +457,7 @@ export default function MarketplacesClient({
               {passo === 3 && (
                 <div className="space-y-4">
                   <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${plat.cor}`}>
-                    <span className="text-2xl">{plat.emoji}</span>
+                    <PlatIcon p={plat} className="w-9 h-9 flex-shrink-0" />
                     <div>
                       <p className="text-xs text-gray-500">Conectando</p>
                       <p className="font-semibold text-gray-800 text-sm">{form.nome} — {plat.label}</p>
@@ -429,7 +476,7 @@ export default function MarketplacesClient({
                           className={`w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                             form.plataforma === 'shopee' ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-yellow-400 hover:bg-yellow-500 text-gray-900'
                           } disabled:opacity-60`}>
-                          {conectando ? '⏳ Abrindo...' : <>{plat.emoji} Entrar com {plat.label}</>}
+                          {conectando ? '⏳ Abrindo...' : <><PlatIcon p={plat} className="w-6 h-6 rounded-md flex-shrink-0" /> Entrar com {plat.label}</>}
                         </button>
                       </div>
                     ) : (
