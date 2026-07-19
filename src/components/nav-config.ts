@@ -205,6 +205,18 @@ export const NAV: NavGroup[] = [
     ],
   },
   {
+    id: 'automacoes',
+    label: 'Automações',
+    icon: '⚡',
+    color: 'bg-yellow-900',
+    textColor: 'text-yellow-300',
+    badgeColor: 'bg-yellow-500',
+    defaultOpen: false,
+    items: [
+      { href: '/dashboard/automacoes', label: 'Central de Automações', icon: '⚡' },
+    ],
+  },
+  {
     id: 'gestao',
     label: 'Gestão',
     icon: '⚙️',
