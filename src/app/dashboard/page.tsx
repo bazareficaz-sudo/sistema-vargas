@@ -122,15 +122,7 @@ export default async function DashboardPage() {
           <h2 className="text-slate-800 font-semibold">Vendas dos Canais Hoje</h2>
           <p className="text-slate-400 text-xs mt-0.5">Comparativo entre os canais de venda da empresa</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
-          <div className="px-5 py-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xl flex-shrink-0">🖥</div>
-            <div className="min-w-0">
-              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide">PDV VargasNexus</p>
-              <p className="text-slate-900 text-lg font-bold truncate">{brl(totalHoje)}</p>
-              <p className="text-slate-400 text-xs">{qtdHoje} venda{qtdHoje === 1 ? '' : 's'}</p>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
           <div className="px-5 py-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-xl flex-shrink-0">🏬</div>
             <div className="min-w-0">
