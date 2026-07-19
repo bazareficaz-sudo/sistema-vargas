@@ -188,10 +188,16 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
           <h1 className="text-gray-900 text-xl font-semibold">Regras de preço/estoque — {canal.nome}</h1>
           <p className="text-gray-500 text-sm mt-0.5">Regras salvas para reaplicar no envio em massa, sem reconfigurar toda vez.</p>
         </div>
-        <button onClick={abrirNova}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-          + Nova regra
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <a href={`/dashboard/marketplaces/${canal.id}/anuncios`}
+            className="px-4 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors">
+            ← Voltar para anúncios
+          </a>
+          <button onClick={abrirNova}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+            + Nova regra
+          </button>
+        </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
