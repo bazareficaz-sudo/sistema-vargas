@@ -4,8 +4,13 @@ import {
   executarAlertaPedidoMarketplace, executarEstoqueBaixo, executarContaReceber, executarContaPagar,
 } from './tipos-whatsapp'
 import { executarMargemBaixa, executarProdutoParado, executarInadimplencia, executarMetaVendas } from './tipos-alertas'
+import { executarEmissaoPorProduto, executarEmissaoPorFormaPagamento, executarEmissaoPorCliente } from './tipos-fiscal'
+import { executarReposicaoMinimo, executarPedidoAutomatico, executarCurvaAbc, executarProdutoParadoReposicao } from './tipos-reposicao'
 
 const HANDLERS: Record<string, (sb: any, a: any) => Promise<ResultadoExecucao>> = {
+  emissao_fiscal_produto: executarEmissaoPorProduto,
+  emissao_fiscal_forma_pagamento: executarEmissaoPorFormaPagamento,
+  emissao_fiscal_cliente: executarEmissaoPorCliente,
   whatsapp_relatorio_diario: executarRelatorioDiario,
   whatsapp_pedido_cliente: executarPedidoCliente,
   whatsapp_alerta_produto: executarAlertaProduto,
@@ -13,6 +18,10 @@ const HANDLERS: Record<string, (sb: any, a: any) => Promise<ResultadoExecucao>> 
   whatsapp_estoque_baixo: executarEstoqueBaixo,
   whatsapp_conta_receber: executarContaReceber,
   whatsapp_conta_pagar: executarContaPagar,
+  reposicao_minimo: executarReposicaoMinimo,
+  reposicao_pedido_automatico: executarPedidoAutomatico,
+  reposicao_curva_abc: executarCurvaAbc,
+  reposicao_produto_parado: executarProdutoParadoReposicao,
   alerta_margem_baixa: executarMargemBaixa,
   alerta_produto_parado: executarProdutoParado,
   alerta_inadimplencia: executarInadimplencia,

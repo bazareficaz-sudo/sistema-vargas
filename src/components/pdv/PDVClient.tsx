@@ -433,20 +433,14 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
       })))
       if (erroItens) throw erroItens
 
-      // Emissão de NFC-e — só pra venda "pura" (sem troca/devolução
-      // misturada), e nunca pode travar nem derrubar a venda em si: a
-      // venda já está salva e é a fonte de verdade comercial, a nota é
-      // um efeito colateral fiscal.
+      // NFC-e não é mais emitida automaticamente — só manual ("Emitir agora"
+      // aqui embaixo ou na tela de Vendas) ou por uma automação cadastrada em
+      // Automações → Emissão Fiscal. Só sinaliza que a venda é elegível
+      // (tipo 'venda' pura, sem troca/devolução misturada) pra mostrar o
+      // botão de emissão manual no modal pós-venda.
       let capNfce: { status: string; chave?: string; numero?: string; danfeUrl?: string; erro?: string } | null = null
       if (operacaoFinal === 'venda') {
-        const resultadoFiscal = await emitirNfceComTimeout(venda.id)
-        capNfce = {
-          status: resultadoFiscal.status ?? (resultadoFiscal.ok ? 'autorizada' : 'erro'),
-          chave: resultadoFiscal.chave,
-          numero: resultadoFiscal.numero,
-          danfeUrl: resultadoFiscal.danfeUrl,
-          erro: resultadoFiscal.ok ? undefined : (resultadoFiscal.erro ?? resultadoFiscal.motivoRejeicao),
-        }
+        capNfce = { status: 'pendente' }
       }
 
       // Movimentação de estoque

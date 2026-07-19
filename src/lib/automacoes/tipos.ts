@@ -10,6 +10,7 @@ export function fmtMoeda(v: number) {
 export const TIPOS_AGENDADOS_1X_DIA = new Set([
   'whatsapp_relatorio_diario', 'whatsapp_estoque_baixo', 'whatsapp_conta_receber', 'whatsapp_conta_pagar',
   'alerta_margem_baixa', 'alerta_produto_parado', 'alerta_inadimplencia', 'alerta_meta_vendas',
+  'reposicao_minimo', 'reposicao_pedido_automatico', 'reposicao_curva_abc', 'reposicao_produto_parado',
 ])
 
 export function horarioJaPassou(horarioEnvio: string | null): boolean {

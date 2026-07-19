@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import RegrasFiscais from './RegrasFiscais'
 import RegrasWhatsApp from './RegrasWhatsApp'
+import RegrasReposicao from './RegrasReposicao'
 import RegrasAlertas from './RegrasAlertas'
 
 export type ProdutoRef = { produto_id: string; produto_nome: string; produto_sku: string | null }
@@ -37,9 +39,9 @@ export type Canal = { id: string; nome: string; plataforma: string }
 type ModuloId = 'fiscal' | 'whatsapp' | 'reposicao' | 'alertas'
 
 const MODULOS: { id: ModuloId; icone: string; titulo: string; descricao: string; cor: string; disponivel: boolean }[] = [
-  { id: 'fiscal', icone: '📄', titulo: 'Emissão Fiscal', descricao: 'Emitir NFC-e automaticamente por produto, forma de pagamento, canal ou cliente.', cor: 'blue', disponivel: false },
+  { id: 'fiscal', icone: '📄', titulo: 'Emissão Fiscal', descricao: 'Emitir NFC-e automaticamente por produto, forma de pagamento ou cliente.', cor: 'blue', disponivel: true },
   { id: 'whatsapp', icone: '💬', titulo: 'WhatsApp', descricao: 'Relatórios, alertas e avisos automáticos direto no WhatsApp.', cor: 'green', disponivel: true },
-  { id: 'reposicao', icone: '🔄', titulo: 'Reposição de Estoque', descricao: 'Alertas de mínimo, pedido automático e análise de giro.', cor: 'amber', disponivel: false },
+  { id: 'reposicao', icone: '🔄', titulo: 'Reposição de Estoque', descricao: 'Alertas de mínimo, pedido automático e análise de giro.', cor: 'amber', disponivel: true },
   { id: 'alertas', icone: '🔔', titulo: 'Alertas em Geral', descricao: 'Margem baixa, produto parado, inadimplência e meta de vendas.', cor: 'red', disponivel: true },
 ]
 
@@ -104,6 +106,20 @@ export default function AutomacoesClient({ empresaId, automacoesIniciais, canais
 
               {emAberto && (
                 <div className="border-t border-gray-200 px-5 py-5">
+                  {m.id === 'fiscal' && (
+                    <RegrasFiscais
+                      empresaId={empresaId}
+                      automacoes={automacoes.filter(a => moduloDoTipo(a.tipo) === 'fiscal')}
+                      onChange={novas => setAutomacoes(prev => [...prev.filter(a => moduloDoTipo(a.tipo) !== 'fiscal'), ...novas])}
+                    />
+                  )}
+                  {m.id === 'reposicao' && (
+                    <RegrasReposicao
+                      empresaId={empresaId}
+                      automacoes={automacoes.filter(a => moduloDoTipo(a.tipo) === 'reposicao')}
+                      onChange={novas => setAutomacoes(prev => [...prev.filter(a => moduloDoTipo(a.tipo) !== 'reposicao'), ...novas])}
+                    />
+                  )}
                   {m.id === 'whatsapp' && (
                     <RegrasWhatsApp
                       empresaId={empresaId}
