@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   const canalNome = searchParams.get('nome') ?? 'nova-loja'
   const markup = searchParams.get('markup') ?? '0'
 
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}/dashboard/marketplaces/callback/mercadolivre`
+  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/dashboard/marketplaces/callback/mercadolivre`
   const state = Buffer.from(JSON.stringify({ nome: canalNome, markup })).toString('base64url')
 
   const authUrl =

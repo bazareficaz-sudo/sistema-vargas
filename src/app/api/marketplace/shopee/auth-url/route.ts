@@ -23,8 +23,8 @@ export async function GET(req: Request) {
   // Assinatura HMAC-SHA256 exigida pela Shopee
   const sign = signRequest(partnerKey, buildPublicBaseString(partnerId, path, timest))
 
-  // Em dev usa sistemavargas.com.br (registrado no Shopee) que redireciona para localhost
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://sistemavargas.com.br'
+  // Em dev usa www.vargasnexus.com.br (registrado no Shopee) que redireciona para localhost
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'
   const redirectUri = `${appUrl}/dashboard/marketplaces/callback/shopee`
   const state = Buffer.from(JSON.stringify({ nome: canalNome, markup })).toString('base64url')
 

@@ -489,7 +489,7 @@ export default function MarketplacesClient({
                           value={urlRetorno}
                           onChange={e => setUrlRetorno(e.target.value)}
                           autoFocus rows={3}
-                          placeholder={`https://sistemavargas.com.br/dashboard/marketplaces/callback/${form.plataforma}?code=...&shop_id=...`}
+                          placeholder={`https://www.vargasnexus.com.br/dashboard/marketplaces/callback/${form.plataforma}?code=...&shop_id=...`}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-blue-500 resize-none"
                         />
                         <button onClick={processarUrlRetorno} disabled={processando}
