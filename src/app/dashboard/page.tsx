@@ -24,6 +24,7 @@ export default async function DashboardPage() {
     produtosRes, clientesRes,
     crRes, cpRes,
     ultimasVendasRes,
+    canaisRes, pedidosMarketplaceHojeRes,
   ] = await Promise.all([
     supabase.from('vendas').select('total').eq('empresa_id', empresaId).eq('status', 'concluida').gte('created_at', inicioHoje),
     supabase.from('vendas').select('total').eq('empresa_id', empresaId).eq('status', 'concluida').gte('created_at', inicioMes),
@@ -32,11 +33,18 @@ export default async function DashboardPage() {
     supabase.from('contas_receber').select('valor_original, valor_pago, status, data_vencimento').eq('empresa_id', empresaId).neq('status', 'cancelado'),
     supabase.from('contas_pagar').select('valor, valor_pago, status, vencimento').eq('empresa_id', empresaId).neq('status', 'cancelado'),
     supabase.from('vendas').select('id, numero, total, status, created_at, clientes(nome)').eq('empresa_id', empresaId).gte('created_at', inicioHoje).order('created_at', { ascending: false }).limit(8),
+    supabase.from('marketplace_canais').select('id, nome, plataforma').eq('empresa_id', empresaId).eq('ativo', true),
+    supabase.from('marketplace_pedidos').select('valor_total, status, canal_id').eq('empresa_id', empresaId).gte('data_pedido', inicioHoje).not('status', 'in', '(cancelado,devolvido)'),
   ])
 
   const totalHoje = (vendasHojeRes.data ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
   const qtdHoje = vendasHojeRes.data?.length ?? 0
   const totalMes = (vendasMesRes.data ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
+
+  const canaisConectados = canaisRes.data ?? []
+  const pedidosMarketplaceHoje = pedidosMarketplaceHojeRes.data ?? []
+  const totalMarketplaceHoje = pedidosMarketplaceHoje.reduce((s, p) => s + Number(p.valor_total ?? 0), 0)
+  const qtdMarketplaceHoje = pedidosMarketplaceHoje.length
 
   const crPendente = (crRes.data ?? []).filter(c => c.status === 'pendente').reduce((s, c) => s + ((c.valor_original ?? 0) - (c.valor_pago ?? 0)), 0)
   const crVencido = (crRes.data ?? []).filter(c => c.status === 'vencido').reduce((s, c) => s + ((c.valor_original ?? 0) - (c.valor_pago ?? 0)), 0)
@@ -106,6 +114,44 @@ export default async function DashboardPage() {
           href="/dashboard/contas-pagar"
           alert={cpHoje > 0}
         />
+      </div>
+
+      {/* ── Vendas dos canais hoje ─────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <h2 className="text-slate-800 font-semibold">Vendas dos Canais Hoje</h2>
+          <p className="text-slate-400 text-xs mt-0.5">Comparativo entre os canais de venda da empresa</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+          <div className="px-5 py-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xl flex-shrink-0">🖥</div>
+            <div className="min-w-0">
+              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide">PDV VargasNexus</p>
+              <p className="text-slate-900 text-lg font-bold truncate">{brl(totalHoje)}</p>
+              <p className="text-slate-400 text-xs">{qtdHoje} venda{qtdHoje === 1 ? '' : 's'}</p>
+            </div>
+          </div>
+          <div className="px-5 py-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-xl flex-shrink-0">🏬</div>
+            <div className="min-w-0">
+              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide">PDV Externo</p>
+              <p className="text-slate-400 text-lg font-bold truncate">—</p>
+              <p className="text-slate-400 text-xs">sem integração ainda</p>
+            </div>
+          </div>
+          <div className="px-5 py-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-pink-50 flex items-center justify-center text-xl flex-shrink-0">🏪</div>
+            <div className="min-w-0">
+              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide">Marketplaces</p>
+              <p className="text-slate-900 text-lg font-bold truncate">{brl(totalMarketplaceHoje)}</p>
+              <p className="text-slate-400 text-xs truncate">
+                {canaisConectados.length === 0
+                  ? 'nenhum canal conectado'
+                  : `${qtdMarketplaceHoje} pedido${qtdMarketplaceHoje === 1 ? '' : 's'} · ${canaisConectados.map(c => c.nome).join(', ')}`}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ── Linha 2: Atalhos rápidos + últimas vendas ──────────────────────── */}
