@@ -17,9 +17,13 @@ type Regra = {
   modo_preco: 'nao' | 'fixo' | 'percentual' | 'formula' | 'shopee_liquido' | 'produto'
   valor_preco: number | null
   arredondamento: 'nenhum' | 'terminar_90' | 'terminar_99' | 'cima_inteiro'
+  valor_embalagem: number | null
+  percentual_imposto: number | null
   modo_estoque: 'nao' | 'fixo' | 'produto' | 'deposito'
   valor_estoque: number | null
   deposito_id: string | null
+  estoque_complementar: number | null
+  estoque_risco: number | null
   considerar_subsidio_pix: boolean
   ativo: boolean
 }
@@ -31,9 +35,13 @@ const FORM_VAZIO = {
   modo_preco: 'nao' as Regra['modo_preco'],
   valor_preco: '',
   arredondamento: 'nenhum' as Regra['arredondamento'],
+  valor_embalagem: '',
+  percentual_imposto: '',
   modo_estoque: 'nao' as Regra['modo_estoque'],
   valor_estoque: '',
   deposito_id: '',
+  estoque_complementar: '',
+  estoque_risco: '',
   considerar_subsidio_pix: false,
   ativo: true,
 }
@@ -68,9 +76,21 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
     if (r.modo_preco !== 'nao' && r.modo_preco !== 'fixo' && r.arredondamento !== 'nenhum') {
       partes.push(ARREDONDAMENTO_LABEL[r.arredondamento])
     }
+    if ((r.modo_preco === 'formula' || r.modo_preco === 'shopee_liquido') && Number(r.valor_embalagem ?? 0) > 0) {
+      partes.push(`+ embalagem ${fmt(Number(r.valor_embalagem))}`)
+    }
+    if (r.modo_preco === 'shopee_liquido' && Number(r.percentual_imposto ?? 0) > 0) {
+      partes.push(`+ imposto ${r.percentual_imposto}%`)
+    }
     if (r.modo_estoque === 'fixo') partes.push(`Estoque fixo: ${r.valor_estoque}`)
     else if (r.modo_estoque === 'produto') partes.push('Estoque do produto vinculado')
     else if (r.modo_estoque === 'deposito') partes.push(`Estoque do depósito "${nomeDeposito(r.deposito_id)}"`)
+    if (r.modo_estoque !== 'nao' && Number(r.estoque_complementar ?? 0) !== 0) {
+      partes.push(`+ complementar ${r.estoque_complementar}`)
+    }
+    if (r.modo_estoque !== 'nao' && r.estoque_risco != null) {
+      partes.push(`pausa se estoque ≤ ${r.estoque_risco}`)
+    }
     return partes.length > 0 ? partes.join(' · ') : 'Nenhuma alteração configurada'
   }
 
@@ -88,9 +108,13 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
       modo_preco: r.modo_preco,
       valor_preco: r.valor_preco != null ? String(r.valor_preco) : '',
       arredondamento: r.arredondamento,
+      valor_embalagem: r.valor_embalagem != null && r.valor_embalagem !== 0 ? String(r.valor_embalagem) : '',
+      percentual_imposto: r.percentual_imposto != null && r.percentual_imposto !== 0 ? String(r.percentual_imposto) : '',
       modo_estoque: r.modo_estoque,
       valor_estoque: r.valor_estoque != null ? String(r.valor_estoque) : '',
       deposito_id: r.deposito_id ?? '',
+      estoque_complementar: r.estoque_complementar != null && r.estoque_complementar !== 0 ? String(r.estoque_complementar) : '',
+      estoque_risco: r.estoque_risco != null ? String(r.estoque_risco) : '',
       considerar_subsidio_pix: r.considerar_subsidio_pix,
       ativo: r.ativo,
     })
@@ -110,9 +134,13 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
       modo_preco: form.modo_preco,
       valor_preco: form.valor_preco !== '' ? parseFloat(form.valor_preco) : null,
       arredondamento: form.arredondamento,
+      valor_embalagem: form.valor_embalagem !== '' ? parseFloat(form.valor_embalagem) : 0,
+      percentual_imposto: form.percentual_imposto !== '' ? parseFloat(form.percentual_imposto) : 0,
       modo_estoque: form.modo_estoque,
       valor_estoque: form.valor_estoque !== '' ? parseFloat(form.valor_estoque) : null,
       deposito_id: form.deposito_id || null,
+      estoque_complementar: form.estoque_complementar !== '' ? parseInt(form.estoque_complementar, 10) : 0,
+      estoque_risco: form.estoque_risco !== '' ? parseInt(form.estoque_risco, 10) : null,
       considerar_subsidio_pix: form.considerar_subsidio_pix,
       ativo: form.ativo,
       updated_at: new Date().toISOString(),
@@ -242,6 +270,26 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
                     Considerar subsídio Pix (5% a 8% adicional)
                   </label>
                 )}
+                {(form.modo_preco === 'formula' || form.modo_preco === 'shopee_liquido') && (
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Valor da embalagem (R$)</label>
+                      <input type="number" step="0.01" value={form.valor_embalagem} onChange={e => f('valor_embalagem', e.target.value)}
+                        placeholder="Ex: 2.50"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      <p className="text-[10px] text-gray-400 mt-0.5">Somado ao custo do produto antes de calcular o preço.</p>
+                    </div>
+                    {form.modo_preco === 'shopee_liquido' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Imposto (%)</label>
+                        <input type="number" step="0.01" value={form.percentual_imposto} onChange={e => f('percentual_imposto', e.target.value)}
+                          placeholder="Ex: 6"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                        <p className="text-[10px] text-gray-400 mt-0.5">Descontado do preço junto com a comissão, pra manter a margem líquida real.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {(form.modo_preco === 'percentual' || form.modo_preco === 'formula' || form.modo_preco === 'shopee_liquido' || form.modo_preco === 'produto') && (
                   <div className="mt-2">
                     <label className="block text-xs font-medium text-gray-600 mb-1">Arredondamento</label>
@@ -283,6 +331,24 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
                     <option value="">Selecione um depósito</option>
                     {depositos.map(d => <option key={d.id} value={d.id}>{d.nome}</option>)}
                   </select>
+                )}
+                {form.modo_estoque !== 'nao' && (
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Estoque complementar</label>
+                      <input type="number" value={form.estoque_complementar} onChange={e => f('estoque_complementar', e.target.value)}
+                        placeholder="Ex: 5"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      <p className="text-[10px] text-gray-400 mt-0.5">Somado ao estoque calculado antes de enviar.</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Estoque de risco</label>
+                      <input type="number" value={form.estoque_risco} onChange={e => f('estoque_risco', e.target.value)}
+                        placeholder="Ex: 2"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      <p className="text-[10px] text-gray-400 mt-0.5">Se o estoque final ficar ≤ este valor, o anúncio é pausado.</p>
+                    </div>
+                  </div>
                 )}
               </div>
 

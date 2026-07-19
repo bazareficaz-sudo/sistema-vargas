@@ -24,17 +24,19 @@ export function calcularComissao(precoVenda: number, considerarPix: boolean) {
 
 // Calcula o preço de venda necessário pra garantir `margemPct`% de margem
 // líquida sobre o custo, já descontando a comissão da Shopee (e o subsídio
-// Pix, se `considerarPix`). A faixa de comissão depende do próprio preço —
-// por isso testa cada faixa e usa a primeira cujo resultado realmente cai
-// dentro dela.
-export function calcularPrecoParaMargem(custo: number, margemPct: number, considerarPix: boolean): number {
+// Pix, se `considerarPix`) e um percentual de imposto adicional (se houver,
+// tratado como mais uma dedução sobre o preço de venda). A faixa de
+// comissão depende do próprio preço — por isso testa cada faixa e usa a
+// primeira cujo resultado realmente cai dentro dela.
+export function calcularPrecoParaMargem(custo: number, margemPct: number, considerarPix: boolean, percentualImposto = 0): number {
   const alvo = custo * (1 + margemPct / 100)
+  const imposto = percentualImposto / 100
   for (const faixa of FAIXAS_COMISSAO_SHOPEE) {
-    const taxaTotal = faixa.percentual / 100 + (considerarPix ? faixa.subsidioPix / 100 : 0)
+    const taxaTotal = faixa.percentual / 100 + (considerarPix ? faixa.subsidioPix / 100 : 0) + imposto
     const preco = (alvo + faixa.fixo) / (1 - taxaTotal)
     if (preco >= faixa.min && preco <= faixa.max) return parseFloat(preco.toFixed(2))
   }
   const ultima = FAIXAS_COMISSAO_SHOPEE[FAIXAS_COMISSAO_SHOPEE.length - 1]
-  const taxaTotal = ultima.percentual / 100 + (considerarPix ? ultima.subsidioPix / 100 : 0)
+  const taxaTotal = ultima.percentual / 100 + (considerarPix ? ultima.subsidioPix / 100 : 0) + imposto
   return parseFloat(((alvo + ultima.fixo) / (1 - taxaTotal)).toFixed(2))
 }

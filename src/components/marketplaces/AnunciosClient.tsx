@@ -69,12 +69,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // Envio de preço/estoque em massa para a Shopee
   const [opcoesMassaPreco, setOpcoesMassaPreco] = useState<{
     modoPreco: 'nao' | 'fixo' | 'percentual' | 'formula' | 'shopee_liquido' | 'produto'; valorPreco: string; arredondamento: string
-    considerarPix: boolean
+    considerarPix: boolean; valorEmbalagem: string; percentualImposto: string
     modoEstoque: 'nao' | 'fixo' | 'produto' | 'deposito'; valorEstoque: string; depositoId: string
+    estoqueComplementar: string; estoqueRisco: string
   } | null>(null)
   const [regraSelecionadaId, setRegraSelecionadaId] = useState('')
   const [previewMassaPreco, setPreviewMassaPreco] = useState<{
-    aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number }[]
+    aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number; paraPausar?: boolean }[]
     pulados: { anuncio: any; motivo: string }[]
   } | null>(null)
   const [enviandoMassaPreco, setEnviandoMassaPreco] = useState(false)
@@ -153,8 +154,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       modoPreco: regra.modo_preco, valorPreco: regra.valor_preco != null ? String(regra.valor_preco) : '',
       arredondamento: regra.arredondamento,
       considerarPix: regra.considerar_subsidio_pix ?? false,
+      valorEmbalagem: regra.valor_embalagem != null && regra.valor_embalagem !== 0 ? String(regra.valor_embalagem) : '',
+      percentualImposto: regra.percentual_imposto != null && regra.percentual_imposto !== 0 ? String(regra.percentual_imposto) : '',
       modoEstoque: regra.modo_estoque, valorEstoque: regra.valor_estoque != null ? String(regra.valor_estoque) : '',
       depositoId: regra.deposito_id ?? '',
+      estoqueComplementar: regra.estoque_complementar != null && regra.estoque_complementar !== 0 ? String(regra.estoque_complementar) : '',
+      estoqueRisco: regra.estoque_risco != null ? String(regra.estoque_risco) : '',
     }
     setOpcoesMassaPreco(novasOpcoes)
     prepararPreviewMassaPreco(novasOpcoes)
@@ -163,8 +168,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   async function prepararPreviewMassaPreco(opcoesForcadas?: typeof opcoesMassaPreco) {
     const opcoes = opcoesForcadas ?? opcoesMassaPreco
     if (!opcoes) return
-    const { modoPreco, valorPreco, arredondamento, considerarPix, modoEstoque, valorEstoque, depositoId } = opcoes
-    const aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number }[] = []
+    const { modoPreco, valorPreco, arredondamento, considerarPix, valorEmbalagem, percentualImposto, modoEstoque, valorEstoque, depositoId, estoqueComplementar, estoqueRisco } = opcoes
+    const embalagem = parseFloat(valorEmbalagem) || 0
+    const imposto = parseFloat(percentualImposto) || 0
+    const complementar = parseInt(estoqueComplementar) || 0
+    const risco = estoqueRisco !== '' ? parseInt(estoqueRisco) : null
+    const aplicaveis: { anuncio: any; precoNovo?: number; estoqueNovo?: number; paraPausar?: boolean }[] = []
     const pulados: { anuncio: any; motivo: string }[] = []
 
     const alvos = filtrados.filter(a => selecionados.has(a.id))
@@ -208,10 +217,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       else if (modoPreco === 'percentual') precoNovo = arredondar(a.preco_venda * (1 + (parseFloat(valorPreco) || 0) / 100), arredondamento)
       else if (modoPreco === 'formula') {
         if (!custoProduto || custoProduto <= 0) { pulados.push({ anuncio: a, motivo: 'Produto vinculado sem custo cadastrado (necessário para "Fórmula")' }); continue }
-        precoNovo = arredondar(custoProduto * (1 + (parseFloat(valorPreco) || 0) / 100), arredondamento)
+        precoNovo = arredondar((custoProduto + embalagem) * (1 + (parseFloat(valorPreco) || 0) / 100), arredondamento)
       } else if (modoPreco === 'shopee_liquido') {
         if (!custoProduto || custoProduto <= 0) { pulados.push({ anuncio: a, motivo: 'Produto vinculado sem custo cadastrado (necessário para "Margem líquida")' }); continue }
-        precoNovo = arredondar(calcularPrecoParaMargem(custoProduto, parseFloat(valorPreco) || 0, considerarPix), arredondamento)
+        precoNovo = arredondar(calcularPrecoParaMargem(custoProduto + embalagem, parseFloat(valorPreco) || 0, considerarPix, imposto), arredondamento)
       } else if (modoPreco === 'produto') {
         if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Do produto vinculado")' }); continue }
         precoNovo = arredondar(a.produtos.preco_venda, arredondamento)
@@ -227,9 +236,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Depósito")' }); continue }
         estoqueNovo = kitInfo ? kitInfo.estoque : (estoquePorDeposito.get(a.produtos.id) ?? 0)
       }
+      if (estoqueNovo !== undefined && complementar !== 0) estoqueNovo = estoqueNovo + complementar
 
       if (precoNovo === undefined && estoqueNovo === undefined) { pulados.push({ anuncio: a, motivo: 'Nenhuma alteração selecionada' }); continue }
-      aplicaveis.push({ anuncio: a, precoNovo, estoqueNovo })
+      const paraPausar = estoqueNovo !== undefined && risco !== null && estoqueNovo <= risco
+      aplicaveis.push({ anuncio: a, precoNovo, estoqueNovo, paraPausar })
     }
 
     setPreviewMassaPreco({ aplicaveis, pulados })
@@ -240,8 +251,9 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setEnviandoMassaPreco(true)
     const sb = createClient()
     let sucesso = 0, falha = 0
+    const idsParaPausar: string[] = []
 
-    for (const { anuncio, precoNovo, estoqueNovo } of previewMassaPreco.aplicaveis) {
+    for (const { anuncio, precoNovo, estoqueNovo, paraPausar } of previewMassaPreco.aplicaveis) {
       const updates: Record<string, any> = { updated_at: new Date().toISOString() }
       if (precoNovo !== undefined) updates.preco_venda = precoNovo
       if (estoqueNovo !== undefined) updates.estoque_reservado = estoqueNovo
@@ -257,6 +269,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         if (data.ok) {
           sucesso++
           setAnuncios(prev => prev.map(a => a.id === anuncio.id ? { ...a, ...updates } : a))
+          if (paraPausar) idsParaPausar.push(anuncio.id)
         } else {
           falha++
         }
@@ -265,7 +278,25 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       }
     }
 
-    setResumoMassaPreco(`Enviados: ${sucesso} · Falharam: ${falha} · Pulados: ${previewMassaPreco.pulados.length}`)
+    let resumoPausa = ''
+    if (idsParaPausar.length > 0) {
+      try {
+        const resp = await fetch('/api/marketplace/shopee/pausar-ativar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canal.id, anuncioIds: idsParaPausar, acao: 'pausar' }),
+        })
+        const data = await resp.json()
+        if (data.atualizados?.length > 0) {
+          setAnuncios(prev => prev.map(a => data.atualizados.includes(a.id) ? { ...a, status: 'pausado' } : a))
+        }
+        resumoPausa = ` · Pausados (estoque de risco): ${data.atualizados?.length ?? 0}`
+      } catch {
+        resumoPausa = ' · Falha ao pausar por estoque de risco'
+      }
+    }
+
+    setResumoMassaPreco(`Enviados: ${sucesso} · Falharam: ${falha} · Pulados: ${previewMassaPreco.pulados.length}${resumoPausa}`)
     setSelecionados(new Set())
     setPreviewMassaPreco(null)
     setOpcoesMassaPreco(null)
@@ -681,7 +712,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             Mapear selecionados por SKU
           </button>
           {canal.plataforma === 'shopee' && (
-            <button onClick={() => { setRegraSelecionadaId(''); setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', arredondamento: 'nenhum', considerarPix: false, modoEstoque: 'nao', valorEstoque: '', depositoId: '' }) }}
+            <button onClick={() => { setRegraSelecionadaId(''); setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', arredondamento: 'nenhum', considerarPix: false, valorEmbalagem: '', percentualImposto: '', modoEstoque: 'nao', valorEstoque: '', depositoId: '', estoqueComplementar: '', estoqueRisco: '' }) }}
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg">
               Atualizar preço/estoque na Shopee
             </button>
@@ -1063,6 +1094,24 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                       Considerar subsídio Pix (5% a 8% adicional)
                     </label>
                   )}
+                  {(opcoesMassaPreco.modoPreco === 'formula' || opcoesMassaPreco.modoPreco === 'shopee_liquido') && (
+                    <div className="ml-6 grid grid-cols-2 gap-2" style={{ width: 'calc(100% - 1.5rem)' }}>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Valor da embalagem (R$)</label>
+                        <input type="number" step="0.01" value={opcoesMassaPreco.valorEmbalagem}
+                          onChange={e => setOpcoesMassaPreco(p => p ? { ...p, valorEmbalagem: e.target.value } : p)}
+                          placeholder="Ex: 2.50" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                      {opcoesMassaPreco.modoPreco === 'shopee_liquido' && (
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Imposto (%)</label>
+                          <input type="number" step="0.01" value={opcoesMassaPreco.percentualImposto}
+                            onChange={e => setOpcoesMassaPreco(p => p ? { ...p, percentualImposto: e.target.value } : p)}
+                            placeholder="Ex: 6" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {(opcoesMassaPreco.modoPreco === 'percentual' || opcoesMassaPreco.modoPreco === 'formula' || opcoesMassaPreco.modoPreco === 'shopee_liquido' || opcoesMassaPreco.modoPreco === 'produto') && (
                     <select value={opcoesMassaPreco.arredondamento} onChange={e => setOpcoesMassaPreco(p => p ? { ...p, arredondamento: e.target.value } : p)}
                       className="border border-gray-300 rounded-lg px-3 py-2 text-sm ml-6" style={{ width: 'calc(100% - 1.5rem)' }}>
@@ -1097,6 +1146,22 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                       {depositos.map(d => <option key={d.id} value={d.id}>{d.nome}</option>)}
                     </select>
                   )}
+                  {opcoesMassaPreco.modoEstoque !== 'nao' && (
+                    <div className="ml-6 grid grid-cols-2 gap-2" style={{ width: 'calc(100% - 1.5rem)' }}>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Estoque complementar</label>
+                        <input type="number" value={opcoesMassaPreco.estoqueComplementar}
+                          onChange={e => setOpcoesMassaPreco(p => p ? { ...p, estoqueComplementar: e.target.value } : p)}
+                          placeholder="Ex: 5" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Estoque de risco</label>
+                        <input type="number" value={opcoesMassaPreco.estoqueRisco}
+                          onChange={e => setOpcoesMassaPreco(p => p ? { ...p, estoqueRisco: e.target.value } : p)}
+                          placeholder="Ex: 2" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1128,7 +1193,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               </p>
               {previewMassaPreco.aplicaveis.length > 0 && (
                 <div className="border border-gray-200 rounded-xl overflow-hidden">
-                  {previewMassaPreco.aplicaveis.map(({ anuncio, precoNovo, estoqueNovo }) => (
+                  {previewMassaPreco.aplicaveis.map(({ anuncio, precoNovo, estoqueNovo, paraPausar }) => (
                     <div key={anuncio.id} className="px-4 py-2.5 border-b border-gray-100 last:border-0 text-sm">
                       <p className="text-gray-800 truncate">{anuncio.titulo}</p>
                       <p className="text-xs text-gray-500">
@@ -1136,6 +1201,9 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                         {precoNovo !== undefined && estoqueNovo !== undefined && ' · '}
                         {estoqueNovo !== undefined && <>Estoque: {anuncio.estoque_reservado ?? 0} → <span className="text-emerald-600 font-medium">{estoqueNovo}</span></>}
                       </p>
+                      {paraPausar && (
+                        <p className="text-xs text-red-600 font-medium mt-0.5">⚠️ Estoque de risco atingido — anúncio será pausado</p>
+                      )}
                     </div>
                   ))}
                 </div>
