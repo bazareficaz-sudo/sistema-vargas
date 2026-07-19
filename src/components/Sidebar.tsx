@@ -278,6 +278,14 @@ export default function Sidebar({ empresa }: { empresa: string }) {
       {/* ── Rodapé ─────────────────────────────────────────────────────────── */}
       <div className="px-2 py-2 border-t border-white/10 flex-shrink-0">
         <PlanBannerSidebar collapsed={collapsed} />
+        <Link
+          href="/blog"
+          title="Novidades"
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/8 transition-all"
+        >
+          <span className="text-base w-5 text-center flex-shrink-0">📰</span>
+          {!collapsed && <span>Novidades</span>}
+        </Link>
         <button
           onClick={logout}
           title="Sair"

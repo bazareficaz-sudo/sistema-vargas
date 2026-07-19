@@ -214,6 +214,16 @@ export default function TopMenu({ empresa }: { empresa: string }) {
           )}
         </div>
 
+        {/* Novidades */}
+        <Link
+          href="/blog"
+          title="Novidades"
+          className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-2 ml-1 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/8 transition-all"
+        >
+          <span className="text-sm leading-none">📰</span>
+          <span className="hidden lg:inline">Novidades</span>
+        </Link>
+
         {/* Sair */}
         <button
           onClick={logout}

@@ -268,6 +268,7 @@ export default function LandingPage() {
             {[['#recursos','Recursos'],['#planos','Planos'],['#faq','FAQ']].map(([h, l]) => (
               <a key={h} href={h} className="text-sm text-gray-600 hover:text-blue-600 transition-colors font-medium">{l}</a>
             ))}
+            <Link href="/blog" className="text-sm text-gray-600 hover:text-blue-600 transition-colors font-medium">Blog</Link>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/login" className="text-sm text-gray-600 hover:text-gray-900 font-medium transition-colors">Entrar</Link>
@@ -632,7 +633,13 @@ export default function LandingPage() {
                 <p className="font-bold text-white text-sm mb-4">{col.titulo}</p>
                 <ul className="space-y-2">
                   {col.links.map(l => (
-                    <li key={l}><a href="#" className="text-slate-400 text-xs hover:text-white transition-colors">{l}</a></li>
+                    <li key={l}>
+                      {l === 'Blog' ? (
+                        <Link href="/blog" className="text-slate-400 text-xs hover:text-white transition-colors">{l}</Link>
+                      ) : (
+                        <a href="#" className="text-slate-400 text-xs hover:text-white transition-colors">{l}</a>
+                      )}
+                    </li>
                   ))}
                 </ul>
               </div>
