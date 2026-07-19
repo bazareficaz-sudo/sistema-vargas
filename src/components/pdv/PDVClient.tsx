@@ -130,11 +130,16 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
   const [modalTroca, setModalTroca] = useState(false)
   const [modalCredito, setModalCredito] = useState(false)
   const [depositoDevolucaoId, setDepositoDevolucaoId] = useState<string | null>(null)
+  const [permiteEstoqueNegativo, setPermiteEstoqueNegativo] = useState(false)
 
   useEffect(() => {
     let ativo = true
-    sb.from('empresa_config_estoque').select('deposito_devolucao_id').eq('empresa_id', empresaId).maybeSingle()
-      .then(({ data }) => { if (ativo) setDepositoDevolucaoId(data?.deposito_devolucao_id ?? null) })
+    sb.from('empresa_config_estoque').select('deposito_devolucao_id, permite_estoque_negativo').eq('empresa_id', empresaId).maybeSingle()
+      .then(({ data }) => {
+        if (!ativo) return
+        setDepositoDevolucaoId(data?.deposito_devolucao_id ?? null)
+        setPermiteEstoqueNegativo(data?.permite_estoque_negativo ?? false)
+      })
     return () => { ativo = false }
   }, [empresaId])
 
@@ -449,8 +454,11 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         const { data: p } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
         if (!p) continue
         if (item.tipo === 'venda') {
-          // Baixa por venda
-          await sb.from('produtos').update({ estoque: Math.max(0, p.estoque - item.quantidade) }).eq('id', item.produto_id)
+          // Baixa por venda. Só trava em 0 se a empresa não permitir estoque
+          // negativo (Empresas → Estoque); por padrão deixa ir negativo pra
+          // sinalizar venda em falta, em vez de esconder o problema.
+          const novoEstoque = p.estoque - item.quantidade
+          await sb.from('produtos').update({ estoque: permiteEstoqueNegativo ? novoEstoque : Math.max(0, novoEstoque) }).eq('id', item.produto_id)
         } else {
           // Entrada por devolução (qty é negativa, usar abs)
           await sb.from('produtos').update({ estoque: p.estoque + Math.abs(item.quantidade) }).eq('id', item.produto_id)
