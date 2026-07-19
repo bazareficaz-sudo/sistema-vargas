@@ -1,0 +1,298 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import type { Venda } from './VendasClient'
+
+type Item = {
+  id: string; produto_nome: string; produto_sku: string | null
+  quantidade: number; preco_unitario: number; desconto: number | null; total: number; tipo: string
+}
+
+type ClienteBusca = { id: string; nome: string; cpf_cnpj: string | null; telefone: string | null }
+
+const FORMA_LABEL: Record<string, string> = {
+  dinheiro: 'Dinheiro', debito: 'Cartão de débito', credito: 'Cartão de crédito',
+  pix: 'Pix', carteira: 'Carteira/crédito loja', fiado: 'Fiado', troca: 'Troca', multiplo: 'Múltiplo',
+}
+
+function fmt(v: number) { return (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
+
+export default function DetalheVendaModal({
+  venda, empresaId, modoEdicaoInicial, onClose, onImprimir, onWhatsapp, gerandoPdf, onAtualizado,
+}: {
+  venda: Venda
+  empresaId: string
+  modoEdicaoInicial: boolean
+  onClose: () => void
+  onImprimir: () => void
+  onWhatsapp: () => void
+  gerandoPdf: boolean
+  onAtualizado: (patch: Partial<Venda>) => void
+}) {
+  const [carregando, setCarregando] = useState(true)
+  const [itens, setItens] = useState<Item[]>([])
+  const [detalhe, setDetalhe] = useState<{
+    observacao: string | null; entrega_solicitada: boolean; valor_pago: number | null; troco: number | null
+    nfce_status: string | null; nfce_numero: string | null; nfce_chave: string | null; operador_nome: string | null
+  } | null>(null)
+
+  const [edicao, setEdicao] = useState(modoEdicaoInicial)
+  const [salvando, setSalvando] = useState(false)
+  const [erroSalvar, setErroSalvar] = useState('')
+
+  const [clienteId, setClienteId] = useState(venda.cliente_id)
+  const [clienteNome, setClienteNome] = useState(venda.clientes?.nome ?? '')
+  const [clienteBusca, setClienteBusca] = useState('')
+  const [clienteResultados, setClienteResultados] = useState<ClienteBusca[]>([])
+  const [observacaoEdit, setObservacaoEdit] = useState('')
+  const [entregaEdit, setEntregaEdit] = useState(false)
+
+  useEffect(() => {
+    (async () => {
+      setCarregando(true)
+      const sb = createClient()
+      const [{ data: itensData }, { data: vendaData }] = await Promise.all([
+        sb.from('venda_itens').select('*').eq('venda_id', venda.id),
+        sb.from('vendas').select('observacao, entrega_solicitada, valor_pago, troco, nfce_status, nfce_numero, nfce_chave, operador_nome').eq('id', venda.id).single(),
+      ])
+      setItens(itensData ?? [])
+      setDetalhe(vendaData as any)
+      setObservacaoEdit(vendaData?.observacao ?? '')
+      setEntregaEdit(vendaData?.entrega_solicitada ?? false)
+      setCarregando(false)
+    })()
+  }, [venda.id])
+
+  useEffect(() => {
+    if (!clienteBusca.trim() || clienteBusca.length < 2) { setClienteResultados([]); return }
+    const t = setTimeout(async () => {
+      const sb = createClient()
+      const { data } = await sb.from('clientes').select('id, nome, cpf_cnpj, telefone')
+        .eq('empresa_id', empresaId)
+        .or(`nome.ilike.%${clienteBusca}%,cpf_cnpj.ilike.%${clienteBusca}%,telefone.ilike.%${clienteBusca}%`)
+        .limit(10)
+      setClienteResultados(data ?? [])
+    }, 300)
+    return () => clearTimeout(t)
+  }, [clienteBusca, empresaId])
+
+  async function salvar() {
+    setSalvando(true); setErroSalvar('')
+    const sb = createClient()
+    const { error } = await sb.from('vendas').update({
+      cliente_id: clienteId,
+      observacao: observacaoEdit || null,
+      entrega_solicitada: entregaEdit,
+    }).eq('id', venda.id)
+    if (error) { setErroSalvar(error.message); setSalvando(false); return }
+
+    let clientesPatch = venda.clientes
+    if (clienteId !== venda.cliente_id) {
+      if (clienteId) {
+        const { data: cli } = await sb.from('clientes').select('nome, telefone, cpf_cnpj').eq('id', clienteId).single()
+        clientesPatch = cli ?? null
+      } else {
+        clientesPatch = null
+      }
+    }
+    setDetalhe(prev => prev ? { ...prev, observacao: observacaoEdit || null, entrega_solicitada: entregaEdit } : prev)
+    onAtualizado({ cliente_id: clienteId, clientes: clientesPatch })
+    setSalvando(false)
+    setEdicao(false)
+  }
+
+  const itensVenda = itens.filter(i => i.tipo !== 'devolucao')
+  const itensDevolvidos = itens.filter(i => i.tipo === 'devolucao')
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-y-auto flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0 sticky top-0 bg-white z-10">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Venda #{venda.numero}</h2>
+            <p className="text-xs text-gray-400">{new Date(venda.created_at).toLocaleString('pt-BR')}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        </div>
+
+        {carregando ? (
+          <div className="px-6 py-10 text-center text-gray-400 text-sm">Carregando...</div>
+        ) : (
+          <div className="px-6 py-5 space-y-5">
+            <div className="flex items-center justify-between">
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                venda.status === 'concluida' ? 'bg-green-100 text-green-700 border-green-200' :
+                venda.status === 'cancelada' ? 'bg-red-100 text-red-600 border-red-200' :
+                'bg-yellow-100 text-yellow-700 border-yellow-200'
+              }`}>{venda.status}</span>
+              {!edicao && (
+                <button onClick={() => setEdicao(true)} className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+                  ✏️ Editar
+                </button>
+              )}
+            </div>
+
+            {/* Cliente */}
+            <div>
+              <p className="text-xs font-semibold text-gray-700 mb-1.5">Cliente</p>
+              {!edicao ? (
+                <p className="text-sm text-gray-900">{venda.clientes?.nome ?? 'Consumidor'}
+                  {venda.clientes?.telefone && <span className="text-gray-400"> · {venda.clientes.telefone}</span>}
+                </p>
+              ) : (
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-sm text-gray-800">{clienteNome || 'Consumidor (nenhum vinculado)'}</span>
+                    {clienteId && (
+                      <button onClick={() => { setClienteId(null); setClienteNome('') }} className="text-xs text-red-500 hover:text-red-600">remover</button>
+                    )}
+                  </div>
+                  <input value={clienteBusca} onChange={e => setClienteBusca(e.target.value)}
+                    placeholder="Buscar cliente por nome, CPF ou telefone..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                  {clienteResultados.length > 0 && (
+                    <div className="mt-1.5 border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                      {clienteResultados.map(c => (
+                        <button key={c.id} onClick={() => { setClienteId(c.id); setClienteNome(c.nome); setClienteBusca(''); setClienteResultados([]) }}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-0">
+                          <span className="text-gray-900">{c.nome}</span>
+                          <span className="text-xs text-gray-400 ml-1.5">{c.cpf_cnpj} {c.telefone && `· ${c.telefone}`}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Itens */}
+            <div>
+              <p className="text-xs font-semibold text-gray-700 mb-1.5">Itens</p>
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                {itensVenda.map(i => (
+                  <div key={i.id} className="px-3 py-2 border-b border-gray-100 last:border-0 flex items-center justify-between text-sm">
+                    <div className="min-w-0">
+                      <p className="text-gray-800 truncate">{i.produto_nome}</p>
+                      <p className="text-xs text-gray-400">{i.quantidade}x {fmt(i.preco_unitario)}{i.produto_sku ? ` · ${i.produto_sku}` : ''}</p>
+                    </div>
+                    <p className="text-gray-900 font-medium flex-shrink-0">{fmt(i.total)}</p>
+                  </div>
+                ))}
+              </div>
+              {itensDevolvidos.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs text-red-500 mb-1">Itens devolvidos</p>
+                  <div className="border border-red-100 rounded-xl overflow-hidden">
+                    {itensDevolvidos.map(i => (
+                      <div key={i.id} className="px-3 py-2 border-b border-red-50 last:border-0 flex items-center justify-between text-sm">
+                        <p className="text-gray-700">{i.produto_nome} <span className="text-gray-400 text-xs">{i.quantidade}x</span></p>
+                        <p className="text-red-500 font-medium">-{fmt(i.total)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Totais */}
+            <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-1 text-sm">
+              <div className="flex justify-between text-gray-500"><span>Subtotal</span><span>{fmt(venda.subtotal)}</span></div>
+              {venda.desconto > 0 && <div className="flex justify-between text-gray-500"><span>Desconto</span><span>-{fmt(venda.desconto)}</span></div>}
+              <div className="flex justify-between text-gray-900 font-semibold text-base pt-1 border-t border-gray-200 mt-1">
+                <span>Total</span><span>{fmt(venda.total)}</span>
+              </div>
+            </div>
+
+            {/* Pagamento */}
+            <div>
+              <p className="text-xs font-semibold text-gray-700 mb-1.5">Forma de pagamento</p>
+              {(venda.pagamentos ?? []).length > 0 ? (
+                <div className="space-y-1">
+                  {venda.pagamentos!.map((p, idx) => (
+                    <div key={idx} className="flex justify-between text-sm text-gray-700">
+                      <span>{FORMA_LABEL[p.forma] ?? p.forma}</span><span>{fmt(p.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-700">{FORMA_LABEL[venda.forma_pagamento] ?? venda.forma_pagamento}</p>
+              )}
+            </div>
+
+            {/* NFC-e */}
+            {detalhe?.nfce_status && (
+              <div>
+                <p className="text-xs font-semibold text-gray-700 mb-1.5">NFC-e</p>
+                {detalhe.nfce_status === 'autorizada' ? (
+                  <p className="text-sm text-gray-700">Número {detalhe.nfce_numero} <span className="text-xs text-gray-400 block">{detalhe.nfce_chave}</span></p>
+                ) : (
+                  <p className="text-sm text-gray-500">{detalhe.nfce_status}</p>
+                )}
+              </div>
+            )}
+
+            {/* Observação / entrega */}
+            <div>
+              <p className="text-xs font-semibold text-gray-700 mb-1.5">Observação</p>
+              {!edicao ? (
+                <p className="text-sm text-gray-600">{detalhe?.observacao || '—'}</p>
+              ) : (
+                <textarea value={observacaoEdit} onChange={e => setObservacaoEdit(e.target.value)} rows={2}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+              )}
+              {edicao && (
+                <label className="flex items-center gap-2 text-xs text-gray-700 mt-2">
+                  <input type="checkbox" checked={entregaEdit} onChange={e => setEntregaEdit(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                  Entrega solicitada
+                </label>
+              )}
+              {!edicao && detalhe?.entrega_solicitada && (
+                <p className="text-xs text-blue-600 mt-1">🚚 Entrega solicitada</p>
+              )}
+            </div>
+
+            {edicao && (
+              <p className="text-xs text-gray-400">
+                Edição limitada a cliente vinculado, observação e entrega. Itens e valores não podem ser alterados aqui — mudanças fiscais/de estoque exigem um fluxo próprio.
+              </p>
+            )}
+
+            {erroSalvar && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{erroSalvar}</p>}
+          </div>
+        )}
+
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-between gap-3 flex-shrink-0">
+          <div className="flex gap-2">
+            {!edicao && (
+              <>
+                <button onClick={onImprimir} disabled={gerandoPdf}
+                  className="px-3 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                  {gerandoPdf ? '⏳' : '🖨️'} Imprimir
+                </button>
+                <button onClick={onWhatsapp} disabled={gerandoPdf}
+                  className="px-3 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                  {gerandoPdf ? '⏳' : '📱'} WhatsApp
+                </button>
+              </>
+            )}
+          </div>
+          <div className="flex gap-3">
+            {edicao ? (
+              <>
+                <button onClick={() => { setEdicao(false); setErroSalvar('') }} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
+                <button onClick={salvar} disabled={salvando}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                  {salvando ? 'Salvando...' : 'Salvar'}
+                </button>
+              </>
+            ) : (
+              <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
