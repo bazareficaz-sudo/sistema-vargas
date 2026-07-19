@@ -53,7 +53,7 @@ export async function POST(req: Request) {
 
   const { data: anuncio } = await sb
     .from('marketplace_anuncios')
-    .select('*, produtos(id, nome, sku, preco_venda, estoque)')
+    .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags)')
     .eq('id', resultado.anuncioId)
     .single()
 

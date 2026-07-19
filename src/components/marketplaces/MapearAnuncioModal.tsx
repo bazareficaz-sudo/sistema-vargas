@@ -40,7 +40,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       let sugestao: any = null
       if (anuncioAtual.sku_canal) {
         const { data } = await sb.from('produtos')
-          .select('id, nome, sku, preco_venda, estoque')
+          .select('id, nome, sku, preco_venda, preco_custo, estoque, tipo')
           .eq('empresa_id', empresaId).eq('ativo', true).eq('sku', anuncioAtual.sku_canal)
           .maybeSingle()
         sugestao = data ?? null
@@ -92,7 +92,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       const sb = createClient()
       const palavras = termo.toLowerCase().split(/\s+/).map(p => p.replace(/[,()%]/g, '')).filter(Boolean)
       let query = sb.from('produtos')
-        .select('id, nome, sku, preco_venda, estoque')
+        .select('id, nome, sku, preco_venda, preco_custo, estoque, tipo')
         .eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(8)
       for (const palavra of palavras) {
         query = query.or(`nome.ilike.%${palavra}%,sku.ilike.%${palavra}%,ean.ilike.%${palavra}%`)
