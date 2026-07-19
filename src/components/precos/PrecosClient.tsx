@@ -512,14 +512,14 @@ export default function PrecosClient({
                 <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Custo</th>
                 <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Markup</th>
                 <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Preço venda</th>
-                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Margem</th>
+                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Markup Promo</th>
                 <th className="text-center px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Promoção</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {produtos.map(p => {
                 const markup = p.markup ?? (p.preco_custo > 0 ? calcMarkup(p.preco_custo, p.preco_venda) : 0)
-                const margem = p.preco_venda > 0 ? ((p.preco_venda - p.preco_custo) / p.preco_venda) * 100 : 0
+                const markupPromo = p.preco_promocional && p.preco_custo > 0 ? calcMarkup(p.preco_custo, p.preco_promocional) : 0
                 return (
                   <tr key={p.id} className={`hover:bg-blue-50/30 transition-colors group ${selecionados.has(p.id) ? 'bg-blue-50/50' : ''}`}>
                     <td className="px-4 py-2.5">
@@ -552,8 +552,8 @@ export default function PrecosClient({
                         valor={p.preco_venda > 0 ? fmt(p.preco_venda) : '—'} />
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs font-medium ${margem >= 20 ? 'text-green-600' : margem > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>
-                        {margem > 0 ? `${margem.toFixed(1)}%` : '—'}
+                      <span className={`text-xs font-medium ${markupPromo >= 30 ? 'text-green-600' : markupPromo > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>
+                        {markupPromo > 0 ? `${markupPromo.toFixed(1)}%` : '—'}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-center">
