@@ -510,7 +510,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   async function sincronizar() {
     setSincronizando(true); setResumoSync(''); setErro('')
     try {
-      const resp = await fetch('/api/marketplace/shopee/sync', {
+      const endpoint = canal.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync' : '/api/marketplace/shopee/sync'
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ canalId: canal.id }),
@@ -637,7 +638,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           )}
-          {canal.plataforma === 'shopee' && (
+          {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && (
             <button onClick={sincronizar} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
               {sincronizando ? 'Sincronizando...' : '↺ Sincronizar agora'}

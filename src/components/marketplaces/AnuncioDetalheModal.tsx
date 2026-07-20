@@ -30,7 +30,8 @@ export default function AnuncioDetalheModal({ anuncio, canal, onClose, onAtualiz
     if (!anuncio.id_externo) { setErro('Este anúncio não tem ID externo — não veio de sincronização.'); return }
     setSincronizando(true); setErro(''); setAviso('')
     try {
-      const resp = await fetch('/api/marketplace/shopee/sync-item', {
+      const endpoint = canal.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync-item' : '/api/marketplace/shopee/sync-item'
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ canalId: canal.id, idExterno: anuncio.id_externo }),
@@ -170,7 +171,7 @@ export default function AnuncioDetalheModal({ anuncio, canal, onClose, onAtualiz
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
-          {canal.plataforma === 'shopee' && anuncio.id_externo && (
+          {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && anuncio.id_externo && (
             <button onClick={sincronizarItem} disabled={sincronizando}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
               {sincronizando ? 'Sincronizando...' : '↺ Sincronizar este anúncio'}
