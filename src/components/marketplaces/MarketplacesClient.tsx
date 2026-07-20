@@ -8,10 +8,11 @@ import { createClient } from '@/lib/supabase/client'
 function MercadoLivreIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
-      <rect x="1" y="1" width="46" height="46" rx="12" fill="#FFE600" />
-      <path d="M9 19c3-6.5 8.5-10 15-10s12 3.5 15 10" fill="none" stroke="#2D3277" strokeWidth="3.2" strokeLinecap="round" />
-      <path d="M9 29c3 6.5 8.5 10 15 10s12-3.5 15-10" fill="none" stroke="#2D3277" strokeWidth="3.2" strokeLinecap="round" />
-      <circle cx="24" cy="24" r="3.4" fill="#2D3277" />
+      <rect x="1" y="1" width="46" height="46" rx="12" fill="#FFFFFF" />
+      <ellipse cx="24" cy="25" rx="17.5" ry="13.5" fill="#FFE600" stroke="#2D3277" strokeWidth="2" />
+      <path d="M11 20c2-4 5-6.5 8-6M37 20c-2-4-5-6.5-8-6" fill="none" stroke="#2D3277" strokeWidth="2" strokeLinecap="round" />
+      <path d="M8 24c4.5 5.5 10.5 8.5 16 8.5S35.5 29.5 40 24" fill="none" stroke="#FFFFFF" strokeWidth="2.6" strokeLinecap="round" />
+      <path d="M16 27.5l4.5 3 3-2 4.5 3 3-2" fill="none" stroke="#2D3277" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
