@@ -262,7 +262,8 @@ export async function processRawOrder(
   // 'novo' = ainda não pago) já dispara baixa automática pros itens mapeados
   // — sem fase de reserva nesta versão (ver plano). Falha de baixa de um
   // item não impede os demais nem o processamento do pedido em si.
-  const deveBaixar = row.status !== 'novo' && row.status !== 'cancelado'
+  const debitaEstoque = canal.sincronizarEstoque !== false && canal.debitarEstoqueVendas !== false
+  const deveBaixar = debitaEstoque && row.status !== 'novo' && row.status !== 'cancelado'
   for (const v of vinculos) {
     const precoUnitario = Number(v.raw.model_discounted_price ?? v.raw.model_original_price ?? 0)
     const quantidade = Number(v.raw.model_quantity_purchased ?? 1)

@@ -1003,6 +1003,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         <AnuncioDetalheModal
           anuncio={detalheAberto}
           canal={canal}
+          regras={regras}
           onClose={() => setDetalheAberto(null)}
           onAtualizado={(anuncioAtualizado) => {
             setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))

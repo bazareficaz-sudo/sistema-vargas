@@ -4,14 +4,23 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt, temDivergencia } from './utils'
 
-export default function AnuncioDetalheModal({ anuncio, canal, onClose, onAtualizado }: {
-  anuncio: any; canal: any; onClose: () => void; onAtualizado: (anuncio: any) => void
+export default function AnuncioDetalheModal({ anuncio, canal, regras, onClose, onAtualizado }: {
+  anuncio: any; canal: any; regras?: any[]; onClose: () => void; onAtualizado: (anuncio: any) => void
 }) {
   const [variacoes, setVariacoes] = useState<any[]>([])
   const [carregandoVariacoes, setCarregandoVariacoes] = useState(false)
   const [sincronizando, setSincronizando] = useState(false)
   const [erro, setErro] = useState('')
   const [aviso, setAviso] = useState('')
+  const [salvandoRegra, setSalvandoRegra] = useState(false)
+
+  async function alterarRegra(regraId: string) {
+    setSalvandoRegra(true)
+    const sb = createClient()
+    await sb.from('marketplace_anuncios').update({ regra_id: regraId || null }).eq('id', anuncio.id)
+    onAtualizado({ ...anuncio, regra_id: regraId || null })
+    setSalvandoRegra(false)
+  }
 
   useEffect(() => {
     if (!anuncio.tem_variacao) { setVariacoes([]); return }
@@ -115,6 +124,20 @@ export default function AnuncioDetalheModal({ anuncio, canal, onClose, onAtualiz
             </div>
             {!anuncio.produtos && <p className="text-xs text-gray-400 mt-1">Este anúncio não está vinculado a nenhum produto do sistema.</p>}
           </div>
+
+          {regras && regras.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Regra associada</p>
+              <select value={anuncio.regra_id ?? ''} onChange={e => alterarRegra(e.target.value)} disabled={salvandoRegra}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50">
+                <option value="">Nenhuma — só espelha o estoque do produto</option>
+                {regras.map(r => <option key={r.id} value={r.id}>{r.nome}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Usada pela sincronização automática de estoque quando "Aplicar a regra associada ao produto" estiver ativo em Configurar.
+              </p>
+            </div>
+          )}
 
           {anuncio.tem_variacao && (
             <div>

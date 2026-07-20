@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncCatalogo } from '@/lib/shopee/sync'
 import { syncPedidos } from '@/lib/shopee/orders'
+import { sincronizarEstoqueAutomatico } from '@/lib/shopee/autoStockSync'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 
 // Fase 7 (catálogo) + Central de Pedidos Fase 2 (pedidos): esta rota roda
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
 
   const { data: canais } = await sb
     .from('marketplace_canais')
-    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, ultima_sincronizacao_pedidos, intervalo_sincronizacao_pedidos_min')
+    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, ultima_sincronizacao_pedidos, intervalo_sincronizacao_pedidos_min, sincronizar_estoque, debitar_estoque_vendas, atualizar_estoque_canal, aplicar_regra_produto')
     .eq('plataforma', 'shopee')
     .not('access_token', 'is', null)
 
@@ -39,6 +40,7 @@ export async function GET(req: Request) {
     canalId: string
     catalogo: { ok: boolean; upserted?: number; failedCount?: number; erro?: string }
     pedidos: { ok: boolean; skipped?: boolean; upserted?: number; failedCount?: number; erro?: string }
+    estoqueAuto: { ok: boolean; processados?: number; enviados?: number; falhas?: number; pausados?: number; erro?: string }
   }[] = []
 
   for (const canalRow of canais ?? []) {
@@ -49,6 +51,8 @@ export async function GET(req: Request) {
       accessToken: canalRow.access_token,
       refreshToken: canalRow.refresh_token,
       tokenExpiraEm: canalRow.token_expira_em,
+      sincronizarEstoque: canalRow.sincronizar_estoque,
+      debitarEstoqueVendas: canalRow.debitar_estoque_vendas,
     }
 
     const sincronizarPedidosAgora = devidoSincronizarPedidos(canalRow)
@@ -94,7 +98,24 @@ export async function GET(req: Request) {
       pedidos = { ok: false, erro }
     }
 
-    resultados.push({ canalId: canal.id, catalogo, pedidos })
+    let estoqueAuto: { ok: boolean; processados?: number; enviados?: number; falhas?: number; pausados?: number; erro?: string } = { ok: true }
+    if (canalRow.sincronizar_estoque && canalRow.atualizar_estoque_canal) {
+      try {
+        const r = await sincronizarEstoqueAutomatico(sb, canal, { aplicarRegraProduto: !!canalRow.aplicar_regra_produto })
+        await sb.from('marketplace_sync_log').insert({
+          canal_id: canal.id, tipo: 'auto_estoque', status: r.falhas === 0 ? 'ok' : 'erro',
+          mensagem: `[automático] Processados: ${r.processados} · Enviados: ${r.enviados} · Falhas: ${r.falhas} · Pausados: ${r.pausados}`,
+          detalhes: r,
+        })
+        estoqueAuto = { ok: true, ...r }
+      } catch (e: any) {
+        const erro = e?.message ?? 'Erro ao sincronizar estoque automaticamente'
+        await sb.from('marketplace_sync_log').insert({ canal_id: canal.id, tipo: 'auto_estoque', status: 'erro', mensagem: `[automático] ${erro}`, detalhes: { error: erro } })
+        estoqueAuto = { ok: false, erro }
+      }
+    }
+
+    resultados.push({ canalId: canal.id, catalogo, pedidos, estoqueAuto })
   }
 
   return NextResponse.json({ ok: true, canaisProcessados: resultados.length, resultados })

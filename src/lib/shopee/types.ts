@@ -11,6 +11,11 @@ export type ShopeeChannel = {
   accessToken: string
   refreshToken: string
   tokenExpiraEm: string | null
+  // Opcionais — só usados no fluxo de pedidos (baixa automática de estoque).
+  // Ausentes = comportamento antigo (sempre baixa), pra não quebrar chamadas
+  // que não passam esses campos.
+  sincronizarEstoque?: boolean
+  debitarEstoqueVendas?: boolean
 }
 
 export class ShopeeApiError extends Error {

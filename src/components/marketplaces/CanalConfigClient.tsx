@@ -28,6 +28,9 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
     seller_id: canalInicial.seller_id ?? '',
     sincronizar_estoque: canalInicial.sincronizar_estoque ?? true,
     sincronizar_preco: canalInicial.sincronizar_preco ?? true,
+    debitar_estoque_vendas: canalInicial.debitar_estoque_vendas ?? true,
+    atualizar_estoque_canal: canalInicial.atualizar_estoque_canal ?? false,
+    aplicar_regra_produto: canalInicial.aplicar_regra_produto ?? false,
   })
 
   function f(k: string, v: any) { setForm(p => ({ ...p, [k]: v })) }
@@ -43,6 +46,9 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
       seller_id: form.seller_id || null,
       sincronizar_estoque: form.sincronizar_estoque,
       sincronizar_preco: form.sincronizar_preco,
+      debitar_estoque_vendas: form.debitar_estoque_vendas,
+      atualizar_estoque_canal: form.atualizar_estoque_canal,
+      aplicar_regra_produto: form.aplicar_regra_produto,
       updated_at: new Date().toISOString(),
     }).eq('id', canalInicial.id)
     setSalvando(false)
@@ -128,21 +134,58 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
               </div>
             </div>
-            <div className="flex gap-6 pt-1">
+            <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <input type="checkbox" checked={form.sincronizar_preco} onChange={e => f('sincronizar_preco', e.target.checked)}
+                className="w-4 h-4 accent-blue-600" />
+              <div>
+                <p className="text-sm text-gray-700">Sincronizar preços</p>
+                <p className="text-xs text-gray-400">Atualiza preços no marketplace automaticamente</p>
+              </div>
+            </label>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
+            <h2 className="font-semibold text-gray-800">Sincronização automática de estoque</h2>
+
+            {canalInicial.plataforma === 'mercadolivre' && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                ⚠ Ainda não executa pro Mercado Livre — só a Shopee tem a sincronização automática pronta por enquanto.
+                As opções abaixo ficam salvas e passam a valer assim que isso for implementado.
+              </p>
+            )}
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.sincronizar_estoque} onChange={e => f('sincronizar_estoque', e.target.checked)}
+                className="w-4 h-4 accent-blue-600" />
+              <div>
+                <p className="text-sm text-gray-700 font-medium">Sincronizar estoque</p>
+                <p className="text-xs text-gray-400">Chave geral — desligada, nenhuma das opções abaixo tem efeito</p>
+              </div>
+            </label>
+
+            <div className={`ml-6 space-y-3 transition-opacity ${!form.sincronizar_estoque ? 'opacity-40 pointer-events-none' : ''}`}>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.sincronizar_estoque} onChange={e => f('sincronizar_estoque', e.target.checked)}
+                <input type="checkbox" checked={form.debitar_estoque_vendas} onChange={e => f('debitar_estoque_vendas', e.target.checked)}
                   className="w-4 h-4 accent-blue-600" />
                 <div>
-                  <p className="text-sm text-gray-700">Sincronizar estoque</p>
-                  <p className="text-xs text-gray-400">Atualiza estoque no marketplace automaticamente</p>
+                  <p className="text-sm text-gray-700">Debitar estoque com as vendas</p>
+                  <p className="text-xs text-gray-400">Baixa o estoque do produto vinculado a cada pedido novo que chegar do canal</p>
                 </div>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.sincronizar_preco} onChange={e => f('sincronizar_preco', e.target.checked)}
+                <input type="checkbox" checked={form.atualizar_estoque_canal} onChange={e => f('atualizar_estoque_canal', e.target.checked)}
                   className="w-4 h-4 accent-blue-600" />
                 <div>
-                  <p className="text-sm text-gray-700">Sincronizar preços</p>
-                  <p className="text-xs text-gray-400">Atualiza preços no marketplace automaticamente</p>
+                  <p className="text-sm text-gray-700">Atualizar estoque do canal com estoque do sistema</p>
+                  <p className="text-xs text-gray-400">Envia o estoque atual do produto vinculado pro anúncio automaticamente</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.aplicar_regra_produto} onChange={e => f('aplicar_regra_produto', e.target.checked)}
+                  className="w-4 h-4 accent-blue-600" />
+                <div>
+                  <p className="text-sm text-gray-700">Aplicar a regra associada ao produto</p>
+                  <p className="text-xs text-gray-400">Usa a regra de preço/estoque vinculada a cada anúncio, em vez de só espelhar o estoque. Vincule a regra na tela de Anúncios.</p>
                 </div>
               </label>
             </div>
