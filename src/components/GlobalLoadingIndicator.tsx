@@ -8,10 +8,8 @@ import { useEffect, useRef, useState } from 'react'
 // não precisa instrumentar tela por tela: um patch em window.fetch já
 // enxerga as duas coisas de uma vez.
 //
-// cursor:url() não anima (o CSS só aceita imagem estática ali), então o
-// "ícone em movimento" de verdade é o badge flutuante com o "V" da marca
-// (mesmo gradiente do menu lateral) girando ao lado do mouse — o cursor
-// nativo de ocupado do sistema operacional entra junto, como reforço.
+// Barra fina fixa no topo da viewport (padrão GitHub/YouTube/Vercel) —
+// posição previsível, sem depender de onde o mouse está.
 
 const MOSTRAR_APOS_MS = 150   // evita "piscar" em requisições muito rápidas
 const ESCONDER_APOS_MS = 150  // evita "piscar" entre requisições em sequência
@@ -20,18 +18,9 @@ let fetchJaInterceptado = false
 
 export default function GlobalLoadingIndicator() {
   const [visivel, setVisivel] = useState(false)
-  const [pos, setPos] = useState({ x: 0, y: 0 })
   const emVooRef = useRef(0)
   const timerMostrarRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timerEsconderRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
-      setPos({ x: e.clientX, y: e.clientY })
-    }
-    window.addEventListener('mousemove', onMouseMove)
-    return () => window.removeEventListener('mousemove', onMouseMove)
-  }, [])
 
   useEffect(() => {
     if (fetchJaInterceptado) return
@@ -45,10 +34,7 @@ export default function GlobalLoadingIndicator() {
       if (emVooRef.current === 1 && !timerMostrarRef.current) {
         timerMostrarRef.current = setTimeout(() => {
           timerMostrarRef.current = null
-          if (emVooRef.current > 0) {
-            document.documentElement.classList.add('app-loading')
-            despacharEstado(true)
-          }
+          if (emVooRef.current > 0) despacharEstado(true)
         }, MOSTRAR_APOS_MS)
       }
     }
@@ -59,10 +45,7 @@ export default function GlobalLoadingIndicator() {
         if (timerMostrarRef.current) { clearTimeout(timerMostrarRef.current); timerMostrarRef.current = null }
         timerEsconderRef.current = setTimeout(() => {
           timerEsconderRef.current = null
-          if (emVooRef.current === 0) {
-            document.documentElement.classList.remove('app-loading')
-            despacharEstado(false)
-          }
+          if (emVooRef.current === 0) despacharEstado(false)
         }, ESCONDER_APOS_MS)
       }
     }
@@ -92,12 +75,8 @@ export default function GlobalLoadingIndicator() {
   if (!visivel) return null
 
   return (
-    <div
-      aria-hidden
-      style={{ left: pos.x + 14, top: pos.y + 14 }}
-      className="fixed z-[9999] pointer-events-none w-6 h-6 rounded-lg flex items-center justify-center shadow-lg app-loading-badge"
-    >
-      <span className="text-white font-bold text-[10px]">V</span>
+    <div aria-hidden className="fixed top-0 left-0 right-0 z-[9999] h-[3px] overflow-hidden pointer-events-none">
+      <div className="app-loading-bar" />
     </div>
   )
 }
