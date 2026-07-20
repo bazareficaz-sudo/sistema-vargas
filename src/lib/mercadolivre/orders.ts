@@ -15,7 +15,11 @@ const OFFSET_MAX = 1000 // mesmo teto do catálogo — /search não pagina além
 
 type CallCtx = { sb: any; canal: MLChannel }
 
-// Pagina /orders/search por período de criação. Cada página já traz pedidos
+// Pagina /orders/search por período de ÚLTIMA ATUALIZAÇÃO (date_last_updated),
+// não de criação — mesmo princípio já usado pela Shopee (time_range_field:
+// 'update_time'). É o que permite pegar mudança de status (ex: pagamento
+// confirmado) em pedidos criados antes da janela de busca, sem precisar
+// escanear tudo de novo a cada sincronização. Cada página já traz pedidos
 // completos (order_items, buyer, shipping...), então não há chamada de
 // detalhe separada como na Shopee.
 export async function* searchOrders(
@@ -28,8 +32,8 @@ export async function* searchOrders(
   while (true) {
     const data = await mlGet('/orders/search', {
       seller: ctx.canal.sellerId,
-      'order.date_created.from': opts.fromIso,
-      'order.date_created.to': opts.toIso,
+      'order.date_last_updated.from': opts.fromIso,
+      'order.date_last_updated.to': opts.toIso,
       sort: 'date_desc',
       offset,
       limit: pageSize,
