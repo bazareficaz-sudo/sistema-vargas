@@ -32,6 +32,23 @@ const STATUS_LABELS: Record<string, string> = {
   rascunho: 'Rascunho', ativo: 'Ativo', pausado: 'Pausado', encerrado: 'Encerrado', erro: 'Erro',
 }
 
+// Tipo de anúncio do Mercado Livre (listing_type_id) — não é uma coluna
+// própria, vem embutido em dados_brutos (já sincronizado no catálogo).
+const ML_TIPO_ANUNCIO_LABELS: Record<string, string> = {
+  gold_pro: 'Premium',
+  gold_special: 'Clássico',
+  gold_premium: 'Premium',
+  gold: 'Clássico',
+  silver: 'Clássico',
+  bronze: 'Clássico',
+  free: 'Grátis',
+}
+function tipoAnuncioML(a: any): string | null {
+  const listingType = a.dados_brutos?.listing_type_id
+  if (!listingType) return null
+  return ML_TIPO_ANUNCIO_LABELS[listingType] ?? listingType
+}
+
 const FACETAS: { key: string; label: string }[] = [
   { key: 'mapeado', label: 'Mapeado' },
   { key: 'nao_mapeado', label: 'Não mapeado' },
@@ -811,6 +828,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                         </p>
                       )}
                       <div className="flex gap-1 flex-wrap mt-0.5">
+                        {canal.plataforma === 'mercadolivre' && tipoAnuncioML(a) && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full border ${tipoAnuncioML(a) === 'Premium' ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-sky-700 bg-sky-50 border-sky-200'}`}>
+                            {tipoAnuncioML(a)}
+                          </span>
+                        )}
                         {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
                         {!a.produtos && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
                         {temDivergencia(a) && <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠ Diverge do produto</span>}

@@ -40,7 +40,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       let sugestao: any = null
       if (anuncioAtual.sku_canal) {
         const { data } = await sb.from('produtos')
-          .select('id, nome, sku, preco_venda, preco_custo, estoque, tipo')
+          .select('id, nome, sku, marca, preco_venda, preco_custo, estoque, tipo')
           .eq('empresa_id', empresaId).eq('ativo', true).eq('sku', anuncioAtual.sku_canal)
           .maybeSingle()
         sugestao = data ?? null
@@ -51,7 +51,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       const sugestoesVar: Record<string, any> = {}
       if (anuncioAtual.tem_variacao) {
         const { data } = await sb.from('marketplace_anuncio_variacoes')
-          .select('*, produtos(id, nome, sku, preco_venda, estoque)')
+          .select('*, produtos(id, nome, sku, marca, preco_venda, estoque)')
           .eq('anuncio_id', anuncioAtual.id)
           .order('nome_variacao')
         vars = data ?? []
@@ -59,7 +59,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
         const skusFaltando = vars.filter(v => !v.produto_id && v.sku_variacao).map(v => v.sku_variacao)
         if (skusFaltando.length > 0) {
           const { data: candidatos } = await sb.from('produtos')
-            .select('id, nome, sku, preco_venda, estoque')
+            .select('id, nome, sku, marca, preco_venda, estoque')
             .eq('empresa_id', empresaId).eq('ativo', true).in('sku', skusFaltando)
           for (const v of vars) {
             if (!v.produto_id && v.sku_variacao) {
@@ -92,7 +92,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       const sb = createClient()
       const palavras = termo.toLowerCase().split(/\s+/).map(p => p.replace(/[,()%]/g, '')).filter(Boolean)
       let query = sb.from('produtos')
-        .select('id, nome, sku, preco_venda, preco_custo, estoque, tipo')
+        .select('id, nome, sku, marca, preco_venda, preco_custo, estoque, tipo')
         .eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(8)
       for (const palavra of palavras) {
         query = query.or(`nome.ilike.%${palavra}%,sku.ilike.%${palavra}%,ean.ilike.%${palavra}%`)
@@ -262,7 +262,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
                   <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
                     <div>
                       <p className="text-sm font-medium text-gray-900">✓ {anuncioAtual.produtos.nome}</p>
-                      <p className="text-xs text-gray-500">{anuncioAtual.produtos.sku} · {fmt(anuncioAtual.produtos.preco_venda)} · Estoque: {anuncioAtual.produtos.estoque}</p>
+                      <p className="text-xs text-gray-500">{anuncioAtual.produtos.sku}{anuncioAtual.produtos.marca && ` · ${anuncioAtual.produtos.marca}`} · {fmt(anuncioAtual.produtos.preco_venda)} · Estoque: {anuncioAtual.produtos.estoque}</p>
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => abrirBusca({ tipo: 'anuncio' })} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Trocar</button>
@@ -273,7 +273,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
                   <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
                     <div>
                       <p className="text-sm font-medium text-gray-900">Sugestão por SKU: {sugestaoAnuncio.nome}</p>
-                      <p className="text-xs text-gray-500">{sugestaoAnuncio.sku} · {fmt(sugestaoAnuncio.preco_venda)} · Estoque: {sugestaoAnuncio.estoque}</p>
+                      <p className="text-xs text-gray-500">{sugestaoAnuncio.sku}{sugestaoAnuncio.marca && ` · ${sugestaoAnuncio.marca}`} · {fmt(sugestaoAnuncio.preco_venda)} · Estoque: {sugestaoAnuncio.estoque}</p>
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => mapearAnuncio(sugestaoAnuncio, 'automatico_sku')} disabled={salvando}
@@ -342,13 +342,13 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
                             </div>
                             {v.produtos ? (
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">✓ {v.produtos.nome}</span>
+                                <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">✓ {v.produtos.nome}{v.produtos.marca && ` · ${v.produtos.marca}`}</span>
                                 <button onClick={() => abrirBusca({ tipo: 'variacao', variacaoId: v.id, skuVariacao: v.sku_variacao })}
                                   className="text-xs text-blue-600 hover:text-blue-800 font-medium">Trocar</button>
                               </div>
                             ) : sugestoesVariacao[v.id] ? (
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500">Sugestão: {sugestoesVariacao[v.id].nome}</span>
+                                <span className="text-xs text-gray-500">Sugestão: {sugestoesVariacao[v.id].nome}{sugestoesVariacao[v.id].marca && ` · ${sugestoesVariacao[v.id].marca}`}</span>
                                 <button onClick={() => mapearVariacao(v, sugestoesVariacao[v.id], 'automatico_sku')} disabled={salvando}
                                   className="px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs rounded-lg">Usar</button>
                                 <button onClick={() => abrirBusca({ tipo: 'variacao', variacaoId: v.id, skuVariacao: v.sku_variacao })}
@@ -395,7 +395,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
                           }
                         }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-gray-100 last:border-0">
                           <p className="text-sm font-medium text-gray-900">{p.nome}</p>
-                          <p className="text-xs text-gray-400">{p.sku} · {fmt(p.preco_venda)} · Estoque: {p.estoque}</p>
+                          <p className="text-xs text-gray-400">{p.sku}{p.marca && ` · ${p.marca}`} · {fmt(p.preco_venda)} · Estoque: {p.estoque}</p>
                         </button>
                       ))}
                     </div>
