@@ -227,7 +227,7 @@ export const NAV: NavGroup[] = [
     defaultOpen: false,
     items: [
       { href: '/dashboard/empresas',                  label: 'Empresas',        icon: '🏢', modulo: 'multiempresa' },
-      { href: '/dashboard/terminais',                 label: 'Terminais PDV',   icon: '🖥️', modulo: 'pdv' },
+      { href: '/dashboard/usuarios-pdv',               label: 'Usuários do PDV', icon: '🔐', modulo: 'pdv' },
       { href: '/dashboard/configuracoes/integracoes', label: 'Integrações',     icon: '🔌', modulo: 'configuracoes' },
       { href: '/dashboard/configuracoes/aparencia',   label: 'Aparência',       icon: '🎨', modulo: 'configuracoes' },
     ],
