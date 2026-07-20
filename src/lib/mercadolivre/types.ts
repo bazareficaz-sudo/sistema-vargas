@@ -11,6 +11,11 @@ export type MLChannel = {
   accessToken: string
   refreshToken: string
   tokenExpiraEm: string | null
+  // Opcionais — só usados no fluxo de pedidos (baixa automática de estoque).
+  // Ausentes = comportamento padrão (sempre baixa), mesmo princípio já usado
+  // em ShopeeChannel.
+  sincronizarEstoque?: boolean
+  debitarEstoqueVendas?: boolean
 }
 
 export class MLApiError extends Error {

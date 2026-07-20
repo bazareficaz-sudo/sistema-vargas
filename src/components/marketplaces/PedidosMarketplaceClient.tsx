@@ -184,7 +184,8 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
   async function sincronizarPedidos() {
     setSincronizando(true); setResumoSync('')
     try {
-      const resp = await fetch('/api/marketplace/shopee/sync-pedidos', {
+      const endpoint = canal.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync-pedidos' : '/api/marketplace/shopee/sync-pedidos'
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ canalId: canal.id }),
@@ -418,7 +419,7 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
           </p>
         </div>
         <div className="flex gap-2">
-          {canal.plataforma === 'shopee' && (
+          {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && (
             <button onClick={sincronizarPedidos} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
               {sincronizando ? 'Sincronizando...' : '↺ Sincronizar pedidos'}

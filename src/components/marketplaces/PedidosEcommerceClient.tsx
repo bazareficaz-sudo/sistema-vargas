@@ -91,7 +91,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [nfeForm, setNfeForm] = useState({ numero: '', chave: '' })
   const [salvandoNfe, setSalvandoNfe] = useState(false)
 
-  const canaisShopee = canais.filter(c => c.plataforma === 'shopee' && c.ativo && c.access_token)
+  const canaisSincronizaveis = canais.filter(c => (c.plataforma === 'shopee' || c.plataforma === 'mercadolivre') && c.ativo && c.access_token)
 
   const formPedidoVazio = {
     canal_id: canais[0]?.id ?? '',
@@ -190,20 +190,21 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     setSalvandoNfe(false)
   }
 
-  // Roda a sincronização em todas as lojas Shopee conectadas (ou só na
-  // selecionada, se um filtro de loja estiver ativo) e agrega o resultado
-  // num resumo único — a rota em si (`sync-pedidos`) não muda, é a mesma
-  // usada na tela por canal.
+  // Roda a sincronização em todas as lojas Shopee/Mercado Livre conectadas
+  // (ou só na selecionada, se um filtro de loja estiver ativo) e agrega o
+  // resultado num resumo único — a rota (`sync-pedidos`) muda por
+  // plataforma, mas o formato de resposta é o mesmo nas duas.
   async function sincronizarPedidos() {
-    const alvos = canalFiltro ? canaisShopee.filter(c => c.id === canalFiltro) : canaisShopee
-    if (alvos.length === 0) { setResumoSync('Nenhuma loja Shopee conectada para sincronizar.'); return }
+    const alvos = canalFiltro ? canaisSincronizaveis.filter(c => c.id === canalFiltro) : canaisSincronizaveis
+    if (alvos.length === 0) { setResumoSync('Nenhuma loja Shopee ou Mercado Livre conectada para sincronizar.'); return }
     setSincronizando(true); setResumoSync('')
-    // Cada loja é uma chamada independente à Shopee — rodar em paralelo em
-    // vez de sequencial evita que a espera total seja a soma do tempo de
+    // Cada loja é uma chamada independente ao marketplace — rodar em paralelo
+    // em vez de sequencial evita que a espera total seja a soma do tempo de
     // todas as lojas (antes, a 2ª loja só começava depois da 1ª terminar).
     const resultados = await Promise.all(alvos.map(async c => {
       try {
-        const resp = await fetch('/api/marketplace/shopee/sync-pedidos', {
+        const endpoint = c.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync-pedidos' : '/api/marketplace/shopee/sync-pedidos'
+        const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canalId: c.id }),
@@ -438,7 +439,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
           </p>
         </div>
         <div className="flex gap-2">
-          {canaisShopee.length > 0 && (
+          {canaisSincronizaveis.length > 0 && (
             <button onClick={sincronizarPedidos} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
               {sincronizando ? 'Sincronizando...' : '↺ Sincronizar pedidos'}
