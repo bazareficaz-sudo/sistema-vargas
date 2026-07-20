@@ -42,6 +42,23 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   const [busca, setBusca] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
 
+  // Painel abre ao passar o mouse sobre o ícone do rail e fecha ao clicar
+  // (num item ou no próprio ícone) ou quando o mouse sai da área do rail +
+  // painel. O timeout evita fechar por engano no instante em que o cursor
+  // atravessa a borda entre o rail e o flyout.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function abrirPainel(id: PainelId) {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
+    setPainel(id)
+  }
+  function agendarFechamento() {
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    closeTimer.current = setTimeout(() => setPainel(null), 200)
+  }
+  function cancelarFechamento() {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
+  }
+
   // Registra página atual nos recentes
   useEffect(() => {
     const current = ALL_ITEMS.find(it => it.href === pathname || pathname.startsWith(it.href + '/'))
@@ -58,10 +75,6 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   useEffect(() => {
     if (painel === 'busca') setTimeout(() => searchRef.current?.focus(), 50)
   }, [painel])
-
-  function togglePainel(id: PainelId) {
-    setPainel(prev => prev === id ? null : id)
-  }
 
   function toggleFav(href: string) {
     setFavorites(favorites.includes(href) ? favorites.filter(f => f !== href) : [...favorites, href])
@@ -102,7 +115,10 @@ export default function Sidebar({ empresa }: { empresa: string }) {
 
   return (
     <>
-      <aside className="w-[72px] flex flex-col items-center h-screen fixed left-0 top-0 z-40 bg-white border-r border-slate-200">
+      <aside
+        onMouseLeave={agendarFechamento}
+        className="w-[72px] flex flex-col items-center h-screen fixed left-0 top-0 z-40 bg-white border-r border-slate-200"
+      >
         {/* Logo */}
         <Link href="/dashboard" title="Sistema Vargas" className="flex-shrink-0 mt-3 mb-2">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
@@ -112,12 +128,15 @@ export default function Sidebar({ empresa }: { empresa: string }) {
         <p className="text-[9px] text-slate-400 text-center px-1 mb-2 leading-tight truncate w-full" title={empresa}>{empresa}</p>
 
         <div className="flex-1 w-full overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 px-2 pb-2">
-          <RailButton icon={<IconSearch className="w-5 h-5" />} label="Buscar" active={painel === 'busca'} onClick={() => togglePainel('busca')} />
+          <RailButton icon={<IconSearch className="w-5 h-5" />} label="Buscar" active={painel === 'busca'}
+            onMouseEnter={() => abrirPainel('busca')} onClick={() => setPainel(null)} />
           {favItems.length > 0 && (
-            <RailButton icon={<IconStar className="w-5 h-5" />} label="Favoritos" active={painel === 'favoritos'} onClick={() => togglePainel('favoritos')} />
+            <RailButton icon={<IconStar className="w-5 h-5" />} label="Favoritos" active={painel === 'favoritos'}
+              onMouseEnter={() => abrirPainel('favoritos')} onClick={() => setPainel(null)} />
           )}
           {recentItems.length > 0 && (
-            <RailButton icon={<IconClock className="w-5 h-5" />} label="Recentes" active={painel === 'recentes'} onClick={() => togglePainel('recentes')} />
+            <RailButton icon={<IconClock className="w-5 h-5" />} label="Recentes" active={painel === 'recentes'}
+              onMouseEnter={() => abrirPainel('recentes')} onClick={() => setPainel(null)} />
           )}
 
           <div className="w-8 h-px bg-slate-200 my-1.5 flex-shrink-0" />
@@ -129,7 +148,8 @@ export default function Sidebar({ empresa }: { empresa: string }) {
                 icon={Icon ? <Icon className="w-5 h-5" /> : <span className="w-5 h-5" />}
                 label={group.label}
                 active={painel === group.id || hasActive}
-                onClick={() => togglePainel(group.id)}
+                onMouseEnter={() => abrirPainel(group.id)}
+                onClick={() => setPainel(null)}
               />
             )
           })}
@@ -146,7 +166,12 @@ export default function Sidebar({ empresa }: { empresa: string }) {
       {painel && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setPainel(null)} />
-          <div className="fixed left-[72px] top-0 h-screen w-72 bg-white border-r border-slate-200 shadow-2xl z-40 flex flex-col">
+          <div
+            onMouseEnter={cancelarFechamento}
+            onMouseLeave={agendarFechamento}
+            className="fixed left-[72px] top-0 h-screen w-72 bg-white border-r border-slate-200 shadow-2xl z-40 flex flex-col"
+          >
+
             {painel === 'busca' && (
               <div className="p-4 flex flex-col h-full">
                 <p className="text-sm font-semibold text-slate-900 mb-3">Buscar módulo</p>
@@ -211,10 +236,13 @@ export default function Sidebar({ empresa }: { empresa: string }) {
 
 // ─── Peças reutilizáveis ──────────────────────────────────────────────────────
 
-function RailButton({ icon, label, active = false, onClick }: { icon: React.ReactNode; label: string; active?: boolean; onClick: () => void }) {
+function RailButton({ icon, label, active = false, onClick, onMouseEnter }: {
+  icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; onMouseEnter?: () => void
+}) {
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onMouseEnter}
       title={label}
       className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl transition-colors ${
         active ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
