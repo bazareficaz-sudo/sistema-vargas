@@ -44,8 +44,8 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
       <Sidebar empresa={empresa} />
       <main
         id="main-content"
-        className="flex-1 overflow-auto min-h-screen transition-[margin] duration-300 flex flex-col"
-        style={{ marginLeft: '15rem' }}
+        className="flex-1 overflow-auto min-h-screen flex flex-col"
+        style={{ marginLeft: '4.5rem' }}
       >
         <PlanAlertBanner />
         <div className="flex-1 p-7">{children}</div>
