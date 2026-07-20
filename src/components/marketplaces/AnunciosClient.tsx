@@ -49,6 +49,16 @@ function tipoAnuncioML(a: any): string | null {
   return ML_TIPO_ANUNCIO_LABELS[listingType] ?? listingType
 }
 
+// Lista as variações do anúncio (nome, ou SKU como fallback quando o nome
+// não veio no sync) pra exibir na listagem — antes só mostrava o badge
+// genérico "Com variações", sem dizer qual.
+function nomesVariacoes(a: any): string {
+  const nomes = (a.marketplace_anuncio_variacoes ?? [])
+    .map((v: any) => v.nome_variacao || v.sku_variacao)
+    .filter(Boolean)
+  return nomes.join(' · ')
+}
+
 const FACETAS: { key: string; label: string }[] = [
   { key: 'mapeado', label: 'Mapeado' },
   { key: 'nao_mapeado', label: 'Não mapeado' },
@@ -825,6 +835,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                       {(a.marca_externa || a.categoria_externa) && (
                         <p className="text-xs text-gray-400">
                           {a.marca_externa}{a.marca_externa && a.categoria_externa && ' · '}{a.categoria_externa && `Categoria ${a.categoria_externa}`}
+                        </p>
+                      )}
+                      {a.tem_variacao && (a.marketplace_anuncio_variacoes?.length ?? 0) > 0 && (
+                        <p className="text-xs text-purple-500 truncate max-w-xs" title={nomesVariacoes(a)}>
+                          {nomesVariacoes(a)}
                         </p>
                       )}
                       <div className="flex gap-1 flex-wrap mt-0.5">
