@@ -692,17 +692,17 @@ export default function ProdutosClient({
                 </td>
                 <td className="px-3 py-2.5 text-center">
                   <button onClick={() => toggleAtivo(p)}
-                    className={`w-10 h-5 rounded-full transition-colors relative ${p.ativo ? 'bg-green-500' : 'bg-gray-300'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${p.ativo ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    className={`w-10 h-5 rounded-full transition-colors relative overflow-hidden ${p.ativo ? 'bg-green-500' : 'bg-gray-300'}`}>
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${p.ativo ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </td>
                 <td className="px-3 py-2.5 text-center">
                   <button
                     onClick={() => togglePdv(p)}
                     title={p.disponivel_pdv ? 'Visível no PDV — clique para ocultar' : 'Oculto no PDV — clique para exibir'}
-                    className={`w-10 h-5 rounded-full transition-colors relative ${p.disponivel_pdv ? 'bg-green-500' : 'bg-gray-300'}`}
+                    className={`w-10 h-5 rounded-full transition-colors relative overflow-hidden ${p.disponivel_pdv ? 'bg-green-500' : 'bg-gray-300'}`}
                   >
-                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${p.disponivel_pdv ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${p.disponivel_pdv ? 'translate-x-5' : 'translate-x-0'}`} />
                   </button>
                 </td>
               </tr>
