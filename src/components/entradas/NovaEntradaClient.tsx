@@ -224,7 +224,7 @@ export default function NovaEntradaClient({
       const ordenados = filtrados
         .map(p => ({ ...p, _score: norm(p.nome).startsWith(palavrasNorm[0]) ? 1 : 0 }))
         .sort((a, b) => b._score - a._score)
-        .slice(0, 10)
+        .slice(0, 50)
 
       setResultados(ordenados)
       setBuscando(false)
@@ -685,7 +685,8 @@ export default function NovaEntradaClient({
                   className="w-full border-2 border-blue-400 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500"
                 />
                 {(resultados.length > 0 || (buscaProd && !buscando)) && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-20 overflow-hidden">
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-20 overflow-hidden flex flex-col">
+                    <div className="max-h-80 overflow-y-auto">
                     {resultados.map((r, i) => (
                       <button key={r.id} onClick={() => selecionarProduto(r)} onMouseEnter={() => setIndiceProd(i)}
                         className={`w-full text-left px-4 py-3 transition-colors border-b border-gray-100 last:border-0 ${indiceProd === i ? 'bg-blue-600' : 'hover:bg-blue-50'}`}>
@@ -695,8 +696,9 @@ export default function NovaEntradaClient({
                         </p>
                       </button>
                     ))}
+                    </div>
                     <button onClick={selecionarManual} onMouseEnter={() => setIndiceProd(resultados.length)}
-                      className={`w-full text-left px-4 py-2.5 text-xs transition-colors ${indiceProd === resultados.length ? 'bg-gray-700 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                      className={`w-full text-left px-4 py-2.5 text-xs transition-colors border-t border-gray-100 flex-shrink-0 ${indiceProd === resultados.length ? 'bg-gray-700 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
                       + Adicionar &quot;{buscaProd}&quot; manualmente (sem vincular produto)
                     </button>
                   </div>
