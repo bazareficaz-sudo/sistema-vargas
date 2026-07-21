@@ -183,8 +183,10 @@ export default function ProdutosClient({
 
   async function toggleAtivo(produto: Produto) {
     const sb = createClient()
-    await sb.from('produtos').update({ ativo: !produto.ativo, updated_at: new Date().toISOString() }).eq('id', produto.id)
-    setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, ativo: !p.ativo } : p))
+    const novoValor = !produto.ativo
+    const { error } = await sb.from('produtos').update({ ativo: novoValor, updated_at: new Date().toISOString() }).eq('id', produto.id)
+    if (error) { alert(`Não foi possível atualizar: ${error.message}`); return }
+    setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, ativo: novoValor } : p))
   }
 
   function iniciarEdicaoNome(produto: Produto) {
@@ -211,14 +213,17 @@ export default function ProdutosClient({
 
   async function togglePdv(produto: Produto) {
     const sb = createClient()
-    await sb.from('produtos').update({ disponivel_pdv: !produto.disponivel_pdv, updated_at: new Date().toISOString() }).eq('id', produto.id)
-    setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, disponivel_pdv: !p.disponivel_pdv } : p))
+    const novoValor = !produto.disponivel_pdv
+    const { error } = await sb.from('produtos').update({ disponivel_pdv: novoValor, updated_at: new Date().toISOString() }).eq('id', produto.id)
+    if (error) { alert(`Não foi possível atualizar: ${error.message}`); return }
+    setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, disponivel_pdv: novoValor } : p))
   }
 
   async function ativarSelecionados(ativo: boolean) {
     if (selecionados.size === 0) return
     const sb = createClient()
-    await sb.from('produtos').update({ ativo, updated_at: new Date().toISOString() }).in('id', [...selecionados])
+    const { error } = await sb.from('produtos').update({ ativo, updated_at: new Date().toISOString() }).in('id', [...selecionados])
+    if (error) { alert(`Não foi possível atualizar: ${error.message}`); return }
     setProdutos(prev => prev.map(p => selecionados.has(p.id) ? { ...p, ativo } : p))
     setSelecionados(new Set())
   }
