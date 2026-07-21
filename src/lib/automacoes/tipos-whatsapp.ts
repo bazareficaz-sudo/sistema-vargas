@@ -86,14 +86,35 @@ export async function executarAlertaPedidoMarketplace(sb: any, a: any): Promise<
   if (!a.marketplace_canal_id) return { status: 'sem_acao', avancarCursorPara: new Date().toISOString() }
 
   const desde = a.cursor_processado ?? a.created_at
-  const { data: pedidos } = await sb.from('marketplace_pedidos').select('id, numero_pedido, id_externo, valor_total, prazo_postagem, created_at')
+  const { data: canal } = await sb.from('marketplace_canais').select('nome').eq('id', a.marketplace_canal_id).maybeSingle()
+  const nomeCanal = canal?.nome ?? 'Canal'
+
+  const { data: pedidos } = await sb.from('marketplace_pedidos')
+    .select('id, numero_pedido, id_externo, valor_total, prazo_postagem, created_at, marketplace_pedido_itens(produto_id, nome_produto, quantidade)')
     .eq('canal_id', a.marketplace_canal_id).gt('created_at', desde)
   if (!pedidos || pedidos.length === 0) return { status: 'sem_acao', avancarCursorPara: new Date().toISOString() }
 
-  const linhas = pedidos.map((p: any) =>
-    `• Pedido ${p.numero_pedido ?? p.id_externo} — ${fmtMoeda(Number(p.valor_total ?? 0))}${p.prazo_postagem ? ` · prazo ${new Date(p.prazo_postagem).toLocaleDateString('pt-BR')}` : ''}`
-  )
-  const mensagem = `🏪 ${pedidos.length} pedido(s) novo(s) no marketplace\n\n${linhas.join('\n')}`
+  // Estoque atual de cada produto vendido, numa única consulta (evita 1
+  // consulta por item quando um pedido tem vários produtos).
+  const produtoIds = Array.from(new Set(
+    pedidos.flatMap((p: any) => (p.marketplace_pedido_itens ?? []).map((i: any) => i.produto_id).filter(Boolean))
+  ))
+  let estoquePorProduto: Record<string, number> = {}
+  if (produtoIds.length > 0) {
+    const { data: produtosVendidos } = await sb.from('produtos').select('id, estoque').in('id', produtoIds)
+    estoquePorProduto = Object.fromEntries((produtosVendidos ?? []).map((pr: any) => [pr.id, pr.estoque]))
+  }
+
+  const linhas = pedidos.map((p: any) => {
+    const itens = p.marketplace_pedido_itens ?? []
+    const itensTxt = itens.map((i: any) => {
+      const temEstoque = i.produto_id && i.produto_id in estoquePorProduto
+      const estoqueTxt = temEstoque ? `estoque: ${estoquePorProduto[i.produto_id]}` : 'sem produto vinculado'
+      return `   - ${i.nome_produto} — ${i.quantidade}x · ${estoqueTxt}`
+    }).join('\n')
+    return `• Pedido ${p.numero_pedido ?? p.id_externo} — ${fmtMoeda(Number(p.valor_total ?? 0))}${p.prazo_postagem ? ` · prazo ${new Date(p.prazo_postagem).toLocaleDateString('pt-BR')}` : ''}\n${itensTxt}`
+  })
+  const mensagem = `🏪 ${nomeCanal} — ${pedidos.length} pedido(s) novo(s)\n\n${linhas.join('\n\n')}`
   const r = await enviarWhatsappAutomacao(sb, a.empresa_id, a.numero_destino, mensagem, { tipo: a.tipo })
   return { status: r.ok ? 'ok' : 'erro', erro: r.erro, avancarCursorPara: new Date().toISOString() }
 }
