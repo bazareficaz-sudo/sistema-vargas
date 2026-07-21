@@ -201,32 +201,40 @@ export default function NovaEntradaClient({
         return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
       }
 
-      const palavras = q.trim().split(/\s+/).filter(p => p.length >= 2)
+      const palavras = q.trim().split(/\s+/).map(p => p.replace(/[,()%]/g, '')).filter(p => p.length >= 2)
       if (palavras.length === 0) { setResultados([]); setBuscando(false); return }
       const palavrasNorm = palavras.map(norm)
 
-      // Busca pela primeira palavra no banco (filtro inicial amplo)
-      const primeiraPalavra = palavras[0]
+      // Busca ampla no banco: QUALQUER palavra digitada pode trazer o
+      // produto (antes só a primeira palavra entrava na consulta — se o
+      // termo mais específico não fosse o primeiro digitado, o produto nem
+      // chegava a ser avaliado pelo filtro do cliente).
+      const condicoes = palavras.flatMap(p => [`nome.ilike.%${p}%`, `sku.ilike.%${p}%`, `ean.ilike.%${p}%`]).join(',')
       const { data } = await sb.from('produtos')
         .select('id, nome, sku, ean, preco_custo, preco_venda, markup, marca')
         .eq('empresa_id', empresaId)
         .eq('ativo', true)
-        .or(`nome.ilike.%${primeiraPalavra}%,sku.ilike.%${primeiraPalavra}%,ean.ilike.%${primeiraPalavra}%`)
-        .limit(200)
+        .or(condicoes)
+        .limit(300)
 
-      // Filtra no cliente: produto só aparece se contiver TODAS as palavras
-      const filtrados = (data ?? []).filter(p => {
-        const campos = norm(p.nome) + ' ' + norm(p.sku ?? '') + ' ' + norm(p.ean ?? '')
-        return palavrasNorm.every(pw => campos.includes(pw))
-      })
-
-      // Ordena: bônus se o nome começa com a primeira palavra
-      const ordenados = filtrados
-        .map(p => ({ ...p, _score: norm(p.nome).startsWith(palavrasNorm[0]) ? 1 : 0 }))
-        .sort((a, b) => b._score - a._score)
+      // Classifica por QUANTAS palavras digitadas o produto contém, em vez
+      // de exigir que todas apareçam — antes, uma única palavra sem
+      // correspondência (ex: "cromada" quando o produto está cadastrado
+      // como "prata") zerava a lista inteira mesmo com as outras palavras
+      // batendo perfeitamente. Produto com mais palavras batendo sobe pro
+      // topo; produtos com pelo menos uma palavra batendo aparecem.
+      const pontuados = (data ?? [])
+        .map(p => {
+          const campos = norm(p.nome) + ' ' + norm(p.sku ?? '') + ' ' + norm(p.ean ?? '')
+          const acertos = palavrasNorm.filter(pw => campos.includes(pw)).length
+          const comecaComPrimeira = norm(p.nome).startsWith(palavrasNorm[0]) ? 1 : 0
+          return { ...p, _acertos: acertos, _score: comecaComPrimeira }
+        })
+        .filter(p => p._acertos > 0)
+        .sort((a, b) => b._acertos - a._acertos || b._score - a._score || a.nome.localeCompare(b.nome))
         .slice(0, 50)
 
-      setResultados(ordenados)
+      setResultados(pontuados)
       setBuscando(false)
     }, 250)
   }
