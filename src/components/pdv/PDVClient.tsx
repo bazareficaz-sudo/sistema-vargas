@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { calcSaude, type SaudeConfig, type FaixaSaude, FAIXAS_PADRAO, CONFIG_PADRAO } from '@/lib/saude-venda'
+import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 
 type Produto = {
   id: string; nome: string; sku: string; ean: string | null
@@ -452,7 +453,12 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           // negativo (Empresas → Estoque); por padrão deixa ir negativo pra
           // sinalizar venda em falta, em vez de esconder o problema.
           const novoEstoque = p.estoque - item.quantidade
-          await sb.from('produtos').update({ estoque: permiteEstoqueNegativo ? novoEstoque : Math.max(0, novoEstoque) }).eq('id', item.produto_id)
+          const estoqueFinal = permiteEstoqueNegativo ? novoEstoque : Math.max(0, novoEstoque)
+          await sb.from('produtos').update({ estoque: estoqueFinal }).eq('id', item.produto_id)
+          // Espelha no depósito principal — sem isso, o total no campo único
+          // muda a cada venda mas o quadro por depósito fica parado, dando
+          // a impressão de erro no sistema (ver src/lib/produtos/depositoPrincipal.ts).
+          await ajustarDepositoPrincipal(sb, empresaId, item.produto_id, estoqueFinal - p.estoque)
         } else {
           // Entrada por devolução (qty é negativa, usar abs)
           await sb.from('produtos').update({ estoque: p.estoque + Math.abs(item.quantidade) }).eq('id', item.produto_id)

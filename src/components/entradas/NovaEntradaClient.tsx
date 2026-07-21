@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
+import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -513,6 +514,10 @@ export default function NovaEntradaClient({
         for (const item of produtosComId) {
           const qtdAtual = estoqueMap[item.produto_id!] ?? 0
           await sb.from('produtos').update({ estoque: qtdAtual + item.quantidade }).eq('id', item.produto_id!)
+          // Espelha no depósito principal — mesmo motivo do PDV (ver
+          // src/lib/produtos/depositoPrincipal.ts): sem isso o quadro por
+          // depósito no Estoque Detalhado nunca acompanha as entradas.
+          await ajustarDepositoPrincipal(sb, empresaId, item.produto_id!, item.quantidade)
         }
       }
 
