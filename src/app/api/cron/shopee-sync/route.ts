@@ -30,11 +30,17 @@ export async function GET(req: Request) {
 
   const sb = createAdminClient()
 
-  const { data: canais } = await sb
+  const { data: canais, error: erroCanais } = await sb
     .from('marketplace_canais')
     .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, ultima_sincronizacao_pedidos, intervalo_sincronizacao_pedidos_min, sincronizar_estoque, debitar_estoque_vendas, atualizar_estoque_canal, aplicar_regra_produto')
     .eq('plataforma', 'shopee')
     .not('access_token', 'is', null)
+
+  // Idem cron de pedidos: nunca tratar erro de consulta como "0 canais" em
+  // silêncio — já causou dias de sincronização parada sem nenhum log.
+  if (erroCanais) {
+    return NextResponse.json({ ok: false, erro: erroCanais.message }, { status: 500 })
+  }
 
   const resultados: {
     canalId: string

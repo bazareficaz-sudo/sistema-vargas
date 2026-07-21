@@ -31,11 +31,20 @@ export async function GET(req: Request) {
   const sb = createAdminClient()
   const desde = new Date(Date.now() - LOOKBACK_MS)
 
-  const { data: canais } = await sb
+  const { data: canais, error: erroCanais } = await sb
     .from('marketplace_canais')
     .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas')
     .in('plataforma', ['shopee', 'mercadolivre'])
     .not('access_token', 'is', null)
+
+  // Nunca falhar em silêncio: se a consulta der erro (ex: coluna que não
+  // existe porque uma migration não foi rodada), `canais` viria `null` e o
+  // loop abaixo simplesmente não faria nada — sem log nenhum, parecendo
+  // sucesso (200 OK, 0 canais processados). Já aconteceu de verdade e
+  // ficou dias sem ninguém perceber. Agora fica registrado e visível.
+  if (erroCanais) {
+    return NextResponse.json({ ok: false, erro: erroCanais.message }, { status: 500 })
+  }
 
   const resultados: { canalId: string; plataforma: string; ok: boolean; totalFound?: number; upserted?: number; failedCount?: number; erro?: string }[] = []
 

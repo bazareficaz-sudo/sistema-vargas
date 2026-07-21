@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 
-  const { data: canalRow } = await sb
+  const { data: canalRow, error: erroCanal } = await sb
     .from('marketplace_canais')
     .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas')
     .eq('id', canalId)
@@ -27,6 +27,11 @@ export async function POST(req: Request) {
     .eq('plataforma', 'mercadolivre')
     .single()
 
+  // Antes essa checagem só olhava `!canalRow`, o que faz uma consulta que
+  // falhou (ex: coluna inexistente por migration não rodada) aparecer pro
+  // usuário como "canal não encontrado" — mensagem enganosa que já mascarou
+  // esse bug real por dias. Reportar o erro de verdade quando ele existir.
+  if (erroCanal) return NextResponse.json({ ok: false, erro: erroCanal.message }, { status: 500 })
   if (!canalRow) return NextResponse.json({ ok: false, erro: 'Canal Mercado Livre não encontrado' }, { status: 404 })
   if (!canalRow.access_token) {
     return NextResponse.json({ ok: false, erro: 'Canal não conectado — refaça a autenticação em Configurar.' }, { status: 400 })
