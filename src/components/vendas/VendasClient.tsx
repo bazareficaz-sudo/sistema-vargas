@@ -65,13 +65,14 @@ function calcularRange(periodo: Periodo, custom: { inicio: string; fim: string }
 
 const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj)'
 
-export default function VendasClient({ empresaId, vendasIniciais, totalInicial, saudeConfig, saudeFaixas }: {
+export default function VendasClient({ empresaId, vendasIniciais, totalInicial, saudeConfig, saudeFaixas, erroInicial }: {
   empresaId: string; vendasIniciais: Venda[]; totalInicial: number
-  saudeConfig?: SaudeConfig | null; saudeFaixas?: FaixaSaude[]
+  saudeConfig?: SaudeConfig | null; saudeFaixas?: FaixaSaude[]; erroInicial?: string | null
 }) {
   const [vendas, setVendas] = useState<Venda[]>(vendasIniciais)
   const [total, setTotal] = useState(totalInicial)
   const [carregando, setCarregando] = useState(false)
+  const [erroBusca, setErroBusca] = useState(erroInicial ?? '')
   const [periodo, setPeriodo] = useState<Periodo>('hoje')
   const [customInicio, setCustomInicio] = useState('')
   const [customFim, setCustomFim] = useState('')
@@ -108,7 +109,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   }, [periodo, customInicio, customFim, buscaDebounced])
 
   async function buscarVendas() {
-    setCarregando(true)
+    setCarregando(true); setErroBusca('')
     const sb = createClient()
     const { inicio, fim } = calcularRange(periodo, { inicio: customInicio, fim: customFim })
     const termo = buscaDebounced.trim()
@@ -138,7 +139,8 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
       .limit(300)
     if (idsFiltro) query = query.in('id', idsFiltro)
 
-    const { data, count } = await query
+    const { data, count, error } = await query
+    if (error) { setErroBusca(error.message); setCarregando(false); return }
     setVendas((data ?? []) as unknown as Venda[])
     setTotal(count ?? 0)
     setCarregando(false)
@@ -338,6 +340,13 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           className="bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:border-blue-500"
         />
       </div>
+
+      {erroBusca && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>Erro ao carregar vendas: {erroBusca}</span>
+          <button onClick={() => setErroBusca('')} className="text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {CHIPS.map(c => (

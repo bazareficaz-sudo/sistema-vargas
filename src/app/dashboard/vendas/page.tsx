@@ -12,7 +12,7 @@ export default async function VendasPage() {
   const fimHoje = new Date(hoje)
   fimHoje.setHours(23, 59, 59, 999)
 
-  const [{ data: vendas, count }, { data: saudeConfig }, { data: saudeFaixas }] = await Promise.all([
+  const [{ data: vendas, count, error: erroVendas }, { data: saudeConfig }, { data: saudeFaixas }] = await Promise.all([
     supabase
       .from('vendas')
       .select('id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj)', { count: 'exact' })
@@ -32,6 +32,7 @@ export default async function VendasPage() {
       totalInicial={count ?? 0}
       saudeConfig={saudeConfig ?? null}
       saudeFaixas={saudeFaixas ?? []}
+      erroInicial={erroVendas?.message ?? null}
     />
   )
 }
