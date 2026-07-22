@@ -319,6 +319,50 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     setTrocandoPagamento(false)
   }
 
+  // NFC-e só faz sentido pra venda pura (tipo_operacao 'venda') — mesma
+  // regra já usada pro botão individual em DetalheVendaModal.tsx. Emite
+  // documento fiscal de verdade, por isso pede confirmação antes.
+  async function emitirNfceSelecionados() {
+    const todasSelecionadas = vendas.filter(v => selecionados.has(v.id))
+    const elegiveis = todasSelecionadas.filter(v => v.tipo_operacao === 'venda')
+    const inelegiveis = todasSelecionadas.length - elegiveis.length
+    if (elegiveis.length === 0) {
+      alert('Nenhuma venda selecionada é elegível pra NFC-e (só venda pura, sem troca/devolução).')
+      return
+    }
+    const confirmar = confirm(
+      `Emitir NFC-e pra ${elegiveis.length} venda(s)` +
+      (inelegiveis > 0 ? ` (${inelegiveis} pulada(s) por não ser venda pura)` : '') +
+      '?\n\nIsso emite documentos fiscais de verdade junto à SEFAZ — não é uma simulação.'
+    )
+    if (!confirmar) return
+
+    setAplicandoMassa(true); setResumoMassa('')
+    let autorizadas = 0, jaEmitidas = 0
+    const falhas: string[] = []
+    for (const v of elegiveis) {
+      try {
+        const res = await fetch('/api/fiscal/emitir-nfce', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vendaId: v.id }),
+        })
+        const data = await res.json()
+        if (data.jaEmitida) jaEmitidas++
+        else if (data.ok) autorizadas++
+        else falhas.push(`#${v.numero}: ${data.erro ?? data.motivoRejeicao ?? 'falha desconhecida'}`)
+      } catch (e: any) {
+        falhas.push(`#${v.numero}: ${e.message}`)
+      }
+    }
+    const partes = [`${autorizadas} autorizada(s)`]
+    if (jaEmitidas > 0) partes.push(`${jaEmitidas} já emitida(s) antes`)
+    if (inelegiveis > 0) partes.push(`${inelegiveis} pulada(s) (troca/devolução)`)
+    if (falhas.length > 0) partes.push(`${falhas.length} falhou(aram): ${falhas.join('; ')}`)
+    setResumoMassa(partes.join(' · '))
+    setAplicandoMassa(false)
+    buscarVendas() // recarrega pra refletir o status fiscal atualizado
+  }
+
   const CHIPS: { id: Periodo; label: string }[] = [
     { id: 'hoje', label: 'Hoje' }, { id: 'ontem', label: 'Ontem' },
     { id: '7dias', label: '7 dias' }, { id: 'mes', label: 'Este mês' }, { id: 'custom', label: 'Período' },
@@ -379,6 +423,10 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           <button onClick={enviarWhatsappSelecionados} disabled={aplicandoMassa}
             className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
             📱 Enviar por WhatsApp
+          </button>
+          <button onClick={emitirNfceSelecionados} disabled={aplicandoMassa}
+            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            🧾 Emitir NFC-e
           </button>
           {!trocandoPagamento ? (
             <button onClick={() => setTrocandoPagamento(true)} disabled={aplicandoMassa}
