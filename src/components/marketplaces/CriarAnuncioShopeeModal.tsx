@@ -58,6 +58,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
+  const [preenchendoIA, setPreenchendoIA] = useState(false)
 
   // Carrega o produto pré-selecionado (entrada a partir da tela de Produtos)
   useEffect(() => {
@@ -152,8 +153,8 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     }
   }
 
-  async function carregarAtributosEMarcas(categoryId: number) {
-    if (!canalAtivo) return
+  async function carregarAtributosEMarcas(categoryId: number): Promise<{ atributos: Atributo[]; marcas: Marca[] } | null> {
+    if (!canalAtivo) return null
     setCarregandoAtributos(true)
     try {
       const resp = await fetch('/api/marketplace/shopee/atributos', {
@@ -161,7 +162,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         body: JSON.stringify({ canalId: canalAtivo.id, categoryId }),
       })
       const data = await resp.json()
-      if (!data.ok) { setErro(data.erro ?? 'Erro ao buscar atributos'); return }
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao buscar atributos'); return null }
       setAtributos(data.atributos ?? [])
       setMarcas(data.marcas ?? [])
       // Pré-seleciona a marca se o nome do produto bater com alguma da lista.
@@ -169,10 +170,76 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         const bate = data.marcas.find((m: Marca) => m.original_brand_name.toLowerCase() === produto.marca.toLowerCase())
         if (bate) setBrandId(String(bate.brand_id))
       }
+      return { atributos: data.atributos ?? [], marcas: data.marcas ?? [] }
     } catch (e: any) {
       setErro(e.message ?? 'Erro ao buscar atributos')
+      return null
     } finally {
       setCarregandoAtributos(false)
+    }
+  }
+
+  // Um clique só: se ainda não tem categoria-folha, deixa a IA navegar a
+  // árvore de categorias nível a nível; depois pede descrição/atributos/marca
+  // sugeridos. Tudo continua editável — a IA nunca envia o anúncio sozinha.
+  async function preencherComIA() {
+    if (!canalAtivo || !produto) return
+    setPreenchendoIA(true); setErro('')
+    try {
+      let categoriaPathAtual = caminhoCategoria.map(c => c.original_category_name).join(' › ')
+      let atributosAtuais = atributos
+      let marcasAtuais = marcas
+
+      if (!categoriaFolha) {
+        const resp = await fetch('/api/marketplace/shopee/ia-sugerir-categoria', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canalAtivo.id, produtoNome: produto.nome, produtoMarca: produto.marca, produtoCategoria: produto.categoria }),
+        })
+        const data = await resp.json()
+        if (!data.ok) { setErro(data.erro ?? 'Erro ao sugerir categoria com IA'); return }
+        if (!data.caminho || data.caminho.length === 0) {
+          setErro('A IA não conseguiu sugerir uma categoria pra esse produto — escolha manualmente abaixo.')
+          return
+        }
+        setOpcoesPorNivel(data.opcoesPorNivel)
+        setCaminhoCategoria(data.caminho)
+        categoriaPathAtual = data.caminho.map((c: Categoria) => c.original_category_name).join(' › ')
+
+        if (!data.resolvidoAteFolha) {
+          setErro('A IA chegou perto (' + categoriaPathAtual + ') mas não fechou numa categoria final — continue escolhendo manualmente a partir daí.')
+          return
+        }
+
+        const folha = data.caminho[data.caminho.length - 1]
+        const carregado = await carregarAtributosEMarcas(folha.category_id)
+        if (!carregado) return
+        atributosAtuais = carregado.atributos
+        marcasAtuais = carregado.marcas
+      }
+
+      const respConteudo = await fetch('/api/marketplace/shopee/ia-gerar-conteudo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          produtoNome: produto.nome, produtoMarca: produto.marca, categoriaPath: categoriaPathAtual,
+          atributos: atributosAtuais, marcas: marcasAtuais,
+        }),
+      })
+      const dataConteudo = await respConteudo.json()
+      if (!dataConteudo.ok) { setErro(dataConteudo.erro ?? 'Erro ao gerar conteúdo com IA'); return }
+
+      if (dataConteudo.descricao) setDescricao(dataConteudo.descricao)
+      if (dataConteudo.atributos && Object.keys(dataConteudo.atributos).length > 0) {
+        setValoresAtributos(prev => {
+          const novo = { ...prev }
+          for (const [attrId, valor] of Object.entries(dataConteudo.atributos)) novo[Number(attrId)] = valor as any
+          return novo
+        })
+      }
+      if (dataConteudo.brandId != null) setBrandId(String(dataConteudo.brandId))
+    } catch (e: any) {
+      setErro(e.message ?? 'Erro ao usar IA')
+    } finally {
+      setPreenchendoIA(false)
     }
   }
 
@@ -308,6 +375,15 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   ⚠ Esse produto não tem foto cadastrada — a Shopee exige pelo menos uma imagem. Adicione uma foto no produto antes de continuar.
                 </p>
+              )}
+
+              {produto && canalAtivo && (
+                <button onClick={preencherComIA} disabled={preenchendoIA}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 border border-violet-200 text-violet-700 text-sm font-medium rounded-lg transition-colors">
+                  {preenchendoIA
+                    ? '✨ Pensando...'
+                    : categoriaFolha ? '✨ Preencher descrição e atributos com IA' : '✨ Preencher com IA (categoria, descrição e atributos)'}
+                </button>
               )}
 
               {produto && (
