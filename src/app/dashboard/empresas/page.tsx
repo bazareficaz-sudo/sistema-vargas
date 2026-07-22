@@ -34,7 +34,7 @@ export default async function EmpresasPage() {
   // pra vendedor_empresas em dashboard/vendedores/page.tsx.
   const empresaIds = (empresas ?? []).map(e => e.id)
   const { data: nfeConfigs } = empresaIds.length > 0
-    ? await supabase.from('nfe_config').select('empresa_id, ativo, ambiente, credenciais, cnpj').in('empresa_id', empresaIds)
+    ? await supabase.from('nfe_config').select('empresa_id, ativo, ambiente, credenciais, cnpj, provider').in('empresa_id', empresaIds)
     : { data: [] as any[] }
   const nfeConfigPorEmpresa = new Map((nfeConfigs ?? []).map(c => [c.empresa_id, c]))
   const empresasComNfeConfig = (empresas ?? []).map(e => ({ ...e, nfe_config: nfeConfigPorEmpresa.get(e.id) ?? null }))
