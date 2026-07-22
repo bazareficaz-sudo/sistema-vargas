@@ -30,11 +30,14 @@ export async function POST(req: NextRequest) {
     const provider = await getFiscalProvider(sb, empresaId)
 
     if (acao === 'listar') {
-      const resultado = await provider.distribuicao.listarDfe(ultimo_nsu ?? '0')
-      if (resultado.ultimoNsu) {
-        await sb.from('nfe_config').update({ ultimo_nsu: resultado.ultimoNsu, updated_at: new Date().toISOString() }).eq('empresa_id', empresaId)
+      const { data: empresa } = await sb.from('empresas').select('cnpj').eq('id', empresaId).single()
+      if (!empresa?.cnpj) return NextResponse.json({ error: 'CNPJ da empresa não cadastrado — preencha em Empresas antes de consultar.' }, { status: 400 })
+
+      const resultado = await provider.distribuicao.listarDfe(empresa.cnpj, ultimo_nsu ?? '0')
+      if (resultado.ultimaVersao) {
+        await sb.from('nfe_config').update({ ultimo_nsu: resultado.ultimaVersao, updated_at: new Date().toISOString() }).eq('empresa_id', empresaId)
       }
-      return NextResponse.json(resultado.raw)
+      return NextResponse.json({ documentos: resultado.documentos })
     }
 
     if (acao in ACOES_MANIFESTO) {

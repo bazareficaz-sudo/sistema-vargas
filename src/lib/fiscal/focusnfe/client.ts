@@ -30,7 +30,7 @@ export async function focusRequest(
   creds: FocusCredentials,
   path: string,
   opts: { method?: string; body?: any; query?: Record<string, string> } = {}
-): Promise<{ status: number; text: string; contentType: string }> {
+): Promise<{ status: number; text: string; contentType: string; headers: Headers }> {
   const url = new URL(`${baseUrl(creds.ambiente)}${path}`)
   for (const [k, v] of Object.entries(opts.query ?? {})) url.searchParams.set(k, v)
 
@@ -53,7 +53,7 @@ export async function focusRequest(
   }
 
   const text = await resp.text()
-  return { status: resp.status, text, contentType: resp.headers.get('Content-Type') ?? 'application/json' }
+  return { status: resp.status, text, contentType: resp.headers.get('Content-Type') ?? 'application/json', headers: resp.headers }
 }
 
 // Helper pros endpoints que sempre respondem JSON (emissão/consulta/

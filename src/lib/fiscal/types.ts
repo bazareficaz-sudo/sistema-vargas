@@ -5,14 +5,15 @@
 
 export type TipoManifesto = 'ciencia' | 'confirmacao' | 'desconhecimento' | 'nao_realizada'
 
-// Resultado de listar a distribuição DFe. Deliberadamente NÃO normalizado
-// item a item (ver nota em focusnfe/distribuicao.ts): o único consumidor
-// hoje (EntradasXmlClient.tsx) já sabe interpretar o formato bruto da Focus,
-// e não há documentação pública confirmada do shape pra arriscar uma
-// normalização errada. `raw` é repassado como veio do provedor.
+// Resultado de listar NFe's recebidas (GET /nfes_recebidas da Focus NFe,
+// confirmado contra a documentação oficial em doc.focusnfe.com.br).
+// `documentos` é o array cru de NfeRecebidaResumo — o único consumidor hoje
+// (EntradasXmlClient.tsx) já sabe interpretar esse formato. `ultimaVersao`
+// vem do header X-Max-Version da resposta e deve ser salvo pra paginar a
+// próxima consulta (evita reler os mesmos documentos sempre).
 export type DfeListaResultado = {
-  ultimoNsu: string | null
-  raw: any
+  ultimaVersao: string | null
+  documentos: any[]
 }
 
 export type EmissaoNFCeItem = {

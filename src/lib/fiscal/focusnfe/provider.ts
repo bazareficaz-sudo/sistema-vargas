@@ -7,7 +7,7 @@ export function createFocusNFeProvider(creds: FocusCredentials): FiscalProvider 
   return {
     nome: 'focusnfe',
     distribuicao: {
-      listarDfe: (ultimoNsu) => distribuicao.listarDfe(creds, ultimoNsu),
+      listarDfe: (cnpj, ultimaVersao) => distribuicao.listarDfe(creds, cnpj, ultimaVersao),
       manifestar: (chave, tipo, justificativa) => distribuicao.manifestar(creds, chave, tipo, justificativa),
       baixarXml: (chave) => distribuicao.baixarXml(creds, chave),
     },

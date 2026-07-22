@@ -558,8 +558,8 @@ export default function EntradasXmlClient({
                     {nfesSefaz.map((n: any, i) => (
                       <tr key={i} className="text-slate-700">
                         <td className="py-2 text-xs font-mono text-slate-400 truncate max-w-[120px]">{n.chave_nfe}</td>
-                        <td className="py-2 text-sm">{n.emitente?.razao_social ?? '—'}</td>
-                        <td className="py-2 text-right">{fmt(n.valor_nfe ?? 0)}</td>
+                        <td className="py-2 text-sm">{n.nome_emitente ?? '—'}</td>
+                        <td className="py-2 text-right">{fmt(Number(n.valor_total ?? 0))}</td>
                         <td className="py-2 text-center">
                           <span className="text-xs text-slate-500">{n.manifestado ?? 'Pendente'}</span>
                         </td>

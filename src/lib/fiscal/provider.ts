@@ -7,7 +7,7 @@ export interface FiscalProvider {
   nome: string
 
   distribuicao: {
-    listarDfe(ultimoNsu: string): Promise<DfeListaResultado>
+    listarDfe(cnpj: string, ultimaVersao: string): Promise<DfeListaResultado>
     manifestar(chave: string, tipo: TipoManifesto, justificativa?: string): Promise<void>
     baixarXml(chave: string): Promise<string>
   }
