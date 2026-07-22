@@ -121,7 +121,10 @@ export type AtributoShopee = {
 
 export async function getAttributeTree(ctx: CallCtx, categoryId: number): Promise<AtributoShopee[]> {
   const callOptions = await callOpts(ctx)
-  const data = await shopeeGet('/api/v2/product/get_attribute_tree', { category_id: categoryId, language: 'pt-br' }, callOptions)
+  // A Shopee rejeitava com "CategoryIdList is required" quando o parâmetro
+  // era enviado como category_id — o nome real esperado pela API atual é
+  // category_id_list (aceita uma lista, mas um id só já funciona como valor único).
+  const data = await shopeeGet('/api/v2/product/get_attribute_tree', { category_id_list: categoryId, language: 'pt-br' }, callOptions)
   const lista: any[] = data?.response?.attribute_list ?? []
   return lista.map((a: any) => ({
     attribute_id: a.attribute_id,
