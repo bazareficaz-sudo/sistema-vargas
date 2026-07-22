@@ -34,7 +34,10 @@ export async function getCategoryTree(ctx: CallCtx, parentCategoryId?: number): 
     .filter((c: any) => (c.parent_category_id ?? 0) === pai)
     .map((c: any) => ({
       category_id: c.category_id,
-      original_category_name: c.original_category_name ?? c.display_category_name ?? `Categoria ${c.category_id}`,
+      // display_category_name é o nome traduzido conforme o `language`
+      // pedido; original_category_name é o nome "mestre" da categoria na
+      // Shopee (normalmente em inglês) — por isso o display vem primeiro.
+      original_category_name: c.display_category_name ?? c.original_category_name ?? `Categoria ${c.category_id}`,
       has_children: !!c.has_children,
     }))
 }
@@ -53,12 +56,12 @@ export async function getAttributeTree(ctx: CallCtx, categoryId: number): Promis
   const lista: any[] = data?.response?.attribute_list ?? []
   return lista.map((a: any) => ({
     attribute_id: a.attribute_id,
-    attribute_name: a.attribute_name ?? a.original_attribute_name ?? `Atributo ${a.attribute_id}`,
+    attribute_name: a.display_attribute_name ?? a.attribute_name ?? a.original_attribute_name ?? `Atributo ${a.attribute_id}`,
     is_mandatory: !!(a.is_mandatory ?? a.mandatory_attribute),
     attribute_type: a.attribute_type ?? a.input_type ?? 'TEXT',
     attribute_value_list: (a.attribute_value_list ?? []).map((v: any) => ({
       value_id: v.value_id,
-      original_value_name: v.original_value_name ?? v.display_value_name ?? String(v.value_id),
+      original_value_name: v.display_value_name ?? v.original_value_name ?? String(v.value_id),
     })),
   }))
 }
@@ -69,7 +72,7 @@ export async function getBrandList(ctx: CallCtx, categoryId: number): Promise<Ma
   const callOptions = await callOpts(ctx)
   const data = await shopeeGet('/api/v2/product/get_brand_list', { category_id: categoryId, offset: 0, page_size: 100, status: 1 }, callOptions)
   const lista: any[] = data?.response?.brand_list ?? []
-  return lista.map((b: any) => ({ brand_id: b.brand_id, original_brand_name: b.original_brand_name ?? b.display_brand_name ?? `Marca ${b.brand_id}` }))
+  return lista.map((b: any) => ({ brand_id: b.brand_id, original_brand_name: b.display_brand_name ?? b.original_brand_name ?? `Marca ${b.brand_id}` }))
 }
 
 export type CanalLogisticaShopee = { logistic_id: number; logistic_name: string; enabled: boolean }

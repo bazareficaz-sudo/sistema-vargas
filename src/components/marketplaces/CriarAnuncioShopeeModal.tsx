@@ -109,10 +109,37 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     return () => { ativo = false }
   }, [produto])
 
-  // Carrega categorias raiz assim que o produto (e o canal) estiverem prontos.
+  // Assim que o produto (e o canal) estiverem prontos: tenta reaproveitar,
+  // sem IA, a categoria usada da última vez pra um produto com a mesma
+  // categoria interna (marketplace_categoria_sugestao); se não achar nada,
+  // cai no comportamento normal de carregar só as categorias raiz.
   useEffect(() => {
     if (!produto || !canalAtivo) return
-    carregarNivelCategoria(undefined, 0)
+    let ativo = true
+    ;(async () => {
+      try {
+        const resp = await fetch('/api/marketplace/shopee/categoria-sugerida', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canalAtivo.id, produtoCategoria: produto.categoria ?? null }),
+        })
+        const data = await resp.json()
+        if (!ativo) return
+        if (data.ok && data.encontrado && data.caminho?.length > 0) {
+          setOpcoesPorNivel(data.opcoesPorNivel)
+          setCaminhoCategoria(data.caminho)
+          if (data.resolvidoAteFolha) {
+            await carregarAtributosEMarcas(data.caminho[data.caminho.length - 1].category_id)
+          } else {
+            carregarNivelCategoria(data.caminho[data.caminho.length - 1].category_id, data.opcoesPorNivel.length)
+          }
+          return
+        }
+      } catch {
+        // sem sugestão disponível — segue pro comportamento padrão abaixo
+      }
+      if (ativo) carregarNivelCategoria(undefined, 0)
+    })()
+    return () => { ativo = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produto, canalAtivo])
 
@@ -284,6 +311,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           canalId: canalAtivo.id, produtoId: produto.id, categoryId: categoriaFolha!.category_id,
+          categoriaIds: caminhoCategoria.map(c => c.category_id),
           titulo: titulo.trim(), descricao: descricao.trim(), preco: Number(preco), estoque: Number(estoque),
           peso: Number(peso), comprimento: comprimento || undefined, largura: largura || undefined, altura: altura || undefined,
           brandId: brandId || undefined, brandNome: brandId ? marcas.find(m => String(m.brand_id) === brandId)?.original_brand_name : undefined,

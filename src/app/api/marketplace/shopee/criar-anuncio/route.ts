@@ -5,7 +5,7 @@ import type { ShopeeChannel } from '@/lib/shopee/types'
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { canalId, produtoId, categoryId, titulo, descricao, preco, estoque, peso, comprimento, largura, altura, brandId, brandNome, atributos, canaisLogisticaHabilitados } = body
+  const { canalId, produtoId, categoryId, categoriaIds, titulo, descricao, preco, estoque, peso, comprimento, largura, altura, brandId, brandNome, atributos, canaisLogisticaHabilitados } = body
 
   if (!canalId || !produtoId || !categoryId || !titulo || preco == null || estoque == null || !peso) {
     return NextResponse.json({ ok: false, erro: 'Dados obrigatórios ausentes (categoria, título, preço, estoque e peso são necessários).' }, { status: 400 })
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   if (!canalRow) return NextResponse.json({ ok: false, erro: 'Canal Shopee não encontrado' }, { status: 404 })
   if (!canalRow.access_token) return NextResponse.json({ ok: false, erro: 'Canal não conectado — refaça a autenticação em Configurar.' }, { status: 400 })
 
-  const { data: produto } = await sb.from('produtos').select('id').eq('id', produtoId).eq('empresa_id', empresaId).maybeSingle()
+  const { data: produto } = await sb.from('produtos').select('id, categoria').eq('id', produtoId).eq('empresa_id', empresaId).maybeSingle()
   if (!produto) return NextResponse.json({ ok: false, erro: 'Produto não encontrado' }, { status: 404 })
 
   const { data: imagemPrincipal } = await sb.from('produto_imagens').select('url').eq('produto_id', produtoId).eq('principal', true).maybeSingle()
@@ -62,6 +62,16 @@ export async function POST(req: Request) {
       : resultado.erro,
     detalhes: resultado,
   })
+
+  // Lembra a categoria escolhida pra pré-selecionar automaticamente da
+  // próxima vez que um produto com a mesma categoria interna for publicado.
+  if (resultado.ok && produto.categoria && Array.isArray(categoriaIds) && categoriaIds.length > 0) {
+    await sb.from('marketplace_categoria_sugestao').upsert({
+      empresa_id: empresaId, canal_id: canalId, produto_categoria: produto.categoria,
+      categoria_ids: categoriaIds.map((id: any) => Number(id)),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'empresa_id,canal_id,produto_categoria' })
+  }
 
   if (!resultado.ok) return NextResponse.json({ ok: false, erro: resultado.erro }, { status: 400 })
   return NextResponse.json(resultado)
