@@ -13,6 +13,7 @@ import ImportarProdutoUrlModal from './ImportarProdutoUrlModal'
 import GerenciarTagsModal from './GerenciarTagsModal'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import EstoqueDetalhadoModal from './EstoqueDetalhadoModal'
+import CriarAnuncioShopeeModal from '@/components/marketplaces/CriarAnuncioShopeeModal'
 
 type Produto = {
   id: string
@@ -74,6 +75,7 @@ type Props = {
   tagFiltro: string
   entradaFiltro: string
   tagsDisponiveis: string[]
+  canaisShopee?: { id: string; nome: string }[]
 }
 
 function calcMarkup(produto: Produto): number | null {
@@ -96,7 +98,7 @@ export default function ProdutosClient({
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
-  tagFiltro: tagInicial, entradaFiltro: entradaInicial, tagsDisponiveis,
+  tagFiltro: tagInicial, entradaFiltro: entradaInicial, tagsDisponiveis, canaisShopee = [],
 }: Props) {
   const router = useRouter()
   const [produtos, setProdutos] = useState(inicial)
@@ -104,6 +106,7 @@ export default function ProdutosClient({
   const [editando, setEditando] = useState<Produto | null>(null)
   const [duplicando, setDuplicando] = useState<Produto | null>(null)
   const [criandoKit, setCriandoKit] = useState<Produto | null>(null)
+  const [criandoAnuncioShopee, setCriandoAnuncioShopee] = useState<Produto | null>(null)
   const [criandoNovo, setCriandoNovo] = useState(false)
   const [importandoUrl, setImportandoUrl] = useState(false)
   const [acoesEmMassa, setAcoesEmMassa] = useState(false)
@@ -258,6 +261,15 @@ export default function ProdutosClient({
           empresaId={empresaId}
           onClose={() => setCriandoKit(null)}
           onCriado={() => { setCriandoKit(null); router.refresh() }}
+        />
+      )}
+      {criandoAnuncioShopee && (
+        <CriarAnuncioShopeeModal
+          canais={canaisShopee}
+          empresaId={empresaId}
+          produtoIdInicial={criandoAnuncioShopee.id}
+          onClose={() => setCriandoAnuncioShopee(null)}
+          onCriado={() => router.refresh()}
         />
       )}
       {criandoNovo && (
@@ -609,6 +621,15 @@ export default function ProdutosClient({
                         title="Criar kit a partir deste produto"
                       >
                         📦
+                      </button>
+                    )}
+                    {p.tipo !== 'kit' && canaisShopee.length > 0 && (
+                      <button
+                        onClick={() => setCriandoAnuncioShopee(p)}
+                        className="text-gray-400 hover:text-orange-600 text-sm leading-none"
+                        title="Publicar este produto como anúncio na Shopee"
+                      >
+                        🛍
                       </button>
                     )}
                   </div>

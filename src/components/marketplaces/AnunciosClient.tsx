@@ -7,6 +7,7 @@ import AnuncioDetalheModal from './AnuncioDetalheModal'
 import MapearAnuncioModal from './MapearAnuncioModal'
 import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
+import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
 import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
@@ -89,6 +90,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [mapeandoAberto, setMapeandoAberto] = useState<any | null>(null)
   const [enriquecendoAberto, setEnriquecendoAberto] = useState<any | null>(null)
   const [enviandoPrecoAberto, setEnviandoPrecoAberto] = useState<any | null>(null)
+  const [criarAnuncioShopeeAberto, setCriarAnuncioShopeeAberto] = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [previewMassa, setPreviewMassa] = useState<{ encontrados: any[]; naoEncontrados: any[] } | null>(null)
   const [aplicandoMassa, setAplicandoMassa] = useState(false)
@@ -671,7 +673,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               {sincronizando ? 'Sincronizando...' : '↺ Sincronizar agora'}
             </button>
           )}
+          {canal.plataforma === 'shopee' && (
+            <button onClick={() => setCriarAnuncioShopeeAberto(true)}
+              title="Cria um anúncio de verdade na Shopee via API, a partir de um produto do catálogo"
+              className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors">
+              Publicar na Shopee
+            </button>
+          )}
           <button onClick={abrirNovo}
+            title="Só registra localmente um anúncio que você já criou manualmente na Shopee/ML — não chama a API"
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
             + Novo anúncio
           </button>
@@ -1060,6 +1070,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
             setMapeandoAberto(anuncioAtualizado)
           }}
+        />
+      )}
+
+      {criarAnuncioShopeeAberto && (
+        <CriarAnuncioShopeeModal
+          canal={{ id: canal.id, nome: canal.nome }}
+          empresaId={empresaId}
+          onClose={() => setCriarAnuncioShopeeAberto(false)}
+          onCriado={() => router.refresh()}
         />
       )}
 

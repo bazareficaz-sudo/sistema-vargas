@@ -79,6 +79,29 @@ export async function shopeePost(path: string, body: Record<string, any>, opts: 
   return parseShopeeResponse(res, path)
 }
 
+// upload_image (media_space) é o único endpoint conhecido desta integração
+// que exige multipart/form-data em vez de JSON — o corpo já vem pronto como
+// FormData (contendo o arquivo + campos como `scene`), sem Content-Type
+// manual (o fetch define o boundary sozinho). Mesmo tratamento defensivo de
+// erro dos outros métodos: a Shopee sempre responde em JSON aqui.
+export async function shopeeUploadImage(path: string, formData: FormData, opts: CallOpts) {
+  const ts = timestamp()
+  const baseStr = opts.accessToken
+    ? buildShopBaseString(opts.partnerId, path, ts, opts.accessToken, opts.shopId ?? '')
+    : buildPublicBaseString(opts.partnerId, path, ts)
+  const sign = signRequest(opts.partnerKey, baseStr)
+
+  const qs = new URLSearchParams({
+    partner_id: String(opts.partnerId),
+    timestamp: String(ts),
+    sign,
+    ...(opts.accessToken ? { access_token: opts.accessToken, shop_id: String(opts.shopId ?? '') } : {}),
+  })
+
+  const res = await fetch(`${API_BASE}${path}?${qs.toString()}`, { method: 'POST', body: formData })
+  return parseShopeeResponse(res, path)
+}
+
 // download_shipping_document é o único endpoint conhecido desta integração
 // que foge do padrão JSON — devolve o PDF em bytes crus. Se a Shopee
 // retornar um erro em vez do documento, o content-type vem como JSON;

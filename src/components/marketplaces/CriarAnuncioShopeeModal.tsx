@@ -1,0 +1,467 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { fmt } from './utils'
+
+type Categoria = { category_id: number; original_category_name: string; has_children: boolean }
+type Atributo = {
+  attribute_id: number; attribute_name: string; is_mandatory: boolean; attribute_type: string
+  attribute_value_list: { value_id: number; original_value_name: string }[]
+}
+type Marca = { brand_id: number; original_brand_name: string }
+type CanalLogistica = { logistic_id: number; logistic_name: string; enabled: boolean }
+
+export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, produtoIdInicial, onClose, onCriado }: {
+  canal?: { id: string; nome: string }
+  canais?: { id: string; nome: string }[]
+  empresaId: string; produtoIdInicial?: string
+  onClose: () => void
+  onCriado: () => void
+}) {
+  // Entrada a partir de Anúncios já vem com `canal` fixo (página já é de um
+  // canal só). Entrada a partir de Produtos não tem canal em contexto —
+  // recebe a lista de lojas Shopee e escolhe aqui (auto-escolhe se só tiver 1).
+  const [canalEscolhidoId, setCanalEscolhidoId] = useState(canal?.id ?? (canais?.length === 1 ? canais[0].id : ''))
+  const canalAtivo = canal ?? canais?.find(c => c.id === canalEscolhidoId) ?? null
+
+  const [produto, setProduto] = useState<any | null>(null)
+  const [fotoUrl, setFotoUrl] = useState<string | null>(null)
+  const [buscaProd, setBuscaProd] = useState('')
+  const [resultadosBusca, setResultadosBusca] = useState<any[]>([])
+
+  // Categoria em cascata — cada posição do array é um nível já escolhido.
+  const [caminhoCategoria, setCaminhoCategoria] = useState<Categoria[]>([])
+  const [opcoesPorNivel, setOpcoesPorNivel] = useState<Categoria[][]>([])
+  const [carregandoCategorias, setCarregandoCategorias] = useState(false)
+  const categoriaFolha = caminhoCategoria.length > 0 && !caminhoCategoria[caminhoCategoria.length - 1].has_children
+    ? caminhoCategoria[caminhoCategoria.length - 1] : null
+
+  const [atributos, setAtributos] = useState<Atributo[]>([])
+  const [valoresAtributos, setValoresAtributos] = useState<Record<number, { valueId?: number; texto?: string }>>({})
+  const [marcas, setMarcas] = useState<Marca[]>([])
+  const [brandId, setBrandId] = useState('')
+  const [carregandoAtributos, setCarregandoAtributos] = useState(false)
+
+  const [canaisLogistica, setCanaisLogistica] = useState<CanalLogistica[]>([])
+  const [logisticaSelecionada, setLogisticaSelecionada] = useState<Set<number>>(new Set())
+
+  const [titulo, setTitulo] = useState('')
+  const [descricao, setDescricao] = useState('')
+  const [preco, setPreco] = useState('')
+  const [estoque, setEstoque] = useState('')
+  const [peso, setPeso] = useState('')
+  const [comprimento, setComprimento] = useState('')
+  const [largura, setLargura] = useState('')
+  const [altura, setAltura] = useState('')
+
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
+
+  // Carrega o produto pré-selecionado (entrada a partir da tela de Produtos)
+  useEffect(() => {
+    if (!produtoIdInicial) return
+    const sb = createClient()
+    sb.from('produtos').select('*').eq('id', produtoIdInicial).single().then(({ data }) => {
+      if (data) selecionarProduto(data)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produtoIdInicial])
+
+  // Busca ao vivo (só quando não veio produto pré-selecionado)
+  useEffect(() => {
+    if (produtoIdInicial || produto) { setResultadosBusca([]); return }
+    const termo = buscaProd.trim()
+    if (termo.length < 2) { setResultadosBusca([]); return }
+    let ativo = true
+    const timer = setTimeout(async () => {
+      const sb = createClient()
+      const palavras = termo.toLowerCase().split(/\s+/).map(p => p.replace(/[,()%]/g, '')).filter(Boolean)
+      let query = sb.from('produtos').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('nome').limit(8)
+      for (const palavra of palavras) query = query.or(`nome.ilike.%${palavra}%,sku.ilike.%${palavra}%`)
+      const { data } = await query
+      if (ativo) setResultadosBusca(data ?? [])
+    }, 250)
+    return () => { ativo = false; clearTimeout(timer) }
+  }, [buscaProd, produto, produtoIdInicial, empresaId])
+
+  function selecionarProduto(p: any) {
+    setProduto(p)
+    setTitulo(p.nome)
+    setPreco(p.preco_venda ? String(p.preco_venda) : '')
+    setEstoque(p.estoque != null ? String(p.estoque) : '0')
+    setPeso(p.peso_kg ? String(p.peso_kg) : '')
+    setComprimento(p.comprimento_cm ? String(p.comprimento_cm) : '')
+    setLargura(p.largura_cm ? String(p.largura_cm) : '')
+    setAltura(p.altura_cm ? String(p.altura_cm) : '')
+  }
+
+  // Imagem principal do produto vem de `produto_imagens` (principal=true) —
+  // não existe coluna `foto_url` em produtos, mesma fonte usada na listagem.
+  useEffect(() => {
+    if (!produto) { setFotoUrl(null); return }
+    let ativo = true
+    const sb = createClient()
+    sb.from('produto_imagens').select('url').eq('produto_id', produto.id).eq('principal', true).maybeSingle()
+      .then(({ data }) => { if (ativo) setFotoUrl(data?.url ?? null) })
+    return () => { ativo = false }
+  }, [produto])
+
+  // Carrega categorias raiz assim que o produto (e o canal) estiverem prontos.
+  useEffect(() => {
+    if (!produto || !canalAtivo) return
+    carregarNivelCategoria(undefined, 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produto, canalAtivo])
+
+  async function carregarNivelCategoria(parentCategoryId: number | undefined, nivel: number) {
+    if (!canalAtivo) return
+    setCarregandoCategorias(true)
+    try {
+      const resp = await fetch('/api/marketplace/shopee/categorias', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: canalAtivo.id, parentCategoryId }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao buscar categorias'); return }
+      setOpcoesPorNivel(prev => {
+        const novo = prev.slice(0, nivel)
+        novo[nivel] = data.categorias
+        return novo
+      })
+    } catch (e: any) {
+      setErro(e.message ?? 'Erro ao buscar categorias')
+    } finally {
+      setCarregandoCategorias(false)
+    }
+  }
+
+  function escolherCategoria(nivel: number, categoryId: string) {
+    const opcoes = opcoesPorNivel[nivel] ?? []
+    const cat = opcoes.find(c => String(c.category_id) === categoryId)
+    if (!cat) return
+    const novoCaminho = [...caminhoCategoria.slice(0, nivel), cat]
+    setCaminhoCategoria(novoCaminho)
+    setAtributos([]); setValoresAtributos({}); setMarcas([]); setBrandId('')
+    if (cat.has_children) {
+      carregarNivelCategoria(cat.category_id, nivel + 1)
+    } else {
+      setOpcoesPorNivel(prev => prev.slice(0, nivel + 1))
+      carregarAtributosEMarcas(cat.category_id)
+    }
+  }
+
+  async function carregarAtributosEMarcas(categoryId: number) {
+    if (!canalAtivo) return
+    setCarregandoAtributos(true)
+    try {
+      const resp = await fetch('/api/marketplace/shopee/atributos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canalId: canalAtivo.id, categoryId }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao buscar atributos'); return }
+      setAtributos(data.atributos ?? [])
+      setMarcas(data.marcas ?? [])
+      // Pré-seleciona a marca se o nome do produto bater com alguma da lista.
+      if (produto?.marca && (data.marcas ?? []).length > 0) {
+        const bate = data.marcas.find((m: Marca) => m.original_brand_name.toLowerCase() === produto.marca.toLowerCase())
+        if (bate) setBrandId(String(bate.brand_id))
+      }
+    } catch (e: any) {
+      setErro(e.message ?? 'Erro ao buscar atributos')
+    } finally {
+      setCarregandoAtributos(false)
+    }
+  }
+
+  // Canais de logística — não dependem de categoria, carrega uma vez.
+  useEffect(() => {
+    if (!produto || !canalAtivo) return
+    const sb2 = fetch('/api/marketplace/shopee/canais-logistica', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canalId: canalAtivo.id }),
+    }).then(r => r.json()).then(data => {
+      if (data.ok) {
+        setCanaisLogistica(data.canais)
+        setLogisticaSelecionada(new Set((data.canais as CanalLogistica[]).filter(c => c.enabled).map(c => c.logistic_id)))
+      }
+    }).catch(() => {})
+    return () => { void sb2 }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [produto, canalAtivo])
+
+  function toggleLogistica(id: number) {
+    setLogisticaSelecionada(prev => {
+      const novo = new Set(prev)
+      if (novo.has(id)) novo.delete(id); else novo.add(id)
+      return novo
+    })
+  }
+
+  const atributosObrigatoriosFaltando = atributos.filter(a => {
+    if (!a.is_mandatory) return false
+    const v = valoresAtributos[a.attribute_id]
+    return !v || (v.valueId == null && !v.texto?.trim())
+  })
+
+  const podeEnviar = !!canalAtivo && !!produto && !!categoriaFolha && titulo.trim() && Number(preco) > 0
+    && estoque !== '' && Number(peso) > 0 && atributosObrigatoriosFaltando.length === 0
+    && !!fotoUrl
+
+  async function enviar() {
+    if (!podeEnviar || !canalAtivo) return
+    setSalvando(true); setErro('')
+    try {
+      const resp = await fetch('/api/marketplace/shopee/criar-anuncio', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          canalId: canalAtivo.id, produtoId: produto.id, categoryId: categoriaFolha!.category_id,
+          titulo: titulo.trim(), descricao: descricao.trim(), preco: Number(preco), estoque: Number(estoque),
+          peso: Number(peso), comprimento: comprimento || undefined, largura: largura || undefined, altura: altura || undefined,
+          brandId: brandId || undefined, brandNome: brandId ? marcas.find(m => String(m.brand_id) === brandId)?.original_brand_name : undefined,
+          atributos: atributos
+            .filter(a => valoresAtributos[a.attribute_id])
+            .map(a => ({ attribute_id: a.attribute_id, value_id: valoresAtributos[a.attribute_id].valueId, texto: valoresAtributos[a.attribute_id].texto })),
+          canaisLogisticaHabilitados: Array.from(logisticaSelecionada),
+        }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao criar anúncio'); return }
+      setResultado({ itemId: data.itemId, warning: data.warning })
+      onCriado()
+    } catch (e: any) {
+      setErro(e.message ?? 'Erro ao criar anúncio')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0 sticky top-0 bg-white z-10">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Criar anúncio na Shopee</h2>
+            {canalAtivo && <p className="text-xs text-gray-400">{canalAtivo.nome}</p>}
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5">
+          {!canalAtivo && canais && canais.length > 1 ? (
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">Escolha a loja Shopee</p>
+              <select value={canalEscolhidoId} onChange={e => setCanalEscolhidoId(e.target.value)} autoFocus
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                <option value="">Selecione...</option>
+                {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </div>
+          ) : resultado ? (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-4">
+              <p className="text-sm font-medium text-emerald-800">✓ Anúncio criado na Shopee (item {resultado.itemId})</p>
+              {resultado.warning && <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{resultado.warning}</p>}
+              <button onClick={onClose} className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">Fechar</button>
+            </div>
+          ) : (
+            <>
+              {/* Produto */}
+              {!produto ? (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-2">Escolha o produto</p>
+                  <input value={buscaProd} onChange={e => setBuscaProd(e.target.value)} autoFocus
+                    placeholder="Nome ou SKU..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                  {resultadosBusca.length > 0 && (
+                    <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
+                      {resultadosBusca.map(p => (
+                        <button key={p.id} onClick={() => selecionarProduto(p)}
+                          className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-gray-100 last:border-0">
+                          <p className="text-sm font-medium text-gray-900">{p.nome}</p>
+                          <p className="text-xs text-gray-400">{p.sku} · {fmt(p.preco_venda)} · Estoque: {p.estoque}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    {fotoUrl ? (
+                      <img src={fotoUrl} alt="" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">📷</div>
+                    )}
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{produto.nome}</p>
+                      <p className="text-xs text-gray-500">{produto.sku}</p>
+                    </div>
+                  </div>
+                  {!produtoIdInicial && (
+                    <button onClick={() => { setProduto(null); setCaminhoCategoria([]); setOpcoesPorNivel([]); setAtributos([]) }}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium">Trocar</button>
+                  )}
+                </div>
+              )}
+              {produto && !fotoUrl && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ⚠ Esse produto não tem foto cadastrada — a Shopee exige pelo menos uma imagem. Adicione uma foto no produto antes de continuar.
+                </p>
+              )}
+
+              {produto && (
+                <>
+                  {/* Categoria em cascata */}
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-2">Categoria na Shopee</p>
+                    <div className="space-y-2">
+                      {opcoesPorNivel.map((opcoes, nivel) => (
+                        <select key={nivel} value={caminhoCategoria[nivel]?.category_id ?? ''} onChange={e => escolherCategoria(nivel, e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                          <option value="">{nivel === 0 ? 'Selecione a categoria...' : 'Selecione a subcategoria...'}</option>
+                          {opcoes.map(c => <option key={c.category_id} value={c.category_id}>{c.original_category_name}</option>)}
+                        </select>
+                      ))}
+                    </div>
+                    {carregandoCategorias && <p className="text-xs text-gray-400 mt-1">Carregando...</p>}
+                    {categoriaFolha && (
+                      <p className="text-xs text-emerald-600 mt-1">✓ {caminhoCategoria.map(c => c.original_category_name).join(' › ')}</p>
+                    )}
+                  </div>
+
+                  {carregandoAtributos && <p className="text-xs text-gray-400">Carregando atributos da categoria...</p>}
+
+                  {/* Atributos */}
+                  {atributos.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-2">Atributos da categoria</p>
+                      <div className="space-y-3">
+                        {atributos.map(a => (
+                          <div key={a.attribute_id}>
+                            <label className="block text-xs text-gray-600 mb-1">
+                              {a.attribute_name} {a.is_mandatory && <span className="text-red-500">*</span>}
+                            </label>
+                            {a.attribute_value_list.length > 0 ? (
+                              <select
+                                value={valoresAtributos[a.attribute_id]?.valueId ?? ''}
+                                onChange={e => setValoresAtributos(prev => ({ ...prev, [a.attribute_id]: { valueId: Number(e.target.value) || undefined } }))}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                                <option value="">Selecione...</option>
+                                {a.attribute_value_list.map(v => <option key={v.value_id} value={v.value_id}>{v.original_value_name}</option>)}
+                              </select>
+                            ) : (
+                              <input
+                                value={valoresAtributos[a.attribute_id]?.texto ?? ''}
+                                onChange={e => setValoresAtributos(prev => ({ ...prev, [a.attribute_id]: { texto: e.target.value } }))}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Marca */}
+                  {marcas.length > 0 && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Marca</label>
+                      <select value={brandId} onChange={e => setBrandId(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                        <option value="">— Sem marca —</option>
+                        {marcas.map(m => <option key={m.brand_id} value={m.brand_id}>{m.original_brand_name}</option>)}
+                      </select>
+                      <p className="text-xs text-gray-400 mt-1">Algumas categorias exigem marca — se a Shopee recusar sem marca, escolha uma da lista.</p>
+                    </div>
+                  )}
+
+                  {/* Título / descrição */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Título do anúncio *</label>
+                    <input value={titulo} onChange={e => setTitulo(e.target.value)} maxLength={120}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Descrição</label>
+                    <textarea value={descricao} onChange={e => setDescricao(e.target.value)} rows={4}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                  </div>
+
+                  {/* Preço / estoque */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Preço de venda (R$) *</label>
+                      <input type="number" step="0.01" value={preco} onChange={e => setPreco(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Estoque *</label>
+                      <input type="number" value={estoque} onChange={e => setEstoque(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                    </div>
+                  </div>
+
+                  {/* Peso / dimensões */}
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-2">Peso e dimensões do pacote</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Peso (kg) *</label>
+                        <input type="number" step="0.01" value={peso} onChange={e => setPeso(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Compr. (cm)</label>
+                        <input type="number" value={comprimento} onChange={e => setComprimento(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Larg. (cm)</label>
+                        <input type="number" value={largura} onChange={e => setLargura(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Alt. (cm)</label>
+                        <input type="number" value={altura} onChange={e => setAltura(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Ficam salvos no produto pra próxima vez.</p>
+                  </div>
+
+                  {/* Logística */}
+                  {canaisLogistica.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-2">Canais de envio</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {canaisLogistica.map(c => (
+                          <label key={c.logistic_id} className="flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" checked={logisticaSelecionada.has(c.logistic_id)} onChange={() => toggleLogistica(c.logistic_id)}
+                              className="w-4 h-4 accent-blue-600" />
+                            {c.logistic_name}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {erro && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{erro}</p>}
+            </>
+          )}
+        </div>
+
+        {!resultado && (
+          <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2 flex-shrink-0">
+            <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
+            <button onClick={enviar} disabled={!podeEnviar || salvando}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg">
+              {salvando ? 'Publicando...' : 'Publicar na Shopee'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

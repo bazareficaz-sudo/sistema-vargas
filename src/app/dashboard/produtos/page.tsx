@@ -31,13 +31,15 @@ export default async function ProdutosPage({
   // resolução de hierarquia categoria → subcategorias (produtos.categoria é
   // um TEXT com o nome escolhido, raiz ou filha; não há coluna própria de
   // subcategoria — ver plano).
-  const [{ data: categoriasRows }, { data: marcasRows }] = await Promise.all([
+  const [{ data: categoriasRows }, { data: marcasRows }, { data: canaisShopeeRows }] = await Promise.all([
     supabase.from('categorias').select('id, nome, pai_id').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     supabase.from('marcas').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+    supabase.from('marketplace_canais').select('id, nome').eq('empresa_id', empresaId).eq('plataforma', 'shopee'),
   ])
   const categoriasTodas = categoriasRows ?? []
   const categoriasRaiz = categoriasTodas.filter(c => !c.pai_id)
   const marcasTodas = marcasRows ?? []
+  const canaisShopee = canaisShopeeRows ?? []
 
   // Ids-com-imagem — só busca quando o filtro de imagem está ativo.
   let idsComImagem: string[] | null = null
@@ -181,6 +183,7 @@ export default async function ProdutosPage({
       tagFiltro={tag}
       entradaFiltro={entrada}
       tagsDisponiveis={tagsDisponiveis}
+      canaisShopee={canaisShopee}
     />
   )
 }
