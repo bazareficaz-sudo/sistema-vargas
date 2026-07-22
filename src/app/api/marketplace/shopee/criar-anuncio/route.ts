@@ -30,7 +30,9 @@ export async function POST(req: Request) {
   const { data: produto } = await sb.from('produtos').select('id, categoria').eq('id', produtoId).eq('empresa_id', empresaId).maybeSingle()
   if (!produto) return NextResponse.json({ ok: false, erro: 'Produto não encontrado' }, { status: 404 })
 
-  const { data: imagemPrincipal } = await sb.from('produto_imagens').select('url').eq('produto_id', produtoId).eq('principal', true).maybeSingle()
+  const { data: imagensProduto } = await sb.from('produto_imagens').select('url, principal').eq('produto_id', produtoId).order('ordem', { ascending: true })
+  const fotoUrls = (imagensProduto ?? []).sort((a: any, b: any) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0)).map((i: any) => i.url)
+  if (fotoUrls.length === 0) return NextResponse.json({ ok: false, erro: 'Produto sem nenhuma imagem cadastrada — a Shopee exige pelo menos uma.' }, { status: 400 })
 
   const canal: ShopeeChannel = {
     id: canalRow.id, empresaId: canalRow.empresa_id, sellerId: canalRow.seller_id,
@@ -50,7 +52,7 @@ export async function POST(req: Request) {
     brandNome,
     atributos: atributos ?? [],
     logisticaHabilitada: (canaisLogisticaHabilitados ?? []).map((id: any) => Number(id)),
-    fotoUrl: imagemPrincipal?.url ?? null,
+    fotoUrls,
   })
 
   await sb.from('marketplace_sync_log').insert({

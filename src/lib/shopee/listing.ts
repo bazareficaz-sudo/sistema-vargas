@@ -75,6 +75,35 @@ function normalizarPalavras(texto: string): string[] {
 
 export type CaminhoCategoriaResolvido = { opcoesPorNivel: CategoriaShopee[][]; caminho: CategoriaShopee[]; resolvidoAteFolha: boolean }
 
+function montarResolucao(arvore: CategoriaShopeeFlat[], folhaId: number): CaminhoCategoriaResolvido {
+  const caminho = montarCaminho(arvore, folhaId)
+  const opcoesPorNivel: CategoriaShopee[][] = []
+  let paiAtual = 0
+  for (const nivel of caminho) {
+    opcoesPorNivel.push(arvore.filter(c => c.parent_category_id === paiAtual))
+    paiAtual = nivel.category_id
+  }
+  return { opcoesPorNivel, caminho, resolvidoAteFolha: true }
+}
+
+// Ferramenta oficial da Shopee pra sugerir categoria a partir do nome do
+// produto (aprendizado deles em cima de milhões de anúncios reais — muito
+// mais confiável que qualquer heurística nossa). Usada como 1º fallback,
+// antes da categoria "lembrada" e da dedução por palavras-chave.
+export async function recomendarCategoria(ctx: CallCtx, itemName: string): Promise<CaminhoCategoriaResolvido | null> {
+  const callOptions = await callOpts(ctx)
+  const data = await shopeeGet('/api/v2/product/category_recommend', { item_name: itemName }, callOptions)
+  const ids: number[] = data?.response?.category_id_list ?? []
+  if (ids.length === 0) return null
+
+  const arvore = await buscarArvoreCompleta(ctx)
+  const porId = new Set(arvore.map(c => c.category_id))
+  const primeiraValida = ids.find(id => porId.has(id))
+  if (primeiraValida == null) return null
+
+  return montarResolucao(arvore, primeiraValida)
+}
+
 // Pré-seleção de categoria por dedução (sem IA): pontua cada categoria-folha
 // da árvore inteira pela sobreposição de palavras entre o nome/categoria do
 // produto e o nome da própria categoria + seus ancestrais (ex: produto
@@ -100,15 +129,7 @@ export async function deduzirCategoriaPorPalavras(ctx: CallCtx, produtoNome: str
   }
   if (!melhor) return null
 
-  const caminho = montarCaminho(arvore, melhor.folha.category_id)
-  const opcoesPorNivel: CategoriaShopee[][] = []
-  let paiAtual = 0
-  for (const nivel of caminho) {
-    opcoesPorNivel.push(arvore.filter(c => c.parent_category_id === paiAtual))
-    paiAtual = nivel.category_id
-  }
-
-  return { opcoesPorNivel, caminho, resolvidoAteFolha: true }
+  return montarResolucao(arvore, melhor.folha.category_id)
 }
 
 export type AtributoShopee = {
@@ -211,7 +232,7 @@ export type CriarAnuncioInput = {
   brandNome?: string
   atributos: AtributoInput[]
   logisticaHabilitada: number[] // logistic_id[]
-  fotoUrl?: string | null
+  fotoUrls: string[] // até 9 — limite da Shopee
 }
 
 export type ResultadoCriarAnuncio =
@@ -223,10 +244,9 @@ export async function criarAnuncio(sb: any, canal: ShopeeChannel, input: CriarAn
   const callOptions = await callOpts(ctx)
 
   try {
-    let imageIdList: string[] = []
-    if (input.fotoUrl) {
-      const imageId = await uploadImageFromUrl(ctx, input.fotoUrl)
-      imageIdList = [imageId]
+    const imageIdList: string[] = []
+    for (const url of input.fotoUrls.slice(0, 9)) {
+      imageIdList.push(await uploadImageFromUrl(ctx, url))
     }
 
     const body: Record<string, any> = {

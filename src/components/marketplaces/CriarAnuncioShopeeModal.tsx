@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
 
@@ -26,7 +26,11 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const canalAtivo = canal ?? canais?.find(c => c.id === canalEscolhidoId) ?? null
 
   const [produto, setProduto] = useState<any | null>(null)
-  const [fotoUrl, setFotoUrl] = useState<string | null>(null)
+  const [imagens, setImagens] = useState<{ id: string; url: string; principal: boolean; ordem: number }[]>([])
+  const [uploadandoImg, setUploadandoImg] = useState(false)
+  const [erroImg, setErroImg] = useState('')
+  const [urlImgInput, setUrlImgInput] = useState('')
+  const [adicionandoUrlImg, setAdicionandoUrlImg] = useState(false)
   const [buscaProd, setBuscaProd] = useState('')
   const [resultadosBusca, setResultadosBusca] = useState<any[]>([])
 
@@ -60,7 +64,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
-  const [origemCategoria, setOrigemCategoria] = useState<'lembrada' | 'deduzida' | null>(null)
+  const [origemCategoria, setOrigemCategoria] = useState<'recomendada' | 'lembrada' | 'deduzida' | null>(null)
 
   // Carrega o produto pré-selecionado (entrada a partir da tela de Produtos)
   useEffect(() => {
@@ -100,30 +104,98 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     setAltura(p.altura_cm ? String(p.altura_cm) : '')
   }
 
-  // Imagem principal do produto vem de `produto_imagens` (principal=true) —
-  // não existe coluna `foto_url` em produtos, mesma fonte usada na listagem.
-  useEffect(() => {
-    if (!produto) { setFotoUrl(null); return }
-    let ativo = true
+  // Galeria de imagens do produto — mesma tabela/bucket usados em
+  // EditarProdutoModal.tsx (produto_imagens + storage "produto-imagens"),
+  // gerenciável direto aqui pra não precisar sair do fluxo de criar anúncio.
+  async function carregarImagens(produtoId: string) {
     const sb = createClient()
-    sb.from('produto_imagens').select('url').eq('produto_id', produto.id).eq('principal', true).maybeSingle()
-      .then(({ data }) => { if (ativo) setFotoUrl(data?.url ?? null) })
-    return () => { ativo = false }
+    const { data } = await sb.from('produto_imagens').select('id, url, principal, ordem').eq('produto_id', produtoId).order('ordem', { ascending: true })
+    setImagens(data ?? [])
+  }
+
+  useEffect(() => {
+    if (!produto) { setImagens([]); return }
+    carregarImagens(produto.id)
   }, [produto])
 
+  async function handleUploadImagens(e: ChangeEvent<HTMLInputElement>) {
+    const arquivos = Array.from(e.target.files ?? [])
+    if (!arquivos.length || !produto) return
+    setUploadandoImg(true); setErroImg('')
+    const sb = createClient()
+    const erros: string[] = []
+    for (const arquivo of arquivos) {
+      const ext = arquivo.name.split('.').pop()?.toLowerCase() ?? 'jpg'
+      const path = `${empresaId}/${produto.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error: uploadError } = await sb.storage.from('produto-imagens').upload(path, arquivo, { upsert: false })
+      if (uploadError) { erros.push(arquivo.name + ': ' + uploadError.message); continue }
+      const { data: { publicUrl } } = sb.storage.from('produto-imagens').getPublicUrl(path)
+      const ordem = imagens.length + erros.length
+      const principal = imagens.length === 0 && erros.length === 0
+      const { data: img, error: dbError } = await sb.from('produto_imagens')
+        .insert({ empresa_id: empresaId, produto_id: produto.id, url: publicUrl, ordem, principal })
+        .select('id, url, principal, ordem').single()
+      if (dbError) { erros.push(arquivo.name + ': ' + dbError.message); continue }
+      setImagens(prev => [...prev, img])
+    }
+    if (erros.length) setErroImg('Alguns arquivos falharam: ' + erros.join('; '))
+    setUploadandoImg(false)
+    e.target.value = ''
+  }
+
+  async function adicionarImagemPorUrl() {
+    if (!urlImgInput.trim() || !produto) return
+    setUploadandoImg(true); setErroImg('')
+    const sb = createClient()
+    const ordem = imagens.length
+    const principal = imagens.length === 0
+    const { data: img, error } = await sb.from('produto_imagens')
+      .insert({ empresa_id: empresaId, produto_id: produto.id, url: urlImgInput.trim(), ordem, principal })
+      .select('id, url, principal, ordem').single()
+    if (error) { setErroImg('Erro: ' + error.message); setUploadandoImg(false); return }
+    setImagens(prev => [...prev, img])
+    setUrlImgInput(''); setAdicionandoUrlImg(false); setUploadandoImg(false)
+  }
+
+  async function definirImagemPrincipal(id: string) {
+    if (!produto) return
+    const sb = createClient()
+    await sb.from('produto_imagens').update({ principal: false }).eq('produto_id', produto.id)
+    await sb.from('produto_imagens').update({ principal: true }).eq('id', id)
+    setImagens(prev => prev.map(img => ({ ...img, principal: img.id === id })))
+  }
+
+  async function removerImagem(img: { id: string; url: string; principal: boolean }) {
+    if (!confirm('Remover esta imagem?')) return
+    const sb = createClient()
+    const path = img.url.split('/produto-imagens/')[1]
+    if (path) await sb.storage.from('produto-imagens').remove([path])
+    await sb.from('produto_imagens').delete().eq('id', img.id)
+    const novas = imagens.filter(i => i.id !== img.id)
+    if (img.principal && novas.length > 0) {
+      const sb2 = createClient()
+      await sb2.from('produto_imagens').update({ principal: true }).eq('id', novas[0].id)
+      novas[0] = { ...novas[0], principal: true }
+    }
+    setImagens(novas)
+  }
+
   // Assim que o produto (e o canal) estiverem prontos, tenta pré-selecionar
-  // a categoria sem IA, em duas etapas de confiança decrescente:
-  // 1) "lembrada" — categoria já usada e confirmada antes pra um produto
+  // a categoria sem IA, em ordem de confiança decrescente:
+  // 1) "recomendada" — ferramenta oficial da Shopee (category_recommend),
+  //    baseada no nome exato deste produto — a mais confiável, roda sempre
+  //    primeiro;
+  // 2) "lembrada" — categoria já usada e confirmada antes pra um produto
   //    com a mesma categoria interna (marketplace_categoria_sugestao);
-  // 2) "deduzida" — nenhuma lembrança encontrada, tenta adivinhar por
+  // 3) "deduzida" — nenhuma das anteriores achou nada, tenta adivinhar por
   //    sobreposição de palavras-chave entre o produto e a árvore da Shopee.
-  // Se nenhuma das duas achar nada, cai no comportamento padrão de carregar
-  // só as categorias raiz pra escolha manual.
+  // Se nenhuma achar nada, cai no comportamento padrão de carregar só as
+  // categorias raiz pra escolha manual.
   useEffect(() => {
     if (!produto || !canalAtivo) return
     let ativo = true
 
-    async function aplicarCaminho(data: any, origem: 'lembrada' | 'deduzida') {
+    async function aplicarCaminho(data: any, origem: 'recomendada' | 'lembrada' | 'deduzida') {
       setOrigemCategoria(origem)
       setOpcoesPorNivel(data.opcoesPorNivel)
       setCaminhoCategoria(data.caminho)
@@ -135,6 +207,21 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     }
 
     ;(async () => {
+      try {
+        const respRec = await fetch('/api/marketplace/shopee/categoria-recomendada', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canalAtivo.id, produtoNome: produto.nome }),
+        })
+        const dataRec = await respRec.json()
+        if (!ativo) return
+        if (dataRec.ok && dataRec.encontrado && dataRec.caminho?.length > 0) {
+          await aplicarCaminho(dataRec, 'recomendada')
+          return
+        }
+      } catch {
+        // segue pra próxima tentativa
+      }
+
       try {
         const resp = await fetch('/api/marketplace/shopee/categoria-sugerida', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -333,7 +420,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
 
   const podeEnviar = !!canalAtivo && !!produto && !!categoriaFolha && titulo.trim() && Number(preco) > 0
     && estoque !== '' && Number(peso) > 0 && atributosObrigatoriosFaltando.length === 0
-    && !!fotoUrl
+    && imagens.length > 0
 
   async function enviar() {
     if (!podeEnviar || !canalAtivo) return
@@ -415,8 +502,8 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
               ) : (
                 <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
                   <div className="flex items-center gap-3">
-                    {fotoUrl ? (
-                      <img src={fotoUrl} alt="" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
+                    {imagens[0] ? (
+                      <img src={imagens.find(i => i.principal)?.url ?? imagens[0].url} alt="" className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
                     ) : (
                       <div className="w-12 h-12 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">📷</div>
                     )}
@@ -431,10 +518,51 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                   )}
                 </div>
               )}
-              {produto && !fotoUrl && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  ⚠ Esse produto não tem foto cadastrada — a Shopee exige pelo menos uma imagem. Adicione uma foto no produto antes de continuar.
-                </p>
+
+              {produto && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 mb-2">Imagens do anúncio ({imagens.length}/9) *</p>
+                  {imagens.length === 0 && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+                      ⚠ Esse produto não tem nenhuma imagem cadastrada — a Shopee exige pelo menos uma. Adicione abaixo.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {imagens.map(img => (
+                      <div key={img.id} className="relative group w-16 h-16">
+                        <img src={img.url} alt="" className={`w-16 h-16 rounded-lg object-cover border-2 ${img.principal ? 'border-blue-500' : 'border-gray-200'}`} />
+                        {img.principal && <span className="absolute -top-1.5 -left-1.5 bg-blue-600 text-white text-[9px] px-1 rounded">principal</span>}
+                        <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                          {!img.principal && (
+                            <button type="button" onClick={() => definirImagemPrincipal(img.id)} title="Definir como principal"
+                              className="text-white text-xs hover:scale-110">⭐</button>
+                          )}
+                          <button type="button" onClick={() => removerImagem(img)} title="Remover"
+                            className="text-white text-xs hover:scale-110">🗑</button>
+                        </div>
+                      </div>
+                    ))}
+                    {imagens.length < 9 && (
+                      <label className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-blue-400 hover:text-blue-500 cursor-pointer text-xl">
+                        {uploadandoImg ? '…' : '+'}
+                        <input type="file" accept="image/*" multiple className="hidden" disabled={uploadandoImg} onChange={handleUploadImagens} />
+                      </label>
+                    )}
+                  </div>
+                  {!adicionandoUrlImg ? (
+                    <button type="button" onClick={() => setAdicionandoUrlImg(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2">+ Adicionar por URL</button>
+                  ) : (
+                    <div className="flex gap-2 mt-2">
+                      <input value={urlImgInput} onChange={e => setUrlImgInput(e.target.value)} placeholder="https://..."
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+                      <button type="button" onClick={adicionarImagemPorUrl} disabled={uploadandoImg || !urlImgInput.trim()}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">Adicionar</button>
+                      <button type="button" onClick={() => { setAdicionandoUrlImg(false); setUrlImgInput('') }}
+                        className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50">Cancelar</button>
+                    </div>
+                  )}
+                  {erroImg && <p className="text-xs text-red-600 mt-1">{erroImg}</p>}
+                </div>
               )}
 
               {produto && canalAtivo && (
@@ -463,6 +591,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                     {carregandoCategorias && <p className="text-xs text-gray-400 mt-1">Carregando...</p>}
                     {categoriaFolha && (
                       <p className="text-xs text-emerald-600 mt-1">✓ {caminhoCategoria.map(c => c.original_category_name).join(' › ')}</p>
+                    )}
+                    {categoriaFolha && origemCategoria === 'recomendada' && (
+                      <p className="text-xs text-gray-400 mt-0.5">✨ recomendada pela própria Shopee com base no título — confira antes de publicar</p>
                     )}
                     {categoriaFolha && origemCategoria === 'lembrada' && (
                       <p className="text-xs text-gray-400 mt-0.5">📌 pré-selecionada com base num anúncio anterior — confira antes de publicar</p>
