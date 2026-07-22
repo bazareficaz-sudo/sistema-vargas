@@ -38,6 +38,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     ? caminhoCategoria[caminhoCategoria.length - 1] : null
 
   const [atributos, setAtributos] = useState<Atributo[]>([])
+  const [atributosCarregados, setAtributosCarregados] = useState(false)
   const [valoresAtributos, setValoresAtributos] = useState<Record<number, { valueId?: number; texto?: string }>>({})
   const [marcas, setMarcas] = useState<Marca[]>([])
   const [brandId, setBrandId] = useState('')
@@ -59,6 +60,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
+  const [origemCategoria, setOrigemCategoria] = useState<'lembrada' | 'deduzida' | null>(null)
 
   // Carrega o produto pré-selecionado (entrada a partir da tela de Produtos)
   useEffect(() => {
@@ -109,13 +111,29 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     return () => { ativo = false }
   }, [produto])
 
-  // Assim que o produto (e o canal) estiverem prontos: tenta reaproveitar,
-  // sem IA, a categoria usada da última vez pra um produto com a mesma
-  // categoria interna (marketplace_categoria_sugestao); se não achar nada,
-  // cai no comportamento normal de carregar só as categorias raiz.
+  // Assim que o produto (e o canal) estiverem prontos, tenta pré-selecionar
+  // a categoria sem IA, em duas etapas de confiança decrescente:
+  // 1) "lembrada" — categoria já usada e confirmada antes pra um produto
+  //    com a mesma categoria interna (marketplace_categoria_sugestao);
+  // 2) "deduzida" — nenhuma lembrança encontrada, tenta adivinhar por
+  //    sobreposição de palavras-chave entre o produto e a árvore da Shopee.
+  // Se nenhuma das duas achar nada, cai no comportamento padrão de carregar
+  // só as categorias raiz pra escolha manual.
   useEffect(() => {
     if (!produto || !canalAtivo) return
     let ativo = true
+
+    async function aplicarCaminho(data: any, origem: 'lembrada' | 'deduzida') {
+      setOrigemCategoria(origem)
+      setOpcoesPorNivel(data.opcoesPorNivel)
+      setCaminhoCategoria(data.caminho)
+      if (data.resolvidoAteFolha) {
+        await carregarAtributosEMarcas(data.caminho[data.caminho.length - 1].category_id)
+      } else {
+        carregarNivelCategoria(data.caminho[data.caminho.length - 1].category_id, data.opcoesPorNivel.length)
+      }
+    }
+
     ;(async () => {
       try {
         const resp = await fetch('/api/marketplace/shopee/categoria-sugerida', {
@@ -125,18 +143,28 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         const data = await resp.json()
         if (!ativo) return
         if (data.ok && data.encontrado && data.caminho?.length > 0) {
-          setOpcoesPorNivel(data.opcoesPorNivel)
-          setCaminhoCategoria(data.caminho)
-          if (data.resolvidoAteFolha) {
-            await carregarAtributosEMarcas(data.caminho[data.caminho.length - 1].category_id)
-          } else {
-            carregarNivelCategoria(data.caminho[data.caminho.length - 1].category_id, data.opcoesPorNivel.length)
-          }
+          await aplicarCaminho(data, 'lembrada')
           return
         }
       } catch {
-        // sem sugestão disponível — segue pro comportamento padrão abaixo
+        // segue pra próxima tentativa
       }
+
+      try {
+        const resp2 = await fetch('/api/marketplace/shopee/categoria-deduzida', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canalAtivo.id, produtoNome: produto.nome, produtoCategoria: produto.categoria ?? null }),
+        })
+        const data2 = await resp2.json()
+        if (!ativo) return
+        if (data2.ok && data2.encontrado && data2.caminho?.length > 0) {
+          await aplicarCaminho(data2, 'deduzida')
+          return
+        }
+      } catch {
+        // sem dedução disponível — segue pro comportamento padrão abaixo
+      }
+
       if (ativo) carregarNivelCategoria(undefined, 0)
     })()
     return () => { ativo = false }
@@ -171,7 +199,8 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     if (!cat) return
     const novoCaminho = [...caminhoCategoria.slice(0, nivel), cat]
     setCaminhoCategoria(novoCaminho)
-    setAtributos([]); setValoresAtributos({}); setMarcas([]); setBrandId('')
+    setOrigemCategoria(null) // escolha manual a partir daqui — não é mais lembrada nem deduzida
+    setAtributos([]); setValoresAtributos({}); setMarcas([]); setBrandId(''); setAtributosCarregados(false)
     if (cat.has_children) {
       carregarNivelCategoria(cat.category_id, nivel + 1)
     } else {
@@ -183,6 +212,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   async function carregarAtributosEMarcas(categoryId: number): Promise<{ atributos: Atributo[]; marcas: Marca[] } | null> {
     if (!canalAtivo) return null
     setCarregandoAtributos(true)
+    setAtributosCarregados(false)
     try {
       const resp = await fetch('/api/marketplace/shopee/atributos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -192,6 +222,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
       if (!data.ok) { setErro(data.erro ?? 'Erro ao buscar atributos'); return null }
       setAtributos(data.atributos ?? [])
       setMarcas(data.marcas ?? [])
+      setAtributosCarregados(true)
       // Pré-seleciona a marca se o nome do produto bater com alguma da lista.
       if (produto?.marca && (data.marcas ?? []).length > 0) {
         const bate = data.marcas.find((m: Marca) => m.original_brand_name.toLowerCase() === produto.marca.toLowerCase())
@@ -230,6 +261,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         }
         setOpcoesPorNivel(data.opcoesPorNivel)
         setCaminhoCategoria(data.caminho)
+        setOrigemCategoria(null) // categoria escolhida pela IA — não é "lembrada" nem "deduzida" por palavras
         categoriaPathAtual = data.caminho.map((c: Categoria) => c.original_category_name).join(' › ')
 
         if (!data.resolvidoAteFolha) {
@@ -394,7 +426,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                     </div>
                   </div>
                   {!produtoIdInicial && (
-                    <button onClick={() => { setProduto(null); setCaminhoCategoria([]); setOpcoesPorNivel([]); setAtributos([]) }}
+                    <button onClick={() => { setProduto(null); setCaminhoCategoria([]); setOpcoesPorNivel([]); setAtributos([]); setOrigemCategoria(null) }}
                       className="text-xs text-blue-600 hover:text-blue-800 font-medium">Trocar</button>
                   )}
                 </div>
@@ -432,11 +464,20 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                     {categoriaFolha && (
                       <p className="text-xs text-emerald-600 mt-1">✓ {caminhoCategoria.map(c => c.original_category_name).join(' › ')}</p>
                     )}
+                    {categoriaFolha && origemCategoria === 'lembrada' && (
+                      <p className="text-xs text-gray-400 mt-0.5">📌 pré-selecionada com base num anúncio anterior — confira antes de publicar</p>
+                    )}
+                    {categoriaFolha && origemCategoria === 'deduzida' && (
+                      <p className="text-xs text-gray-400 mt-0.5">🔎 sugerida por palavras-chave do produto — confira antes de publicar</p>
+                    )}
                   </div>
 
                   {carregandoAtributos && <p className="text-xs text-gray-400">Carregando atributos da categoria...</p>}
 
                   {/* Atributos */}
+                  {!carregandoAtributos && categoriaFolha && atributosCarregados && atributos.length === 0 && (
+                    <p className="text-xs text-gray-400">Esta categoria não exige atributos específicos na Shopee.</p>
+                  )}
                   {atributos.length > 0 && (
                     <div>
                       <p className="text-xs font-medium text-gray-500 mb-2">Atributos da categoria</p>

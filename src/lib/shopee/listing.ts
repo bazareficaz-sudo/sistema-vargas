@@ -22,24 +22,93 @@ export type CategoriaShopee = {
   has_children: boolean
 }
 
-export async function getCategoryTree(ctx: CallCtx, parentCategoryId?: number): Promise<CategoriaShopee[]> {
+type CategoriaShopeeFlat = CategoriaShopee & { parent_category_id: number }
+
+// A Shopee devolve a árvore inteira numa chamada só (não pagina por
+// parent_category_id) — busca crua reaproveitada tanto pra navegação em
+// cascata (getCategoryTree) quanto pra dedução por palavras-chave.
+async function buscarArvoreCompleta(ctx: CallCtx): Promise<CategoriaShopeeFlat[]> {
   const callOptions = await callOpts(ctx)
   const data = await shopeeGet('/api/v2/product/get_category', { language: 'pt-br' }, callOptions)
   const lista: any[] = data?.response?.category_list ?? []
-  // A Shopee devolve a árvore inteira numa chamada só (não pagina por
-  // parent_category_id) — filtra no cliente pra simular navegação em
-  // cascata sem precisar guardar/cachear a árvore inteira no banco.
+  return lista.map((c: any) => ({
+    category_id: c.category_id,
+    // display_category_name é o nome traduzido conforme o `language`
+    // pedido; original_category_name é o nome "mestre" da categoria na
+    // Shopee (normalmente em inglês) — por isso o display vem primeiro.
+    original_category_name: c.display_category_name ?? c.original_category_name ?? `Categoria ${c.category_id}`,
+    has_children: !!c.has_children,
+    parent_category_id: c.parent_category_id ?? 0,
+  }))
+}
+
+export async function getCategoryTree(ctx: CallCtx, parentCategoryId?: number): Promise<CategoriaShopee[]> {
+  const arvore = await buscarArvoreCompleta(ctx)
   const pai = parentCategoryId ?? 0
-  return lista
-    .filter((c: any) => (c.parent_category_id ?? 0) === pai)
-    .map((c: any) => ({
-      category_id: c.category_id,
-      // display_category_name é o nome traduzido conforme o `language`
-      // pedido; original_category_name é o nome "mestre" da categoria na
-      // Shopee (normalmente em inglês) — por isso o display vem primeiro.
-      original_category_name: c.display_category_name ?? c.original_category_name ?? `Categoria ${c.category_id}`,
-      has_children: !!c.has_children,
-    }))
+  return arvore.filter(c => c.parent_category_id === pai)
+}
+
+function montarCaminho(arvore: CategoriaShopeeFlat[], categoryId: number): CategoriaShopeeFlat[] {
+  const porId = new Map(arvore.map(c => [c.category_id, c]))
+  const caminho: CategoriaShopeeFlat[] = []
+  let atual = porId.get(categoryId)
+  while (atual) {
+    caminho.unshift(atual)
+    atual = atual.parent_category_id ? porId.get(atual.parent_category_id) : undefined
+  }
+  return caminho
+}
+
+const PALAVRAS_IGNORADAS = new Set([
+  'de', 'da', 'do', 'das', 'dos', 'com', 'para', 'pra', 'sem', 'em', 'e', 'ou', 'a', 'o', 'as', 'os',
+  'kit', 'un', 'unid', 'pc', 'pct', 'cm', 'mm', 'kg', 'ml', 'und', 'peca', 'pecas',
+])
+
+function normalizarPalavras(texto: string): string[] {
+  return texto
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(p => p.length > 2 && !PALAVRAS_IGNORADAS.has(p))
+}
+
+export type CaminhoCategoriaResolvido = { opcoesPorNivel: CategoriaShopee[][]; caminho: CategoriaShopee[]; resolvidoAteFolha: boolean }
+
+// Pré-seleção de categoria por dedução (sem IA): pontua cada categoria-folha
+// da árvore inteira pela sobreposição de palavras entre o nome/categoria do
+// produto e o nome da própria categoria + seus ancestrais (ex: produto
+// "Lima kit 6 peças" bate com a folha "Lixas, Lixadeiras..." só se alguma
+// palavra do produto aparecer ali ou em algum nível acima). Pontuação por
+// tamanho da palavra (palavras mais longas/específicas pesam mais) reduz
+// falsos positivos de palavras curtas genéricas.
+export async function deduzirCategoriaPorPalavras(ctx: CallCtx, produtoNome: string, produtoCategoria?: string | null): Promise<CaminhoCategoriaResolvido | null> {
+  const arvore = await buscarArvoreCompleta(ctx)
+  const folhas = arvore.filter(c => !c.has_children)
+  if (folhas.length === 0) return null
+
+  const palavrasProduto = new Set([...normalizarPalavras(produtoNome), ...normalizarPalavras(produtoCategoria ?? '')])
+  if (palavrasProduto.size === 0) return null
+
+  let melhor: { folha: CategoriaShopeeFlat; pontos: number } | null = null
+  for (const folha of folhas) {
+    const caminhoAncestral = montarCaminho(arvore, folha.category_id)
+    const palavrasCategoria = new Set(caminhoAncestral.flatMap(c => normalizarPalavras(c.original_category_name)))
+    let pontos = 0
+    for (const p of palavrasProduto) if (palavrasCategoria.has(p)) pontos += p.length
+    if (pontos > 0 && (!melhor || pontos > melhor.pontos)) melhor = { folha, pontos }
+  }
+  if (!melhor) return null
+
+  const caminho = montarCaminho(arvore, melhor.folha.category_id)
+  const opcoesPorNivel: CategoriaShopee[][] = []
+  let paiAtual = 0
+  for (const nivel of caminho) {
+    opcoesPorNivel.push(arvore.filter(c => c.parent_category_id === paiAtual))
+    paiAtual = nivel.category_id
+  }
+
+  return { opcoesPorNivel, caminho, resolvidoAteFolha: true }
 }
 
 export type AtributoShopee = {
