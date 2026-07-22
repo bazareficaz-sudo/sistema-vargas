@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { gerarProximoSku } from '@/components/produtos/sku'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -255,12 +256,24 @@ export default function NovaEntradaClient({
     setFaseItem('qtd')
   }
 
-  function selecionarManual() {
-    if (!buscaProd.trim()) return
+  // Produto digitado que ainda não existe no cadastro — cria de verdade em
+  // `produtos` (SKU sequencial automático) em vez de só lançar um item solto
+  // sem vínculo, pra ele passar a aparecer no catálogo e ter estoque rastreado.
+  async function selecionarManual() {
+    const nome = buscaProd.trim()
+    if (!nome) return
+    const sb = createClient()
+    const sku = await gerarProximoSku(sb, empresaId)
+    const { data: novoProduto, error } = await sb.from('produtos').insert({
+      empresa_id: empresaId, nome, sku, tipo: 'simples', unidade: 'UN',
+      preco_venda: 0, preco_custo: 0, estoque: 0, ativo: true, disponivel_pdv: true,
+    }).select('id, sku').single()
+    if (error) { setErro('Erro ao cadastrar produto novo: ' + error.message); return }
+
     setItemAtual({
-      produto_id: null, nome_produto: buscaProd.trim(), sku: null,
+      produto_id: novoProduto.id, nome_produto: nome, sku: novoProduto.sku,
       quantidade: 1, preco_custo_anterior: 0, preco_custo_novo: 0,
-      markup: 0, preco_venda_novo: 0, atualizar_custo: false, atualizar_preco: false,
+      markup: 0, preco_venda_novo: 0, atualizar_custo: true, atualizar_preco: true,
     })
     setInputQtd('1'); setInputCusto('')
     setBuscaProd(''); setResultados([]); setIndiceProd(-1)
@@ -712,7 +725,7 @@ export default function NovaEntradaClient({
                     </div>
                     <button onClick={selecionarManual} onMouseEnter={() => setIndiceProd(resultados.length)}
                       className={`w-full text-left px-4 py-2.5 text-xs transition-colors border-t border-gray-100 flex-shrink-0 ${indiceProd === resultados.length ? 'bg-gray-700 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
-                      + Adicionar &quot;{buscaProd}&quot; manualmente (sem vincular produto)
+                      + Cadastrar &quot;{buscaProd}&quot; como produto novo e adicionar
                     </button>
                   </div>
                 )}
