@@ -421,15 +421,18 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         total_devolucoes: totalDevolucoes,
         credito_gerado: valorCredito,
         pagamentos: tipoOp === 'troca' ? [] : (isFiado ? [{ forma: 'fiado', valor: total }] : formas.map(f => ({ forma: f.tipo, valor: f.valor }))),
+        canal: 'PDV',
         created_at: new Date().toISOString(),
       }).select().single()
       if (error) throw error
 
-      // Salvar itens com tipo
+      // Salvar itens com tipo — custo_unitario snapshot do momento da venda,
+      // usado depois na tela de Vendas pra recalcular a saúde/margem real.
       const { error: erroItens } = await sb.from('venda_itens').insert(itens.map(i => ({
         venda_id: venda.id,
         produto_id: i.produto_id, produto_nome: i.nome, produto_sku: i.sku,
         quantidade: i.quantidade, preco_unitario: i.preco_unitario, desconto: i.desconto, total: i.total,
+        custo_unitario: i.custo,
         tipo: i.tipo,
       })))
       if (erroItens) throw erroItens

@@ -49,6 +49,7 @@ export default function DetalheVendaModal({
   const [clienteResultados, setClienteResultados] = useState<ClienteBusca[]>([])
   const [observacaoEdit, setObservacaoEdit] = useState('')
   const [entregaEdit, setEntregaEdit] = useState(false)
+  const [formaPagamentoEdit, setFormaPagamentoEdit] = useState(venda.forma_pagamento)
 
   useEffect(() => {
     (async () => {
@@ -82,10 +83,14 @@ export default function DetalheVendaModal({
   async function salvar() {
     setSalvando(true); setErroSalvar('')
     const sb = createClient()
+    const mudouPagamento = formaPagamentoEdit !== venda.forma_pagamento
     const { error } = await sb.from('vendas').update({
       cliente_id: clienteId,
       observacao: observacaoEdit || null,
       entrega_solicitada: entregaEdit,
+      // Mudar a forma de pagamento aqui sobrescreve o detalhamento por um
+      // pagamento único pelo total — não é um editor de pagamento dividido.
+      ...(mudouPagamento ? { forma_pagamento: formaPagamentoEdit, pagamentos: [{ forma: formaPagamentoEdit, valor: venda.total }] } : {}),
     }).eq('id', venda.id)
     if (error) { setErroSalvar(error.message); setSalvando(false); return }
 
@@ -99,7 +104,10 @@ export default function DetalheVendaModal({
       }
     }
     setDetalhe(prev => prev ? { ...prev, observacao: observacaoEdit || null, entrega_solicitada: entregaEdit } : prev)
-    onAtualizado({ cliente_id: clienteId, clientes: clientesPatch })
+    onAtualizado({
+      cliente_id: clienteId, clientes: clientesPatch,
+      ...(mudouPagamento ? { forma_pagamento: formaPagamentoEdit, pagamentos: [{ forma: formaPagamentoEdit, valor: venda.total }] } : {}),
+    })
     setSalvando(false)
     setEdicao(false)
   }
@@ -233,7 +241,19 @@ export default function DetalheVendaModal({
             {/* Pagamento */}
             <div>
               <p className="text-xs font-semibold text-gray-700 mb-1.5">Forma de pagamento</p>
-              {(venda.pagamentos ?? []).length > 0 ? (
+              {edicao ? (
+                <div>
+                  <select value={formaPagamentoEdit} onChange={e => setFormaPagamentoEdit(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                    {Object.entries(FORMA_LABEL).filter(([k]) => k !== 'troca' && k !== 'multiplo').map(([k, l]) => (
+                      <option key={k} value={k}>{l}</option>
+                    ))}
+                  </select>
+                  {formaPagamentoEdit !== venda.forma_pagamento && (
+                    <p className="text-xs text-amber-700 mt-1">⚠ Isso substitui o detalhamento por um pagamento único de {fmt(venda.total)}.</p>
+                  )}
+                </div>
+              ) : (venda.pagamentos ?? []).length > 0 ? (
                 <div className="space-y-1">
                   {venda.pagamentos!.map((p, idx) => (
                     <div key={idx} className="flex justify-between text-sm text-gray-700">
@@ -291,7 +311,7 @@ export default function DetalheVendaModal({
 
             {edicao && (
               <p className="text-xs text-gray-400">
-                Edição limitada a cliente vinculado, observação e entrega. Itens e valores não podem ser alterados aqui — mudanças fiscais/de estoque exigem um fluxo próprio.
+                Edição limitada a cliente vinculado, forma de pagamento, observação e entrega. Itens e valores não podem ser alterados aqui — mudanças fiscais/de estoque exigem um fluxo próprio.
               </p>
             )}
 
@@ -317,7 +337,7 @@ export default function DetalheVendaModal({
           <div className="flex gap-3">
             {edicao ? (
               <>
-                <button onClick={() => { setEdicao(false); setErroSalvar('') }} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
+                <button onClick={() => { setEdicao(false); setErroSalvar(''); setFormaPagamentoEdit(venda.forma_pagamento) }} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
                 <button onClick={salvar} disabled={salvando}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
                   {salvando ? 'Salvando...' : 'Salvar'}

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import DetalheVendaModal from './DetalheVendaModal'
 import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integracoes/EnviarWhatsAppModal'
+import { calcSaude, CONFIG_PADRAO, FAIXAS_PADRAO, type SaudeConfig, type FaixaSaude, type ResultadoSaude } from '@/lib/saude-venda'
 
 type Cliente = { nome: string; telefone: string | null; cpf_cnpj: string | null } | null
 
@@ -19,7 +20,15 @@ export type Venda = {
   tipo_operacao: string
   created_at: string
   cliente_id: string | null
+  operador_nome: string | null
+  canal: string | null
   clientes: Cliente
+}
+
+type VendaItemLite = {
+  venda_id: string; produto_id: string | null; produto_nome: string
+  quantidade: number; preco_unitario: number; desconto: number | null
+  custo_unitario: number | null; tipo: string
 }
 
 type Periodo = 'hoje' | 'ontem' | '7dias' | 'mes' | 'custom'
@@ -54,10 +63,11 @@ function calcularRange(periodo: Periodo, custom: { inicio: string; fim: string }
   return { inicio, fim }
 }
 
-const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, clientes(nome, telefone, cpf_cnpj)'
+const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj)'
 
-export default function VendasClient({ empresaId, vendasIniciais, totalInicial }: {
+export default function VendasClient({ empresaId, vendasIniciais, totalInicial, saudeConfig, saudeFaixas }: {
   empresaId: string; vendasIniciais: Venda[]; totalInicial: number
+  saudeConfig?: SaudeConfig | null; saudeFaixas?: FaixaSaude[]
 }) {
   const [vendas, setVendas] = useState<Venda[]>(vendasIniciais)
   const [total, setTotal] = useState(totalInicial)
@@ -73,6 +83,17 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial }
   const [gerandoPdfId, setGerandoPdfId] = useState<string | null>(null)
   const [wppAberto, setWppAberto] = useState(false)
   const [wppPayload, setWppPayload] = useState<EnviarWppPayload | null>(null)
+
+  const [itensPorVenda, setItensPorVenda] = useState<Record<string, VendaItemLite[]>>({})
+  const [saudePorVenda, setSaudePorVenda] = useState<Record<string, { resultado: ResultadoSaude; aproximado: boolean }>>({})
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [aplicandoMassa, setAplicandoMassa] = useState(false)
+  const [resumoMassa, setResumoMassa] = useState('')
+  const [trocandoPagamento, setTrocandoPagamento] = useState(false)
+  const [novaFormaMassa, setNovaFormaMassa] = useState('pix')
+
+  const cfgSaude = saudeConfig ?? CONFIG_PADRAO
+  const faixasSaude = (saudeFaixas && saudeFaixas.length > 0) ? saudeFaixas : FAIXAS_PADRAO
 
   const primeiraRenderizacao = useRef(true)
 
@@ -125,6 +146,56 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial }
 
   const totalFaturado = vendas.filter(v => v.status === 'concluida').reduce((s, v) => s + (v.total ?? 0), 0)
 
+  // Saúde retroativa por venda — reaproveita o mesmo calcSaude usado ao vivo
+  // no PDV. Vendas antigas não têm custo_unitario salvo (coluna nova), então
+  // caem no fallback do custo ATUAL do produto — aproximação, marcada como tal.
+  useEffect(() => {
+    if (vendas.length === 0) { setItensPorVenda({}); setSaudePorVenda({}); return }
+    let ativo = true
+    ;(async () => {
+      const sb = createClient()
+      const ids = vendas.map(v => v.id)
+      const { data: itens } = await sb.from('venda_itens')
+        .select('venda_id, produto_id, produto_nome, quantidade, preco_unitario, desconto, custo_unitario, tipo')
+        .in('venda_id', ids)
+      if (!ativo) return
+
+      const porVenda: Record<string, VendaItemLite[]> = {}
+      const produtoIdsSemCusto = new Set<string>()
+      for (const it of (itens ?? []) as VendaItemLite[]) {
+        ;(porVenda[it.venda_id] ??= []).push(it)
+        if (it.custo_unitario == null && it.produto_id) produtoIdsSemCusto.add(it.produto_id)
+      }
+      setItensPorVenda(porVenda)
+
+      const custoAtualPorProduto: Record<string, number> = {}
+      if (produtoIdsSemCusto.size > 0) {
+        const { data: produtosData } = await sb.from('produtos').select('id, preco_custo').in('id', [...produtoIdsSemCusto])
+        for (const p of produtosData ?? []) custoAtualPorProduto[p.id] = p.preco_custo ?? 0
+      }
+      if (!ativo) return
+
+      const saudeCalc: Record<string, { resultado: ResultadoSaude; aproximado: boolean }> = {}
+      for (const v of vendas) {
+        const itensV = porVenda[v.id] ?? []
+        let aproximado = false
+        const itensCalc = itensV.map(it => {
+          let custo = it.custo_unitario
+          if (custo == null) {
+            aproximado = true
+            custo = it.produto_id ? (custoAtualPorProduto[it.produto_id] ?? 0) : 0
+          }
+          return { custo, preco_unitario: it.preco_unitario, quantidade: it.quantidade, tipo: (it.tipo === 'devolucao' ? 'devolucao' : 'venda') as 'venda' | 'devolucao' }
+        })
+        const resultado = calcSaude(itensCalc, v.desconto ?? 0, v.forma_pagamento, 1, cfgSaude, faixasSaude)
+        saudeCalc[v.id] = { resultado, aproximado }
+      }
+      setSaudePorVenda(saudeCalc)
+    })()
+    return () => { ativo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendas])
+
   async function gerarPdfUrl(vendaId: string): Promise<string | null> {
     setGerandoPdfId(vendaId)
     try {
@@ -164,6 +235,86 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial }
   function abrirDetalhe(venda: Venda, edicao = false) {
     setModoEdicaoInicial(edicao)
     setDetalheAberto(venda)
+  }
+
+  function toggleTodos(checked: boolean) {
+    setSelecionados(checked ? new Set(vendas.map(v => v.id)) : new Set())
+  }
+  function toggleUm(id: string) {
+    setSelecionados(prev => {
+      const novo = new Set(prev)
+      if (novo.has(id)) novo.delete(id); else novo.add(id)
+      return novo
+    })
+  }
+
+  function aguardar(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
+  async function imprimirSelecionados() {
+    const alvos = vendas.filter(v => selecionados.has(v.id))
+    if (alvos.length === 0) return
+    setAplicandoMassa(true); setResumoMassa('')
+    let ok = 0
+    for (const v of alvos) {
+      const url = await gerarPdfUrl(v.id)
+      if (url) { window.open(url, '_blank'); ok++ }
+      await aguardar(300) // evita bloqueio de pop-up por abrir muitas abas de uma vez
+    }
+    setResumoMassa(`${ok} de ${alvos.length} comprovante(s) aberto(s) em novas abas. Se o navegador bloqueou alguma, permita pop-ups pra este site.`)
+    setAplicandoMassa(false)
+  }
+
+  async function enviarWhatsappSelecionados() {
+    const alvos = vendas.filter(v => selecionados.has(v.id))
+    if (alvos.length === 0) return
+    setAplicandoMassa(true); setResumoMassa('')
+    let enviados = 0
+    const semTelefone: string[] = []
+    const falhas: string[] = []
+    for (const v of alvos) {
+      if (!v.clientes?.telefone) { semTelefone.push(String(v.numero)); continue }
+      const url = await gerarPdfUrl(v.id)
+      if (!url) { falhas.push(String(v.numero)); continue }
+      try {
+        const res = await fetch('/api/whatsapp/enviar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telefone: v.clientes.telefone,
+            mensagem: `Segue o comprovante da sua compra #${v.numero} — Total: ${fmt(v.total)}. Obrigado! 🙏`,
+            tipo: 'comprovante_venda', cliente_id: v.cliente_id, cliente_nome: v.clientes?.nome ?? null,
+            referencia_tipo: 'venda', referencia_id: v.id, pdf_url: url,
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok || data.error) falhas.push(String(v.numero)); else enviados++
+      } catch { falhas.push(String(v.numero)) }
+    }
+    const partes = [`${enviados} enviado(s)`]
+    if (semTelefone.length) partes.push(`${semTelefone.length} pulado(s) sem telefone (#${semTelefone.join(', #')})`)
+    if (falhas.length) partes.push(`${falhas.length} falhou(aram) (#${falhas.join(', #')})`)
+    setResumoMassa(partes.join(' · '))
+    setAplicandoMassa(false)
+  }
+
+  async function mudarPagamentoSelecionados() {
+    const alvos = vendas.filter(v => selecionados.has(v.id))
+    if (alvos.length === 0) return
+    setAplicandoMassa(true); setResumoMassa('')
+    const sb = createClient()
+    let ok = 0
+    for (const v of alvos) {
+      const { error } = await sb.from('vendas').update({
+        forma_pagamento: novaFormaMassa,
+        pagamentos: [{ forma: novaFormaMassa, valor: v.total }],
+      }).eq('id', v.id)
+      if (!error) ok++
+    }
+    setVendas(prev => prev.map(v => selecionados.has(v.id)
+      ? { ...v, forma_pagamento: novaFormaMassa, pagamentos: [{ forma: novaFormaMassa, valor: v.total }] }
+      : v))
+    setResumoMassa(`Forma de pagamento atualizada em ${ok} de ${alvos.length} venda(s).`)
+    setAplicandoMassa(false)
+    setTrocandoPagamento(false)
   }
 
   const CHIPS: { id: Periodo; label: string }[] = [
@@ -209,13 +360,62 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial }
         {carregando && <span className="text-xs text-gray-400">Carregando...</span>}
       </div>
 
+      {selecionados.size > 0 && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 flex-wrap">
+          <span className="text-sm text-blue-700 font-medium">{selecionados.size} selecionada(s)</span>
+          <button onClick={imprimirSelecionados} disabled={aplicandoMassa}
+            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            🖨️ Imprimir selecionadas
+          </button>
+          <button onClick={enviarWhatsappSelecionados} disabled={aplicandoMassa}
+            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            📱 Enviar por WhatsApp
+          </button>
+          {!trocandoPagamento ? (
+            <button onClick={() => setTrocandoPagamento(true)} disabled={aplicandoMassa}
+              className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+              💳 Mudar forma de pagamento
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-white border border-gray-300 rounded-lg px-2 py-1">
+              <select value={novaFormaMassa} onChange={e => setNovaFormaMassa(e.target.value)}
+                className="text-xs focus:outline-none">
+                {Object.entries(FORMA_LABEL).filter(([k]) => k !== 'troca' && k !== 'multiplo').map(([k, l]) => (
+                  <option key={k} value={k}>{l}</option>
+                ))}
+              </select>
+              <button onClick={mudarPagamentoSelecionados} disabled={aplicandoMassa}
+                className="px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded">
+                Aplicar
+              </button>
+              <button onClick={() => setTrocandoPagamento(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+          )}
+          <button onClick={() => setSelecionados(new Set())} className="text-xs text-blue-400 hover:text-blue-600 ml-auto">✕ limpar seleção</button>
+        </div>
+      )}
+      {resumoMassa && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>{resumoMassa}</span>
+          <button onClick={() => setResumoMassa('')} className="text-emerald-400 hover:text-emerald-600">✕</button>
+        </div>
+      )}
+
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-gray-500 bg-gray-50 border-b border-gray-200">
+              <th className="px-4 py-3">
+                <input type="checkbox" checked={selecionados.size === vendas.length && vendas.length > 0}
+                  onChange={e => toggleTodos(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+              </th>
+              <th className="text-center px-2 py-3 font-medium" title="Saúde da venda">Saúde</th>
               <th className="text-left px-4 py-3 font-medium">#</th>
               <th className="text-left px-4 py-3 font-medium">Data/Hora</th>
               <th className="text-left px-4 py-3 font-medium">Cliente</th>
+              <th className="text-left px-4 py-3 font-medium">Vendedor</th>
+              <th className="text-left px-4 py-3 font-medium">Itens</th>
+              <th className="text-left px-4 py-3 font-medium">Canal</th>
               <th className="text-left px-4 py-3 font-medium">Pagamento</th>
               <th className="text-right px-4 py-3 font-medium">Desconto</th>
               <th className="text-right px-4 py-3 font-medium">Total</th>
@@ -224,13 +424,36 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial }
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {vendas.map(v => (
-              <tr key={v.id} className="text-gray-600 hover:bg-gray-50 transition-colors">
+            {vendas.map(v => {
+              const itensV = (itensPorVenda[v.id] ?? []).filter(i => i.tipo !== 'devolucao')
+              const saude = saudePorVenda[v.id]
+              return (
+              <tr key={v.id} className={`text-gray-600 hover:bg-gray-50 transition-colors ${selecionados.has(v.id) ? 'bg-blue-50/50' : ''}`}>
+                <td className="px-4 py-2.5">
+                  <input type="checkbox" checked={selecionados.has(v.id)} onChange={() => toggleUm(v.id)} className="w-4 h-4 accent-blue-600" />
+                </td>
+                <td className="px-2 py-2.5 text-center">
+                  {saude ? (
+                    <span title={`${saude.resultado.faixa?.nome ?? '—'} · margem ${saude.resultado.margem.toFixed(1)}%${saude.aproximado ? ' (estimado com custo atual)' : ''}`}
+                      className="inline-flex items-center gap-0.5">
+                      <span className={`inline-block w-2.5 h-2.5 rounded-full ${saude.aproximado ? 'opacity-60' : ''}`}
+                        style={{ backgroundColor: saude.resultado.faixa?.cor ?? '#9ca3af' }} />
+                      {saude.aproximado && <span className="text-[10px] text-gray-300">~</span>}
+                    </span>
+                  ) : <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-200" />}
+                </td>
                 <td className="px-4 py-2.5 text-gray-400 font-mono">{v.numero}</td>
                 <td className="px-4 py-2.5 text-gray-400 text-xs">
                   {new Date(v.created_at).toLocaleDateString('pt-BR')} {new Date(v.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </td>
                 <td className="px-4 py-2.5 text-gray-900">{v.clientes?.nome ?? 'Consumidor'}</td>
+                <td className="px-4 py-2.5 text-gray-600 text-xs">{v.operador_nome ?? '—'}</td>
+                <td className="px-4 py-2.5 text-gray-600 text-xs max-w-[180px] truncate" title={itensV.map(i => i.produto_nome).join(', ')}>
+                  {itensV.length > 0 ? `${itensV[0].produto_nome}${itensV.length > 1 ? ` +${itensV.length - 1}` : ''}` : '—'}
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200">{v.canal ?? 'PDV'}</span>
+                </td>
                 <td className="px-4 py-2.5 text-gray-600 text-xs">{FORMA_LABEL[v.forma_pagamento] ?? v.forma_pagamento}</td>
                 <td className="px-4 py-2.5 text-right text-gray-400">
                   {(v.desconto ?? 0) > 0 ? fmt(v.desconto) : '—'}
@@ -260,10 +483,10 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial }
                   </div>
                 </td>
               </tr>
-            ))}
+            )})}
             {vendas.length === 0 && !carregando && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={13} className="px-4 py-8 text-center text-gray-400">
                   Nenhuma venda encontrada neste período.
                 </td>
               </tr>
