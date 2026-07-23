@@ -1,25 +1,19 @@
 import type { FiscalProvider } from '../provider'
 import type { BrasilNFeCredentials } from './client'
 import * as emissao from './emissao'
+import * as distribuicao from './distribuicao'
 
-// Distribuição DFe / manifesto do destinatário: não encontramos nenhum
-// endpoint documentado pra isso na Brasil NFe (nem na doc em prosa nem nos
-// módulos do SDK oficial — NotaFiscal/Eventos/Consultas/Arquivos/Empresa,
-// nenhum cobre "documentos recebidos"). Diferente de emissão, aqui não é
-// uma questão de confiança baixa — é ausência confirmada da capacidade.
-// Empresa que usa Brasil NFe continua precisando da Focus (ou config
-// separada) pro fluxo de entrada/XML de fornecedor.
-function semDistribuicao(): never {
-  throw new Error('Brasil NFe não oferece distribuição DFe/manifesto do destinatário — use a Focus NFe para o fluxo de entrada (XML de fornecedor).')
-}
+// Distribuição DFe / manifesto do destinatário — confirmado com o suporte
+// da Brasil NFe (2026-07): eles importam as notas emitidas contra o CNPJ
+// da empresa e permitem consultar/manifestar via API (ver distribuicao.ts).
 
 export function createBrasilNFeProvider(creds: BrasilNFeCredentials): FiscalProvider {
   return {
     nome: 'brasilnfe',
     distribuicao: {
-      listarDfe: async () => semDistribuicao(),
-      manifestar: async () => semDistribuicao(),
-      baixarXml: async () => semDistribuicao(),
+      listarDfe: (cnpj, ultimaVersao) => distribuicao.listarDfe(creds, cnpj, ultimaVersao),
+      manifestar: (chave, tipo, justificativa) => distribuicao.manifestar(creds, chave, tipo, justificativa),
+      baixarXml: (chave) => distribuicao.baixarXml(creds, chave),
     },
     emissao: {
       emitirNFCe: (input) => emissao.emitirNFCe(creds, input),

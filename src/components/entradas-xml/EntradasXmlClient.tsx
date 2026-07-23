@@ -13,7 +13,7 @@ type Entrada = {
   origem: string; operador_nome: string | null; created_at: string
 }
 type Deposito = { id: string; nome: string; principal: boolean }
-type ConfigSefaz = { focusnfe_token: string | null; ultimo_nsu: string | null; ativo: boolean } | null
+type ConfigSefaz = { focusnfe_token: string | null; ultimo_nsu: string | null; ativo: boolean; provider?: string | null } | null
 
 const STATUS_LABEL: Record<string, string> = {
   xml_importado:        'XML Importado',
@@ -294,7 +294,7 @@ export default function EntradasXmlClient({
 
   // ── Consulta SEFAZ ───────────────────────────────────────────
   async function consultarSefaz() {
-    if (!configSefaz?.focusnfe_token) { setErroSefaz('Configure o token FocusNFe primeiro.'); return }
+    if (!configSefaz?.focusnfe_token) { setErroSefaz('Configure o token fiscal da empresa primeiro.'); return }
     setConsultandoSefaz(true); setErroSefaz('')
     try {
       const resp = await fetch('/api/sefaz', {
@@ -310,11 +310,18 @@ export default function EntradasXmlClient({
   }
 
   async function manifestar(chave: string, tipo: string) {
+    let justificativa: string | undefined
+    if (tipo === 'nao_realizada') {
+      const texto = window.prompt('Justificativa da operação não realizada (mínimo 15 caracteres):')
+      if (!texto) return
+      if (texto.trim().length < 15) { alert('A justificativa precisa ter pelo menos 15 caracteres.'); return }
+      justificativa = texto.trim()
+    }
     try {
       const resp = await fetch('/api/sefaz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ acao: tipo, chave }),
+        body: JSON.stringify({ acao: tipo, chave, justificativa }),
       })
       if (!resp.ok) { const d = await resp.json(); throw new Error(d.error) }
       setNfesSefaz(p => p.map(n => n.chave_nfe === chave ? { ...n, manifestado: tipo } : n))
@@ -523,7 +530,7 @@ export default function EntradasXmlClient({
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-3xl shadow-xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <h2 className="text-slate-900 font-semibold">NF-e na SEFAZ (via FocusNFe)</h2>
+              <h2 className="text-slate-900 font-semibold">NF-e na SEFAZ (via {configSefaz?.provider === 'brasilnfe' ? 'Brasil NFe' : 'Focus NFe'})</h2>
               <button onClick={() => setModalSefaz(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4">
@@ -564,11 +571,15 @@ export default function EntradasXmlClient({
                           <span className="text-xs text-slate-500">{n.manifestado ?? 'Pendente'}</span>
                         </td>
                         <td className="py-2 text-center">
-                          <div className="flex gap-1 justify-center">
+                          <div className="flex gap-1 justify-center flex-wrap">
                             <button onClick={() => manifestar(n.chave_nfe, 'ciencia')}
                               className="px-2 py-1 bg-teal-600 hover:bg-teal-700 text-white text-xs rounded-lg">Ciência</button>
                             <button onClick={() => manifestar(n.chave_nfe, 'confirmacao')}
                               className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs rounded-lg">Confirmar</button>
+                            <button onClick={() => manifestar(n.chave_nfe, 'desconhecimento')}
+                              className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-lg">Desconhecer</button>
+                            <button onClick={() => manifestar(n.chave_nfe, 'nao_realizada')}
+                              className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded-lg">Não realizada</button>
                           </div>
                         </td>
                       </tr>

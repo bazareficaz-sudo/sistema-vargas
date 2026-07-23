@@ -101,8 +101,8 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
       </div>
 
       <div className="bg-amber-900/30 border border-amber-800 rounded-2xl p-4 text-xs text-amber-200 max-w-2xl">
-        <p className="font-semibold mb-1">⚠ Brasil NFe — confiança moderada, sem distribuição DFe</p>
-        <p>Emissão/cancelamento de NFC-e validados contra o SDK oficial deles, mas ainda não testados contra a API real — valide em homologação antes de trocar uma empresa em produção. Além disso, a Brasil NFe não tem endpoint de distribuição DFe/manifesto do destinatário: uma empresa nessa configuração perde a tela de entrada (XML de fornecedor), que continua exclusiva da Focus NFe.</p>
+        <p className="font-semibold mb-1">⚠ Brasil NFe — confiança moderada</p>
+        <p>Emissão/cancelamento de NFC-e e distribuição DFe (consulta de notas contra o CNPJ + manifesto do destinatário) validados contra a documentação e o SDK oficial deles, mas ainda não testados de ponta a ponta contra a API real — valide em homologação antes de trocar uma empresa em produção.</p>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md">
