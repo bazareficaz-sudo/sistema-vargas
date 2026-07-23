@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { parseNFeXml, calcularCustoItem, type NFeData } from '@/lib/nfe-parser'
+import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
+import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 
 type Entrada = {
   id: string; chave_acesso: string; numero: string | null; serie: string | null
@@ -85,7 +87,76 @@ export default function EntradasXmlClient({
   const [importadosSefaz, setImportadosSefaz] = useState<Record<string, { ok: boolean; msg: string }>>({})
   const [periodoDias, setPeriodoDias] = useState(30)
 
+  // Preços / Etiquetas por entrada
+  const [carregandoAcao, setCarregandoAcao] = useState<string | null>(null)
+  const [etiquetaProdutos, setEtiquetaProdutos] = useState<(ProdutoParaEtiqueta & { estoque: number })[] | null>(null)
+
   const depositoPrincipal = depositos.find(d => d.principal)?.id ?? depositos[0]?.id ?? null
+
+  // Produtos mapeados de uma entrada (itens com produto_id já vinculado).
+  async function buscarProdutosMapeados(entradaId: string) {
+    const { data, error } = await sb.from('nfe_itens')
+      .select('produto_id, quantidade_entrada, quantidade_xml')
+      .eq('entrada_id', entradaId)
+      .not('produto_id', 'is', null)
+    if (error) { alert('Erro ao buscar itens da entrada: ' + error.message); return null }
+    return (data ?? []) as { produto_id: string; quantidade_entrada: number | null; quantidade_xml: number }[]
+  }
+
+  async function abrirGestaoPrecos(entradaId: string, numero: string | null) {
+    setCarregandoAcao(`precos-${entradaId}`)
+    try {
+      const linhas = await buscarProdutosMapeados(entradaId)
+      if (!linhas) return
+      const produtoIds = Array.from(new Set(linhas.map(l => l.produto_id)))
+      if (produtoIds.length === 0) { alert('Nenhum item desta NF-e está mapeado a um produto ainda.'); return }
+
+      const { data: kits, error: erroKits } = await sb.from('kit_itens').select('kit_id').in('produto_id', produtoIds)
+      if (erroKits) { alert('Erro ao buscar kits relacionados: ' + erroKits.message); return }
+      const kitIds = Array.from(new Set((kits ?? []).map(k => k.kit_id as string)))
+
+      const todosIds = Array.from(new Set([...produtoIds, ...kitIds]))
+      const origem = `Itens da NF-e ${numero ?? ''}`
+      router.push(`/dashboard/precos?ids=${todosIds.join(',')}&origem=${encodeURIComponent(origem)}`)
+    } finally {
+      setCarregandoAcao(null)
+    }
+  }
+
+  async function imprimirEtiquetasEntrada(entradaId: string) {
+    setCarregandoAcao(`etiqueta-${entradaId}`)
+    try {
+      const linhas = await buscarProdutosMapeados(entradaId)
+      if (!linhas) return
+      if (linhas.length === 0) { alert('Nenhum item desta NF-e está mapeado a um produto ainda.'); return }
+
+      const qtdPorProduto = new Map<string, number>()
+      for (const l of linhas) {
+        const atual = qtdPorProduto.get(l.produto_id) ?? 0
+        qtdPorProduto.set(l.produto_id, atual + (l.quantidade_entrada || l.quantidade_xml || 0))
+      }
+      const ids = Array.from(qtdPorProduto.keys())
+
+      const { data: dadosProdutos, error } = await sb.from('produtos')
+        .select('id, nome, sku, ean, preco_venda, preco_promocional, marca, unidade, categoria')
+        .in('id', ids)
+      if (error) { alert('Erro ao buscar produtos: ' + error.message); return }
+      const porId = new Map((dadosProdutos ?? []).map(p => [p.id, p]))
+
+      const produtosEtiqueta = ids.map(id => {
+        const p = porId.get(id)
+        return {
+          id, nome: p?.nome ?? '(produto)', sku: p?.sku ?? null, ean: p?.ean ?? null,
+          preco_venda: p?.preco_venda ?? 0, preco_promocional: p?.preco_promocional ?? null,
+          marca: p?.marca ?? null, unidade: p?.unidade ?? 'UN', categoria: p?.categoria ?? null,
+          estoque: qtdPorProduto.get(id) ?? 0,
+        } as ProdutoParaEtiqueta & { estoque: number }
+      })
+      setEtiquetaProdutos(produtosEtiqueta)
+    } finally {
+      setCarregandoAcao(null)
+    }
+  }
 
   const entradasFiltradas = useMemo(() => {
     let list = [...entradas]
@@ -469,10 +540,22 @@ export default function EntradasXmlClient({
                   </span>
                 </td>
                 <td className="px-4 py-2.5 text-center">
-                  <button onClick={ev => { ev.stopPropagation(); router.push(`/dashboard/entradas-xml/${e.id}`) }}
-                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg">
-                    Abrir →
-                  </button>
+                  <div className="flex gap-1 justify-center flex-wrap">
+                    <button onClick={ev => { ev.stopPropagation(); router.push(`/dashboard/entradas-xml/${e.id}`) }}
+                      className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg">
+                      Abrir →
+                    </button>
+                    <button onClick={ev => { ev.stopPropagation(); abrirGestaoPrecos(e.id, e.numero) }}
+                      disabled={carregandoAcao === `precos-${e.id}`}
+                      className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs rounded-lg disabled:opacity-50">
+                      💰 Preços
+                    </button>
+                    <button onClick={ev => { ev.stopPropagation(); imprimirEtiquetasEntrada(e.id) }}
+                      disabled={carregandoAcao === `etiqueta-${e.id}`}
+                      className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs rounded-lg disabled:opacity-50">
+                      🏷️ Etiquetas
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -671,6 +754,16 @@ export default function EntradasXmlClient({
         </div>
       )}
 
+      {etiquetaProdutos && (
+        <ImprimirEtiquetaModal
+          produtos={etiquetaProdutos}
+          empresaId={empresaId}
+          operadorNome={operador}
+          modoQtdPadrao="estoque"
+          labelModoEstoque="Igual à quantidade recebida"
+          onClose={() => setEtiquetaProdutos(null)}
+        />
+      )}
     </div>
   )
 }
