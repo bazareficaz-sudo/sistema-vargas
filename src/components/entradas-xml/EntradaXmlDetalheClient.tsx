@@ -99,7 +99,7 @@ export default function EntradaXmlDetalheClient({
 
   function selecionarProduto(p: Produto) {
     setProdutoSelecionado(p)
-    setTimeout(() => fatorInputRef.current?.focus(), 0)
+    setTimeout(() => { fatorInputRef.current?.focus(); fatorInputRef.current?.select() }, 0)
   }
 
   function iniciarCriarProduto(item: Item | null) {
