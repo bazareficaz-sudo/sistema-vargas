@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { cadastrarEmpresa } from '@/lib/fiscal/brasilnfe/empresa'
+import { cadastrarEmpresa, buscarTokenPorCnpj } from '@/lib/fiscal/brasilnfe/empresa'
 
 // Cadastra a empresa na Brasil NFe (POST /services/empresa/AdicionarEmpresa)
 // usando o UserToken de plataforma (sistema_config_fiscal) e grava o token
@@ -44,17 +44,32 @@ export async function POST(req: Request) {
     email: empresa.email,
   })
 
-  if (!resultado.ok) return NextResponse.json({ ok: false, erro: resultado.erro }, { status: 400 })
+  let token: string
+  let recuperado = false
+  if (resultado.ok) {
+    token = resultado.token
+  } else if (resultado.jaExiste) {
+    // CNPJ já cadastrado na conta (ex: feito manualmente antes desta
+    // automação, ou uma tentativa anterior que não chegou a salvar o
+    // token no nosso banco) — recupera o token existente em vez de tentar
+    // cadastrar de novo (a Brasil NFe não permite duplicar).
+    const busca = await buscarTokenPorCnpj(config.brasilnfe_user_token, empresa.cnpj)
+    if (!busca.ok) return NextResponse.json({ ok: false, erro: `Empresa já cadastrada na Brasil NFe, mas não foi possível recuperar o token: ${busca.erro}` }, { status: 400 })
+    token = busca.token
+    recuperado = true
+  } else {
+    return NextResponse.json({ ok: false, erro: resultado.erro }, { status: 400 })
+  }
 
   const { error: erroUpdate } = await sb.from('nfe_config').upsert({
     empresa_id: empresaId,
     provider: 'brasilnfe',
-    credenciais: { token_producao: resultado.token, token_homologacao: resultado.token },
-    focusnfe_token: resultado.token,
+    credenciais: { token_producao: token, token_homologacao: token },
+    focusnfe_token: token,
     ativo: true,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'empresa_id' })
-  if (erroUpdate) return NextResponse.json({ ok: false, erro: `Empresa cadastrada na Brasil NFe, mas falhou ao salvar o token: ${erroUpdate.message}` }, { status: 500 })
+  if (erroUpdate) return NextResponse.json({ ok: false, erro: `Empresa ${recuperado ? 'já cadastrada' : 'cadastrada'} na Brasil NFe, mas falhou ao salvar o token: ${erroUpdate.message}` }, { status: 500 })
 
-  return NextResponse.json({ ok: true, token: resultado.token })
+  return NextResponse.json({ ok: true, token, recuperado })
 }

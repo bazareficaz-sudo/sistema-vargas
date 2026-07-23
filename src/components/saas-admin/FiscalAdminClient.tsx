@@ -23,7 +23,7 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
   const [userToken, setUserToken] = useState(brasilnfeUserTokenInicial)
   const [salvandoUserToken, setSalvandoUserToken] = useState(false)
   const [cadastrandoEmpresa, setCadastrandoEmpresa] = useState<string | null>(null)
-  const [resultadoCadastro, setResultadoCadastro] = useState<Record<string, string>>({})
+  const [resultadoCadastro, setResultadoCadastro] = useState<Record<string, { msg: string; ok: boolean }>>({})
   const [erroPadrao, setErroPadrao] = useState('')
   const [erroEmpresa, setErroEmpresa] = useState('')
   const [erroUserToken, setErroUserToken] = useState('')
@@ -74,17 +74,18 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
 
   async function cadastrarNaBrasilNFe(empresaId: string) {
     setCadastrandoEmpresa(empresaId)
-    setResultadoCadastro(prev => ({ ...prev, [empresaId]: '' }))
+    setResultadoCadastro(prev => ({ ...prev, [empresaId]: { msg: '', ok: false } }))
     try {
       const resp = await fetch('/api/fiscal/brasilnfe/cadastrar-empresa', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ empresaId }),
       })
       const data = await resp.json()
-      setResultadoCadastro(prev => ({ ...prev, [empresaId]: data.ok ? 'Cadastrada com sucesso.' : (data.erro ?? 'Falha ao cadastrar.') }))
+      const msg = data.ok ? (data.recuperado ? 'Já estava cadastrada — token recuperado.' : 'Cadastrada com sucesso.') : (data.erro ?? 'Falha ao cadastrar.')
+      setResultadoCadastro(prev => ({ ...prev, [empresaId]: { msg, ok: !!data.ok } }))
       if (data.ok) router.refresh()
     } catch (e: any) {
-      setResultadoCadastro(prev => ({ ...prev, [empresaId]: e.message ?? 'Erro ao cadastrar.' }))
+      setResultadoCadastro(prev => ({ ...prev, [empresaId]: { msg: e.message ?? 'Erro ao cadastrar.', ok: false } }))
     } finally {
       setCadastrandoEmpresa(null)
     }
@@ -179,9 +180,9 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
                       {cadastrandoEmpresa === e.empresa_id ? 'Cadastrando...' : '☁ Cadastrar na Brasil NFe'}
                     </button>
                   )}
-                  {resultadoCadastro[e.empresa_id] && (
-                    <span className={resultadoCadastro[e.empresa_id].startsWith('Cadastrada') ? 'text-emerald-400' : 'text-red-400'}>
-                      {resultadoCadastro[e.empresa_id]}
+                  {resultadoCadastro[e.empresa_id]?.msg && (
+                    <span className={resultadoCadastro[e.empresa_id].ok ? 'text-emerald-400' : 'text-red-400'}>
+                      {resultadoCadastro[e.empresa_id].msg}
                     </span>
                   )}
                   {!resultadoCadastro[e.empresa_id] && salvandoEmpresa === e.empresa_id && <span className="text-slate-500">Salvando...</span>}

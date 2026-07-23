@@ -62,7 +62,16 @@ export type DadosEmpresaCadastro = {
 
 export type ResultadoCadastroEmpresa =
   | { ok: true; token: string }
-  | { ok: false; erro: string }
+  | { ok: false; erro: string; jaExiste?: boolean }
+
+// "Já está cadastrada" é o retorno da Brasil NFe quando o CNPJ tentado em
+// AdicionarEmpresa já existe na conta (ex: cadastrado manualmente antes de
+// termos essa automação) — não dá pra recadastrar, só recuperar o token
+// já existente via buscarTokenPorCnpj().
+function indicaEmpresaJaExiste(erro: string): boolean {
+  const e = erro.toLowerCase()
+  return e.includes('já esta cadastrada') || e.includes('já está cadastrada') || e.includes('ja esta cadastrada') || e.includes('already') || e.includes('duplicad')
+}
 
 export async function cadastrarEmpresa(userToken: string, dados: DadosEmpresaCadastro): Promise<ResultadoCadastroEmpresa> {
   const body = {
@@ -102,12 +111,42 @@ export async function cadastrarEmpresa(userToken: string, dados: DadosEmpresaCad
 
   if (status >= 400 || json?.Error || json?.status === false) {
     const erro = json?.Error ?? (Array.isArray(json?.Avisos) ? json.Avisos.join('; ') : null) ?? `Erro ${status} ao cadastrar empresa na Brasil NFe`
-    return { ok: false, erro }
+    return { ok: false, erro, jaExiste: indicaEmpresaJaExiste(erro) }
   }
   if (!json?.token) {
     return { ok: false, erro: 'Brasil NFe não retornou o token da empresa cadastrada.' }
   }
   return { ok: true, token: json.token }
+}
+
+export type ResultadoBuscaToken =
+  | { ok: true; token: string }
+  | { ok: false; erro: string }
+
+// Recupera o token de uma empresa que já existe na conta Brasil NFe (ex:
+// cadastrada manualmente antes desta automação, ou uma tentativa anterior
+// de AdicionarEmpresa que "vazou" sem gravar o token no nosso banco).
+// BuscarEmpresa exige o Token da empresa pra identificar qual buscar — como
+// é justamente isso que não temos, a única forma de achar por CNPJ é listar
+// tudo via BuscarTodasEmpresas (só exige UserToken) e filtrar no cliente.
+export async function buscarTokenPorCnpj(userToken: string, cnpj: string): Promise<ResultadoBuscaToken> {
+  const { status, text } = await brasilNFeRequestUserToken(userToken, '/services/empresa/BuscarTodasEmpresas', {})
+  let json: any
+  try {
+    json = text ? JSON.parse(text) : {}
+  } catch {
+    throw new FiscalProviderError(`Resposta inesperada da Brasil NFe ao listar empresas (status ${status}): ${text.slice(0, 300)}`, 'resposta_invalida')
+  }
+  if (status >= 400 || json?.Error) {
+    return { ok: false, erro: json?.Error ?? `Erro ${status} ao listar empresas da Brasil NFe` }
+  }
+  const lista: any[] = Array.isArray(json) ? json : (Array.isArray(json?.Empresas) ? json.Empresas : [])
+  const cnpjLimpo = cnpj.replace(/\D/g, '')
+  const encontrada = lista.find(e => (e?.CNPJ ?? '').replace(/\D/g, '') === cnpjLimpo)
+  if (!encontrada?.Token) {
+    return { ok: false, erro: 'Empresa não encontrada na lista de cadastros da Brasil NFe (verifique se o CNPJ está correto ou se foi cadastrada com outra conta/UserToken).' }
+  }
+  return { ok: true, token: encontrada.Token }
 }
 
 export type ResultadoCertificado =
