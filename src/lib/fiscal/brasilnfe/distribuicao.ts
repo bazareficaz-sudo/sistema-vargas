@@ -35,16 +35,15 @@ import { FiscalProviderError, type DfeListaResultado, type TipoManifesto } from 
 //    na última consulta — tratar isso como cursor incremental faz a
 //    janela encolher a cada clique em "Atualizar" e perder notas antigas.
 //
-// 4. Download do XML (ObterArquivoNotaFiscal): testado com uma nota de
-//    fornecedor bem recente (emitida no dia anterior) e voltou vazio,
-//    mesmo com TipoAmbiente/TipoDocumentoFiscal variados. A hipótese mais
-//    provável (e é assim que funciona a Distribuição DFe de verdade na
-//    SEFAZ, fora da Brasil NFe) é que o XML completo só fica disponível
-//    pra download DEPOIS que o destinatário dá ciência da operação — ou
-//    seja, a ordem certa é: listar → manifestar Ciência → só então
-//    baixar/importar. Não validei essa hipótese chamando manifestação de
-//    verdade (é uma declaração fiscal real, não algo pra testar sozinho
-//    sem o usuário) — vale confirmar na tela.
+// 4. Download do XML (ObterArquivoNotaFiscal): esse endpoint usa o
+//    TipoDocumentoFiscal com a semântica DOCUMENTADA mesmo (0=Entrada,
+//    1=Saída — confirmado na referência oficial da API, não só resumo
+//    por IA) — ao contrário do ObterNotasFiscais acima, cujo
+//    TipoDocumentoFiscal não funciona como documentado (por isso a
+//    classificação por CNPJ). Usar 1 aqui (pensando "entrada" com a
+//    semântica errada) devolvia string vazia sempre, mesmo com
+//    parâmetros inválidos de propósito; com 0 (Entrada, valor certo
+//    documentado) o XML completo veio normalmente.
 const JANELA_DIAS = 180
 const MODELO_NFE = 55
 
@@ -120,7 +119,7 @@ export async function baixarXml(creds: BrasilNFeCredentials, chave: string): Pro
   const { status, text } = await brasilNFeRequest(creds, '/services/fiscal/ObterArquivoNotaFiscal', {
     ChaveNF: chave,
     FileType: 1, // 1 = XML
-    TipoDocumentoFiscal: 1, // entrada (ver nota em listarDfe)
+    TipoDocumentoFiscal: 0, // 0 = Entrada (semântica documentada oficialmente pra este endpoint — ver nota acima)
   })
   if (status >= 400) {
     throw new FiscalProviderError(`Erro ${status} ao baixar XML da nota ${chave} na Brasil NFe`, 'brasilnfe_erro')
@@ -132,6 +131,9 @@ export async function baixarXml(creds: BrasilNFeCredentials, chave: string): Pro
     base64 = typeof json === 'string' ? json : (json?.Arquivo ?? json?.arquivo ?? text)
   } catch {
     // já veio como string crua (sem envelope JSON) — usa como está
+  }
+  if (!base64) {
+    throw new FiscalProviderError(`A Brasil NFe não retornou o arquivo da nota ${chave} (resposta vazia).`, 'brasilnfe_erro')
   }
   return Buffer.from(base64, 'base64').toString('utf-8')
 }
