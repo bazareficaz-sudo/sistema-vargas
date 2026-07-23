@@ -7,7 +7,7 @@ export default async function FiscalAdminPage() {
   const supabase = await createClient()
 
   const [{ data: config }, { data: empresas }, { data: configsNfe }] = await Promise.all([
-    supabase.from('sistema_config_fiscal').select('id, provider_padrao').maybeSingle(),
+    supabase.from('sistema_config_fiscal').select('id, provider_padrao, brasilnfe_user_token').maybeSingle(),
     supabase.from('empresas').select('id, nome, cnpj').order('nome').limit(1000),
     supabase.from('nfe_config').select('empresa_id, provider, ativo'),
   ])
@@ -25,6 +25,7 @@ export default async function FiscalAdminPage() {
     <FiscalAdminClient
       providerPadraoInicial={config?.provider_padrao ?? 'focusnfe'}
       configId={config?.id ?? null}
+      brasilnfeUserTokenInicial={config?.brasilnfe_user_token ?? ''}
       empresas={linhas}
     />
   )

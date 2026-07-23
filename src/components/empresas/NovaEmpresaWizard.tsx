@@ -367,6 +367,23 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
       }
       await sb.from('nfe_config').upsert(nfeConfigPayload, { onConflict: 'empresa_id' })
 
+      // Empresa nova + provider Brasil NFe: cadastra automaticamente na
+      // API deles (o token por empresa é obrigatório antes de qualquer
+      // emissão funcionar) — melhor esforço, não trava a criação da
+      // empresa se falhar (pode ser refeito depois em saas-admin/fiscal).
+      if (!editando && nfeConfigPayload.provider === 'brasilnfe' && form.cnpj) {
+        try {
+          const resp = await fetch('/api/fiscal/brasilnfe/cadastrar-empresa', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ empresaId }),
+          })
+          const data = await resp.json()
+          if (!data.ok) alert('Empresa criada, mas o cadastro automático na Brasil NFe falhou: ' + data.erro + '\n\nVocê pode tentar de novo em saas-admin → Fiscal.')
+        } catch (e: any) {
+          alert('Empresa criada, mas o cadastro automático na Brasil NFe falhou: ' + (e?.message ?? 'erro desconhecido') + '\n\nVocê pode tentar de novo em saas-admin → Fiscal.')
+        }
+      }
+
       // Config comercial
       await sb.from('empresa_config_comercial').upsert({
         empresa_id: empresaId,

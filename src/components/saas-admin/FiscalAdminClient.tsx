@@ -11,8 +11,8 @@ const PROVIDERS = [
   { value: 'brasilnfe', label: 'Brasil NFe' },
 ]
 
-export default function FiscalAdminClient({ providerPadraoInicial, configId, empresas }: {
-  providerPadraoInicial: string; configId: string | null; empresas: Empresa[]
+export default function FiscalAdminClient({ providerPadraoInicial, configId, brasilnfeUserTokenInicial, empresas }: {
+  providerPadraoInicial: string; configId: string | null; brasilnfeUserTokenInicial: string; empresas: Empresa[]
 }) {
   const router = useRouter()
   const supabase = createClient()
@@ -20,6 +20,10 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, emp
   const [salvandoPadrao, setSalvandoPadrao] = useState(false)
   const [busca, setBusca] = useState('')
   const [salvandoEmpresa, setSalvandoEmpresa] = useState<string | null>(null)
+  const [userToken, setUserToken] = useState(brasilnfeUserTokenInicial)
+  const [salvandoUserToken, setSalvandoUserToken] = useState(false)
+  const [cadastrandoEmpresa, setCadastrandoEmpresa] = useState<string | null>(null)
+  const [resultadoCadastro, setResultadoCadastro] = useState<Record<string, string>>({})
 
   async function salvarPadrao() {
     setSalvandoPadrao(true)
@@ -49,6 +53,38 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, emp
     }
   }
 
+  async function salvarUserToken() {
+    setSalvandoUserToken(true)
+    try {
+      if (configId) {
+        await supabase.from('sistema_config_fiscal').update({ brasilnfe_user_token: userToken || null, updated_at: new Date().toISOString() }).eq('id', configId)
+      } else {
+        await supabase.from('sistema_config_fiscal').insert({ provider_padrao: providerPadrao, brasilnfe_user_token: userToken || null })
+      }
+      router.refresh()
+    } finally {
+      setSalvandoUserToken(false)
+    }
+  }
+
+  async function cadastrarNaBrasilNFe(empresaId: string) {
+    setCadastrandoEmpresa(empresaId)
+    setResultadoCadastro(prev => ({ ...prev, [empresaId]: '' }))
+    try {
+      const resp = await fetch('/api/fiscal/brasilnfe/cadastrar-empresa', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresaId }),
+      })
+      const data = await resp.json()
+      setResultadoCadastro(prev => ({ ...prev, [empresaId]: data.ok ? 'Cadastrada com sucesso.' : (data.erro ?? 'Falha ao cadastrar.') }))
+      if (data.ok) router.refresh()
+    } catch (e: any) {
+      setResultadoCadastro(prev => ({ ...prev, [empresaId]: e.message ?? 'Erro ao cadastrar.' }))
+    } finally {
+      setCadastrandoEmpresa(null)
+    }
+  }
+
   const filtradas = empresas.filter(e => !busca || e.empresa_nome.toLowerCase().includes(busca.toLowerCase()))
 
   return (
@@ -74,6 +110,19 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, emp
           <button onClick={salvarPadrao} disabled={salvandoPadrao || providerPadrao === providerPadraoInicial}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg text-sm font-medium">
             {salvandoPadrao ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md">
+        <h2 className="text-sm font-semibold text-white mb-1">UserToken da conta Brasil NFe</h2>
+        <p className="text-xs text-slate-400 mb-3">Token de plataforma (não é o token de uma empresa) — necessário pra cadastrar empresas novas automaticamente via API.</p>
+        <div className="flex gap-2">
+          <input value={userToken} onChange={e => setUserToken(e.target.value)} type="password" placeholder="UserToken"
+            className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
+          <button onClick={salvarUserToken} disabled={salvandoUserToken || userToken === brasilnfeUserTokenInicial}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg text-sm font-medium">
+            {salvandoUserToken ? 'Salvando...' : 'Salvar'}
           </button>
         </div>
       </div>
@@ -115,8 +164,19 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, emp
                     {PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                   </select>
                 </td>
-                <td className="px-4 py-3 text-xs text-slate-500">
-                  {salvandoEmpresa === e.empresa_id ? 'Salvando...' : ''}
+                <td className="px-4 py-3 text-xs">
+                  {(e.provider ?? providerPadrao) === 'brasilnfe' && (
+                    <button onClick={() => cadastrarNaBrasilNFe(e.empresa_id)} disabled={cadastrandoEmpresa === e.empresa_id}
+                      className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white rounded text-xs mr-2">
+                      {cadastrandoEmpresa === e.empresa_id ? 'Cadastrando...' : '☁ Cadastrar na Brasil NFe'}
+                    </button>
+                  )}
+                  {resultadoCadastro[e.empresa_id] && (
+                    <span className={resultadoCadastro[e.empresa_id].startsWith('Cadastrada') ? 'text-emerald-400' : 'text-red-400'}>
+                      {resultadoCadastro[e.empresa_id]}
+                    </span>
+                  )}
+                  {!resultadoCadastro[e.empresa_id] && salvandoEmpresa === e.empresa_id && <span className="text-slate-500">Salvando...</span>}
                 </td>
               </tr>
             ))}

@@ -57,3 +57,30 @@ export async function brasilNFeRequest(
   const text = await resp.text()
   return { status: resp.status, text }
 }
+
+// Cadastro de empresa (POST /services/empresa/AdicionarEmpresa) acontece
+// ANTES de a empresa existir na Brasil NFe — por isso não tem `Token` de
+// empresa ainda, só o `UserToken` da conta (nível plataforma, distinto do
+// token por empresa usado em todo o resto desta integração).
+export async function brasilNFeRequestUserToken(
+  userToken: string,
+  path: string,
+  body: any
+): Promise<{ status: number; text: string }> {
+  let resp: Response
+  try {
+    resp = await fetchWithTimeout(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'UserToken': userToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (e: any) {
+    const timeout = e?.name === 'AbortError'
+    throw new FiscalProviderError(
+      timeout ? 'Tempo esgotado ao conectar com a Brasil NFe' : `Erro de rede ao conectar com a Brasil NFe: ${e?.message ?? e}`,
+      timeout ? 'timeout' : 'rede'
+    )
+  }
+  const text = await resp.text()
+  return { status: resp.status, text }
+}
