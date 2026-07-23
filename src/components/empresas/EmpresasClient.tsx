@@ -72,6 +72,7 @@ const STATUS_COR: Record<string, string> = {
 
 const REGIME_LABEL: Record<string, string> = {
   simples_nacional: 'Simples Nacional',
+  simples_nacional_excesso: 'Simples Nacional (excesso de sublimite)',
   lucro_presumido: 'Lucro Presumido',
   lucro_real: 'Lucro Real',
   mei: 'MEI',

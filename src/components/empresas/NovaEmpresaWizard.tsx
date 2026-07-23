@@ -121,10 +121,13 @@ const ETAPAS = [
 // CRT (Código de Regime Tributário) é o código numérico exigido no XML da
 // NFe/NFCe — diferente do campo "regime_tributario" (texto, cadastro geral
 // da empresa) já coletado na Etapa 1. Em vez de pedir de novo numa outra
-// etapa, deriva o CRT a partir do regime já escolhido. Tabela oficial:
+// etapa, deriva o CRT a partir do regime já escolhido. Tabela oficial
+// SEFAZ (só 3 valores possíveis no XML, mesmo que o cadastro interno
+// distinga mais regimes pra fins comerciais/de exibição):
 // 1 = Simples Nacional, 2 = Simples Nacional (excesso de sublimite),
-// 3 = Regime Normal (Lucro Presumido/Real e demais).
+// 3 = Regime Normal (Lucro Presumido, Lucro Real, isento e demais).
 function crtDoRegimeTributario(regime: string): string {
+  if (regime === 'simples_nacional_excesso') return '2'
   if (regime === 'simples_nacional' || regime === 'mei') return '1'
   return '3'
 }
@@ -538,6 +541,7 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
                 <Field label="Regime tributário">
                   <select value={form.regime_tributario} onChange={e => set('regime_tributario', e.target.value)} className={SELECT}>
                     <option value="simples_nacional">Simples Nacional</option>
+                    <option value="simples_nacional_excesso">Simples Nacional (excesso de sublimite)</option>
                     <option value="lucro_presumido">Lucro Presumido</option>
                     <option value="lucro_real">Lucro Real</option>
                     <option value="mei">MEI</option>
@@ -936,7 +940,7 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
                 {[
                   { label: 'Grupo', valor: grupos.find(g => g.id === form.grupo_id)?.nome ?? '—' },
                   { label: 'CNPJ', valor: form.cnpj || '—' },
-                  { label: 'Regime', valor: { simples_nacional: 'Simples Nacional', lucro_presumido: 'Lucro Presumido', lucro_real: 'Lucro Real', mei: 'MEI', isento: 'Isento', outro: 'Outro' }[form.regime_tributario] ?? form.regime_tributario },
+                  { label: 'Regime', valor: { simples_nacional: 'Simples Nacional', simples_nacional_excesso: 'Simples Nacional (excesso de sublimite)', lucro_presumido: 'Lucro Presumido', lucro_real: 'Lucro Real', mei: 'MEI', isento: 'Isento', outro: 'Outro' }[form.regime_tributario] ?? form.regime_tributario },
                   { label: 'Status', valor: { ativa: 'Ativa', em_implantacao: 'Em implantação', suspensa: 'Suspensa', inativa: 'Inativa' }[form.status] ?? form.status },
                   { label: 'Cidade / UF', valor: form.cidade && form.uf ? `${form.cidade} / ${form.uf}` : '—' },
                   { label: 'Ambiente fiscal', valor: form.ambiente_fiscal === 'producao' ? 'Produção ✅' : 'Homologação 🧪' },

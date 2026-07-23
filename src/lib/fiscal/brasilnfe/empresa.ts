@@ -10,15 +10,31 @@ import { FiscalProviderError } from '../types'
 // produção/homologação acontece por campo (TipoAmbiente) em cada chamada,
 // não por token separado como na Focus NFe.
 
-// CRT da Brasil NFe (1 Simples Nacional, 2 Simples c/ excesso de
-// sublimite, 3 Lucro Presumido, 4 Lucro Real) é mais granular que o nosso
-// campo interno `regime_tributario` — mapeamento conservador: só
-// distinguimos Simples (inclui MEI) de "regime normal", que cai em Lucro
-// Presumido (3) por ser o mais comum; empresas de Lucro Real precisam
-// ajustar isso manualmente depois se for o caso.
+// CRT da Brasil NFe no cadastro de empresa (doc.brasilnfe.com.br/api/empresas,
+// lido via WebFetch — confiança moderada, é uma leitura de doc de terceiro
+// resumida por IA, não uma fonte primária conferida linha a linha): 1 Simples
+// Nacional, 2 Simples c/ excesso de sublimite, 3 Lucro Presumido, 4 Lucro
+// Real — mais granular que o CRT oficial da SEFAZ (que só tem 1/2/3, sem
+// distinguir Presumido de Real). Agora que o cadastro interno também
+// distingue "Simples Nacional (excesso de sublimite)", o mapeamento cobre
+// todos os regimes com um valor específico; "isento"/"outro" (sem CRT
+// correspondente em nenhuma tabela) caem em Lucro Presumido (3) por ser o
+// padrão mais comum — vale conferir manualmente se for um desses dois casos.
 function crtBrasilNFe(regimeTributario: string): number {
-  if (regimeTributario === 'simples_nacional' || regimeTributario === 'mei') return 1
-  return 3
+  switch (regimeTributario) {
+    case 'simples_nacional':
+    case 'mei':
+      return 1
+    case 'simples_nacional_excesso':
+      return 2
+    case 'lucro_real':
+      return 4
+    case 'lucro_presumido':
+    case 'isento':
+    case 'outro':
+    default:
+      return 3
+  }
 }
 
 export type DadosEmpresaCadastro = {
