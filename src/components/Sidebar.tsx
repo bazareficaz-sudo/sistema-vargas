@@ -39,21 +39,27 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   const [favorites, setFavorites] = useLS<string[]>('sb_favs', [])
   const [recentes, setRecentes] = useLS<{ href: string; label: string }[]>('sb_recents', [])
   const [painel, setPainel] = useState<PainelId>(null)
+  const [railHover, setRailHover] = useState(false)
   const [busca, setBusca] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Painel abre ao passar o mouse sobre o ícone do rail e fecha ao clicar
   // (num item ou no próprio ícone) ou quando o mouse sai da área do rail +
   // painel. O timeout evita fechar por engano no instante em que o cursor
-  // atravessa a borda entre o rail e o flyout.
+  // atravessa a borda entre o rail e o flyout. `railHover` (o rail em si
+  // alargando pra mostrar o texto de cada item, não só o ícone) usa o
+  // mesmo timer — sempre abre/fecha junto com o flyout, pra não descolar
+  // da posição do flyout (que passa a nascer na borda direita do rail
+  // largo, não mais num "72px" fixo).
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   function abrirPainel(id: PainelId) {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
     setPainel(id)
+    setRailHover(true)
   }
   function agendarFechamento() {
     if (closeTimer.current) clearTimeout(closeTimer.current)
-    closeTimer.current = setTimeout(() => setPainel(null), 200)
+    closeTimer.current = setTimeout(() => { setPainel(null); setRailHover(false) }, 200)
   }
   function cancelarFechamento() {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
@@ -116,30 +122,34 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   return (
     <>
       <aside
+        onMouseEnter={() => { cancelarFechamento(); setRailHover(true) }}
         onMouseLeave={agendarFechamento}
-        className="w-[72px] flex flex-col items-center h-screen fixed left-0 top-0 z-40 bg-white border-r border-slate-200"
+        className={`${railHover ? 'w-[216px]' : 'w-[72px]'} flex flex-col items-center h-screen fixed left-0 top-0 z-40 bg-white border-r border-slate-200 transition-[width] duration-150 ease-out overflow-hidden`}
       >
         {/* Logo */}
-        <Link href="/dashboard" title="Sistema Vargas" className="flex-shrink-0 mt-3 mb-2">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
-            <span className="text-white font-bold text-sm">V</span>
-          </div>
-        </Link>
-        <p className="text-[9px] text-slate-400 text-center px-1 mb-2 leading-tight truncate w-full" title={empresa}>{empresa}</p>
+        <div className={`flex-shrink-0 mt-3 mb-2 w-full flex items-center gap-2 px-[14px] ${railHover ? '' : 'justify-center'}`}>
+          <Link href="/dashboard" title="Sistema Vargas" className="flex-shrink-0">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
+              <span className="text-white font-bold text-sm">V</span>
+            </div>
+          </Link>
+          {railHover && <span className="text-sm font-semibold text-slate-700 truncate">Sistema Vargas</span>}
+        </div>
+        <p className={`text-[9px] text-slate-400 px-1 mb-2 leading-tight truncate w-full ${railHover ? 'text-left px-3' : 'text-center'}`} title={empresa}>{empresa}</p>
 
         <div className="flex-1 w-full overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 px-2 pb-2">
-          <RailButton icon={<IconSearch className="w-5 h-5" />} label="Buscar" active={painel === 'busca'}
+          <RailButton icon={<IconSearch className="w-5 h-5" />} label="Buscar" active={painel === 'busca'} expanded={railHover}
             onMouseEnter={() => abrirPainel('busca')} onClick={() => setPainel(null)} />
           {favItems.length > 0 && (
-            <RailButton icon={<IconStar className="w-5 h-5" />} label="Favoritos" active={painel === 'favoritos'}
+            <RailButton icon={<IconStar className="w-5 h-5" />} label="Favoritos" active={painel === 'favoritos'} expanded={railHover}
               onMouseEnter={() => abrirPainel('favoritos')} onClick={() => setPainel(null)} />
           )}
           {recentItems.length > 0 && (
-            <RailButton icon={<IconClock className="w-5 h-5" />} label="Recentes" active={painel === 'recentes'}
+            <RailButton icon={<IconClock className="w-5 h-5" />} label="Recentes" active={painel === 'recentes'} expanded={railHover}
               onMouseEnter={() => abrirPainel('recentes')} onClick={() => setPainel(null)} />
           )}
 
-          <div className="w-8 h-px bg-slate-200 my-1.5 flex-shrink-0" />
+          <div className={`h-px bg-slate-200 my-1.5 flex-shrink-0 ${railHover ? 'w-full' : 'w-8'}`} />
 
           {groupsData.map(({ group, hasActive }) => {
             const Icon = GROUP_ICONS[group.id]
@@ -148,6 +158,7 @@ export default function Sidebar({ empresa }: { empresa: string }) {
                 icon={Icon ? <Icon className="w-5 h-5" /> : <span className="w-5 h-5" />}
                 label={group.label}
                 active={painel === group.id || hasActive}
+                expanded={railHover}
                 onMouseEnter={() => abrirPainel(group.id)}
                 onClick={() => setPainel(null)}
               />
@@ -157,8 +168,8 @@ export default function Sidebar({ empresa }: { empresa: string }) {
 
         <div className="flex-shrink-0 w-full flex flex-col items-center gap-1 px-2 pt-1 border-t border-slate-100">
           <PlanBannerSidebar collapsed />
-          <RailLink href="/blog" icon={<IconNews className="w-5 h-5" />} label="Novidades" />
-          <RailButton icon={<IconLogout className="w-5 h-5" />} label="Sair" onClick={logout} />
+          <RailLink href="/blog" icon={<IconNews className="w-5 h-5" />} label="Novidades" expanded={railHover} />
+          <RailButton icon={<IconLogout className="w-5 h-5" />} label="Sair" onClick={logout} expanded={railHover} />
         </div>
       </aside>
 
@@ -169,7 +180,7 @@ export default function Sidebar({ empresa }: { empresa: string }) {
           <div
             onMouseEnter={cancelarFechamento}
             onMouseLeave={agendarFechamento}
-            className="fixed left-[72px] top-0 h-screen w-72 bg-white border-r border-slate-200 shadow-2xl z-40 flex flex-col"
+            className={`fixed top-0 h-screen w-72 bg-white border-r border-slate-200 shadow-2xl z-40 flex flex-col ${railHover ? 'left-[216px]' : 'left-[72px]'}`}
           >
 
             {painel === 'busca' && (
@@ -236,28 +247,30 @@ export default function Sidebar({ empresa }: { empresa: string }) {
 
 // ─── Peças reutilizáveis ──────────────────────────────────────────────────────
 
-function RailButton({ icon, label, active = false, onClick, onMouseEnter }: {
-  icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; onMouseEnter?: () => void
+function RailButton({ icon, label, active = false, expanded = false, onClick, onMouseEnter }: {
+  icon: React.ReactNode; label: string; active?: boolean; expanded?: boolean; onClick: () => void; onMouseEnter?: () => void
 }) {
   return (
     <button
       onClick={onClick}
       onMouseEnter={onMouseEnter}
-      title={label}
-      className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl transition-colors ${
+      title={expanded ? undefined : label}
+      className={`h-11 flex-shrink-0 flex items-center rounded-xl transition-colors ${expanded ? 'w-full gap-3 px-2.5' : 'w-11 justify-center'} ${
         active ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
       }`}
     >
-      {icon}
+      <span className="flex-shrink-0 flex items-center justify-center w-5 h-5">{icon}</span>
+      {expanded && <span className="text-sm truncate">{label}</span>}
     </button>
   )
 }
 
-function RailLink({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
+function RailLink({ href, icon, label, expanded = false }: { href: string; icon: React.ReactNode; label: string; expanded?: boolean }) {
   return (
-    <Link href={href} title={label}
-      className="w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
-      {icon}
+    <Link href={href} title={expanded ? undefined : label}
+      className={`h-11 flex-shrink-0 flex items-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors ${expanded ? 'w-full gap-3 px-2.5' : 'w-11 justify-center'}`}>
+      <span className="flex-shrink-0 flex items-center justify-center w-5 h-5">{icon}</span>
+      {expanded && <span className="text-sm truncate">{label}</span>}
     </Link>
   )
 }

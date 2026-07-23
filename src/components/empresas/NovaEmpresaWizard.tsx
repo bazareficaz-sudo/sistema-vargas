@@ -178,6 +178,10 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   const [buscandoCep, setBuscandoCep] = useState(false)
+  const [certArquivo, setCertArquivo] = useState<File | null>(null)
+  const [certSenha, setCertSenha] = useState('')
+  const [enviandoCert, setEnviandoCert] = useState(false)
+  const [resultadoCert, setResultadoCert] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const editando = !!empresaEditando
 
@@ -444,6 +448,45 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
     } catch (e: any) {
       setErro(e?.message ?? 'Erro ao salvar empresa')
       setSalvando(false)
+    }
+  }
+
+  // Envia o certificado A1 pra Brasil NFe via API (o cliente não tem acesso
+  // ao painel deles — tudo, inclusive o certificado, passa pela plataforma).
+  function arquivoParaBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const resultado = reader.result as string
+        resolve(resultado.split(',').pop() ?? '')
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function enviarCertificado() {
+    if (!certArquivo || !certSenha || !empresaEditando?.id) return
+    setEnviandoCert(true)
+    setResultadoCert(null)
+    try {
+      const base64Certificado = await arquivoParaBase64(certArquivo)
+      const resp = await fetch('/api/fiscal/brasilnfe/enviar-certificado', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresaId: empresaEditando.id, base64Certificado, senha: certSenha }),
+      })
+      const data = await resp.json()
+      if (!data.ok) {
+        setResultadoCert({ ok: false, msg: data.erro })
+      } else {
+        setResultadoCert({ ok: true, msg: data.dtExpiracao ? `Certificado enviado — válido até ${data.dtExpiracao.slice(0, 10)}.` : 'Certificado enviado com sucesso.' })
+        setCertSenha('')
+        setCertArquivo(null)
+      }
+    } catch (e: any) {
+      setResultadoCert({ ok: false, msg: e?.message ?? 'Erro ao enviar certificado' })
+    } finally {
+      setEnviandoCert(false)
     }
   }
 
@@ -752,18 +795,62 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
                       className={`${INPUT} font-mono text-xs`} placeholder="token de homologação (testes)" />
                   </Field>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Certificado digital (referência)">
-                    <input value={form.certificado_ref} onChange={e => set('certificado_ref', e.target.value)}
-                      className={INPUT} placeholder="cadastrado no painel do provedor" />
-                  </Field>
-                  <Field label="Validade do certificado">
-                    <input type="date" value={form.certificado_validade} onChange={e => set('certificado_validade', e.target.value)} className={INPUT} />
-                  </Field>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  O certificado A1 em si é cadastrado direto no painel do provedor fiscal (não aqui) — este campo é só uma referência/validade pra controle.
-                </p>
+                {editando && empresaEditando?.nfe_config?.provider === 'brasilnfe' ? (
+                  <>
+                    {empresaEditando?.nfe_config?.credenciais?.token_producao ? (
+                      <div className="border border-slate-200 rounded-lg p-3 bg-white space-y-2">
+                        <p className="text-xs font-semibold text-slate-600">Certificado digital A1 — envio via API (Brasil NFe)</p>
+                        <p className="text-[11px] text-slate-400">
+                          O cliente não tem acesso ao painel da Brasil NFe — envie o certificado (.pfx/.p12) e a senha aqui; vai direto pra API deles.
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field label="Arquivo do certificado (.pfx/.p12)">
+                            <input type="file" accept=".pfx,.p12"
+                              onChange={e => setCertArquivo(e.target.files?.[0] ?? null)}
+                              className="w-full text-xs text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:text-xs" />
+                          </Field>
+                          <Field label="Senha do certificado">
+                            <input type="password" value={certSenha} onChange={e => setCertSenha(e.target.value)} className={INPUT} placeholder="senha do .pfx" />
+                          </Field>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button type="button" disabled={!certArquivo || !certSenha || enviandoCert}
+                            onClick={enviarCertificado}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                            {enviandoCert ? 'Enviando...' : 'Enviar certificado à Brasil NFe'}
+                          </button>
+                          {form.certificado_validade && (
+                            <span className="text-[11px] text-slate-500">Validade atual: {form.certificado_validade}</span>
+                          )}
+                        </div>
+                        {resultadoCert && (
+                          <p className={`text-xs ${resultadoCert.ok ? 'text-emerald-600' : 'text-red-600'}`}>{resultadoCert.msg}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                        Empresa ainda não tem token da Brasil NFe — cadastre-a primeiro em saas-admin → Fiscal, depois volte aqui pra enviar o certificado.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Certificado digital (referência)">
+                        <input value={form.certificado_ref} onChange={e => set('certificado_ref', e.target.value)}
+                          className={INPUT} placeholder="cadastrado no painel do provedor" />
+                      </Field>
+                      <Field label="Validade do certificado">
+                        <input type="date" value={form.certificado_validade} onChange={e => set('certificado_validade', e.target.value)} className={INPUT} />
+                      </Field>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      {!editando
+                        ? 'Se o provedor definido for Brasil NFe, o envio do certificado via API fica disponível aqui mesmo depois de salvar (modo edição).'
+                        : 'O certificado A1 em si é cadastrado direto no painel do provedor fiscal (não aqui) — este campo é só uma referência/validade pra controle.'}
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

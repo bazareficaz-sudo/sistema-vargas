@@ -1,4 +1,4 @@
-import { brasilNFeRequestUserToken } from './client'
+import { brasilNFeRequest, brasilNFeRequestUserToken } from './client'
 import { FiscalProviderError } from '../types'
 
 // Cadastro de empresa na Brasil NFe (doc.brasilnfe.com.br/api/empresas —
@@ -108,4 +108,38 @@ export async function cadastrarEmpresa(userToken: string, dados: DadosEmpresaCad
     return { ok: false, erro: 'Brasil NFe não retornou o token da empresa cadastrada.' }
   }
   return { ok: true, token: json.token }
+}
+
+export type ResultadoCertificado =
+  | { ok: true; expirado: boolean; dtExpiracao: string | null }
+  | { ok: false; erro: string }
+
+// Envio do certificado A1 (doc.brasilnfe.com.br/api/empresas#adicionar —
+// AlterarCertificado, endpoint SEPARADO do cadastro da empresa): precisa
+// do Token da empresa (já cadastrada) + UserToken da conta, e do arquivo
+// .pfx/.p12 em base64 junto da senha. Sem tela própria da Brasil NFe pro
+// cliente, é este o único jeito de colocar o certificado em produção.
+export async function alterarCertificado(
+  userToken: string,
+  empresaToken: string,
+  base64CertificateFile: string,
+  senha: string
+): Promise<ResultadoCertificado> {
+  const { status, text } = await brasilNFeRequest(
+    { token: empresaToken, userToken, ambiente: 'producao' },
+    '/services/empresa/AlterarCertificado',
+    { Senha: senha, Base64CertificateFile: base64CertificateFile }
+  )
+  let json: any
+  try {
+    json = text ? JSON.parse(text) : {}
+  } catch {
+    throw new FiscalProviderError(`Resposta inesperada da Brasil NFe ao enviar certificado (status ${status}): ${text.slice(0, 300)}`, 'resposta_invalida')
+  }
+
+  if (status >= 400 || json?.status === 2 || json?.Error) {
+    const erro = json?.Error ?? (Array.isArray(json?.Avisos) ? json.Avisos.join('; ') : null) ?? `Erro ${status} ao enviar certificado à Brasil NFe`
+    return { ok: false, erro }
+  }
+  return { ok: true, expirado: !!json?.Expirado, dtExpiracao: json?.DtExpiracao ?? null }
 }
