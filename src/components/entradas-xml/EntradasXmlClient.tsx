@@ -81,6 +81,8 @@ export default function EntradasXmlClient({
   const [consultandoSefaz, setConsultandoSefaz] = useState(false)
   const [nfesSefaz, setNfesSefaz] = useState<any[]>([])
   const [erroSefaz, setErroSefaz] = useState('')
+  const [importandoSefaz, setImportandoSefaz] = useState<string | null>(null)
+  const [importadosSefaz, setImportadosSefaz] = useState<Record<string, { ok: boolean; msg: string }>>({})
 
   const depositoPrincipal = depositos.find(d => d.principal)?.id ?? depositos[0]?.id ?? null
 
@@ -100,6 +102,102 @@ export default function EntradasXmlClient({
   }, [entradas, filtroStatus, busca])
 
   // ── Importar XML ─────────────────────────────────────────────
+  // Núcleo compartilhado entre "Importar XML" (arquivo local) e "Baixar e
+  // importar" (XML baixado da SEFAZ via Brasil NFe/Focus) — mesmo pipeline
+  // de parse → duplicidade → fornecedor → entrada → itens → auto-mapeamento,
+  // só a origem do XML (arquivo vs. download) muda.
+  async function importarUmXml(xml: string, rotulo: string, origem: 'manual' | 'sefaz'): Promise<typeof resultados[number]> {
+    const nfe = parseNFeXml(xml)
+    if (!nfe) return { arquivo: rotulo, status: 'erro', msg: 'XML inválido ou não é NF-e' }
+    if (!nfe.chave_acesso || nfe.chave_acesso.length !== 44) return { arquivo: rotulo, status: 'erro', msg: 'Chave de acesso inválida' }
+
+    const { data: existente } = await sb.from('nfe_entradas').select('id').eq('empresa_id', empresaId).eq('chave_acesso', nfe.chave_acesso).maybeSingle()
+    if (existente) return { arquivo: rotulo, status: 'duplicado', msg: `NF-e ${nfe.numero} já importada` }
+
+    const fornecedorId = await upsertFornecedor(nfe)
+
+    const { data: entrada, error } = await sb.from('nfe_entradas').insert({
+      empresa_id: empresaId,
+      chave_acesso: nfe.chave_acesso,
+      numero: nfe.numero,
+      serie: nfe.serie,
+      modelo: nfe.modelo,
+      nat_operacao: nfe.nat_operacao,
+      data_emissao: nfe.data_emissao || null,
+      data_entrada: nfe.data_entrada || null,
+      fornecedor_id: fornecedorId,
+      cnpj_fornecedor: nfe.cnpj_fornecedor,
+      nome_fornecedor: nfe.nome_fornecedor,
+      ie_fornecedor: nfe.ie_fornecedor,
+      uf_fornecedor: nfe.uf_fornecedor,
+      cnpj_destinatario: nfe.cnpj_destinatario,
+      valor_produtos: nfe.valor_produtos,
+      valor_frete: nfe.valor_frete,
+      valor_seguro: nfe.valor_seguro,
+      valor_desconto: nfe.valor_desconto,
+      outras_despesas: nfe.outras_despesas,
+      valor_ipi: nfe.valor_ipi,
+      valor_icms: nfe.valor_icms,
+      valor_icms_st: nfe.valor_icms_st,
+      valor_pis: nfe.valor_pis,
+      valor_cofins: nfe.valor_cofins,
+      valor_total: nfe.valor_total,
+      status: 'aguardando_mapeamento',
+      origem,
+      deposito_id: depositoPrincipal,
+      xml_content: xml,
+      operador_nome: operador,
+    }).select().single()
+    if (error) throw error
+
+    if (nfe.itens.length > 0) {
+      await sb.from('nfe_itens').insert(nfe.itens.map(item => ({
+        entrada_id: entrada.id,
+        empresa_id: empresaId,
+        num_item: item.num_item,
+        codigo_fornecedor: item.codigo_fornecedor,
+        ean: item.ean || null,
+        descricao_xml: item.descricao_xml,
+        ncm: item.ncm,
+        cest: item.cest,
+        cfop: item.cfop,
+        unidade_xml: item.unidade_xml,
+        quantidade_xml: item.quantidade_xml,
+        valor_unitario_xml: item.valor_unitario_xml,
+        valor_produto: item.valor_produto,
+        desconto_item: item.desconto_item,
+        frete_item: item.frete_item,
+        seguro_item: item.seguro_item,
+        outras_desp_item: item.outras_desp_item,
+        ipi: item.ipi,
+        icms: item.icms,
+        icms_st: item.icms_st,
+        pis: item.pis,
+        cofins: item.cofins,
+        custo_unitario: calcularCustoItem(item),
+        custo_total: calcularCustoItem(item) * item.quantidade_xml,
+        quantidade_entrada: item.quantidade_xml,
+        fator_conversao: 1,
+        status_mapeamento: 'nao_mapeado',
+      })))
+    }
+
+    if (nfe.duplicatas.length > 0) {
+      await sb.from('nfe_duplicatas').insert(nfe.duplicatas.map(d => ({
+        entrada_id: entrada.id,
+        empresa_id: empresaId,
+        num_dup: d.num_dup,
+        data_vencimento: d.data_vencimento,
+        valor: d.valor,
+      })))
+    }
+
+    await autoMapearItens(entrada.id, nfe.cnpj_fornecedor)
+
+    setEntradas(p => [entrada as Entrada, ...p])
+    return { arquivo: rotulo, status: 'ok', msg: `NF-e ${nfe.numero} importada com ${nfe.itens.length} item(ns)`, id: entrada.id }
+  }
+
   async function processarXmls() {
     if (arquivos.length === 0) return
     if (!depositoPrincipal) {
@@ -113,102 +211,7 @@ export default function EntradasXmlClient({
     for (const arquivo of arquivos) {
       try {
         const xml = await arquivo.text()
-        const nfe = parseNFeXml(xml)
-
-        if (!nfe) { novos.push({ arquivo: arquivo.name, status: 'erro', msg: 'XML inválido ou não é NF-e' }); continue }
-        if (!nfe.chave_acesso || nfe.chave_acesso.length !== 44) { novos.push({ arquivo: arquivo.name, status: 'erro', msg: 'Chave de acesso inválida' }); continue }
-
-        // Verificar duplicado
-        const { data: existente } = await sb.from('nfe_entradas').select('id').eq('empresa_id', empresaId).eq('chave_acesso', nfe.chave_acesso).maybeSingle()
-        if (existente) { novos.push({ arquivo: arquivo.name, status: 'duplicado', msg: `NF-e ${nfe.numero} já importada` }); continue }
-
-        // Verificar/criar fornecedor
-        const fornecedorId = await upsertFornecedor(nfe)
-
-        // Criar entrada
-        const { data: entrada, error } = await sb.from('nfe_entradas').insert({
-          empresa_id: empresaId,
-          chave_acesso: nfe.chave_acesso,
-          numero: nfe.numero,
-          serie: nfe.serie,
-          modelo: nfe.modelo,
-          nat_operacao: nfe.nat_operacao,
-          data_emissao: nfe.data_emissao || null,
-          data_entrada: nfe.data_entrada || null,
-          fornecedor_id: fornecedorId,
-          cnpj_fornecedor: nfe.cnpj_fornecedor,
-          nome_fornecedor: nfe.nome_fornecedor,
-          ie_fornecedor: nfe.ie_fornecedor,
-          uf_fornecedor: nfe.uf_fornecedor,
-          cnpj_destinatario: nfe.cnpj_destinatario,
-          valor_produtos: nfe.valor_produtos,
-          valor_frete: nfe.valor_frete,
-          valor_seguro: nfe.valor_seguro,
-          valor_desconto: nfe.valor_desconto,
-          outras_despesas: nfe.outras_despesas,
-          valor_ipi: nfe.valor_ipi,
-          valor_icms: nfe.valor_icms,
-          valor_icms_st: nfe.valor_icms_st,
-          valor_pis: nfe.valor_pis,
-          valor_cofins: nfe.valor_cofins,
-          valor_total: nfe.valor_total,
-          status: 'aguardando_mapeamento',
-          origem: 'manual',
-          deposito_id: depositoPrincipal,
-          xml_content: xml,
-          operador_nome: operador,
-        }).select().single()
-        if (error) throw error
-
-        // Criar itens
-        if (nfe.itens.length > 0) {
-          await sb.from('nfe_itens').insert(nfe.itens.map(item => ({
-            entrada_id: entrada.id,
-            empresa_id: empresaId,
-            num_item: item.num_item,
-            codigo_fornecedor: item.codigo_fornecedor,
-            ean: item.ean || null,
-            descricao_xml: item.descricao_xml,
-            ncm: item.ncm,
-            cest: item.cest,
-            cfop: item.cfop,
-            unidade_xml: item.unidade_xml,
-            quantidade_xml: item.quantidade_xml,
-            valor_unitario_xml: item.valor_unitario_xml,
-            valor_produto: item.valor_produto,
-            desconto_item: item.desconto_item,
-            frete_item: item.frete_item,
-            seguro_item: item.seguro_item,
-            outras_desp_item: item.outras_desp_item,
-            ipi: item.ipi,
-            icms: item.icms,
-            icms_st: item.icms_st,
-            pis: item.pis,
-            cofins: item.cofins,
-            custo_unitario: calcularCustoItem(item),
-            custo_total: calcularCustoItem(item) * item.quantidade_xml,
-            quantidade_entrada: item.quantidade_xml,
-            fator_conversao: 1,
-            status_mapeamento: 'nao_mapeado',
-          })))
-        }
-
-        // Criar duplicatas
-        if (nfe.duplicatas.length > 0) {
-          await sb.from('nfe_duplicatas').insert(nfe.duplicatas.map(d => ({
-            entrada_id: entrada.id,
-            empresa_id: empresaId,
-            num_dup: d.num_dup,
-            data_vencimento: d.data_vencimento,
-            valor: d.valor,
-          })))
-        }
-
-        // Tentar auto-mapeamento
-        await autoMapearItens(entrada.id, nfe.cnpj_fornecedor)
-
-        novos.push({ arquivo: arquivo.name, status: 'ok', msg: `NF-e ${nfe.numero} importada com ${nfe.itens.length} item(ns)`, id: entrada.id })
-        setEntradas(p => [entrada as Entrada, ...p])
+        novos.push(await importarUmXml(xml, arquivo.name, 'manual'))
       } catch (e: any) {
         novos.push({ arquivo: arquivo.name, status: 'erro', msg: e.message })
       }
@@ -326,6 +329,26 @@ export default function EntradasXmlClient({
       if (!resp.ok) { const d = await resp.json(); throw new Error(d.error) }
       setNfesSefaz(p => p.map(n => n.chave_nfe === chave ? { ...n, manifestado: tipo } : n))
     } catch (e: any) { alert('Erro manifesto: ' + e.message) }
+  }
+
+  async function importarDaSefaz(chave: string, numero: string | null) {
+    if (!depositoPrincipal) { alert('Nenhum depósito cadastrado. Cadastre um depósito em Estoque → Depósitos antes de importar.'); return }
+    setImportandoSefaz(chave)
+    try {
+      const resp = await fetch('/api/sefaz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acao: 'download_xml', chave }),
+      })
+      if (!resp.ok) { const d = await resp.json(); throw new Error(d.error ?? 'Erro ao baixar XML') }
+      const xml = await resp.text()
+      const resultado = await importarUmXml(xml, `NF-e ${numero ?? chave}`, 'sefaz')
+      setImportadosSefaz(p => ({ ...p, [chave]: { ok: resultado.status === 'ok', msg: resultado.msg } }))
+    } catch (e: any) {
+      setImportadosSefaz(p => ({ ...p, [chave]: { ok: false, msg: e.message } }))
+    } finally {
+      setImportandoSefaz(null)
+    }
   }
 
   const totalFinalizado = entradas.filter(e => e.status === 'finalizada').reduce((s, e) => s + (e.valor_total ?? 0), 0)
@@ -559,10 +582,14 @@ export default function EntradasXmlClient({
                       <th className="pb-2 text-right">Valor</th>
                       <th className="pb-2 text-center">Manifesto</th>
                       <th className="pb-2 text-center">Ação</th>
+                      <th className="pb-2 text-center">Entrada</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {nfesSefaz.map((n: any, i) => (
+                    {nfesSefaz.map((n: any, i) => {
+                      const jaImportada = entradas.some(e => e.chave_acesso === n.chave_nfe)
+                      const resultado = importadosSefaz[n.chave_nfe]
+                      return (
                       <tr key={i} className="text-slate-700">
                         <td className="py-2 text-xs font-mono text-slate-400 truncate max-w-[120px]">{n.chave_nfe}</td>
                         <td className="py-2 text-sm">{n.nome_emitente ?? '—'}</td>
@@ -582,8 +609,20 @@ export default function EntradasXmlClient({
                               className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded-lg">Não realizada</button>
                           </div>
                         </td>
+                        <td className="py-2 text-center">
+                          {jaImportada || resultado?.ok ? (
+                            <span className="text-xs text-emerald-600 font-medium">✓ Importada</span>
+                          ) : (
+                            <button onClick={() => importarDaSefaz(n.chave_nfe, n.numero)} disabled={importandoSefaz === n.chave_nfe}
+                              className="px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs rounded-lg">
+                              {importandoSefaz === n.chave_nfe ? 'Baixando...' : '↓ Baixar e importar'}
+                            </button>
+                          )}
+                          {resultado && !resultado.ok && <p className="text-[11px] text-red-500 mt-1 max-w-[140px]">{resultado.msg}</p>}
+                        </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               )}
