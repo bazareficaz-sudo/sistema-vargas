@@ -20,6 +20,7 @@ export type NFeItem = {
   ipi: number
   icms: number
   icms_st: number
+  fcp_st: number
   pis: number
   cofins: number
 }
@@ -64,6 +65,7 @@ export type NFeData = {
   valor_ipi: number
   valor_icms: number
   valor_icms_st: number
+  valor_fcp_st: number
   valor_pis: number
   valor_cofins: number
   valor_total: number
@@ -86,15 +88,19 @@ function num(el: Element | null, tag: string): number {
 }
 
 // Extrai valor de ICMS — vários sub-grupos possíveis
-function getIcms(imposto: Element | null): { icms: number; icms_st: number } {
-  if (!imposto) return { icms: 0, icms_st: 0 }
+// vFCPST (Fundo de Combate à Pobreza sobre a base do ICMS-ST) é um valor
+// À PARTE do vICMSST — soma no total da nota (vFCPST no ICMSTot) mas não
+// era capturado aqui, subestimando o custo real do item.
+function getIcms(imposto: Element | null): { icms: number; icms_st: number; fcp_st: number } {
+  if (!imposto) return { icms: 0, icms_st: 0, fcp_st: 0 }
   const icmsEl = imposto.getElementsByTagName('ICMS')[0]
-  if (!icmsEl) return { icms: 0, icms_st: 0 }
+  if (!icmsEl) return { icms: 0, icms_st: 0, fcp_st: 0 }
   const child = icmsEl.children[0]
-  if (!child) return { icms: 0, icms_st: 0 }
+  if (!child) return { icms: 0, icms_st: 0, fcp_st: 0 }
   const vICMS   = num(child, 'vICMS')
   const vICMSST = num(child, 'vICMSST')
-  return { icms: vICMS, icms_st: vICMSST }
+  const vFCPST  = num(child, 'vFCPST')
+  return { icms: vICMS, icms_st: vICMSST, fcp_st: vFCPST }
 }
 
 function getIpi(imposto: Element | null): number {
@@ -158,7 +164,7 @@ export function parseNFeXml(xmlString: string): NFeData | null {
       const vProd    = num(prod, 'vProd')
       const proporcao= valorProdutos > 0 ? vProd / valorProdutos : 0
 
-      const { icms, icms_st } = getIcms(imposto)
+      const { icms, icms_st, fcp_st } = getIcms(imposto)
 
       return {
         num_item:           nItem,
@@ -179,6 +185,7 @@ export function parseNFeXml(xmlString: string): NFeData | null {
         ipi:                getIpi(imposto),
         icms,
         icms_st,
+        fcp_st,
         pis:                getPis(imposto),
         cofins:             getCofins(imposto),
       }
@@ -233,6 +240,7 @@ export function parseNFeXml(xmlString: string): NFeData | null {
       valor_ipi:       num(totEl, 'vIPI'),
       valor_icms:      num(totEl, 'vICMS'),
       valor_icms_st:   num(totEl, 'vICMSST') || num(totEl, 'vST'),
+      valor_fcp_st:    num(totEl, 'vFCPST'),
       valor_pis:       num(totEl, 'vPIS'),
       valor_cofins:    num(totEl, 'vCOFINS'),
       valor_total:     valorTotal,
@@ -255,7 +263,9 @@ export function parseNFeXml(xmlString: string): NFeData | null {
 export function calcularCustoItem(item: NFeItem, incluirIpi = true, incluirIcmsSt = true): number {
   const base   = item.valor_produto - item.desconto_item
   const rateios= item.frete_item + item.seguro_item + item.outras_desp_item
-  const impostos = (incluirIpi ? item.ipi : 0) + (incluirIcmsSt ? item.icms_st : 0)
+  // FCP-ST é um adicional sobre a base do ICMS-ST (não um imposto separado
+  // no DANFE), por isso segue o mesmo toggle "incluir ICMS-ST".
+  const impostos = (incluirIpi ? item.ipi : 0) + (incluirIcmsSt ? item.icms_st + (item.fcp_st || 0) : 0)
   const total  = base + rateios + impostos
   const quantidade = (item as any).quantidade_entrada || item.quantidade_xml
   return quantidade > 0 ? total / quantidade : 0

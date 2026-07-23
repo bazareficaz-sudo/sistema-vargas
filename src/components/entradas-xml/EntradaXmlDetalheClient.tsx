@@ -503,11 +503,12 @@ export default function EntradaXmlDetalheClient({
           </div>
           <div className="bg-white border border-slate-100 rounded-2xl p-4 space-y-3 col-span-2 shadow-sm">
             <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-wide">Totais</h3>
-            <div className="grid grid-cols-5 gap-3">
+            <div className="grid grid-cols-6 gap-3">
               <Metric label="Produtos" value={fmt(entrada.valor_produtos)} />
               <Metric label="Frete" value={fmt(entrada.valor_frete)} />
               <Metric label="IPI" value={fmt(entrada.valor_ipi)} />
               <Metric label="ICMS ST" value={fmt(entrada.valor_icms_st)} />
+              <Metric label="FCP-ST" value={fmt(entrada.valor_fcp_st || 0)} />
               <Metric label="Total NF-e" value={fmt(entrada.valor_total)} color="text-emerald-600" />
             </div>
           </div>
@@ -716,7 +717,7 @@ export default function EntradaXmlDetalheClient({
                 <th className="px-3 py-2 text-left">Produto</th>
                 <th className="px-3 py-2 text-right">Vl. Prod.</th>
                 <th className="px-3 py-2 text-right">IPI</th>
-                <th className="px-3 py-2 text-right">ST</th>
+                <th className="px-3 py-2 text-right">ST+FCP</th>
                 <th className="px-3 py-2 text-right">Frete+</th>
                 <th className="px-3 py-2 text-right font-semibold text-slate-700">Custo Unit.</th>
               </tr></thead>
@@ -728,7 +729,7 @@ export default function EntradaXmlDetalheClient({
                       <td className="px-3 py-2 text-slate-700 max-w-[180px] truncate">{item.descricao_sistema || item.descricao_xml}</td>
                       <td className="px-3 py-2 text-right">{fmt(item.valor_produto)}</td>
                       <td className="px-3 py-2 text-right">{fmt(item.ipi || 0)}</td>
-                      <td className="px-3 py-2 text-right">{fmt(item.icms_st || 0)}</td>
+                      <td className="px-3 py-2 text-right">{fmt((item.icms_st || 0) + (item.fcp_st || 0))}</td>
                       <td className="px-3 py-2 text-right">{fmt((item.frete_item || 0) + (item.seguro_item || 0) + (item.outras_desp_item || 0))}</td>
                       <td className="px-3 py-2 text-right font-semibold text-emerald-600">{fmt(custo)}</td>
                     </tr>
