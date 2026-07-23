@@ -55,10 +55,22 @@ export default function EntradaXmlDetalheClient({
   const [mapBusca, setMapBusca] = useState('')
   const [mapFator, setMapFator] = useState('1')
   const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(null)
+  const [indiceDestacado, setIndiceDestacado] = useState(0)
+  const buscaInputRef = useRef<HTMLInputElement>(null)
   const fatorInputRef = useRef<HTMLInputElement>(null)
+  const linhaRefs = useRef<Record<number, HTMLTableRowElement | null>>({})
   const [criandoProduto, setCriandoProduto] = useState(false)
   const [novoProd, setNovoProd] = useState({ nome: '', ean: '', ncm: '', cest: '', unidade: 'UN', precoCusto: '0', precoVenda: '0' })
   const [salvandoNovoProduto, setSalvandoNovoProduto] = useState(false)
+
+  function abrirMapModal(item: Item) {
+    setMapModal(item)
+    setMapBusca('')
+    setMapFator(String(item.fator_conversao || 1))
+    setProdutoSelecionado(null)
+    setIndiceDestacado(0)
+    setCriandoProduto(false)
+  }
 
   function fecharMapModal() {
     setMapModal(null)
@@ -66,16 +78,40 @@ export default function EntradaXmlDetalheClient({
     setCriandoProduto(false)
   }
 
-  function iniciarCriarProduto() {
-    if (!mapModal) return
-    const unidadeXml = (mapModal.unidade_xml || '').toUpperCase()
+  // Foca a busca sempre que o modal abre (ou quando volta da tela de criar produto).
+  useEffect(() => {
+    if (mapModal && !criandoProduto) {
+      const t = setTimeout(() => buscaInputRef.current?.focus(), 50)
+      return () => clearTimeout(t)
+    }
+  }, [mapModal, criandoProduto])
+
+  // Reseta o destaque do teclado a cada nova busca.
+  useEffect(() => { setIndiceDestacado(0) }, [mapBusca])
+
+  function moverDestaque(delta: number, total: number) {
+    setIndiceDestacado(i => {
+      const novo = Math.max(0, Math.min(total - 1, i + delta))
+      setTimeout(() => linhaRefs.current[novo]?.scrollIntoView({ block: 'nearest' }), 0)
+      return novo
+    })
+  }
+
+  function selecionarProduto(p: Produto) {
+    setProdutoSelecionado(p)
+    setTimeout(() => fatorInputRef.current?.focus(), 0)
+  }
+
+  function iniciarCriarProduto(item: Item | null) {
+    if (!item) return
+    const unidadeXml = (item.unidade_xml || '').toUpperCase()
     setNovoProd({
-      nome: mapModal.descricao_xml || '',
-      ean: mapModal.ean || '',
-      ncm: mapModal.ncm || '',
-      cest: mapModal.cest || '',
+      nome: item.descricao_xml || '',
+      ean: item.ean || '',
+      ncm: item.ncm || '',
+      cest: item.cest || '',
       unidade: UNIDADES.includes(unidadeXml) ? unidadeXml : 'UN',
-      precoCusto: String(mapModal.custo_unitario || mapModal.valor_unitario_xml || 0),
+      precoCusto: String(item.custo_unitario || item.valor_unitario_xml || 0),
       precoVenda: '0',
     })
     setCriandoProduto(true)
@@ -558,10 +594,14 @@ export default function EntradaXmlDetalheClient({
                     </td>
                     <td className="px-3 py-2 text-center">
                       {!readonly && item.status_mapeamento !== 'ignorado' && (
-                        <div className="flex gap-1 justify-center">
-                          <button onClick={() => { setMapModal(item); setMapBusca(''); setMapFator(String(item.fator_conversao || 1)); setProdutoSelecionado(null); setCriandoProduto(false) }}
+                        <div className="flex gap-1 justify-center flex-wrap">
+                          <button onClick={() => abrirMapModal(item)}
                             className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg">
                             {item.produto_id ? 'Alterar' : 'Mapear'}
+                          </button>
+                          <button onClick={() => { abrirMapModal(item); iniciarCriarProduto(item) }}
+                            className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-600 text-xs rounded-lg">
+                            Criar Produto
                           </button>
                           <button onClick={() => ignorarItem(item)}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-500 text-xs rounded-lg">
@@ -969,8 +1009,17 @@ export default function EntradaXmlDetalheClient({
             ) : (
               <>
                 <div className="p-4 border-b border-slate-100 flex gap-3">
-                  <input value={mapBusca} onChange={e => setMapBusca(e.target.value)}
+                  <input ref={buscaInputRef} value={mapBusca} onChange={e => setMapBusca(e.target.value)}
                     placeholder="Buscar por nome, SKU ou EAN..."
+                    onKeyDown={e => {
+                      if (e.key === 'ArrowDown') { e.preventDefault(); moverDestaque(1, produtosFiltrados.length) }
+                      else if (e.key === 'ArrowUp') { e.preventDefault(); moverDestaque(-1, produtosFiltrados.length) }
+                      else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const p = produtosFiltrados[indiceDestacado]
+                        if (p) selecionarProduto(p)
+                      }
+                    }}
                     className="flex-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500 placeholder-slate-400" />
                   <div>
                     <label className="text-slate-400 text-xs">Fator conversão</label>
@@ -986,7 +1035,7 @@ export default function EntradaXmlDetalheClient({
                   </div>
                 </div>
                 <div className="px-4 py-2 border-b border-slate-100">
-                  <button onClick={iniciarCriarProduto} className="text-xs text-purple-600 hover:text-purple-700 font-medium">
+                  <button onClick={() => iniciarCriarProduto(mapModal)} className="text-xs text-purple-600 hover:text-purple-700 font-medium">
                     + Criar produto novo a partir deste item
                   </button>
                 </div>
@@ -998,10 +1047,13 @@ export default function EntradaXmlDetalheClient({
                   ) : (
                     <table className="w-full text-sm">
                       <tbody className="divide-y divide-slate-50">
-                        {produtosFiltrados.map(p => (
+                        {produtosFiltrados.map((p, i) => {
+                          const destacado = produtoSelecionado ? produtoSelecionado.id === p.id : i === indiceDestacado
+                          return (
                           <tr key={p.id}
-                            className={`text-slate-700 cursor-pointer ${produtoSelecionado?.id === p.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
-                            onClick={() => { setProdutoSelecionado(p); setTimeout(() => fatorInputRef.current?.focus(), 0) }}>
+                            ref={el => { linhaRefs.current[i] = el }}
+                            className={`text-slate-700 cursor-pointer ${destacado ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                            onClick={() => selecionarProduto(p)}>
                             <td className="px-4 py-2.5">
                               <p className="text-slate-800 text-xs font-medium">{p.nome}</p>
                               <p className="text-slate-400 text-xs">SKU: {p.sku} • EAN: {p.ean || '—'}</p>
@@ -1015,7 +1067,8 @@ export default function EntradaXmlDetalheClient({
                               <p className={`text-xs ${p.estoque <= 0 ? 'text-red-500' : 'text-emerald-600'}`}>{p.estoque} un.</p>
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   )}
@@ -1023,7 +1076,7 @@ export default function EntradaXmlDetalheClient({
                 <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-400 text-center">
                   {produtoSelecionado
                     ? <>Selecionado: <span className="text-slate-600 font-medium">{produtoSelecionado.nome}</span> — ajuste o fator e aperte Enter pra confirmar</>
-                    : <>Clique num produto pra selecionar · Fator {mapFator}x = {((parseFloat(mapFator) || 1) * mapModal.quantidade_xml).toFixed(3)} unidades no sistema</>}
+                    : <>↑↓ pra navegar, Enter pra selecionar · Fator {mapFator}x = {((parseFloat(mapFator) || 1) * mapModal.quantidade_xml).toFixed(3)} unidades no sistema</>}
                 </div>
               </>
             )}
