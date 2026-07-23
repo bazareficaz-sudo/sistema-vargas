@@ -6,11 +6,30 @@ import { FiscalProviderError, type DfeListaResultado, type TipoManifesto } from 
 // (brasilnfe.com.br/api/consultas e /api/eventos-nf-e-nfc-e): a Brasil NFe
 // importa as NFe's emitidas contra o CNPJ da empresa e já faz o manifesto
 // automático de ciência; a consulta/manifesto explícito acontece por aqui.
-// Diferente da Focus (paginação incremental por versão/NSU), aqui a
-// consulta é por período (DtInicio/DtFim) — não existe cursor incremental
-// real, então tratamos `ultimaVersao` como a data ISO da última consulta
-// bem-sucedida (janela de busca = [ultimaVersao, agora]), com fallback de
-// 90 dias pra primeira consulta.
+//
+// Duas correções feitas com base em teste direto contra a API de produção
+// (não só a doc resumida por IA, que se mostrou errada nos dois pontos):
+//
+// 1. TipoDocumentoFiscal: a doc dizia "0 = Entradas, 1 = Saídas", mas o
+//    teste real mostrou o oposto — TipoDocumentoFiscal=0 devolveu notas
+//    com CnpjEmissor = o próprio CNPJ da empresa (ou seja, são as SAÍDAS,
+//    as NFC-e que a própria empresa emite), e TipoDocumentoFiscal=1 (o
+//    valor correto pra ENTRADAS/notas de fornecedor) devolveu vazio no
+//    teste — o que pode ser porque ainda não há nenhuma nota de
+//    fornecedor rastreada pela Brasil NFe pra este CNPJ (vale confirmar
+//    com o suporte deles se isso exige alguma habilitação separada).
+//
+// 2. Paginação: diferente da Focus (que pagina de verdade por
+//    versão/NSU), a Brasil NFe não tem cursor incremental aqui — é uma
+//    busca por período (DtInicio/DtFim) só. A implementação anterior
+//    tratava `ultimaVersao` como o início da janela da PRÓXIMA consulta,
+//    o que fazia a janela encolher a cada clique em "Atualizar" (da data
+//    da última consulta até agora) — na prática, depois do primeiro
+//    clique, a consulta seguinte só via os últimos minutos, perdendo
+//    tudo que fosse mais antigo. Agora a janela é sempre fixa (últimos
+//    180 dias, prazo usual de relevância pra manifestação do
+//    destinatário) a partir de "agora", em toda consulta.
+const JANELA_DIAS = 180
 
 const TIPO_MANIFESTACAO: Record<TipoManifesto, number> = {
   confirmacao: 1,
@@ -33,14 +52,13 @@ function normalizarDocumento(d: any) {
   }
 }
 
-export async function listarDfe(creds: BrasilNFeCredentials, _cnpj: string, ultimaVersao: string): Promise<DfeListaResultado> {
+export async function listarDfe(creds: BrasilNFeCredentials, _cnpj: string, _ultimaVersao: string): Promise<DfeListaResultado> {
   const agora = new Date()
-  const inicioValido = ultimaVersao && ultimaVersao !== '0' && !isNaN(Date.parse(ultimaVersao))
-  const dtInicio = inicioValido ? new Date(ultimaVersao) : new Date(agora.getTime() - 90 * 24 * 60 * 60 * 1000)
+  const dtInicio = new Date(agora.getTime() - JANELA_DIAS * 24 * 60 * 60 * 1000)
 
   const { status, text } = await brasilNFeRequest(creds, '/services/fiscal/ObterNotasFiscais', {
     TipoAmbiente: tipoAmbiente(creds.ambiente),
-    TipoDocumentoFiscal: 0, // 0 = entradas (notas contra o CNPJ da empresa)
+    TipoDocumentoFiscal: 1, // 1 = entradas (notas de fornecedor contra o CNPJ) — confirmado por teste real, doc tinha 0/1 trocados
     DtInicio: dtInicio.toISOString(),
     DtFim: agora.toISOString(),
   })
@@ -77,7 +95,7 @@ export async function baixarXml(creds: BrasilNFeCredentials, chave: string): Pro
   const { status, text } = await brasilNFeRequest(creds, '/services/fiscal/ObterArquivoNotaFiscal', {
     ChaveNF: chave,
     FileType: 1, // 1 = XML
-    TipoDocumentoFiscal: 0, // entrada
+    TipoDocumentoFiscal: 1, // entrada (ver nota em listarDfe)
   })
   if (status >= 400) {
     throw new FiscalProviderError(`Erro ${status} ao baixar XML da nota ${chave} na Brasil NFe`, 'brasilnfe_erro')
