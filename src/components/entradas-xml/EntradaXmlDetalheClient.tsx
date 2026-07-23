@@ -14,7 +14,11 @@ type Entrada = Record<string, any>
 type Item = Record<string, any>
 type Duplicata = Record<string, any>
 type Deposito = { id: string; nome: string; principal: boolean }
-type Produto = { id: string; nome: string; sku: string; ean: string | null; estoque: number; unidade: string; preco_venda: number; preco_custo: number; marca: string | null; categoria: string | null }
+type Produto = {
+  id: string; nome: string; sku: string; ean: string | null; estoque: number; unidade: string
+  preco_venda: number; preco_custo: number; marca: string | null; categoria: string | null
+  ncm?: string | null; cest?: string | null; codigo_fornecedor?: string | null
+}
 type Fornecedor = { id: string; nome: string; cnpj: string }
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
@@ -183,10 +187,11 @@ export default function EntradaXmlDetalheClient({
     if (ids.length === 0) { setProdutosAtuais({}); return }
     let ativo = true
     sb.from('produtos')
-      .select('id, nome, sku, ean, estoque, unidade, preco_venda, preco_custo, marca, categoria')
+      .select('id, nome, sku, ean, estoque, unidade, preco_venda, preco_custo, marca, categoria, ncm, cest, codigo_fornecedor')
       .in('id', ids)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (!ativo) return
+        if (error) { console.error('Erro ao buscar dados atuais dos produtos:', error); return }
         const mapa: Record<string, Produto> = {}
         for (const p of (data ?? []) as Produto[]) mapa[p.id] = p
         setProdutosAtuais(mapa)
@@ -378,6 +383,68 @@ export default function EntradaXmlDetalheClient({
     finally { setSalvando(false) }
   }
 
+  // ── Atualização de dados fiscais/códigos do produto ─────────────────────
+  // Compara NCM/CEST/EAN/Código do fornecedor do item da NF-e com o que já
+  // está cadastrado no produto vinculado — só sugere quando há diferença
+  // real (o produto está vazio nesse campo, ou tem um valor diferente do
+  // que veio na nota). O usuário escolhe, por item, se quer atualizar.
+  type CampoFiscal = 'ncm' | 'cest' | 'ean' | 'codigo_fornecedor'
+  const CAMPOS_FISCAIS: { campo: CampoFiscal; label: string }[] = [
+    { campo: 'ncm', label: 'NCM' },
+    { campo: 'cest', label: 'CEST' },
+    { campo: 'ean', label: 'EAN' },
+    { campo: 'codigo_fornecedor', label: 'Cód. Fornecedor' },
+  ]
+
+  const candidatosFiscais = itens
+    .filter(i => i.produto_id && i.status_mapeamento !== 'ignorado' && produtosAtuais[i.produto_id])
+    .map(i => {
+      const produto = produtosAtuais[i.produto_id]
+      const diffs = CAMPOS_FISCAIS.filter(({ campo }) => {
+        const doXml = (i[campo] ?? '').toString().trim()
+        const doProduto = (produto[campo] ?? '').toString().trim()
+        return doXml && doXml !== doProduto
+      })
+      return { item: i, produto, diffs }
+    })
+    .filter(c => c.diffs.length > 0)
+
+  const [selecaoFiscal, setSelecaoFiscal] = useState<Record<string, boolean>>({})
+  const [aplicandoFiscal, setAplicandoFiscal] = useState(false)
+
+  useEffect(() => {
+    // Marca por padrão os itens que têm alguma diferença — o usuário
+    // desmarca o que quiser ignorar.
+    setSelecaoFiscal(prev => {
+      const novo = { ...prev }
+      for (const c of candidatosFiscais) {
+        if (!(c.item.id in novo)) novo[c.item.id] = true
+      }
+      return novo
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itens, produtosAtuais])
+
+  async function aplicarAtualizacoesFiscais() {
+    const selecionados = candidatosFiscais.filter(c => selecaoFiscal[c.item.id])
+    if (selecionados.length === 0) return
+    setAplicandoFiscal(true)
+    try {
+      for (const { item, produto, diffs } of selecionados) {
+        const patch: Record<string, string> = {}
+        for (const { campo } of diffs) patch[campo] = (item[campo] ?? '').toString().trim()
+        const { error } = await sb.from('produtos').update(patch).eq('id', produto.id).eq('empresa_id', empresaId)
+        if (error) throw error
+        setProdutosAtuais(p => ({ ...p, [produto.id]: { ...p[produto.id], ...patch } }))
+      }
+      alert(`Dados fiscais atualizados em ${selecionados.length} produto(s).`)
+    } catch (e: any) {
+      alert('Erro ao atualizar dados fiscais: ' + e.message)
+    } finally {
+      setAplicandoFiscal(false)
+    }
+  }
+
   // ── Finalizar entrada ────────────────────────────────────────────────────
   async function finalizar() {
     setFinalizando(true)
@@ -482,6 +549,7 @@ export default function EntradaXmlDetalheClient({
     { id: 'conferencia', label: '📦 Conferência' },
     { id: 'custos',      label: '💰 Custos' },
     { id: 'precos',      label: '🏷 Revisão Preços' },
+    { id: 'fiscal',      label: `🧬 Dados Fiscais${candidatosFiscais.length > 0 ? ` (${candidatosFiscais.length})` : ''}` },
     { id: 'financeiro',  label: '🧾 Financeiro' },
     { id: 'finalizar',   label: '✅ Finalizar' },
   ]
@@ -877,6 +945,72 @@ export default function EntradaXmlDetalheClient({
               <button onClick={salvarPrecos} disabled={salvando}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50">
                 {salvando ? 'Salvando...' : 'Atualizar Preços →'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ABA DADOS FISCAIS ─────────────────────────────────────── */}
+      {aba === 'fiscal' && (
+        <div className="space-y-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-700 text-sm">
+            Compara NCM, CEST, EAN e Código do Fornecedor do XML com o que já está cadastrado no produto vinculado.
+            Só aparece aqui quando há diferença de verdade — desmarque o que não quiser atualizar.
+          </div>
+          {candidatosFiscais.length === 0 ? (
+            <p className="text-slate-400 text-center py-8 text-sm">Nenhuma diferença encontrada entre o XML e o cadastro dos produtos mapeados.</p>
+          ) : (
+            <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+              <table className="w-full text-sm">
+                <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
+                  <th className="px-3 py-2 text-center">
+                    <input type="checkbox"
+                      checked={candidatosFiscais.length > 0 && candidatosFiscais.every(c => selecaoFiscal[c.item.id])}
+                      onChange={e => setSelecaoFiscal(Object.fromEntries(candidatosFiscais.map(c => [c.item.id, e.target.checked])))}
+                    />
+                  </th>
+                  <th className="px-3 py-2 text-left">Produto</th>
+                  {CAMPOS_FISCAIS.map(({ campo, label }) => (
+                    <th key={campo} className="px-3 py-2 text-left">{label}</th>
+                  ))}
+                </tr></thead>
+                <tbody className="divide-y divide-slate-50">
+                  {candidatosFiscais.map(({ item, produto, diffs }) => (
+                    <tr key={item.id} className={readonly ? 'opacity-60' : ''}>
+                      <td className="px-3 py-2 text-center">
+                        <input type="checkbox" disabled={readonly}
+                          checked={!!selecaoFiscal[item.id]}
+                          onChange={e => setSelecaoFiscal(p => ({ ...p, [item.id]: e.target.checked }))} />
+                      </td>
+                      <td className="px-3 py-2 text-slate-800 text-xs max-w-[180px] truncate">{produto.nome}</td>
+                      {CAMPOS_FISCAIS.map(({ campo }) => {
+                        const mudou = diffs.some(d => d.campo === campo)
+                        return (
+                          <td key={campo} className="px-3 py-2 text-xs">
+                            {mudou ? (
+                              <span>
+                                <span className="text-slate-400 line-through">{produto[campo] || '—'}</span>
+                                {' → '}
+                                <span className="text-emerald-600 font-medium">{item[campo]}</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">{produto[campo] || '—'}</span>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!readonly && candidatosFiscais.length > 0 && (
+            <div className="flex justify-end">
+              <button onClick={aplicarAtualizacoesFiscais} disabled={aplicandoFiscal || candidatosFiscais.every(c => !selecaoFiscal[c.item.id])}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50">
+                {aplicandoFiscal ? 'Aplicando...' : `Aplicar atualizações selecionadas`}
               </button>
             </div>
           )}
