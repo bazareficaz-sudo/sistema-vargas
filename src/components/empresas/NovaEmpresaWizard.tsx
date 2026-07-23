@@ -785,16 +785,24 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 -mt-2">O provedor é definido pelo administrador do sistema, não é escolhido aqui — só o token e o certificado.</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Token — Produção">
-                    <input type="password" value={form.token_producao} onChange={e => set('token_producao', e.target.value)}
-                      className={`${INPUT} font-mono text-xs`} placeholder="token de produção" />
-                  </Field>
-                  <Field label="Token — Homologação">
-                    <input type="password" value={form.token_homologacao} onChange={e => set('token_homologacao', e.target.value)}
-                      className={`${INPUT} font-mono text-xs`} placeholder="token de homologação (testes)" />
-                  </Field>
-                </div>
+                {editando && empresaEditando?.nfe_config?.provider === 'brasilnfe' ? (
+                  <div className={`border rounded-lg p-3 text-xs ${form.token_producao ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                    {form.token_producao
+                      ? '✅ Token gerado automaticamente pela Brasil NFe — o cliente não precisa digitar nada aqui.'
+                      : '⏳ Token ainda não gerado — cadastre a empresa em saas-admin → Fiscal (botão "Cadastrar na Brasil NFe") pra gerar automaticamente via API.'}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Token — Produção">
+                      <input type="password" value={form.token_producao} onChange={e => set('token_producao', e.target.value)}
+                        className={`${INPUT} font-mono text-xs`} placeholder="token de produção" />
+                    </Field>
+                    <Field label="Token — Homologação">
+                      <input type="password" value={form.token_homologacao} onChange={e => set('token_homologacao', e.target.value)}
+                        className={`${INPUT} font-mono text-xs`} placeholder="token de homologação (testes)" />
+                    </Field>
+                  </div>
+                )}
                 {editando && empresaEditando?.nfe_config?.provider === 'brasilnfe' ? (
                   <>
                     {empresaEditando?.nfe_config?.credenciais?.token_producao ? (

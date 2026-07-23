@@ -24,15 +24,18 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
   const [salvandoUserToken, setSalvandoUserToken] = useState(false)
   const [cadastrandoEmpresa, setCadastrandoEmpresa] = useState<string | null>(null)
   const [resultadoCadastro, setResultadoCadastro] = useState<Record<string, string>>({})
+  const [erroPadrao, setErroPadrao] = useState('')
+  const [erroEmpresa, setErroEmpresa] = useState('')
+  const [erroUserToken, setErroUserToken] = useState('')
 
   async function salvarPadrao() {
     setSalvandoPadrao(true)
+    setErroPadrao('')
     try {
-      if (configId) {
-        await supabase.from('sistema_config_fiscal').update({ provider_padrao: providerPadrao, updated_at: new Date().toISOString() }).eq('id', configId)
-      } else {
-        await supabase.from('sistema_config_fiscal').insert({ provider_padrao: providerPadrao })
-      }
+      const { error } = configId
+        ? await supabase.from('sistema_config_fiscal').update({ provider_padrao: providerPadrao, updated_at: new Date().toISOString() }).eq('id', configId)
+        : await supabase.from('sistema_config_fiscal').insert({ provider_padrao: providerPadrao })
+      if (error) { setErroPadrao(error.message); return }
       router.refresh()
     } finally {
       setSalvandoPadrao(false)
@@ -41,12 +44,14 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
 
   async function trocarProviderEmpresa(empresaId: string, novoProvider: string) {
     setSalvandoEmpresa(empresaId)
+    setErroEmpresa('')
     try {
-      await supabase.from('nfe_config').upsert({
+      const { error } = await supabase.from('nfe_config').upsert({
         empresa_id: empresaId,
         provider: novoProvider,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id' })
+      if (error) { setErroEmpresa(error.message); return }
       router.refresh()
     } finally {
       setSalvandoEmpresa(null)
@@ -55,12 +60,12 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
 
   async function salvarUserToken() {
     setSalvandoUserToken(true)
+    setErroUserToken('')
     try {
-      if (configId) {
-        await supabase.from('sistema_config_fiscal').update({ brasilnfe_user_token: userToken || null, updated_at: new Date().toISOString() }).eq('id', configId)
-      } else {
-        await supabase.from('sistema_config_fiscal').insert({ provider_padrao: providerPadrao, brasilnfe_user_token: userToken || null })
-      }
+      const { error } = configId
+        ? await supabase.from('sistema_config_fiscal').update({ brasilnfe_user_token: userToken || null, updated_at: new Date().toISOString() }).eq('id', configId)
+        : await supabase.from('sistema_config_fiscal').insert({ provider_padrao: providerPadrao, brasilnfe_user_token: userToken || null })
+      if (error) { setErroUserToken(error.message); return }
       router.refresh()
     } finally {
       setSalvandoUserToken(false)
@@ -112,6 +117,7 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
             {salvandoPadrao ? 'Salvando...' : 'Salvar'}
           </button>
         </div>
+        {erroPadrao && <p className="text-xs text-red-400 mt-2">{erroPadrao}</p>}
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-md">
@@ -125,6 +131,7 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
             {salvandoUserToken ? 'Salvando...' : 'Salvar'}
           </button>
         </div>
+        {erroUserToken && <p className="text-xs text-red-400 mt-2">{erroUserToken}</p>}
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
@@ -133,6 +140,7 @@ export default function FiscalAdminClient({ providerPadraoInicial, configId, bra
           <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar empresa..."
             className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 w-56" />
         </div>
+        {erroEmpresa && <p className="text-xs text-red-400 px-4 py-2 border-b border-slate-800">{erroEmpresa}</p>}
         <table className="w-full text-sm">
           <thead className="bg-slate-800 border-b border-slate-700">
             <tr>
