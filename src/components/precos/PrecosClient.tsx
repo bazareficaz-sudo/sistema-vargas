@@ -33,6 +33,8 @@ type Props = {
   categoriaFiltro: string
   categorias: Categoria[]
   empresaId: string
+  idsFiltro?: string
+  origemFiltro?: string
 }
 
 const ABAS = [
@@ -51,9 +53,10 @@ function calcMarkup(custo: number, venda: number) {
 
 export default function PrecosClient({
   produtos: inicial, total, pagina, totalPaginas, q: qInicial,
-  abaAtiva: abaInicial, categoriaFiltro, categorias, empresaId
+  abaAtiva: abaInicial, categoriaFiltro, categorias, empresaId, idsFiltro, origemFiltro
 }: Props) {
   const router = useRouter()
+  const filtroPorIds = !!idsFiltro
   const [produtos, setProdutos] = useState(inicial)
   const [aba, setAba] = useState(abaInicial)
   const [q, setQ] = useState(qInicial)
@@ -322,6 +325,17 @@ export default function PrecosClient({
         )}
       </div>
 
+      {filtroPorIds && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-center justify-between">
+          <span className="text-sm text-blue-700">
+            Mostrando {total} produto(s){origemFiltro ? ` — ${origemFiltro}` : ''}, incluindo kits que usam algum deles como componente.
+          </span>
+          <a href="/dashboard/precos" className="text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap ml-3">
+            Ver todos os produtos →
+          </a>
+        </div>
+      )}
+
       {/* Abas */}
       <div className="flex items-end gap-6 border-b border-gray-200 mb-5">
         {ABAS.map(a => (
@@ -334,26 +348,28 @@ export default function PrecosClient({
       </div>
 
       {/* Busca + filtro */}
-      <div className="flex items-center gap-3 mb-4">
-        <form onSubmit={e => { e.preventDefault(); navegar({ q, pagina: '1' }) }} className="flex gap-2 flex-1 max-w-lg">
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input value={q} onChange={e => setQ(e.target.value)}
-              placeholder="Buscar produto..."
-              className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
-          </div>
-          <button type="submit" className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 bg-white">Buscar</button>
-        </form>
-        <select value={categoriaFiltro}
-          onChange={e => navegar({ categoria: e.target.value, pagina: '1' })}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500 bg-white">
-          <option value="">Todas as categorias</option>
-          {categorias.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
-        </select>
-        <span className="text-sm text-gray-500">{total.toLocaleString('pt-BR')} produtos</span>
-      </div>
+      {!filtroPorIds && (
+        <div className="flex items-center gap-3 mb-4">
+          <form onSubmit={e => { e.preventDefault(); navegar({ q, pagina: '1' }) }} className="flex gap-2 flex-1 max-w-lg">
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input value={q} onChange={e => setQ(e.target.value)}
+                placeholder="Buscar produto..."
+                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
+            </div>
+            <button type="submit" className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 bg-white">Buscar</button>
+          </form>
+          <select value={categoriaFiltro}
+            onChange={e => navegar({ categoria: e.target.value, pagina: '1' })}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500 bg-white">
+            <option value="">Todas as categorias</option>
+            {categorias.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+          </select>
+          <span className="text-sm text-gray-500">{total.toLocaleString('pt-BR')} produtos</span>
+        </div>
+      )}
 
       {/* Barra de ações em massa */}
       {selecionados.size > 0 && (
