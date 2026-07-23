@@ -7,29 +7,46 @@ import { FiscalProviderError, type DfeListaResultado, type TipoManifesto } from 
 // importa as NFe's emitidas contra o CNPJ da empresa e já faz o manifesto
 // automático de ciência; a consulta/manifesto explícito acontece por aqui.
 //
-// Duas correções feitas com base em teste direto contra a API de produção
-// (não só a doc resumida por IA, que se mostrou errada nos dois pontos):
+// Correções feitas com base em teste direto contra a API de produção (não
+// só a doc resumida por IA, que se mostrou pouco confiável neste endpoint):
 //
-// 1. TipoDocumentoFiscal: a doc dizia "0 = Entradas, 1 = Saídas", mas o
-//    teste real mostrou o oposto — TipoDocumentoFiscal=0 devolveu notas
-//    com CnpjEmissor = o próprio CNPJ da empresa (ou seja, são as SAÍDAS,
-//    as NFC-e que a própria empresa emite), e TipoDocumentoFiscal=1 (o
-//    valor correto pra ENTRADAS/notas de fornecedor) devolveu vazio no
-//    teste — o que pode ser porque ainda não há nenhuma nota de
-//    fornecedor rastreada pela Brasil NFe pra este CNPJ (vale confirmar
-//    com o suporte deles se isso exige alguma habilitação separada).
+// 1. TipoDocumentoFiscal (0/1): testado nos dois valores contra o CNPJ
+//    real do Bazar Eficaz — 0 devolveu só notas onde a própria empresa é
+//    emitente (SAÍDA), e 1 devolveu o erro "Não existe notas fiscais para
+//    o período informado" mesmo havendo notas de fornecedor genuínas no
+//    período (confirmado comparando com o painel da Brasil NFe, que
+//    mostrava 767 notas recebidas). Ou seja, o parâmetro em si não
+//    funciona como documentado pra filtrar direção — a solução que
+//    funciona de verdade é OMITIR esse campo (devolve tudo, entrada e
+//    saída misturadas) e classificar no nosso lado comparando
+//    CnpjDestinatario/CnpjEmissor com o CNPJ da empresa.
 //
-// 2. Paginação: diferente da Focus (que pagina de verdade por
+// 2. Entre as ~2000 notas "entrada" que sobram após esse filtro, a
+//    grande maioria (ModeloDocumento=57) são CT-e de frete de
+//    marketplace (Shopee/eBazar — valores pequenos, tipo R$2-20), não
+//    XML de compra de mercadoria. Só ModeloDocumento=55 é NF-e de
+//    verdade — filtramos só esses pra não inundar a tela de "Entrada
+//    por XML" com frete que o parser de NF-e nem entende.
+//
+// 3. Paginação: diferente da Focus (que pagina de verdade por
 //    versão/NSU), a Brasil NFe não tem cursor incremental aqui — é uma
-//    busca por período (DtInicio/DtFim) só. A implementação anterior
-//    tratava `ultimaVersao` como o início da janela da PRÓXIMA consulta,
-//    o que fazia a janela encolher a cada clique em "Atualizar" (da data
-//    da última consulta até agora) — na prática, depois do primeiro
-//    clique, a consulta seguinte só via os últimos minutos, perdendo
-//    tudo que fosse mais antigo. Agora a janela é sempre fixa (últimos
-//    180 dias, prazo usual de relevância pra manifestação do
-//    destinatário) a partir de "agora", em toda consulta.
+//    busca por período (DtInicio/DtFim) só. Por isso a janela de busca é
+//    sempre fixa (últimos 180 dias a partir de "agora"), nunca baseada
+//    na última consulta — tratar isso como cursor incremental faz a
+//    janela encolher a cada clique em "Atualizar" e perder notas antigas.
+//
+// 4. Download do XML (ObterArquivoNotaFiscal): testado com uma nota de
+//    fornecedor bem recente (emitida no dia anterior) e voltou vazio,
+//    mesmo com TipoAmbiente/TipoDocumentoFiscal variados. A hipótese mais
+//    provável (e é assim que funciona a Distribuição DFe de verdade na
+//    SEFAZ, fora da Brasil NFe) é que o XML completo só fica disponível
+//    pra download DEPOIS que o destinatário dá ciência da operação — ou
+//    seja, a ordem certa é: listar → manifestar Ciência → só então
+//    baixar/importar. Não validei essa hipótese chamando manifestação de
+//    verdade (é uma declaração fiscal real, não algo pra testar sozinho
+//    sem o usuário) — vale confirmar na tela.
 const JANELA_DIAS = 180
+const MODELO_NFE = 55
 
 const TIPO_MANIFESTACAO: Record<TipoManifesto, number> = {
   confirmacao: 1,
@@ -52,13 +69,15 @@ function normalizarDocumento(d: any) {
   }
 }
 
-export async function listarDfe(creds: BrasilNFeCredentials, _cnpj: string, _ultimaVersao: string): Promise<DfeListaResultado> {
+export async function listarDfe(creds: BrasilNFeCredentials, cnpj: string, _ultimaVersao: string): Promise<DfeListaResultado> {
   const agora = new Date()
   const dtInicio = new Date(agora.getTime() - JANELA_DIAS * 24 * 60 * 60 * 1000)
+  const cnpjLimpo = cnpj.replace(/\D/g, '')
 
   const { status, text } = await brasilNFeRequest(creds, '/services/fiscal/ObterNotasFiscais', {
     TipoAmbiente: tipoAmbiente(creds.ambiente),
-    TipoDocumentoFiscal: 1, // 1 = entradas (notas de fornecedor contra o CNPJ) — confirmado por teste real, doc tinha 0/1 trocados
+    // Sem TipoDocumentoFiscal de propósito (ver nota acima) — devolve
+    // entrada+saída misturadas, filtradas abaixo.
     DtInicio: dtInicio.toISOString(),
     DtFim: agora.toISOString(),
   })
@@ -68,11 +87,17 @@ export async function listarDfe(creds: BrasilNFeCredentials, _cnpj: string, _ult
   } catch {
     throw new FiscalProviderError(`Resposta inesperada da Brasil NFe ao listar notas recebidas (status ${status}): ${text.slice(0, 300)}`, 'resposta_invalida')
   }
-  if (status >= 400 || json?.Error) {
+  if (status >= 400) {
     throw new FiscalProviderError(json?.Error ?? `Erro ${status} ao listar notas recebidas na Brasil NFe`, 'brasilnfe_erro', json)
   }
-  const lista: any[] = Array.isArray(json) ? json : (Array.isArray(json?.NotasFiscais) ? json.NotasFiscais : [])
-  return { ultimaVersao: agora.toISOString(), documentos: lista.map(normalizarDocumento) }
+  // "Não existe notas fiscais para o período informado" vem como um
+  // `Error` de negócio dentro de uma resposta 200 — não é uma falha de
+  // verdade, é só o período vazio. Trata como lista vazia, não como erro.
+  const lista: any[] = Array.isArray(json) ? json : (Array.isArray(json?.Notas) ? json.Notas : (Array.isArray(json?.NotasFiscais) ? json.NotasFiscais : []))
+  const entradas = lista.filter(d =>
+    (d?.CnpjDestinatario ?? '').replace(/\D/g, '') === cnpjLimpo && Number(d?.ModeloDocumento) === MODELO_NFE
+  )
+  return { ultimaVersao: agora.toISOString(), documentos: entradas.map(normalizarDocumento) }
 }
 
 export async function manifestar(creds: BrasilNFeCredentials, chave: string, tipo: TipoManifesto, justificativa?: string): Promise<void> {
