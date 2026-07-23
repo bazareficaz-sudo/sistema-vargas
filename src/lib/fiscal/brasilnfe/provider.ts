@@ -11,7 +11,7 @@ export function createBrasilNFeProvider(creds: BrasilNFeCredentials): FiscalProv
   return {
     nome: 'brasilnfe',
     distribuicao: {
-      listarDfe: (cnpj, ultimaVersao) => distribuicao.listarDfe(creds, cnpj, ultimaVersao),
+      listarDfe: (cnpj, ultimaVersao, periodoDias) => distribuicao.listarDfe(creds, cnpj, ultimaVersao, periodoDias),
       manifestar: (chave, tipo, justificativa) => distribuicao.manifestar(creds, chave, tipo, justificativa),
       baixarXml: (chave) => distribuicao.baixarXml(creds, chave),
     },

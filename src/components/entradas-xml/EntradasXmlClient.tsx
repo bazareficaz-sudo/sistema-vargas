@@ -83,6 +83,7 @@ export default function EntradasXmlClient({
   const [erroSefaz, setErroSefaz] = useState('')
   const [importandoSefaz, setImportandoSefaz] = useState<string | null>(null)
   const [importadosSefaz, setImportadosSefaz] = useState<Record<string, { ok: boolean; msg: string }>>({})
+  const [periodoDias, setPeriodoDias] = useState(30)
 
   const depositoPrincipal = depositos.find(d => d.principal)?.id ?? depositos[0]?.id ?? null
 
@@ -296,20 +297,31 @@ export default function EntradasXmlClient({
   }
 
   // ── Consulta SEFAZ ───────────────────────────────────────────
-  async function consultarSefaz() {
+  function diasMesAtual() {
+    const agora = new Date()
+    const inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1)
+    return Math.ceil((agora.getTime() - inicioMes.getTime()) / (24 * 60 * 60 * 1000)) + 1
+  }
+
+  async function consultarSefaz(periodoOverride?: number) {
     if (!configSefaz?.focusnfe_token) { setErroSefaz('Configure o token fiscal da empresa primeiro.'); return }
     setConsultandoSefaz(true); setErroSefaz('')
     try {
       const resp = await fetch('/api/sefaz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ acao: 'listar', ultimo_nsu: configSefaz.ultimo_nsu }),
+        body: JSON.stringify({ acao: 'listar', ultimo_nsu: configSefaz.ultimo_nsu, periodo_dias: periodoOverride ?? periodoDias }),
       })
       const data = await resp.json()
       if (!resp.ok) throw new Error(data.error ?? 'Erro na consulta')
       setNfesSefaz(data.documentos ?? data.nfes ?? [])
     } catch (e: any) { setErroSefaz(e.message) }
     finally { setConsultandoSefaz(false) }
+  }
+
+  function escolherPeriodo(dias: number) {
+    setPeriodoDias(dias)
+    consultarSefaz(dias)
   }
 
   async function manifestar(chave: string, tipo: string) {
@@ -551,10 +563,27 @@ export default function EntradasXmlClient({
       {/* ── MODAL SEFAZ ────────────────────────────────────────── */}
       {modalSefaz && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-3xl shadow-xl max-h-[90vh] flex flex-col">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-6xl shadow-xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <h2 className="text-slate-900 font-semibold">NF-e na SEFAZ (via {configSefaz?.provider === 'brasilnfe' ? 'Brasil NFe' : 'Focus NFe'})</h2>
               <button onClick={() => setModalSefaz(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-100 flex-wrap">
+              <span className="text-xs text-slate-500 mr-1">Período:</span>
+              {[
+                { label: '7 dias', dias: 7 },
+                { label: '30 dias', dias: 30 },
+                { label: 'Mês atual', dias: diasMesAtual() },
+                { label: '90 dias', dias: 90 },
+                { label: '180 dias', dias: 180 },
+              ].map(p => (
+                <button key={p.label} onClick={() => escolherPeriodo(p.dias)} disabled={consultandoSefaz}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors disabled:opacity-50 ${
+                    periodoDias === p.dias ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                  }`}>
+                  {p.label}
+                </button>
+              ))}
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4">
               {consultandoSefaz && <p className="text-slate-400 text-center py-8">Consultando SEFAZ...</p>}
@@ -579,6 +608,7 @@ export default function EntradasXmlClient({
                     <tr className="text-slate-500 text-xs border-b border-slate-100">
                       <th className="pb-2 text-left">Chave</th>
                       <th className="pb-2 text-left">Emitente</th>
+                      <th className="pb-2 text-left">Emissão</th>
                       <th className="pb-2 text-right">Valor</th>
                       <th className="pb-2 text-center">Manifesto</th>
                       <th className="pb-2 text-center">Ação</th>
@@ -593,6 +623,7 @@ export default function EntradasXmlClient({
                       <tr key={i} className="text-slate-700">
                         <td className="py-2 text-xs font-mono text-slate-400 truncate max-w-[120px]">{n.chave_nfe}</td>
                         <td className="py-2 text-sm">{n.nome_emitente ?? '—'}</td>
+                        <td className="py-2 text-xs text-slate-500 whitespace-nowrap">{n.data_emissao ? fmtDt(n.data_emissao) : '—'}</td>
                         <td className="py-2 text-right">{fmt(Number(n.valor_total ?? 0))}</td>
                         <td className="py-2 text-center">
                           <span className="text-xs text-slate-500">{n.manifestado ?? 'Pendente'}</span>
@@ -628,7 +659,7 @@ export default function EntradasXmlClient({
               )}
             </div>
             <div className="flex justify-between px-5 py-4 border-t border-slate-100">
-              <button onClick={consultarSefaz} disabled={consultandoSefaz}
+              <button onClick={() => consultarSefaz()} disabled={consultandoSefaz}
                 className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm disabled:opacity-50">
                 {consultandoSefaz ? 'Consultando...' : '↺ Atualizar'}
               </button>

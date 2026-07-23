@@ -7,7 +7,11 @@ export interface FiscalProvider {
   nome: string
 
   distribuicao: {
-    listarDfe(cnpj: string, ultimaVersao: string): Promise<DfeListaResultado>
+    // periodoDias: janela de busca em dias (usado pela Brasil NFe, que
+    // consulta por período em vez de paginar por versão/NSU como a Focus
+    // — a Focus ignora esse parâmetro). Undefined = janela padrão do
+    // provider.
+    listarDfe(cnpj: string, ultimaVersao: string, periodoDias?: number): Promise<DfeListaResultado>
     manifestar(chave: string, tipo: TipoManifesto, justificativa?: string): Promise<void>
     baixarXml(chave: string): Promise<string>
   }

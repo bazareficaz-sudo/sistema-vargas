@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     const empresaId = profile?.empresa_id
     if (!empresaId) return NextResponse.json({ error: 'Empresa não encontrada' }, { status: 400 })
 
-    const { acao, chave, ultimo_nsu, justificativa } = await req.json()
+    const { acao, chave, ultimo_nsu, justificativa, periodo_dias } = await req.json()
 
     const provider = await getFiscalProvider(sb, empresaId)
 
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       const { data: empresa } = await sb.from('empresas').select('cnpj').eq('id', empresaId).single()
       if (!empresa?.cnpj) return NextResponse.json({ error: 'CNPJ da empresa não cadastrado — preencha em Empresas antes de consultar.' }, { status: 400 })
 
-      const resultado = await provider.distribuicao.listarDfe(empresa.cnpj, ultimo_nsu ?? '0')
+      const resultado = await provider.distribuicao.listarDfe(empresa.cnpj, ultimo_nsu ?? '0', periodo_dias)
       if (resultado.ultimaVersao) {
         await sb.from('nfe_config').update({ ultimo_nsu: resultado.ultimaVersao, updated_at: new Date().toISOString() }).eq('empresa_id', empresaId)
       }

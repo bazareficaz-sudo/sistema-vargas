@@ -69,9 +69,9 @@ function normalizarDocumento(d: any) {
   }
 }
 
-export async function listarDfe(creds: BrasilNFeCredentials, cnpj: string, _ultimaVersao: string): Promise<DfeListaResultado> {
+export async function listarDfe(creds: BrasilNFeCredentials, cnpj: string, _ultimaVersao: string, periodoDias?: number): Promise<DfeListaResultado> {
   const agora = new Date()
-  const dtInicio = new Date(agora.getTime() - JANELA_DIAS * 24 * 60 * 60 * 1000)
+  const dtInicio = new Date(agora.getTime() - (periodoDias ?? JANELA_DIAS) * 24 * 60 * 60 * 1000)
   const cnpjLimpo = cnpj.replace(/\D/g, '')
 
   const { status, text } = await brasilNFeRequest(creds, '/services/fiscal/ObterNotasFiscais', {
