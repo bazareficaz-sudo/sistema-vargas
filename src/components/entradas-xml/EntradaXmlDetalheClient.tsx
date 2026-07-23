@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { calcularCustoItem, type NFeItem as NFeItemParser } from '@/lib/nfe-parser'
 import { gerarProximoSku } from '@/components/produtos/sku'
+import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -228,7 +229,7 @@ export default function EntradaXmlDetalheClient({
   async function mapearItem(item: Item, produto: Produto, status: string = 'manual') {
     const fator = parseFloat(mapFator) || 1
     try {
-      await sb.from('nfe_itens').update({
+      const { error: erroItem } = await sb.from('nfe_itens').update({
         produto_id: produto.id,
         descricao_sistema: produto.nome,
         unidade_sistema: produto.unidade,
@@ -236,9 +237,13 @@ export default function EntradaXmlDetalheClient({
         quantidade_entrada: item.quantidade_xml * fator,
         status_mapeamento: status,
       }).eq('id', item.id)
+      if (erroItem) throw erroItem
 
-      // Salvar histórico de mapeamento
-      await sb.from('nfe_mapeamentos').upsert({
+      // Salvar histórico de mapeamento — best-effort: não é o dado principal
+      // (já gravado acima em nfe_itens), só alimenta o auto-mapeamento de
+      // futuras entradas do mesmo fornecedor, então uma falha aqui não deve
+      // impedir o mapeamento do item em si.
+      const { error: erroMapa } = await sb.from('nfe_mapeamentos').upsert({
         empresa_id: empresaId,
         cnpj_fornecedor: entrada.cnpj_fornecedor,
         codigo_fornecedor: item.codigo_fornecedor,
@@ -251,6 +256,7 @@ export default function EntradaXmlDetalheClient({
         operador: operador,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id,cnpj_fornecedor,codigo_fornecedor' })
+      if (erroMapa) console.error('Falha ao salvar histórico de mapeamento (nfe_mapeamentos):', erroMapa)
 
       setItens(p => p.map(i => i.id === item.id ? {
         ...i, produto_id: produto.id, descricao_sistema: produto.nome,
@@ -262,16 +268,18 @@ export default function EntradaXmlDetalheClient({
       const novosItens = itens.map(i => i.id === item.id ? { ...i, status_mapeamento: status } : i)
       const allMapped = novosItens.every(i => i.status_mapeamento !== 'nao_mapeado')
       if (allMapped && entrada.status === 'aguardando_mapeamento') {
-        await sb.from('nfe_entradas').update({ status: 'aguardando_conferencia' }).eq('id', entrada.id)
+        const { error: erroStatus } = await sb.from('nfe_entradas').update({ status: 'aguardando_conferencia' }).eq('id', entrada.id)
+        if (erroStatus) throw erroStatus
         setEntrada(p => ({ ...p, status: 'aguardando_conferencia' }))
       }
 
       fecharMapModal()
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { alert('Erro ao mapear item: ' + e.message) }
   }
 
   async function ignorarItem(item: Item) {
-    await sb.from('nfe_itens').update({ status_mapeamento: 'ignorado' }).eq('id', item.id)
+    const { error } = await sb.from('nfe_itens').update({ status_mapeamento: 'ignorado' }).eq('id', item.id)
+    if (error) { alert('Erro ao ignorar item: ' + error.message); return }
     setItens(p => p.map(i => i.id === item.id ? { ...i, status_mapeamento: 'ignorado' } : i))
   }
 
@@ -282,17 +290,23 @@ export default function EntradaXmlDetalheClient({
       for (const item of itens) {
         const qtd = confQtd[item.id] ?? item.quantidade_entrada
         const ok = Math.abs(qtd - item.quantidade_entrada) < 0.001
-        await sb.from('nfe_itens').update({
+        const { error } = await sb.from('nfe_itens').update({
           qtd_conferida: qtd,
           conferido: ok,
           diferenca_qtd: qtd - item.quantidade_entrada,
         }).eq('id', item.id)
+        if (error) throw error
       }
+      setItens(p => p.map(i => {
+        const qtd = confQtd[i.id] ?? i.quantidade_entrada
+        return { ...i, qtd_conferida: qtd, conferido: Math.abs(qtd - i.quantidade_entrada) < 0.001, diferenca_qtd: qtd - i.quantidade_entrada }
+      }))
       if (entrada.status === 'aguardando_conferencia') {
-        await sb.from('nfe_entradas').update({ status: 'aguardando_precos' }).eq('id', entrada.id)
+        const { error: erroStatus } = await sb.from('nfe_entradas').update({ status: 'aguardando_precos' }).eq('id', entrada.id)
+        if (erroStatus) throw erroStatus
         setEntrada(p => ({ ...p, status: 'aguardando_precos' }))
       }
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { alert('Erro ao salvar conferência: ' + e.message) }
     finally { setSalvando(false) }
   }
 
@@ -308,11 +322,14 @@ export default function EntradaXmlDetalheClient({
   async function salvarCustos() {
     setSalvando(true)
     try {
+      const custos: Record<string, number> = {}
       for (const item of itens) {
         const custo = custoComAdic(item)
-        await sb.from('nfe_itens').update({ custo_unitario: custo, custo_total: custo * (item.quantidade_entrada || item.quantidade_xml) }).eq('id', item.id)
+        custos[item.id] = custo
+        const { error } = await sb.from('nfe_itens').update({ custo_unitario: custo, custo_total: custo * (item.quantidade_entrada || item.quantidade_xml) }).eq('id', item.id)
+        if (error) throw error
       }
-      await sb.from('nfe_entradas').update({
+      const { error: erroEntrada } = await sb.from('nfe_entradas').update({
         frete_adicional: custosAdic.frete_adicional,
         seguro_adicional: custosAdic.seguro_adicional,
         outras_despesas_adicionais: custosAdic.outras_despesas,
@@ -320,8 +337,10 @@ export default function EntradaXmlDetalheClient({
         incluir_st_custo: incluirSt,
         status: 'aguardando_precos',
       }).eq('id', entrada.id)
+      if (erroEntrada) throw erroEntrada
+      setItens(p => p.map(i => ({ ...i, custo_unitario: custos[i.id], custo_total: custos[i.id] * (i.quantidade_entrada || i.quantidade_xml) })))
       setEntrada(p => ({ ...p, status: 'aguardando_precos' }))
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { alert('Erro ao salvar custos: ' + e.message) }
     finally { setSalvando(false) }
   }
 
@@ -349,11 +368,13 @@ export default function EntradaXmlDetalheClient({
         const item = itens.find(i => i.id === itemId)
         if (!item?.produto_id) continue
         const custo = custoComAdic(item)
-        await sb.from('produtos').update({ preco_custo: custo, preco_venda: preco }).eq('id', item.produto_id).eq('empresa_id', empresaId)
+        const { error } = await sb.from('produtos').update({ preco_custo: custo, preco_venda: preco }).eq('id', item.produto_id).eq('empresa_id', empresaId)
+        if (error) throw error
       }
-      await sb.from('nfe_entradas').update({ status: 'aguardando_financeiro' }).eq('id', entrada.id)
+      const { error: erroEntrada } = await sb.from('nfe_entradas').update({ status: 'aguardando_financeiro' }).eq('id', entrada.id)
+      if (erroEntrada) throw erroEntrada
       setEntrada(p => ({ ...p, status: 'aguardando_financeiro' }))
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { alert('Erro ao salvar preços: ' + e.message) }
     finally { setSalvando(false) }
   }
 
@@ -362,6 +383,7 @@ export default function EntradaXmlDetalheClient({
     setFinalizando(true)
     try {
       const agora = new Date().toISOString()
+      const produtoIdsAfetados = new Set<string>()
 
       // 1. Dar entrada no estoque
       for (const item of itens) {
@@ -369,25 +391,34 @@ export default function EntradaXmlDetalheClient({
         const qtd = item.qtd_conferida || item.quantidade_entrada || item.quantidade_xml
         const custo = item.custo_unitario || custoComAdic(item)
 
-        await sb.rpc('incrementar_estoque', {
+        const { error: erroRpc } = await sb.rpc('incrementar_estoque', {
           p_produto_id: item.produto_id,
           p_empresa_id: empresaId,
           p_deposito_id: depositoId,
           p_quantidade: qtd,
           p_custo: custo,
-        }).then(async ({ error }) => {
-          if (error) {
-            // fallback: update direto
-            const { data: prod } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
-            await sb.from('produtos').update({ estoque: (prod?.estoque ?? 0) + qtd, preco_custo: custo }).eq('id', item.produto_id)
-          }
         })
+        if (erroRpc) {
+          // fallback: update direto
+          const { data: prod, error: erroBusca } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
+          if (erroBusca) throw erroBusca
+          const { error: erroUpdate } = await sb.from('produtos').update({ estoque: (prod?.estoque ?? 0) + qtd, preco_custo: custo }).eq('id', item.produto_id)
+          if (erroUpdate) throw erroUpdate
+        }
+        produtoIdsAfetados.add(item.produto_id)
+      }
+
+      // 1b. Recalcular custo/estoque dos kits que têm algum item desta
+      // entrada como componente — senão o kit fica com custo desatualizado
+      // até alguém abrir o produto e clicar em "Recalcular" manualmente.
+      for (const produtoId of produtoIdsAfetados) {
+        await recalcularKitsQueUsam(sb, produtoId)
       }
 
       // 2. Gerar contas a pagar
       if (gerarContaPagar) {
         for (const dup of duplicatas) {
-          await sb.from('contas_pagar').insert({
+          const { error } = await sb.from('contas_pagar').insert({
             empresa_id: empresaId,
             descricao: `NF-e ${entrada.numero}/${entrada.serie} — ${entrada.nome_fornecedor} — Dup. ${dup.num_dup}`,
             fornecedor_id: entrada.fornecedor_id || null,
@@ -398,25 +429,28 @@ export default function EntradaXmlDetalheClient({
             origem_id: entrada.id,
             observacoes: obsFinanceiro || null,
           })
+          if (error) throw error
         }
       }
 
       // 3. Atualizar status da entrada
-      await sb.from('nfe_entradas').update({
+      const { error: erroStatus } = await sb.from('nfe_entradas').update({
         status: 'finalizada',
         data_finalizacao: agora,
         deposito_id: depositoId,
         operador_finalizacao: operador,
       }).eq('id', entrada.id)
+      if (erroStatus) throw erroStatus
 
-      // 4. Log
-      await sb.from('nfe_logs').insert({
+      // 4. Log — best-effort, não bloqueia a finalização se falhar
+      const { error: erroLog } = await sb.from('nfe_logs').insert({
         entrada_id: entrada.id,
         empresa_id: empresaId,
         acao: 'finalizada',
         operador,
         detalhes: JSON.stringify({ deposito_id: depositoId, gerou_cp: gerarContaPagar }),
       })
+      if (erroLog) console.error('Falha ao gravar log de finalização:', erroLog)
 
       setEntrada(p => ({ ...p, status: 'finalizada' }))
       setAba('dados')
@@ -429,10 +463,12 @@ export default function EntradaXmlDetalheClient({
     if (!confirm('Cancelar esta entrada? Esta ação não pode ser desfeita.')) return
     setCancelando(true)
     try {
-      await sb.from('nfe_entradas').update({ status: 'cancelada' }).eq('id', entrada.id)
-      await sb.from('nfe_logs').insert({ entrada_id: entrada.id, empresa_id: empresaId, acao: 'cancelada', operador })
+      const { error } = await sb.from('nfe_entradas').update({ status: 'cancelada' }).eq('id', entrada.id)
+      if (error) throw error
+      const { error: erroLog } = await sb.from('nfe_logs').insert({ entrada_id: entrada.id, empresa_id: empresaId, acao: 'cancelada', operador })
+      if (erroLog) console.error('Falha ao gravar log de cancelamento:', erroLog)
       setEntrada(p => ({ ...p, status: 'cancelada' }))
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { alert('Erro ao cancelar: ' + e.message) }
     finally { setCancelando(false) }
   }
 
@@ -612,7 +648,8 @@ export default function EntradaXmlDetalheClient({
                       )}
                       {item.status_mapeamento === 'ignorado' && !readonly && (
                         <button onClick={async () => {
-                          await sb.from('nfe_itens').update({ status_mapeamento: 'nao_mapeado', produto_id: null }).eq('id', item.id)
+                          const { error } = await sb.from('nfe_itens').update({ status_mapeamento: 'nao_mapeado', produto_id: null }).eq('id', item.id)
+                          if (error) { alert('Erro ao reverter: ' + error.message); return }
                           setItens(p => p.map(i => i.id === item.id ? { ...i, status_mapeamento: 'nao_mapeado', produto_id: null } : i))
                         }} className="px-2 py-1 bg-slate-100 text-slate-500 text-xs rounded-lg">Reverter</button>
                       )}
