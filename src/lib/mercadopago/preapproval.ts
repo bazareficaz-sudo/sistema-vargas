@@ -35,3 +35,15 @@ export function checkoutUrlDoPlano(mercadopagoPlanId: string): string {
 export async function buscarPreapproval(id: string): Promise<any> {
   return mpRequest('GET', `/preapproval/${id}`)
 }
+
+// Lista as preapprovals já criadas pra um plano — usado pra reconciliação
+// manual (ver /api/mercadopago/confirmar-assinatura). Confirmado ao vivo que
+// a resposta de /preapproval/{id} vem com payer_email vazio nesse fluxo de
+// checkout hospedado, então casar pagamento com assinatura pelo e-mail do
+// pagador (como o webhook tentava fazer) não funciona — a reconciliação por
+// "assinatura pendente + único candidato autorizado desse plano" é o que
+// efetivamente linka o pagamento à conta certa.
+export async function buscarPreapprovalsPorPlano(planoId: string): Promise<any[]> {
+  const data = await mpRequest('GET', `/preapproval/search?preapproval_plan_id=${planoId}`)
+  return data?.results ?? []
+}

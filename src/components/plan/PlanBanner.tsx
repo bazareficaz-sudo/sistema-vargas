@@ -73,6 +73,16 @@ export function PlanAlertBanner() {
     async function concluirPagamento() {
       setProcessando(true)
       try {
+        // Antes de mandar pro checkout de novo, tenta reconciliar — cobre o
+        // caso do cliente já ter pago e só o link com a assinatura não ter
+        // sido feito ainda (ver /api/mercadopago/confirmar-assinatura).
+        const confRes = await fetch('/api/mercadopago/confirmar-assinatura', { method: 'POST' })
+        const confData = await confRes.json()
+        if (confData.ok && confData.status === 'active') {
+          window.location.reload()
+          return
+        }
+
         const res = await fetch('/api/mercadopago/criar-assinatura', { method: 'POST' })
         const data = await res.json()
         if (!data.ok) { alert(data.error ?? 'Erro ao retomar o pagamento.'); return }
