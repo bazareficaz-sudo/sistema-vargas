@@ -10,13 +10,14 @@ type PorDeposito = { deposito_id: string; nome: string; quantidade: number; esto
 type Movimento = {
   id: string
   data: string
-  tipo: 'venda' | 'devolucao' | 'entrada' | 'ajuste_entrada' | 'ajuste_saida' | 'transferencia_entrada' | 'transferencia_saida' | 'inventario' | 'avaria' | 'compra'
+  tipo: 'venda' | 'venda_marketplace' | 'devolucao' | 'entrada' | 'ajuste_entrada' | 'ajuste_saida' | 'transferencia_entrada' | 'transferencia_saida' | 'inventario' | 'avaria' | 'compra'
   quantidade: number
   detalhe: string
 }
 
 const TIPO_MOV: Record<Movimento['tipo'], { label: string; cor: string; sinal: string }> = {
   venda:                  { label: 'Venda',          cor: 'text-red-600 bg-red-50 border-red-200',       sinal: '−' },
+  venda_marketplace:      { label: 'Venda Marketplace', cor: 'text-red-600 bg-red-50 border-red-200',     sinal: '−' },
   devolucao:              { label: 'Devolução',       cor: 'text-green-600 bg-green-50 border-green-200', sinal: '+' },
   entrada:                { label: 'Entrada',         cor: 'text-blue-600 bg-blue-50 border-blue-200',    sinal: '+' },
   compra:                 { label: 'Compra',          cor: 'text-blue-600 bg-blue-50 border-blue-200',    sinal: '+' },
@@ -156,7 +157,8 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
 
   const movimentosFiltrados = movimentos.filter(m => {
     if (!filtro) return true
-    if (filtro === 'outros') return !['venda', 'entrada', 'devolucao'].includes(m.tipo)
+    if (filtro === 'outros') return !['venda', 'venda_marketplace', 'entrada', 'devolucao'].includes(m.tipo)
+    if (filtro === 'venda') return m.tipo === 'venda' || m.tipo === 'venda_marketplace'
     return m.tipo === filtro
   })
 
