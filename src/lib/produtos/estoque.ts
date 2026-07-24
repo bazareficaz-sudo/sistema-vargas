@@ -1,15 +1,19 @@
 import { recalcularKitsQueUsam } from './kit'
 
-// Baixa de estoque de um item de pedido de marketplace. Evita dois riscos
-// reais quando cron automático e botão manual podem rodar quase juntos:
-// (1) baixar duas vezes o mesmo item, (2) deixar estoque negativo. Sem
-// worker/fila persistente nesta versão, a atomicidade vem de duas técnicas
-// simples via supabase-js (sem stored procedure, fora do padrão do projeto):
+// Baixa de estoque de um item de pedido de marketplace. Evita o risco real
+// de baixar duas vezes o mesmo item quando cron automático e botão manual
+// podem rodar quase juntos. Sem worker/fila persistente nesta versão, a
+// atomicidade vem de duas técnicas simples via supabase-js (sem stored
+// procedure, fora do padrão do projeto):
 //   - "reivindicar" o item com um UPDATE condicional em baixou_estoque
 //     (WHERE baixou_estoque = false) — só um chamador consegue.
 //   - decrementar o estoque com compare-and-swap (lê o valor, escreve de
 //     volta com WHERE estoque = valor_lido) — se outro processo alterou o
 //     valor no meio do caminho, a escrita afeta 0 linhas e tenta de novo.
+// Deixa o estoque ir negativo de propósito (ver decrementarEstoqueAtomico)
+// — pedido vendido sem saldo (overselling entre canais) reflete o estoque
+// real em vez de ficar preso esperando alguém repor e clicar "Tentar
+// novamente".
 
 export type ResultadoBaixa = { ok: true; jaProcessado?: boolean } | { ok: false; motivo: string }
 
@@ -17,7 +21,10 @@ async function decrementarEstoqueAtomico(sb: any, produtoId: string, quantidade:
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     const { data: produto } = await sb.from('produtos').select('estoque').eq('id', produtoId).single()
     if (!produto) return { ok: false, motivo: 'Produto não encontrado' }
-    if (produto.estoque < quantidade) return { ok: false, motivo: `Estoque insuficiente (disponível: ${produto.estoque}, necessário: ${quantidade})` }
+    // Decide deixar ir negativo em vez de bloquear a baixa — pedido de
+    // marketplace vendido sem saldo (overselling entre canais) não pode
+    // ficar preso pra sempre esperando alguém notar e clicar "Tentar
+    // novamente"; melhor refletir o estoque real (negativo) na hora.
 
     const { data: atualizado } = await sb.from('produtos')
       .update({ estoque: produto.estoque - quantidade })
