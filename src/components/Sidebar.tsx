@@ -64,6 +64,13 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   function cancelarFechamento() {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
   }
+  // Ao navegar de verdade (clicar num link), fecha o painel E recolhe o
+  // rail — diferente de clicar num ícone do rail só pra alternar o painel
+  // (aí o mouse continua ali, não faz sentido recolher).
+  function fecharNavegando() {
+    setPainel(null)
+    setRailHover(false)
+  }
 
   // Registra página atual nos recentes
   useEffect(() => {
@@ -75,8 +82,9 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname])
 
-  // Fecha o painel ao trocar de rota
-  useEffect(() => { setPainel(null) }, [pathname])
+  // Fecha o painel e recolhe o rail ao trocar de rota (rede de segurança —
+  // os cliques em links já chamam fecharNavegando() diretamente)
+  useEffect(() => { setPainel(null); setRailHover(false) }, [pathname])
 
   useEffect(() => {
     if (painel === 'busca') setTimeout(() => searchRef.current?.focus(), 50)
@@ -176,7 +184,7 @@ export default function Sidebar({ empresa }: { empresa: string }) {
       {/* ── Painel lateral (flyout) ─────────────────────────────────────────── */}
       {painel && (
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setPainel(null)} />
+          <div className="fixed inset-0 z-30" onClick={fecharNavegando} />
           <div
             onMouseEnter={cancelarFechamento}
             onMouseLeave={agendarFechamento}
@@ -195,7 +203,7 @@ export default function Sidebar({ empresa }: { empresa: string }) {
                 />
                 <div className="flex-1 overflow-y-auto -mx-1">
                   {resultadosBusca.map(r => (
-                    <Link key={r.href} href={r.href} onClick={() => setPainel(null)}
+                    <Link key={r.href} href={r.href} onClick={fecharNavegando}
                       className={`flex flex-col px-3 py-2 mx-1 rounded-lg text-sm transition-colors ${isActive(r.href) ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}>
                       <span className="font-medium">{r.label}</span>
                       <span className="text-xs text-slate-400">{r.group}</span>
@@ -209,11 +217,11 @@ export default function Sidebar({ empresa }: { empresa: string }) {
             )}
 
             {painel === 'favoritos' && (
-              <PainelLista titulo="Favoritos" itens={favItems} isActive={isActive} favorites={favorites} onToggleFav={toggleFav} onNavegar={() => setPainel(null)} />
+              <PainelLista titulo="Favoritos" itens={favItems} isActive={isActive} favorites={favorites} onToggleFav={toggleFav} onNavegar={fecharNavegando} />
             )}
 
             {painel === 'recentes' && (
-              <PainelLista titulo="Recentes" itens={recentItems} isActive={isActive} favorites={favorites} onToggleFav={toggleFav} onNavegar={() => setPainel(null)} />
+              <PainelLista titulo="Recentes" itens={recentItems} isActive={isActive} favorites={favorites} onToggleFav={toggleFav} onNavegar={fecharNavegando} />
             )}
 
             {grupoAberto && (
@@ -224,14 +232,14 @@ export default function Sidebar({ empresa }: { empresa: string }) {
                 <div className="flex-1 overflow-y-auto px-2 py-2">
                   {grupoAberto.visibleItems.map(it => (
                     <NavLink key={it.href} item={it} active={isActive(it.href)}
-                      isFav={favorites.includes(it.href)} onToggleFav={() => toggleFav(it.href)} onNavegar={() => setPainel(null)} />
+                      isFav={favorites.includes(it.href)} onToggleFav={() => toggleFav(it.href)} onNavegar={fecharNavegando} />
                   ))}
                   {grupoAberto.visibleSubGroups.map(sg => (
                     <div key={sg.label} className="mt-3 mb-1">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-2.5 mb-1">{sg.label}</p>
                       {sg.items.map(it => (
                         <NavLink key={it.href} item={it} active={isActive(it.href)}
-                          isFav={favorites.includes(it.href)} onToggleFav={() => toggleFav(it.href)} onNavegar={() => setPainel(null)} />
+                          isFav={favorites.includes(it.href)} onToggleFav={() => toggleFav(it.href)} onNavegar={fecharNavegando} />
                       ))}
                     </div>
                   ))}
