@@ -30,7 +30,7 @@ export function usePlan(): PlanData {
 export function useModulo(modulo: string): boolean {
   const plan = usePlan()
   if (plan.isSystemAdmin) return true
-  if (plan.subscriptionStatus === 'expired' || plan.subscriptionStatus === 'blocked' || plan.subscriptionStatus === 'suspended') return false
+  if (plan.subscriptionStatus === 'expired' || plan.subscriptionStatus === 'blocked' || plan.subscriptionStatus === 'suspended' || plan.subscriptionStatus === 'pending') return false
   if (plan.modulos.includes('*')) return true
   return plan.modulos.includes(modulo)
 }

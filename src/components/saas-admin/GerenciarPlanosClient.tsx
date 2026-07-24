@@ -15,7 +15,7 @@ interface Plan {
   id: string; nome: string; codigo: string; descricao: string
   preco_mensal: number; preco_anual: number; permite_trial: boolean; dias_trial: number
   exige_pagamento_inicial: boolean; publico: boolean; ativo: boolean; recomendado: boolean
-  ordem: number; cor: string
+  ordem: number; cor: string; mercadopago_plan_id?: string | null
   plan_modules: { modulo: string }[]
   plan_limits: PlanLimitFields | null
 }
@@ -129,6 +129,25 @@ export default function GerenciarPlanosClient({ plans, modulos }: Props) {
     router.refresh()
   }
 
+  const [vinculandoMP, setVinculandoMP] = useState(false)
+  async function vincularMercadoPago() {
+    const planId = modal?.plan?.id
+    if (!planId) return
+    setVinculandoMP(true); setErro('')
+    try {
+      const res = await fetch('/api/saas-admin/mercadopago/criar-plano', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      })
+      const data = await res.json()
+      if (!data.ok) { setErro(data.error ?? 'Erro ao vincular ao Mercado Pago'); return }
+      setForm(f => ({ ...f, mercadopago_plan_id: data.mercadopago_plan_id }))
+      router.refresh()
+    } finally {
+      setVinculandoMP(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -225,6 +244,21 @@ export default function GerenciarPlanosClient({ plans, modulos }: Props) {
                     </label>
                   ))}
                 </div>
+                {form.exige_pagamento_inicial && modal?.mode === 'edit' && (
+                  <div className="mt-3 flex items-center gap-3 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+                    {form.mercadopago_plan_id ? (
+                      <span className="text-xs text-emerald-400">✓ Vinculado ao Mercado Pago</span>
+                    ) : (
+                      <>
+                        <span className="text-xs text-slate-400 flex-1">Ainda não tem cobrança recorrente configurada no Mercado Pago.</span>
+                        <button onClick={vincularMercadoPago} disabled={vinculandoMP}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg disabled:opacity-50">
+                          {vinculandoMP ? '...' : 'Criar cobrança no Mercado Pago'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </section>
 
               {/* Modules */}

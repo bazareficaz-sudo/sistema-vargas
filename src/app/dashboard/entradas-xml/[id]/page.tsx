@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import EntradaXmlDetalheClient from '@/components/entradas-xml/EntradaXmlDetalheClient'
+import { podeAcessarModulo } from '@/lib/plans/access'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,10 @@ export default async function EntradaXmlDetalhePage({ params }: { params: Promis
 
   const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
   const empresaId = profile?.empresa_id ?? ''
+
+  // Planos restritos (ex.: "Consulta Fiscal") têm o módulo entradas_xml sem o
+  // módulo entradas completo — nesse caso a tela abre em modo só-leitura.
+  const somenteLeitura = !(await podeAcessarModulo('entradas', empresaId, user.id))
 
   const [entradaRes, itensRes, dupRes, depositosRes, produtosRes, fornecedoresRes] = await Promise.all([
     sb.from('nfe_entradas').select('*').eq('id', id).eq('empresa_id', empresaId).single(),
@@ -39,6 +44,7 @@ export default async function EntradaXmlDetalhePage({ params }: { params: Promis
       fornecedores={fornecedoresRes.data ?? []}
       empresaId={empresaId}
       operador={user.email ?? ''}
+      somenteLeitura={somenteLeitura}
     />
   )
 }

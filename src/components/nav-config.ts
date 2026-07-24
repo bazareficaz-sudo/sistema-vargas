@@ -108,12 +108,11 @@ export const NAV: NavGroup[] = [
     color: 'bg-orange-900',
     textColor: 'text-orange-300',
     badgeColor: 'bg-orange-500',
-    modulo: 'entradas',
     defaultOpen: false,
     items: [
       { href: '/dashboard/pedidos-compra',  label: 'Pedido ao Fornecedor', icon: '📋', modulo: 'pedidos_compra' },
       { href: '/dashboard/entradas/nova',   label: 'Nova Entrada',         icon: '➕', modulo: 'entradas' },
-      { href: '/dashboard/entradas-xml',    label: 'XML / NF-e',           icon: '📄', modulo: 'entradas' },
+      { href: '/dashboard/entradas-xml',    label: 'XML / NF-e',           icon: '📄', modulo: 'entradas_xml' },
       { href: '/dashboard/fornecedores',    label: 'Fornecedores',         icon: '🏭', modulo: 'fornecedores' },
     ],
   },
@@ -124,7 +123,6 @@ export const NAV: NavGroup[] = [
     color: 'bg-emerald-900',
     textColor: 'text-emerald-300',
     badgeColor: 'bg-emerald-500',
-    modulo: 'financeiro',
     defaultOpen: false,
     subGroups: [
       {

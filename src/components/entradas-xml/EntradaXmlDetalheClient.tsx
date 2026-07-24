@@ -39,11 +39,11 @@ const MAP_STATUS_COR: Record<string, string> = {
 // ── Componente principal ─────────────────────────────────────────────────────
 export default function EntradaXmlDetalheClient({
   entrada: entradaInicial, itensIniciais, duplicatasIniciais,
-  depositos, produtos, fornecedores, empresaId, operador
+  depositos, produtos, fornecedores, empresaId, operador, somenteLeitura = false
 }: {
   entrada: Entrada; itensIniciais: Item[]; duplicatasIniciais: Duplicata[]
   depositos: Deposito[]; produtos: Produto[]; fornecedores: Fornecedor[]
-  empresaId: string; operador: string
+  empresaId: string; operador: string; somenteLeitura?: boolean
 }) {
   const sb = createClient()
   const router = useRouter()
@@ -490,7 +490,7 @@ export default function EntradaXmlDetalheClient({
             descricao: `NF-e ${entrada.numero}/${entrada.serie} — ${entrada.nome_fornecedor} — Dup. ${dup.num_dup}`,
             fornecedor_id: entrada.fornecedor_id || null,
             valor: dup.valor,
-            data_vencimento: dup.data_vencimento,
+            vencimento: dup.data_vencimento,
             status: 'aberto',
             origem: 'entrada_xml',
             origem_id: entrada.id,
@@ -541,7 +541,7 @@ export default function EntradaXmlDetalheClient({
 
   const isFinalizada = entrada.status === 'finalizada'
   const isCancelada  = entrada.status === 'cancelada'
-  const readonly     = isFinalizada || isCancelada
+  const readonly     = isFinalizada || isCancelada || somenteLeitura
 
   const ABAS = [
     { id: 'dados',       label: '📄 Dados NF-e' },
@@ -553,6 +553,19 @@ export default function EntradaXmlDetalheClient({
     { id: 'financeiro',  label: '🧾 Financeiro' },
     { id: 'finalizar',   label: '✅ Finalizar' },
   ]
+  // Cliente externo (plano Consulta Fiscal) só vê a nota em si e as duplicatas —
+  // mapeamento/conferência/custos/preços/fiscal/finalizar são etapas de trabalho interno.
+  const abasVisiveis = somenteLeitura ? ABAS.filter(a => a.id === 'dados' || a.id === 'financeiro') : ABAS
+
+  function baixarXml() {
+    const blob = new Blob([entrada.xml_content ?? ''], { type: 'application/xml' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `NFe-${entrada.numero}-${entrada.serie}-${entrada.chave_acesso ?? entrada.id}.xml`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="space-y-4">
@@ -568,6 +581,10 @@ export default function EntradaXmlDetalheClient({
           isCancelada  ? 'bg-red-50 text-red-600 border border-red-100' :
           'bg-amber-50 text-amber-600 border border-amber-100'
         }`}>{STATUS_LABEL[entrada.status] ?? entrada.status}</span>
+        <button onClick={baixarXml}
+          className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 text-sm rounded-xl border border-slate-200">
+          ⬇ Exportar XML
+        </button>
         {!readonly && (
           <button onClick={cancelar} disabled={cancelando}
             className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-xl border border-red-200">
@@ -578,7 +595,7 @@ export default function EntradaXmlDetalheClient({
 
       {/* Abas */}
       <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-        {ABAS.map(a => (
+        {abasVisiveis.map(a => (
           <button key={a.id} onClick={() => setAba(a.id)}
             className={`px-4 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors ${
               aba === a.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -1044,12 +1061,14 @@ export default function EntradaXmlDetalheClient({
               </tbody>
             </table>
           </div>
-          <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={gerarContaPagar} onChange={e => setGerarContaPagar(e.target.checked)} className="accent-blue-500" />
-              Gerar contas a pagar ao finalizar
-            </label>
-          </div>
+          {!readonly && (
+            <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={gerarContaPagar} onChange={e => setGerarContaPagar(e.target.checked)} className="accent-blue-500" />
+                Gerar contas a pagar ao finalizar
+              </label>
+            </div>
+          )}
         </div>
       )}
 

@@ -103,6 +103,24 @@ export default function EntradasXmlClient({
     return (data ?? []) as { produto_id: string; quantidade_entrada: number | null; quantidade_xml: number }[]
   }
 
+  async function exportarXmlEntrada(entradaId: string, numero: string | null, serie: string | null) {
+    setCarregandoAcao(`xml-${entradaId}`)
+    try {
+      const { data, error } = await sb.from('nfe_entradas').select('xml_content, chave_acesso').eq('id', entradaId).single()
+      if (error) { alert('Erro ao buscar XML: ' + error.message); return }
+      if (!data?.xml_content) { alert('Esta NF-e não tem o XML original salvo.'); return }
+      const blob = new Blob([data.xml_content], { type: 'application/xml' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `NFe-${numero ?? ''}-${serie ?? ''}-${data.chave_acesso ?? entradaId}.xml`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setCarregandoAcao(null)
+    }
+  }
+
   async function abrirGestaoPrecos(entradaId: string, numero: string | null) {
     setCarregandoAcao(`precos-${entradaId}`)
     try {
@@ -172,6 +190,28 @@ export default function EntradasXmlClient({
     }
     return list
   }, [entradas, filtroStatus, busca])
+
+  // Indicadores: soma de compras (por data de emissão) no mês corrente vs. anterior,
+  // calculado a partir do lote já carregado (últimas 200 entradas) — sem query nova.
+  const indicadores = useMemo(() => {
+    const agora = new Date()
+    const anoAtual = agora.getFullYear(), mesAtual = agora.getMonth()
+    const anoAnt = mesAtual === 0 ? anoAtual - 1 : anoAtual
+    const mesAnt = mesAtual === 0 ? 11 : mesAtual - 1
+
+    let totalAtual = 0, qtdAtual = 0, totalAnterior = 0, qtdAnterior = 0
+    for (const e of entradas) {
+      if (e.status === 'cancelada' || !e.data_emissao) continue
+      const d = new Date(e.data_emissao)
+      if (d.getFullYear() === anoAtual && d.getMonth() === mesAtual) {
+        totalAtual += e.valor_total; qtdAtual++
+      } else if (d.getFullYear() === anoAnt && d.getMonth() === mesAnt) {
+        totalAnterior += e.valor_total; qtdAnterior++
+      }
+    }
+    const variacao = totalAnterior > 0 ? ((totalAtual - totalAnterior) / totalAnterior) * 100 : null
+    return { totalAtual, qtdAtual, totalAnterior, qtdAnterior, variacao }
+  }, [entradas])
 
   // ── Importar XML ─────────────────────────────────────────────
   // Núcleo compartilhado entre "Importar XML" (arquivo local) e "Baixar e
@@ -484,6 +524,29 @@ export default function EntradasXmlClient({
         </div>
       </div>
 
+      {/* Indicadores: compras mês atual vs. mês passado */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-slate-500 text-xs">Compras este mês</p>
+          <p className="text-slate-800 text-lg font-bold mt-1">{fmt(indicadores.totalAtual)}</p>
+          <p className="text-slate-400 text-xs mt-0.5">{indicadores.qtdAtual} nota(s)</p>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-slate-500 text-xs">Compras mês passado</p>
+          <p className="text-slate-800 text-lg font-bold mt-1">{fmt(indicadores.totalAnterior)}</p>
+          <p className="text-slate-400 text-xs mt-0.5">{indicadores.qtdAnterior} nota(s)</p>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-slate-500 text-xs">Variação</p>
+          <p className={`text-lg font-bold mt-1 ${
+            indicadores.variacao === null ? 'text-slate-400' : indicadores.variacao >= 0 ? 'text-red-600' : 'text-emerald-600'
+          }`}>
+            {indicadores.variacao === null ? '—' : `${indicadores.variacao >= 0 ? '+' : ''}${indicadores.variacao.toFixed(1)}%`}
+          </p>
+          <p className="text-slate-400 text-xs mt-0.5">vs. mês anterior</p>
+        </div>
+      </div>
+
       {/* Filtros */}
       <div className="flex gap-2 flex-wrap">
         <input value={busca} onChange={e => setBusca(e.target.value)}
@@ -554,6 +617,11 @@ export default function EntradasXmlClient({
                       disabled={carregandoAcao === `etiqueta-${e.id}`}
                       className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs rounded-lg disabled:opacity-50">
                       🏷️ Etiquetas
+                    </button>
+                    <button onClick={ev => { ev.stopPropagation(); exportarXmlEntrada(e.id, e.numero, e.serie) }}
+                      disabled={carregandoAcao === `xml-${e.id}`}
+                      className="px-2 py-1 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs rounded-lg disabled:opacity-50">
+                      ⬇ XML
                     </button>
                   </div>
                 </td>

@@ -83,6 +83,11 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
     diasRestantes = Math.max(0, Math.ceil((new Date(sub.data_fim).getTime() - Date.now()) / 86400000))
   }
 
+  // Assinatura sem acesso (aguardando pagamento, vencida, suspensa, bloqueada)
+  // não libera nenhum módulo — sem isso, o menu (que só olha `modulos`,
+  // não `subscriptionStatus`) mostraria tudo mesmo sem pagamento confirmado.
+  const semAcesso = ['expired', 'blocked', 'suspended', 'pending'].includes(sub.status)
+
   return {
     planId: String(plan?.id ?? ''),
     planNome: String(plan?.nome ?? ''),
@@ -92,7 +97,7 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
     subscriptionStatus: sub.status as SubscriptionStatus,
     trialFim: sub.trial_fim ?? null,
     diasRestantes,
-    modulos: isSystemAdmin ? ['*'] : modulos,
+    modulos: isSystemAdmin ? ['*'] : (semAcesso ? [] : modulos),
     limites,
     isSystemAdmin,
     empresaId,
@@ -103,7 +108,7 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
 export async function podeAcessarModulo(modulo: string, empresaId: string, userId: string): Promise<boolean> {
   const plan = await loadPlanData(empresaId, userId)
   if (plan.isSystemAdmin) return true
-  if (plan.subscriptionStatus === 'expired' || plan.subscriptionStatus === 'blocked' || plan.subscriptionStatus === 'suspended') return false
+  if (plan.subscriptionStatus === 'expired' || plan.subscriptionStatus === 'blocked' || plan.subscriptionStatus === 'suspended' || plan.subscriptionStatus === 'pending') return false
   return plan.modulos.includes(modulo)
 }
 

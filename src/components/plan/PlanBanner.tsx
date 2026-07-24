@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { usePlan } from '@/contexts/PlanContext'
 import Link from 'next/link'
 
@@ -65,7 +66,31 @@ export function PlanBannerSidebar({ collapsed }: { collapsed: boolean }) {
 // Alert banner shown at top of page for critical subscription issues
 export function PlanAlertBanner() {
   const plan = usePlan()
+  const [processando, setProcessando] = useState(false)
   if (plan.isSystemAdmin) return null
+
+  if (plan.subscriptionStatus === 'pending') {
+    async function concluirPagamento() {
+      setProcessando(true)
+      try {
+        const res = await fetch('/api/mercadopago/criar-assinatura', { method: 'POST' })
+        const data = await res.json()
+        if (!data.ok) { alert(data.error ?? 'Erro ao retomar o pagamento.'); return }
+        window.location.href = data.init_point
+      } finally {
+        setProcessando(false)
+      }
+    }
+    return (
+      <div className="bg-orange-500 text-white text-sm px-4 py-2 flex items-center justify-between">
+        <span>⚠ Seu pagamento ainda não foi confirmado. O acesso ao plano {plan.planNome} fica liberado assim que o Mercado Pago confirmar.</span>
+        <button onClick={concluirPagamento} disabled={processando}
+          className="ml-4 px-3 py-1 bg-white text-orange-600 rounded-lg text-xs font-bold hover:bg-orange-50 disabled:opacity-60">
+          {processando ? '...' : 'Concluir pagamento →'}
+        </button>
+      </div>
+    )
+  }
 
   if (plan.subscriptionStatus === 'expired' || plan.subscriptionStatus === 'blocked' || plan.subscriptionStatus === 'suspended') {
     return (
