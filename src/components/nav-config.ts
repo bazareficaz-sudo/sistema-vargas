@@ -31,6 +31,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard',                        label: 'Visão Geral',          icon: '🏠' },
       { href: '/dashboard/relatorios',             label: 'Indicadores BI',       icon: '📊', modulo: 'relatorios' },
       { href: '/dashboard/relatorios/alertas',     label: 'Alertas Inteligentes', icon: '🔔', modulo: 'relatorios_avancados' },
+      { href: '/dashboard/assinatura',             label: 'Minha Assinatura',     icon: '💳' },
     ],
   },
   {
@@ -45,8 +46,8 @@ export const NAV: NavGroup[] = [
       { href: '/pdv',                              label: 'PDV',                icon: '🖥',  modulo: 'pdv' },
       { href: '/dashboard/vendas',                 label: 'Vendas',             icon: '💳',  modulo: 'vendas' },
       { href: '/dashboard/orcamentos',             label: 'Orçamentos',         icon: '📋',  modulo: 'orcamentos' },
-      { href: '/dashboard/incentivos',             label: 'Incentivos',         icon: '🏆' },
-      { href: '/dashboard/configuracoes/saude-venda', label: 'Saúde da Venda', icon: '💚' },
+      { href: '/dashboard/incentivos',             label: 'Incentivos',         icon: '🏆',  modulo: 'incentivos' },
+      { href: '/dashboard/configuracoes/saude-venda', label: 'Saúde da Venda', icon: '💚', modulo: 'saude_venda' },
     ],
   },
   {
@@ -211,7 +212,7 @@ export const NAV: NavGroup[] = [
     badgeColor: 'bg-yellow-500',
     defaultOpen: false,
     items: [
-      { href: '/dashboard/automacoes', label: 'Central de Automações', icon: '⚡' },
+      { href: '/dashboard/automacoes', label: 'Central de Automações', icon: '⚡', modulo: 'automacoes' },
     ],
   },
   {

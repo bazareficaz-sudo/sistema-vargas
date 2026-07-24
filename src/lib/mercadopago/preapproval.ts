@@ -47,3 +47,11 @@ export async function buscarPreapprovalsPorPlano(planoId: string): Promise<any[]
   const data = await mpRequest('GET', `/preapproval/search?preapproval_plan_id=${planoId}`)
   return data?.results ?? []
 }
+
+// Histórico de cobranças de uma assinatura — usado na tela "Minha
+// Assinatura" pro cliente ver as faturas. Confirmado ao vivo que esse
+// endpoint devolve cada cobrança recorrente com status do pagamento.
+export async function listarPagamentos(preapprovalId: string): Promise<any[]> {
+  const data = await mpRequest('GET', `/authorized_payments/search?preapproval_id=${preapprovalId}`)
+  return data?.results ?? []
+}
