@@ -72,9 +72,14 @@ export default function EntradaXmlDetalheClient({
     setMapModal(item)
     setMapBusca('')
     setMapFator(String(item.fator_conversao || 1))
-    setProdutoSelecionado(null)
     setIndiceDestacado(0)
     setCriandoProduto(false)
+
+    // Se o EAN do item bate exatamente com o de algum produto cadastrado,
+    // já pré-seleciona — evita ter que buscar manualmente quando o produto
+    // já existe no sistema com o mesmo código de barras.
+    const porEan = item.ean ? produtos.find(p => p.ean && p.ean === item.ean) : undefined
+    setProdutoSelecionado(porEan ?? null)
   }
 
   function fecharMapModal() {
@@ -83,12 +88,18 @@ export default function EntradaXmlDetalheClient({
     setCriandoProduto(false)
   }
 
-  // Foca a busca sempre que o modal abre (ou quando volta da tela de criar produto).
+  // Foca a busca sempre que o modal abre (ou quando volta da tela de criar
+  // produto) — a menos que já tenha achado o produto certo pelo EAN, aí foca
+  // direto o fator de conversão pra já confirmar com Enter.
   useEffect(() => {
     if (mapModal && !criandoProduto) {
-      const t = setTimeout(() => buscaInputRef.current?.focus(), 50)
+      const t = setTimeout(() => {
+        if (produtoSelecionado) { fatorInputRef.current?.focus(); fatorInputRef.current?.select() }
+        else buscaInputRef.current?.focus()
+      }, 50)
       return () => clearTimeout(t)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapModal, criandoProduto])
 
   // Reseta o destaque do teclado a cada nova busca.
@@ -1260,7 +1271,7 @@ export default function EntradaXmlDetalheClient({
                             className={`text-slate-700 cursor-pointer ${destacado ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
                             onClick={() => selecionarProduto(p)}>
                             <td className="px-4 py-2.5">
-                              <p className="text-slate-800 text-xs font-medium">{p.nome}</p>
+                              <p className="text-slate-800 text-xs font-medium">{p.nome}{p.marca && <span className="text-blue-600 font-normal"> — {p.marca}</span>}</p>
                               <p className="text-slate-400 text-xs">SKU: {p.sku} • EAN: {p.ean || '—'}</p>
                             </td>
                             <td className="px-4 py-2.5 text-center text-xs text-slate-500">{p.unidade}</td>
