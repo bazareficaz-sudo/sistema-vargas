@@ -390,12 +390,21 @@ export default function EntradasXmlClient({
         }
 
         if (produtoId) {
+          // Recalcula o custo agora que o fator de conversão é conhecido —
+          // o custo gravado na importação foi dividido pela quantidade do
+          // XML (ex: 1 caixa), não pela quantidade real de entrada depois
+          // da conversão (ex: 48 unidades), senão o produto herdava o custo
+          // da caixa inteira como se fosse o custo de 1 unidade.
+          const quantidadeEntrada = item.quantidade_xml * fator
+          const custoUnitario = calcularCustoItem({ ...item, quantidade_entrada: quantidadeEntrada } as any)
           await sb.from('nfe_itens').update({
             produto_id: produtoId,
             fator_conversao: fator,
             unidade_sistema: unidadeSistema,
-            quantidade_entrada: item.quantidade_xml * fator,
+            quantidade_entrada: quantidadeEntrada,
             status_mapeamento: 'auto',
+            custo_unitario: custoUnitario,
+            custo_total: custoUnitario * quantidadeEntrada,
           }).eq('id', item.id)
         }
       }

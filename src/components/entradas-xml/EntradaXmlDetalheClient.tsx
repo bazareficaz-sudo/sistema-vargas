@@ -234,13 +234,20 @@ export default function EntradaXmlDetalheClient({
   async function mapearItem(item: Item, produto: Produto, status: string = 'manual') {
     const fator = parseFloat(mapFator) || 1
     try {
+      // Recalcula o custo com o fator de conversão real — o custo gravado na
+      // importação foi dividido pela quantidade do XML (antes de saber o
+      // fator), não pela quantidade de entrada de verdade.
+      const quantidadeEntrada = item.quantidade_xml * fator
+      const custoUnitario = calcularCustoItem({ ...item, quantidade_entrada: quantidadeEntrada } as any, incluirIpi, incluirSt)
       const { error: erroItem } = await sb.from('nfe_itens').update({
         produto_id: produto.id,
         descricao_sistema: produto.nome,
         unidade_sistema: produto.unidade,
         fator_conversao: fator,
-        quantidade_entrada: item.quantidade_xml * fator,
+        quantidade_entrada: quantidadeEntrada,
         status_mapeamento: status,
+        custo_unitario: custoUnitario,
+        custo_total: custoUnitario * quantidadeEntrada,
       }).eq('id', item.id)
       if (erroItem) throw erroItem
 
@@ -266,7 +273,8 @@ export default function EntradaXmlDetalheClient({
       setItens(p => p.map(i => i.id === item.id ? {
         ...i, produto_id: produto.id, descricao_sistema: produto.nome,
         unidade_sistema: produto.unidade, fator_conversao: fator,
-        quantidade_entrada: item.quantidade_xml * fator, status_mapeamento: status
+        quantidade_entrada: quantidadeEntrada, status_mapeamento: status,
+        custo_unitario: custoUnitario, custo_total: custoUnitario * quantidadeEntrada,
       } : i))
 
       // Verificar se todos mapeados
@@ -456,7 +464,13 @@ export default function EntradaXmlDetalheClient({
       for (const item of itens) {
         if (!item.produto_id || item.status_mapeamento === 'ignorado') continue
         const qtd = item.qtd_conferida || item.quantidade_entrada || item.quantidade_xml
-        const custo = item.custo_unitario || custoComAdic(item)
+        // Sempre recalcula na hora de finalizar (não confia em custo_unitario
+        // salvo) — esse campo é gravado na importação, antes do fator de
+        // conversão ser conhecido, e só é atualizado se o usuário passar
+        // pela aba Custos manualmente. Sem isso, produto com conversão (ex.
+        // fator 48, uma caixa vira 48 unidades) herdava o custo da caixa
+        // inteira como se fosse o custo de 1 unidade.
+        const custo = custoComAdic(item)
 
         const { error: erroRpc } = await sb.rpc('incrementar_estoque', {
           p_produto_id: item.produto_id,
