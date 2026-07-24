@@ -92,6 +92,7 @@ export default function SignupWizard({ onClose, planoInicial }: { onClose: () =>
       const { data, error: authErr } = await sb.auth.signUp({
         email: form.email, password: form.senha,
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             nome: form.nome, telefone: form.telefone,
             pending_signup: {
