@@ -174,6 +174,7 @@ export default function EntradaXmlDetalheClient({
 
   // Preços
   const [precosNovos, setPrecosNovos] = useState<Record<string, number>>({})
+  const [margemInputs, setMargemInputs] = useState<Record<string, string>>({})
   const [margemPadrao, setMargemPadrao] = useState(40)
   const [modoPreco, setModoPreco] = useState<'margem' | 'preco'>('margem')
   const [produtosAtuais, setProdutosAtuais] = useState<Record<string, Produto>>({})
@@ -967,12 +968,21 @@ export default function EntradaXmlDetalheClient({
                         {readonly ? (
                           <span className={`text-xs ${novaMargem > 0 ? 'text-emerald-600' : 'text-red-500'}`}>{novaMargem.toFixed(1)}%</span>
                         ) : (
-                          <input type="number" step="0.1" value={novaMargem.toFixed(1)}
+                          <input type="number" step="0.1"
+                            value={margemInputs[item.id] ?? novaMargem.toFixed(1)}
                             onChange={e => {
-                              const m = +e.target.value
-                              const preco = custo > 0 ? Math.ceil(custo * (1 + m / 100) * 100) / 100 : 0
-                              setPrecosNovos(p => ({ ...p, [item.id]: preco }))
+                              const raw = e.target.value
+                              setMargemInputs(p => ({ ...p, [item.id]: raw }))
+                              const m = parseFloat(raw)
+                              if (!Number.isNaN(m)) {
+                                const preco = custo > 0 ? Math.ceil(custo * (1 + m / 100) * 100) / 100 : 0
+                                setPrecosNovos(p => ({ ...p, [item.id]: preco }))
+                              }
                             }}
+                            onBlur={() => setMargemInputs(p => {
+                              const { [item.id]: _remove, ...rest } = p
+                              return rest
+                            })}
                             className="w-20 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                         )}
                       </td>
