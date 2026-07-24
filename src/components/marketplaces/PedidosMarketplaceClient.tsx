@@ -71,6 +71,7 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
   const [mapeandoItem, setMapeandoItem] = useState<any | null>(null)
   const [anuncioParaMapear, setAnuncioParaMapear] = useState<any | null>(null)
   const [carregandoAnuncio, setCarregandoAnuncio] = useState(false)
+  const [baixandoItemId, setBaixandoItemId] = useState<string | null>(null)
   const [buscaItemId, setBuscaItemId] = useState<string | null>(null)
   const [termoBuscaItem, setTermoBuscaItem] = useState('')
   const [resultadosBuscaItem, setResultadosBuscaItem] = useState<any[]>([])
@@ -229,6 +230,27 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pedidoItemId: item.id }),
       })
     } catch { /* falha aqui não deve travar o mapeamento já salvo — fica pendente pra próxima sincronização */ }
+  }
+
+  // Item já mapeado mas a baixa falhou (normalmente "estoque insuficiente" —
+  // ver pendencia_motivo do pedido) fica travado pra sempre sem isso: nada
+  // tenta baixar de novo automaticamente depois que o produto é reabastecido.
+  async function tentarBaixarEstoqueDeNovo(item: any) {
+    setBaixandoItemId(item.id)
+    try {
+      const resp = await fetch('/api/marketplace/shopee/baixar-estoque-item', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pedidoItemId: item.id }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { alert(data.erro ?? 'Erro ao baixar estoque.'); return }
+      atualizarItemLocal(item.pedido_id, item.id, { baixou_estoque: true })
+      await recalcularEtapaLocal(item.pedido_id)
+      router.refresh()
+    } catch (e: any) {
+      alert(e.message ?? 'Erro ao baixar estoque.')
+    } finally {
+      setBaixandoItemId(null)
+    }
   }
 
   // etapa_interna só é recalculada automaticamente durante a sincronização —
@@ -624,6 +646,18 @@ export default function PedidosMarketplaceClient({ canal, pedidos: pedidosInicia
                               className="text-blue-600 hover:text-blue-800 font-medium">Mapear</button>
                           )}
                         </div>
+                        {item.status_mapeamento === 'mapeado' && !item.baixou_estoque
+                          && detalhe.status !== 'novo' && detalhe.status !== 'cancelado' && (
+                          <div className="flex items-center justify-between mt-1 gap-2">
+                            <span className="text-red-600 truncate" title={detalhe.pendencia_motivo ?? ''}>
+                              ✗ estoque não baixado{detalhe.pendencia_motivo ? ` — ${detalhe.pendencia_motivo}` : ''}
+                            </span>
+                            <button onClick={() => tentarBaixarEstoqueDeNovo(item)} disabled={baixandoItemId === item.id}
+                              className="text-blue-600 hover:text-blue-800 font-medium flex-shrink-0 disabled:opacity-50">
+                              {baixandoItemId === item.id ? 'Tentando...' : 'Tentar novamente'}
+                            </button>
+                          </div>
+                        )}
                         {buscaItemId === item.id && (
                           <div className="mt-2 border border-blue-200 bg-blue-50/40 rounded-lg p-2 space-y-1.5">
                             <p className="text-[11px] text-gray-500">Anúncio não sincronizado no catálogo — vincule direto a um produto:</p>
