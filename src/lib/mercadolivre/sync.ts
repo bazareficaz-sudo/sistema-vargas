@@ -1,10 +1,13 @@
 import { mlGet, refreshAccessTokenIfNeeded } from './client'
-import { getItemsBatch, listItemIds } from './catalog'
+import { getItemsBatch, listItemIdsScan } from './catalog'
 import type { MLChannel, SyncFailure, SyncResult } from './types'
 
 // Teto de itens processados por chamada de sincronização — mesmo padrão da
-// Shopee: sem fila/cron dedicado ainda, sync síncrono e limitado. Catálogos
-// maiores precisam rodar "Sincronizar agora" mais de uma vez (`truncated`).
+// Shopee: sync síncrono e limitado por chamada. Diferente de antes, agora
+// isso não trunca o catálogo pra sempre: o scroll_id de onde a busca parou
+// fica salvo em marketplace_canais.ml_scan_scroll_id, e a PRÓXIMA chamada
+// (clique manual ou cron) continua dali em vez de recomeçar do zero — ver
+// listItemIdsScan em catalog.ts.
 const DEFAULT_MAX_ITEMS = 500
 
 const STATUS_MAP: Record<string, string> = {
@@ -199,14 +202,24 @@ export async function syncCatalogo(
   const ctx = { sb, canal }
 
   const encontrados: string[] = []
-  let truncated = false
+  let scrollIdParaSalvar: string | null = null
+  let passeCompleto = true // só vira false se paramos no meio (maxItems atingido)
 
-  paginacao: for await (const pagina of listItemIds(ctx)) {
-    for (const id of pagina) {
-      if (encontrados.length >= maxItems) { truncated = true; break paginacao }
+  paginacao: for await (const pagina of listItemIdsScan(ctx, { scrollIdInicial: canal.mlScanScrollId ?? null })) {
+    for (const id of pagina.ids) {
+      if (encontrados.length >= maxItems) {
+        scrollIdParaSalvar = pagina.scrollId
+        passeCompleto = false
+        break paginacao
+      }
       encontrados.push(id)
     }
   }
+  // passeCompleto=true (chegou ao fim do catálogo) → reseta o cursor pra
+  // próxima sincronização recomeçar do zero e pegar itens novos/alterados.
+  // passeCompleto=false (parou por maxItems) → salva onde parou pra
+  // continuar dali na próxima chamada, sem repetir nem pular nada.
+  await sb.from('marketplace_canais').update({ ml_scan_scroll_id: passeCompleto ? null : scrollIdParaSalvar }).eq('id', canal.id)
 
   if (encontrados.length === 0) {
     return { totalFound: 0, upserted: 0, failed: [], truncated: false }
@@ -231,5 +244,5 @@ export async function syncCatalogo(
     }
   }
 
-  return { totalFound: encontrados.length, upserted, failed, truncated }
+  return { totalFound: encontrados.length, upserted, failed, truncated: !passeCompleto }
 }

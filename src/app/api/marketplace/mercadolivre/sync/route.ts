@@ -17,7 +17,7 @@ export async function POST(req: Request) {
 
   const { data: canalRow } = await sb
     .from('marketplace_canais')
-    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em')
+    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, ml_scan_scroll_id')
     .eq('id', canalId)
     .eq('empresa_id', empresaId)
     .eq('plataforma', 'mercadolivre')
@@ -35,6 +35,7 @@ export async function POST(req: Request) {
     accessToken: canalRow.access_token,
     refreshToken: canalRow.refresh_token,
     tokenExpiraEm: canalRow.token_expira_em,
+    mlScanScrollId: canalRow.ml_scan_scroll_id,
   }
 
   try {
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
       canal_id: canalId,
       tipo: 'produto_sync',
       status,
-      mensagem: `Encontrados: ${resultado.totalFound} · Sincronizados: ${resultado.upserted} · Falhas: ${resultado.failed.length}${resultado.truncated ? ' · Truncado (rodar novamente)' : ''}`,
+      mensagem: `Encontrados: ${resultado.totalFound} · Sincronizados: ${resultado.upserted} · Falhas: ${resultado.failed.length}${resultado.truncated ? ' · Catálogo grande — continua de onde parou na próxima sincronização' : ''}`,
       detalhes: resultado,
     })
 

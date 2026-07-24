@@ -16,6 +16,9 @@ export type MLChannel = {
   // em ShopeeChannel.
   sincronizarEstoque?: boolean
   debitarEstoqueVendas?: boolean
+  // Cursor de onde a última sincronização de catálogo parou (modo "scan" —
+  // ver catalog.ts). null/ausente = começar um passe novo do zero.
+  mlScanScrollId?: string | null
 }
 
 export class MLApiError extends Error {

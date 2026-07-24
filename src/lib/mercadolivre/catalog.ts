@@ -10,32 +10,38 @@ export const DEFAULT_PAGE_SIZE = 50
 export const ITEMS_BATCH_SIZE = 20
 export const THROTTLE_MS = 150
 
-// A busca padrão de /items/search (offset) é limitada pelo próprio ML a
-// offset+limit <= 1000 — catálogos maiores exigiriam o modo "scan" com
-// scroll_id, não implementado aqui. Lojas com mais de 1000 anúncios ativos
-// ficam truncadas (mesmo aviso que já existe pro limite de itens por rodada).
-const OFFSET_MAX = 1000
-
 export function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 type CallCtx = { sb: any; canal: MLChannel }
 
-export async function* listItemIds(ctx: CallCtx, opts: { pageSize?: number } = {}): AsyncGenerator<string[]> {
+// Pagina via "scan" (scroll_id), não offset — a busca por offset é limitada
+// pelo próprio ML a offset+limit <= 1000, o que truncava silenciosamente
+// qualquer loja com catálogo maior (confirmado ao vivo: uma conta real com
+// 5.449 itens ativos nunca conseguia ir além dos primeiros ~500, sempre os
+// MESMOS, porque cada sincronização recomeçava do offset 0). Scan não tem
+// esse teto: cada resposta traz um `scroll_id` novo pra buscar a próxima
+// leva, até vir vazio — validado ao vivo contra a API real do Mercado Livre.
+// `scrollIdInicial` permite RETOMAR de onde uma sincronização anterior
+// parou (ver syncCatalogo), em vez de sempre recomeçar do zero.
+export async function* listItemIdsScan(
+  ctx: CallCtx,
+  opts: { pageSize?: number; scrollIdInicial?: string | null } = {}
+): AsyncGenerator<{ ids: string[]; scrollId: string | null }> {
   const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE
-  let offset = 0
+  let scrollId = opts.scrollIdInicial ?? undefined
+
   while (true) {
-    const data = await mlGet(`/users/${ctx.canal.sellerId}/items/search`, { offset, limit: pageSize }, ctx.canal.accessToken)
+    const params: Record<string, any> = { search_type: 'scan', limit: pageSize }
+    if (scrollId) params.scroll_id = scrollId
+    const data = await mlGet(`/users/${ctx.canal.sellerId}/items/search`, params, ctx.canal.accessToken)
     const ids: string[] = data?.results ?? []
+    scrollId = data?.scroll_id ?? undefined
+
     if (ids.length === 0) break
-
-    yield ids
+    yield { ids, scrollId: scrollId ?? null }
     await sleep(THROTTLE_MS)
-
-    const total = data?.paging?.total ?? 0
-    offset += ids.length
-    if (offset >= total || offset >= OFFSET_MAX) break
   }
 }
 
