@@ -75,6 +75,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
 }) {
   const router = useRouter()
   const [anuncios, setAnuncios] = useState(anunciosIniciais)
+  // anunciosIniciais só vale como valor inicial do useState — sem isso,
+  // router.refresh() (ex: depois de sincronizar) atualiza os dados no
+  // servidor mas o estado local do client component nunca pega o valor
+  // novo, então a listagem parecia "travada" mesmo com o catálogo já
+  // sincronizado por baixo (mesmo bug já visto antes na tela de Pedidos).
+  useEffect(() => { setAnuncios(anunciosIniciais) }, [anunciosIniciais])
   const [q, setQ] = useState(qInicial)
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
   const [modal, setModal] = useState(false)
@@ -94,6 +100,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [previewMassa, setPreviewMassa] = useState<{ encontrados: any[]; naoEncontrados: any[] } | null>(null)
   const [aplicandoMassa, setAplicandoMassa] = useState(false)
+  const [pagina, setPagina] = useState(1)
+  const ITENS_POR_PAGINA = 100
 
   // Envio de preço/estoque em massa para a Shopee
   const [opcoesMassaPreco, setOpcoesMassaPreco] = useState<{
@@ -621,6 +629,14 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     return true
   })
 
+  // Renderizar 2000+ linhas de uma vez deixa a tela pesada — pagina o que é
+  // exibido, mas mantém "selecionar todos" e ações em massa operando sobre
+  // `filtrados` inteiro (todas as páginas), não só a página visível.
+  useEffect(() => { setPagina(1) }, [q, statusFiltro, tagFiltro, facetas])
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / ITENS_POR_PAGINA))
+  const paginaAtual = Math.min(pagina, totalPaginas)
+  const paginados = filtrados.slice((paginaAtual - 1) * ITENS_POR_PAGINA, paginaAtual * ITENS_POR_PAGINA)
+
   // Busca produto ao vivo no banco (não filtra a lista inicial, que é só um
   // fallback pequeno) — evita não achar produtos fora de uma janela limitada
   // e permite localizar por qualquer palavra do nome/SKU, não só um trecho
@@ -658,7 +674,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Anúncios — {canal.nome}</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{anuncios.length} anúncio(s) cadastrados</p>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {anuncios.length} anúncio(s) cadastrados
+            {filtrados.length !== anuncios.length && ` · ${filtrados.length} nos filtros atuais`}
+          </p>
         </div>
         <div className="flex gap-2 items-center">
           {canais.length > 1 && (
@@ -826,7 +845,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filtrados.map(a => (
+            {paginados.map(a => (
               <tr key={a.id} className={`group hover:bg-gray-50 transition-colors ${temDivergencia(a) ? 'border-l-2 border-amber-300' : ''}`}>
                 <td className="px-4 py-3">
                   <input type="checkbox" checked={selecionados.has(a.id)} onChange={() => toggleSelecionado(a.id)}
@@ -921,6 +940,27 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           </tbody>
         </table>
       </div>
+
+      {filtrados.length > 0 && (
+        <div className="flex items-center justify-between mt-3 text-sm text-gray-500">
+          <span>
+            Mostrando {(paginaAtual - 1) * ITENS_POR_PAGINA + 1}–{Math.min(paginaAtual * ITENS_POR_PAGINA, filtrados.length)} de {filtrados.length}
+          </span>
+          {totalPaginas > 1 && (
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={paginaAtual === 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white">
+                ← Anterior
+              </button>
+              <span className="text-xs text-gray-500">Página {paginaAtual} de {totalPaginas}</span>
+              <button onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))} disabled={paginaAtual === totalPaginas}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 text-xs font-medium hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white">
+                Próxima →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modal anúncio */}
       {modal && (
