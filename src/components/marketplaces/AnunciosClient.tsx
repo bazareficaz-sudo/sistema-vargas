@@ -60,6 +60,20 @@ function nomesVariacoes(a: any): string {
   return nomes.join(' · ')
 }
 
+// Um anúncio com variações nunca usa o produto_id do PRÓPRIO anúncio na hora
+// de baixar estoque de um pedido — cada variação tem seu vínculo próprio (ver
+// resolverVinculoItem em src/lib/mercadolivre/orders.ts e equivalente na
+// Shopee). Então "mapeado" pra esse tipo de anúncio significa TODAS as
+// variações terem produto vinculado, não o campo produto_id do anúncio em
+// si (que fica vazio de propósito e não precisa ser preenchido).
+function estaMapeado(a: any): boolean {
+  if (a.tem_variacao) {
+    const variacoes = a.marketplace_anuncio_variacoes ?? []
+    return variacoes.length > 0 && variacoes.every((v: any) => !!v.produto_id)
+  }
+  return !!a.produto_id
+}
+
 const FACETAS: { key: string; label: string }[] = [
   { key: 'mapeado', label: 'Mapeado' },
   { key: 'nao_mapeado', label: 'Não mapeado' },
@@ -619,8 +633,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     if (!matchQ || !matchS || !matchTag) return false
 
     for (const faceta of facetas) {
-      if (faceta === 'mapeado' && !a.produto_id) return false
-      if (faceta === 'nao_mapeado' && a.produto_id) return false
+      if (faceta === 'mapeado' && !estaMapeado(a)) return false
+      if (faceta === 'nao_mapeado' && estaMapeado(a)) return false
       if (faceta === 'sem_sku' && a.sku_canal) return false
       if (faceta === 'sem_estoque' && (a.estoque_externo ?? null) !== 0) return false
       if (faceta === 'com_variacao' && !a.tem_variacao) return false
@@ -878,7 +892,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                           </span>
                         )}
                         {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
-                        {!a.produtos && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
+                        {!estaMapeado(a) && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
                         {temDivergencia(a) && <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠ Diverge do produto</span>}
                         {(a.produtos?.tags ?? []).map((t: string) => (
                           <span key={t} className="text-xs text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded-full">{t}</span>

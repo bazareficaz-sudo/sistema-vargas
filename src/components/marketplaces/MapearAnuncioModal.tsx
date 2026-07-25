@@ -258,6 +258,12 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
               {/* Mapeamento do anúncio */}
               <div>
                 <p className="text-xs font-medium text-gray-500 mb-2">Produto vinculado ao anúncio</p>
+                {anuncioAtual.tem_variacao && (
+                  <p className="text-xs text-gray-400 mb-2">
+                    Opcional quando há variações — pedidos usam o produto vinculado a cada variação abaixo, não este campo.
+                    {variacoes.length > 0 && variacoes.every(v => v.produto_id) && ' Todas as variações já estão mapeadas, então não é necessário preencher isto.'}
+                  </p>
+                )}
                 {anuncioAtual.produtos ? (
                   <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
                     <div>

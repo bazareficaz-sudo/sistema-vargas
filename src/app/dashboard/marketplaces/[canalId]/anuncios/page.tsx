@@ -32,7 +32,7 @@ export default async function AnunciosPage({ params, searchParams }: {
 
   let query = supabase
     .from('marketplace_anuncios')
-    .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao)')
+    .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao, produto_id)')
     .eq('canal_id', canalId)
     .order('created_at', { ascending: false })
 
