@@ -113,6 +113,7 @@ export default function ProdutosClient({
   const [imagemEmMassa, setImagemEmMassa] = useState(false)
   const [nomeEditando, setNomeEditando] = useState<string | null>(null)
   const [nomeValor, setNomeValor] = useState('')
+  const [copiado, setCopiado] = useState<string | null>(null)
   const cancelandoNomeRef = useRef(false)
   const [q, setQ] = useState(qInicial)
   const [aba, setAba] = useState(abaInicial)
@@ -184,14 +185,6 @@ export default function ProdutosClient({
     })
   }
 
-  async function toggleAtivo(produto: Produto) {
-    const sb = createClient()
-    const novoValor = !produto.ativo
-    const { error } = await sb.from('produtos').update({ ativo: novoValor, updated_at: new Date().toISOString() }).eq('id', produto.id)
-    if (error) { alert(`Não foi possível atualizar: ${error.message}`); return }
-    setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, ativo: novoValor } : p))
-  }
-
   function iniciarEdicaoNome(produto: Produto) {
     setNomeEditando(produto.id)
     setNomeValor(produto.nome)
@@ -214,12 +207,15 @@ export default function ProdutosClient({
     setProdutos(prev => prev.map(p => p.id === id ? { ...p, nome: valor } : p))
   }
 
-  async function togglePdv(produto: Produto) {
-    const sb = createClient()
-    const novoValor = !produto.disponivel_pdv
-    const { error } = await sb.from('produtos').update({ disponivel_pdv: novoValor, updated_at: new Date().toISOString() }).eq('id', produto.id)
-    if (error) { alert(`Não foi possível atualizar: ${error.message}`); return }
-    setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, disponivel_pdv: novoValor } : p))
+  // Ativo/PDV agora só são alterados dentro do cadastro do produto
+  // (EditarProdutoModal) — removidos daqui pra não duplicar o controle.
+
+  async function copiar(id: string, campo: string, valor: string) {
+    try {
+      await navigator.clipboard.writeText(valor)
+      setCopiado(`${id}-${campo}`)
+      setTimeout(() => setCopiado(null), 1200)
+    } catch { /* clipboard indisponível — ignora silenciosamente */ }
   }
 
   async function ativarSelecionados(ativo: boolean) {
@@ -575,18 +571,15 @@ export default function ProdutosClient({
                   onChange={e => toggleAll(e.target.checked)}
                   className="w-4 h-4 accent-blue-600" />
               </th>
-              <th className="w-8 px-2 py-3"></th>
               <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Descrição</th>
-              <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Código (SKU)</th>
-              <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">GTIN/EAN</th>
+              <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Código / GTIN-EAN</th>
               <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Unidade</th>
               <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Preço</th>
               <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Custo</th>
               <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Markup</th>
               <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Marca</th>
               <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Estoque</th>
-              <th className="text-center px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Ativo</th>
-              <th className="text-center px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">PDV</th>
+              <th className="w-28 px-2 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -595,44 +588,6 @@ export default function ProdutosClient({
                 <td className="px-4 py-2.5">
                   <input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleOne(p.id)}
                     className="w-4 h-4 accent-blue-600" />
-                </td>
-                <td className="px-2 py-2.5">
-                  <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
-                    <button
-                      onClick={() => setEditando(p)}
-                      className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-                      title="Editar"
-                    >
-                      ✎
-                    </button>
-                    {p.tipo !== 'kit' && (
-                      <button
-                        onClick={() => setDuplicando(p)}
-                        className="text-gray-400 hover:text-gray-600 text-sm leading-none"
-                        title="Duplicar produto"
-                      >
-                        ⧉
-                      </button>
-                    )}
-                    {p.tipo !== 'kit' && (
-                      <button
-                        onClick={() => setCriandoKit(p)}
-                        className="text-gray-400 hover:text-gray-600 text-sm leading-none"
-                        title="Criar kit a partir deste produto"
-                      >
-                        📦
-                      </button>
-                    )}
-                    {p.tipo !== 'kit' && canaisShopee.length > 0 && (
-                      <button
-                        onClick={() => setCriandoAnuncioShopee(p)}
-                        className="text-gray-400 hover:text-orange-600 text-sm leading-none"
-                        title="Publicar este produto como anúncio na Shopee"
-                      >
-                        🛍
-                      </button>
-                    )}
-                  </div>
                 </td>
                 <td className="px-3 py-2.5">
                   <div className="flex items-center gap-2.5 flex-wrap">
@@ -688,8 +643,26 @@ export default function ProdutosClient({
                     )}
                   </div>
                 </td>
-                <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{p.sku ?? '—'}</td>
-                <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">{p.ean ?? '—'}</td>
+                <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span>{p.sku ?? '—'}</span>
+                    {p.sku && (
+                      <button onClick={() => copiar(p.id, 'sku', p.sku!)} title="Copiar SKU"
+                        className="text-gray-300 hover:text-blue-600 transition-colors leading-none">
+                        {copiado === `${p.id}-sku` ? '✓' : '⧉'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span>{p.ean ?? '—'}</span>
+                    {p.ean && (
+                      <button onClick={() => copiar(p.id, 'ean', p.ean!)} title="Copiar GTIN/EAN"
+                        className="text-gray-300 hover:text-blue-600 transition-colors leading-none">
+                        {copiado === `${p.id}-ean` ? '✓' : '⧉'}
+                      </button>
+                    )}
+                  </div>
+                </td>
                 <td className="px-3 py-2.5 text-gray-600">{p.unidade}</td>
                 <td className="px-3 py-2.5 text-right text-gray-900 font-medium">
                   {p.preco_venda > 0 ? p.preco_venda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : <span className="text-gray-400">—</span>}
@@ -711,25 +684,48 @@ export default function ProdutosClient({
                     {p.estoque ?? 0}
                   </button>
                 </td>
-                <td className="px-3 py-2.5 text-center">
-                  <button onClick={() => toggleAtivo(p)}
-                    className={`w-10 h-5 rounded-full transition-colors relative overflow-hidden ${p.ativo ? 'bg-green-500' : 'bg-gray-300'}`}>
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${p.ativo ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </td>
-                <td className="px-3 py-2.5 text-center">
-                  <button
-                    onClick={() => togglePdv(p)}
-                    title={p.disponivel_pdv ? 'Visível no PDV — clique para ocultar' : 'Oculto no PDV — clique para exibir'}
-                    className={`w-10 h-5 rounded-full transition-colors relative overflow-hidden ${p.disponivel_pdv ? 'bg-green-500' : 'bg-gray-300'}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${p.disponivel_pdv ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
+                <td className="px-2 py-2.5">
+                  <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+                    <button
+                      onClick={() => setEditando(p)}
+                      className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+                      title="Editar"
+                    >
+                      ✎
+                    </button>
+                    {p.tipo !== 'kit' && (
+                      <button
+                        onClick={() => setDuplicando(p)}
+                        className="text-gray-400 hover:text-gray-600 text-sm leading-none"
+                        title="Duplicar produto"
+                      >
+                        ⧉
+                      </button>
+                    )}
+                    {p.tipo !== 'kit' && (
+                      <button
+                        onClick={() => setCriandoKit(p)}
+                        className="text-gray-400 hover:text-gray-600 text-sm leading-none"
+                        title="Criar kit a partir deste produto"
+                      >
+                        📦
+                      </button>
+                    )}
+                    {p.tipo !== 'kit' && canaisShopee.length > 0 && (
+                      <button
+                        onClick={() => setCriandoAnuncioShopee(p)}
+                        className="text-gray-400 hover:text-orange-600 text-sm leading-none"
+                        title="Publicar este produto como anúncio na Shopee"
+                      >
+                        🛍
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
             {produtos.length === 0 && (
-              <tr><td colSpan={13} className="py-12 text-center text-gray-400">Nenhum produto encontrado.</td></tr>
+              <tr><td colSpan={10} className="py-12 text-center text-gray-400">Nenhum produto encontrado.</td></tr>
             )}
           </tbody>
         </table>
