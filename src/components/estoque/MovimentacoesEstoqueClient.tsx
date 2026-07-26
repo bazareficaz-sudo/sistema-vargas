@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { PERIODO_OPCOES, PERIODO_LABELS, TIPOS_MOVIMENTO, TIPO_LABEL, type PeriodoPreset } from '@/lib/estoque/periodo'
 import AjusteEstoqueModal from './AjusteEstoqueModal'
+import GraficoEvolucaoEstoque from './GraficoEvolucaoEstoque'
 
 type Deposito = { id: string; nome: string }
 type ProdutoSelecionado = {
@@ -61,6 +62,16 @@ export default function MovimentacoesEstoqueClient({
   const [de, setDe] = useState(deInicial)
   const [ate, setAte] = useState(ateInicial)
   const [mostrarTipos, setMostrarTipos] = useState(false)
+  const tiposRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!mostrarTipos) return
+    function aoClicarFora(e: MouseEvent) {
+      if (tiposRef.current && !tiposRef.current.contains(e.target as Node)) setMostrarTipos(false)
+    }
+    document.addEventListener('mousedown', aoClicarFora)
+    return () => document.removeEventListener('mousedown', aoClicarFora)
+  }, [mostrarTipos])
   const [ajustando, setAjustando] = useState(false)
 
   // Mantém o estado local em sincronia quando a navegação (router.push)
@@ -102,6 +113,13 @@ export default function MovimentacoesEstoqueClient({
     router.push(`/dashboard/movimentacoes-estoque?${sp.toString()}`)
   }
 
+  function urlExportar() {
+    const sp = new URLSearchParams({
+      modo, produto: produtoIdInicial, deposito, tipos: tipos.join(','), periodo, de, ate,
+    })
+    return `/api/movimentacoes-estoque/exportar?${sp.toString()}`
+  }
+
   function alternarTipo(valor: string) {
     const novo = tipos.includes(valor) ? tipos.filter(t => t !== valor) : [...tipos, valor]
     setTipos(novo)
@@ -135,10 +153,16 @@ export default function MovimentacoesEstoqueClient({
           <h1 className="text-gray-900 text-xl font-semibold">Movimentação de Estoque</h1>
           <p className="text-sm text-gray-400 mt-0.5">Extrato de entradas, saídas e ajustes de cada produto</p>
         </div>
-        <button onClick={() => setAjustando(true)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-          + Ajustar estoque
-        </button>
+        <div className="flex gap-2">
+          <a href={urlExportar()} download
+            className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+            ⬇ Exportar CSV
+          </a>
+          <button onClick={() => setAjustando(true)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+            + Ajustar estoque
+          </button>
+        </div>
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-700 mb-4">
@@ -261,6 +285,16 @@ export default function MovimentacoesEstoqueClient({
               A diferença pode vir de movimentações anteriores a {DATA_LANCAMENTO} (ainda não registradas) ou de outra alteração fora do período filtrado.
             </div>
           )}
+
+          <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+            <p className="text-sm font-semibold text-gray-900 mb-3">Evolução do Estoque</p>
+            <GraficoEvolucaoEstoque
+              pontos={movimentosProduto.map(m => ({
+                data: new Date(m.created_at).toLocaleDateString('pt-BR'),
+                saldo: m.estoque_novo,
+              }))}
+            />
+          </div>
         </>
       )}
 
