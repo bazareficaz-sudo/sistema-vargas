@@ -12,6 +12,15 @@ function numOuNull(v: unknown, min: number, max: number): number | null {
   return Number.isFinite(n) && n > min && n <= max ? Math.round(n * 1000) / 1000 : null
 }
 
+// A IA às vezes devolve NCM/CEST como número JSON em vez de string (apesar
+// do prompt pedir string) — checar só `typeof === 'string'` descartava esses
+// casos silenciosamente. Aceita number ou string e normaliza pra dígitos.
+function digitsOuNull(v: unknown, tamanho: number): string | null {
+  if (v == null) return null
+  const digitos = String(v).replace(/\D/g, '')
+  return digitos.length === tamanho ? digitos : null
+}
+
 export async function POST(req: Request) {
   const { produtoNome, produtoEan } = await req.json()
   if (!produtoNome?.trim()) return NextResponse.json({ ok: false, erro: 'Nome do produto é obrigatório' }, { status: 400 })
@@ -46,8 +55,8 @@ Responda SOMENTE com um JSON neste formato exato:
 {
   "categoria": "<nome exato de uma categoria da lista acima, ou null>",
   "marca": "<nome exato de uma marca da lista acima, ou null>",
-  "ncm": "<código NCM de 8 dígitos mais provável, só números, ou null se não tiver certeza>",
-  "cest": "<código CEST de 7 dígitos, só números, APENAS se esse tipo de produto costuma ter substituição tributária — senão null>",
+  "ncm": "<código NCM de 8 dígitos mais provável, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver, ou null se não tiver certeza>",
+  "cest": "<código CEST de 7 dígitos, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver, APENAS se esse tipo de produto costuma ter substituição tributária — senão null>",
   "descricao_marketplace": "<descrição curta e vendável em português, 2 a 3 frases, pra exibir numa loja online/marketplace, ou null>",
   "peso_kg": <peso estimado do produto embalado, em kg, número, ou null>,
   "altura_cm": <altura estimada da embalagem em cm, número, ou null>,
@@ -66,8 +75,8 @@ Se não tiver informação suficiente e confiável pra algum campo, use null nes
     const nomeMarcaValido = typeof resultado?.marca === 'string'
       ? (marcas ?? []).find(m => m.nome.toLowerCase() === resultado.marca.toLowerCase())?.nome ?? null
       : null
-    const ncmValido = typeof resultado?.ncm === 'string' && /^\d{8}$/.test(resultado.ncm) ? resultado.ncm : null
-    const cestValido = typeof resultado?.cest === 'string' && /^\d{7}$/.test(resultado.cest) ? resultado.cest : null
+    const ncmValido = digitsOuNull(resultado?.ncm, 8)
+    const cestValido = digitsOuNull(resultado?.cest, 7)
     const descricao = typeof resultado?.descricao_marketplace === 'string'
       ? resultado.descricao_marketplace.trim().slice(0, 1000) || null
       : null
