@@ -14,7 +14,7 @@ const CATEGORIAS: Record<string, { label: string; cor: string; icon: string }> =
 
 function formatarData(iso: string | null) {
   if (!iso) return ''
-  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'America/Sao_Paulo' })
 }
 
 async function getPost(slug: string) {

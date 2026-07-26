@@ -330,6 +330,7 @@ export default function ProdutosClient({
         <EstoqueDetalhadoModal
           produto={vendoEstoque}
           empresaId={empresaId}
+          onAtualizado={(novoEstoque) => setProdutos(prev => prev.map(p => p.id === vendoEstoque.id ? { ...p, estoque: novoEstoque } : p))}
           onClose={() => setVendoEstoque(null)}
         />
       )}

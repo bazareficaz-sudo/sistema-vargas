@@ -32,6 +32,9 @@ export default function NovoProdutoModal({ empresaId, categoriasRaiz, categorias
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  const [preenchendoIA, setPreenchendoIA] = useState(false)
+  const [mensagemIA, setMensagemIA] = useState('')
+  const [tituloSugerido, setTituloSugerido] = useState('')
 
   const subcategoriasDisponiveis = categoria
     ? categoriasTodas.filter(c => c.pai_id && categoriasTodas.find(r => r.id === c.pai_id)?.nome === categoria)
@@ -52,6 +55,47 @@ export default function NovoProdutoModal({ empresaId, categoriasRaiz, categorias
     const { data } = await sb.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('sku', valor).maybeSingle()
     setSkuDuplicado(data ?? null)
     setChecandoSku(false)
+  }
+
+  async function preencherComIA() {
+    if (!nome.trim()) return
+    setPreenchendoIA(true); setErro(''); setMensagemIA(''); setTituloSugerido('')
+    try {
+      const res = await fetch('/api/produtos/ia-enriquecer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ produtoNome: nome, produtoEan: '' }),
+      })
+      const data = await res.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao consultar a IA'); return }
+
+      if (data.titulo_sugerido) setTituloSugerido(data.titulo_sugerido)
+
+      let preenchidos = 0
+      if (!categoria && data.categoria) {
+        const raiz = categoriasRaiz.find(c => c.nome === data.categoria)
+        if (raiz) {
+          setCategoria(raiz.nome); preenchidos++
+        } else {
+          const filha = categoriasTodas.find(c => c.nome === data.categoria && c.pai_id)
+          const pai = filha ? categoriasTodas.find(r => r.id === filha.pai_id) : undefined
+          if (filha && pai) { setCategoria(pai.nome); setSubcategoria(filha.nome); preenchidos++ }
+        }
+      }
+      if (!marca && data.marca) { setMarca(data.marca); preenchidos++ }
+
+      setMensagemIA(preenchidos > 0
+        ? `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar.`
+        : 'A IA não encontrou sugestões novas pra categoria/marca — os campos já estavam preenchidos ou não há confiança suficiente.')
+    } catch {
+      setErro('Erro ao consultar a IA — tente novamente.')
+    } finally {
+      setPreenchendoIA(false)
+    }
+  }
+
+  function usarTituloSugerido() {
+    setNome(tituloSugerido)
+    setTituloSugerido('')
   }
 
   async function salvar() {
@@ -103,6 +147,33 @@ export default function NovoProdutoModal({ empresaId, categoriasRaiz, categorias
             <label className="block text-xs font-medium text-gray-600 mb-1">Nome *</label>
             <input value={nome} onChange={e => setNome(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+          </div>
+
+          <div>
+            <button type="button" onClick={preencherComIA} disabled={preenchendoIA || !nome.trim()}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 border border-violet-200 text-violet-700 text-sm font-medium rounded-lg transition-colors">
+              {preenchendoIA ? '✨ Pensando...' : '✨ Preencher com IA (título, categoria, marca)'}
+            </button>
+            {mensagemIA && (
+              <p className="text-xs text-violet-600 mt-1.5">{mensagemIA}</p>
+            )}
+            {tituloSugerido && (
+              <div className="mt-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2.5">
+                <p className="text-xs text-violet-700 mb-1.5">
+                  <span className="font-medium">Título sugerido:</span> {tituloSugerido}
+                </p>
+                <div className="flex gap-2">
+                  <button type="button" onClick={usarTituloSugerido}
+                    className="px-3 py-1 bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium rounded-lg transition-colors">
+                    Usar este título
+                  </button>
+                  <button type="button" onClick={() => setTituloSugerido('')}
+                    className="px-3 py-1 border border-violet-300 text-violet-600 text-xs rounded-lg hover:bg-violet-100 transition-colors">
+                    Ignorar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

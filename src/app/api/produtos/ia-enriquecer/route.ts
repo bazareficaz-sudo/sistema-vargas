@@ -53,6 +53,7 @@ ${(marcas ?? []).map(m => `- ${m.nome}`).join('\n') || '(nenhuma cadastrada aind
 
 Responda SOMENTE com um JSON neste formato exato:
 {
+  "titulo_sugerido": "<versão melhorada do nome do produto acima — mesma identidade do produto, só mais completo e bem formatado: capitalização correta (não usar CAIXA ALTA nem tudo minúsculo), sem abreviação confusa, incluindo marca/modelo/medida/voltagem/quantidade quando isso já estiver implícito no nome mas puder ficar mais claro. NÃO invente característica que não esteja sugerida pelo nome original. Se o nome já estiver bom e completo, repita ele. Nunca null.>",
   "categoria": "<nome exato de uma categoria da lista acima, ou null>",
   "marca": "<nome exato de uma marca da lista acima, ou null>",
   "ncm": "<código NCM de 8 dígitos mais provável, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver, ou null se não tiver certeza>",
@@ -80,9 +81,14 @@ Se não tiver informação suficiente e confiável pra algum campo, use null nes
     const descricao = typeof resultado?.descricao_marketplace === 'string'
       ? resultado.descricao_marketplace.trim().slice(0, 1000) || null
       : null
+    const tituloBruto = typeof resultado?.titulo_sugerido === 'string' ? resultado.titulo_sugerido.trim().slice(0, 150) : ''
+    // Só devolve se for realmente diferente do nome atual — evita mostrar
+    // uma "sugestão" que é só o mesmo texto de volta.
+    const tituloSugerido = tituloBruto && tituloBruto.toLowerCase() !== produtoNome.trim().toLowerCase() ? tituloBruto : null
 
     return NextResponse.json({
       ok: true,
+      titulo_sugerido: tituloSugerido,
       categoria: nomeCategoriaValido,
       marca: nomeMarcaValido,
       ncm: ncmValido,

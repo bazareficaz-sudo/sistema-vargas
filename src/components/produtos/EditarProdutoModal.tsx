@@ -90,6 +90,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
   const [mensagemIA, setMensagemIA] = useState('')
+  const [tituloSugerido, setTituloSugerido] = useState('')
   const [anunciosVinculados, setAnunciosVinculados] = useState<AnuncioVinculado[]>([])
   const [carregandoAnuncios, setCarregandoAnuncios] = useState(false)
 
@@ -191,7 +192,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
   async function preencherComIA() {
     if (!form || !form.nome.trim()) return
-    setPreenchendoIA(true); setErro(''); setMensagemIA('')
+    setPreenchendoIA(true); setErro(''); setMensagemIA(''); setTituloSugerido('')
     try {
       const res = await fetch('/api/produtos/ia-enriquecer', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -199,6 +200,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       })
       const data = await res.json()
       if (!data.ok) { setErro(data.erro ?? 'Erro ao consultar a IA'); return }
+
+      // Título nunca sobrescreve sozinho (nome sempre tem conteúdo, não é um
+      // "campo vazio") — só aparece como sugestão com botão pra aplicar.
+      if (data.titulo_sugerido) setTituloSugerido(data.titulo_sugerido)
 
       let preenchidos = 0
       setForm(prev => {
@@ -223,6 +228,11 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     } finally {
       setPreenchendoIA(false)
     }
+  }
+
+  function usarTituloSugerido() {
+    campo('nome', tituloSugerido)
+    setTituloSugerido('')
   }
 
   function aplicarMarkup(markup: number) {
@@ -625,10 +635,27 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               <div>
                 <button type="button" onClick={preencherComIA} disabled={preenchendoIA || !form.nome.trim()}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 border border-violet-200 text-violet-700 text-sm font-medium rounded-lg transition-colors">
-                  {preenchendoIA ? '✨ Pensando...' : '✨ Preencher campos vazios com IA (categoria, marca, NCM, descrição, dimensões...)'}
+                  {preenchendoIA ? '✨ Pensando...' : '✨ Preencher com IA (título, categoria, marca, NCM, descrição, dimensões...)'}
                 </button>
                 {mensagemIA && (
                   <p className="text-xs text-violet-600 mt-1.5">{mensagemIA}</p>
+                )}
+                {tituloSugerido && (
+                  <div className="mt-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2.5">
+                    <p className="text-xs text-violet-700 mb-1.5">
+                      <span className="font-medium">Título sugerido:</span> {tituloSugerido}
+                    </p>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={usarTituloSugerido}
+                        className="px-3 py-1 bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium rounded-lg transition-colors">
+                        Usar este título
+                      </button>
+                      <button type="button" onClick={() => setTituloSugerido('')}
+                        className="px-3 py-1 border border-violet-300 text-violet-600 text-xs rounded-lg hover:bg-violet-100 transition-colors">
+                        Ignorar
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
 

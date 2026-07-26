@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
+import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 
 type Produto = { id: string; nome: string; sku: string | null; unidade: string; estoque: number }
 
@@ -39,15 +41,80 @@ const FILTROS: { key: string; label: string }[] = [
 
 function fmtDT(s: string) { return new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }
 
-export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
+export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onAtualizado }: {
   produto: Produto
   empresaId: string
   onClose: () => void
+  onAtualizado?: (novoEstoque: number) => void
 }) {
   const [carregando, setCarregando] = useState(true)
   const [porDeposito, setPorDeposito] = useState<PorDeposito[]>([])
   const [movimentos, setMovimentos] = useState<Movimento[]>([])
   const [filtro, setFiltro] = useState('')
+  const [estoqueAtual, setEstoqueAtual] = useState(produto.estoque)
+
+  const [ajustando, setAjustando] = useState(false)
+  const [novaQtd, setNovaQtd] = useState('')
+  const [motivoAjuste, setMotivoAjuste] = useState('')
+  const [salvandoAjuste, setSalvandoAjuste] = useState(false)
+  const [erroAjuste, setErroAjuste] = useState('')
+
+  async function carregarPorDeposito() {
+    const sb = createClient()
+    const { data } = await sb.from('produto_estoque')
+      .select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome, ativo)')
+      .eq('empresa_id', empresaId).eq('produto_id', produto.id)
+    setPorDeposito((data ?? [])
+      .filter((r: any) => r.depositos?.ativo !== false)
+      .map((r: any) => ({
+        deposito_id: r.deposito_id,
+        nome: r.depositos?.nome ?? '—',
+        quantidade: Number(r.quantidade) || 0,
+        estoque_minimo: Number(r.estoque_minimo) || 0,
+        localizacao: r.localizacao,
+      })))
+  }
+
+  function abrirAjuste() {
+    setNovaQtd(String(estoqueAtual)); setMotivoAjuste(''); setErroAjuste(''); setAjustando(true)
+  }
+
+  async function salvarAjuste() {
+    const nova = parseFloat(novaQtd)
+    if (!Number.isFinite(nova)) { setErroAjuste('Informe uma quantidade válida.'); return }
+    if (!motivoAjuste.trim()) { setErroAjuste('Informe o motivo do ajuste — fica registrado no extrato.'); return }
+    if (nova === estoqueAtual) { setErroAjuste('A quantidade informada é igual ao estoque atual.'); return }
+
+    setSalvandoAjuste(true); setErroAjuste('')
+    const sb = createClient()
+    const anterior = estoqueAtual
+    const delta = nova - anterior
+
+    const { error } = await sb.from('produtos').update({ estoque: nova, updated_at: new Date().toISOString() }).eq('id', produto.id)
+    if (error) { setSalvandoAjuste(false); setErroAjuste(error.message); return }
+
+    await ajustarDepositoPrincipal(sb, empresaId, produto.id, delta)
+    const depositoId = await buscarDepositoPrincipal(sb, empresaId)
+    await registrarMovimentoEstoque(sb, {
+      empresaId, depositoId, produtoId: produto.id, produtoNome: produto.nome,
+      tipo: delta > 0 ? 'ajuste_entrada' : 'ajuste_saida',
+      quantidade: Math.abs(delta), estoqueAnterior: anterior, estoqueNovo: nova,
+      motivo: motivoAjuste.trim(), referenciaTipo: 'ajuste_manual',
+    })
+
+    setEstoqueAtual(nova)
+    setMovimentos(prev => [{
+      id: `mov-ajuste-${Date.now()}`,
+      data: new Date().toISOString(),
+      tipo: delta > 0 ? 'ajuste_entrada' : 'ajuste_saida',
+      quantidade: Math.abs(delta),
+      detalhe: motivoAjuste.trim(),
+    }, ...prev])
+    await carregarPorDeposito()
+    onAtualizado?.(nova)
+
+    setSalvandoAjuste(false); setAjustando(false); setNovaQtd(''); setMotivoAjuste('')
+  }
 
   useEffect(() => {
     let ativo = true
@@ -62,7 +129,7 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
       const vendaItensSelect = 'id, quantidade, tipo, created_at, venda_id'
 
       const [estoqueRes, vendasRes, devolucoesRes, entradasRes, movRes] = await Promise.all([
-        sb.from('produto_estoque').select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome)')
+        sb.from('produto_estoque').select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome, ativo)')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id),
         sb.from('venda_itens').select(vendaItensSelect)
           .eq('produto_id', produto.id).eq('tipo', 'venda').order('created_at', { ascending: false }).limit(100),
@@ -102,13 +169,15 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
       }
       if (!ativo) return
 
-      setPorDeposito((estoqueRes.data ?? []).map((r: any) => ({
-        deposito_id: r.deposito_id,
-        nome: r.depositos?.nome ?? '—',
-        quantidade: Number(r.quantidade) || 0,
-        estoque_minimo: Number(r.estoque_minimo) || 0,
-        localizacao: r.localizacao,
-      })))
+      setPorDeposito((estoqueRes.data ?? [])
+        .filter((r: any) => r.depositos?.ativo !== false) // esconde depósito inativo/desativado
+        .map((r: any) => ({
+          deposito_id: r.deposito_id,
+          nome: r.depositos?.nome ?? '—',
+          quantidade: Number(r.quantidade) || 0,
+          estoque_minimo: Number(r.estoque_minimo) || 0,
+          localizacao: r.localizacao,
+        })))
 
       function mapVendaItem(v: any): Movimento {
         const venda = vendasMap.get(v.venda_id)
@@ -176,9 +245,55 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
         </div>
 
-        <div className="px-6 py-4 bg-blue-50 border-b border-blue-100 flex items-center justify-between flex-shrink-0">
-          <span className="text-sm text-blue-900 font-medium">Estoque atual</span>
-          <span className="text-xl font-bold text-blue-700">{produto.estoque} {produto.unidade}</span>
+        <div className="px-6 py-4 bg-blue-50 border-b border-blue-100 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-blue-900 font-medium">Estoque atual</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xl font-bold text-blue-700">{estoqueAtual} {produto.unidade}</span>
+              {!ajustando && (
+                <button onClick={abrirAjuste} className="text-xs px-2.5 py-1 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors">
+                  ⚙ Ajustar
+                </button>
+              )}
+            </div>
+          </div>
+
+          {ajustando && (
+            <div className="mt-3 bg-white border border-blue-200 rounded-lg p-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] text-gray-500 mb-1">Nova quantidade</label>
+                  <input type="number" step="0.001" value={novaQtd} onChange={e => setNovaQtd(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500" />
+                </div>
+                {novaQtd !== '' && Number.isFinite(parseFloat(novaQtd)) && parseFloat(novaQtd) !== estoqueAtual && (
+                  <div className="flex items-end pb-1.5">
+                    <p className="text-xs text-gray-500">
+                      {parseFloat(novaQtd) > estoqueAtual
+                        ? <>Entrada de <strong className="text-green-600">{(parseFloat(novaQtd) - estoqueAtual).toLocaleString('pt-BR')}</strong></>
+                        : <>Saída de <strong className="text-red-600">{(estoqueAtual - parseFloat(novaQtd)).toLocaleString('pt-BR')}</strong></>}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-500 mb-1">Motivo do ajuste *</label>
+                <input value={motivoAjuste} onChange={e => setMotivoAjuste(e.target.value)}
+                  placeholder="Ex: contagem física, avaria, correção de erro..."
+                  className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+              {erroAjuste && <p className="text-xs text-red-600">{erroAjuste}</p>}
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setAjustando(false)} className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50">
+                  Cancelar
+                </button>
+                <button onClick={salvarAjuste} disabled={salvandoAjuste}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                  {salvandoAjuste ? 'Salvando...' : 'Registrar ajuste'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {carregando ? (

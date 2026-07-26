@@ -3,6 +3,7 @@
 //
 // O JSON deve ter: titulo, slug, resumo, conteudo, categoria, publicado, destaque, autor
 // (categoria: novidade | atualizacao | manutencao | dica)
+// publicado_em é opcional (ISO 8601) — se omitido, usa o momento da publicação.
 //
 // Faz upsert por slug: se o slug já existir, atualiza o post existente.
 
@@ -61,7 +62,7 @@ const payload = {
   destaque: post.destaque ?? false,
   autor: post.autor ?? 'Equipe Vargas',
   updated_at: new Date().toISOString(),
-  ...(post.publicado !== false ? { publicado_em: new Date().toISOString() } : {}),
+  ...(post.publicado !== false ? { publicado_em: post.publicado_em ?? new Date().toISOString() } : {}),
 }
 
 const { data, error } = await supabase
