@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { calcularCustoItem, type NFeItem as NFeItemParser } from '@/lib/nfe-parser'
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -484,6 +485,14 @@ export default function EntradaXmlDetalheClient({
         // inteira como se fosse o custo de 1 unidade.
         const custo = custoComAdic(item)
 
+        // Busca o saldo antes de incrementar — precisa pra logar o
+        // movimento (anterior/novo), e serve pros dois caminhos abaixo
+        // (RPC ou fallback), em vez de buscar de novo só no fallback.
+        const { data: prodAntes, error: erroBusca } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
+        if (erroBusca) throw erroBusca
+        const estoqueAnterior = prodAntes?.estoque ?? 0
+        const estoqueNovo = estoqueAnterior + qtd
+
         const { error: erroRpc } = await sb.rpc('incrementar_estoque', {
           p_produto_id: item.produto_id,
           p_empresa_id: empresaId,
@@ -493,11 +502,15 @@ export default function EntradaXmlDetalheClient({
         })
         if (erroRpc) {
           // fallback: update direto
-          const { data: prod, error: erroBusca } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
-          if (erroBusca) throw erroBusca
-          const { error: erroUpdate } = await sb.from('produtos').update({ estoque: (prod?.estoque ?? 0) + qtd, preco_custo: custo }).eq('id', item.produto_id)
+          const { error: erroUpdate } = await sb.from('produtos').update({ estoque: estoqueNovo, preco_custo: custo }).eq('id', item.produto_id)
           if (erroUpdate) throw erroUpdate
         }
+        await registrarMovimentoEstoque(sb, {
+          empresaId, depositoId, produtoId: item.produto_id, produtoNome: item.descricao_sistema || item.descricao_xml,
+          tipo: 'entrada_nfe', quantidade: qtd, estoqueAnterior, estoqueNovo,
+          motivo: `Entrada NF-e ${entrada.numero}/${entrada.serie}`, referenciaTipo: 'entrada_xml', referenciaId: entrada.id,
+          usuario: operador,
+        })
         produtoIdsAfetados.add(item.produto_id)
       }
 

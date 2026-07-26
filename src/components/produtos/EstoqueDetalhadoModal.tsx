@@ -263,7 +263,9 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose }: {
           </div>
         )}
 
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-end flex-shrink-0">
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center flex-shrink-0">
+          <a href={`/dashboard/movimentacoes-estoque?modo=produto&produto=${produto.id}`}
+            className="text-sm text-blue-600 hover:underline">Ver extrato completo →</a>
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
         </div>
       </div>

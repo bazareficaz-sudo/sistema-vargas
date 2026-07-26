@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { gerarProximoSku } from '@/components/produtos/sku'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
@@ -524,13 +525,20 @@ export default function NovaEntradaClient({
           acc[p.id] = p.estoque ?? 0
           return acc
         }, {})
+        const depositoPrincipalId = await buscarDepositoPrincipal(sb, empresaId)
         for (const item of produtosComId) {
           const qtdAtual = estoqueMap[item.produto_id!] ?? 0
-          await sb.from('produtos').update({ estoque: qtdAtual + item.quantidade }).eq('id', item.produto_id!)
+          const qtdNova = qtdAtual + item.quantidade
+          await sb.from('produtos').update({ estoque: qtdNova }).eq('id', item.produto_id!)
           // Espelha no depósito principal — mesmo motivo do PDV (ver
           // src/lib/produtos/depositoPrincipal.ts): sem isso o quadro por
           // depósito no Estoque Detalhado nunca acompanha as entradas.
           await ajustarDepositoPrincipal(sb, empresaId, item.produto_id!, item.quantidade)
+          await registrarMovimentoEstoque(sb, {
+            empresaId, depositoId: depositoPrincipalId, produtoId: item.produto_id!, produtoNome: item.nome_produto,
+            tipo: 'entrada_compra', quantidade: item.quantidade, estoqueAnterior: qtdAtual, estoqueNovo: qtdNova,
+            motivo: `Entrada NF ${numeroNf || entrada.id.slice(0, 8)}`, referenciaTipo: 'entrada', referenciaId: entrada.id,
+          })
         }
       }
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 
 const TIPOS = [
@@ -399,7 +400,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   }
 
   async function salvar() {
-    if (!form) return
+    if (!form || !produto) return
     setSalvando(true); setErro('')
     const isKit = form.tipo === 'kit'
 
@@ -461,6 +462,19 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       updated_at: new Date().toISOString(),
     }).eq('id', form.id)
     if (error) { setSalvando(false); setErro(error.message); return }
+
+    // Estoque editado direto no cadastro (não-kit — kit é recalculado a
+    // partir dos componentes, não é uma edição deliberada do usuário) —
+    // registra como ajuste manual pra aparecer no extrato de movimentação.
+    if (!isKit && estoque !== produto.estoque) {
+      await registrarMovimentoEstoque(sb, {
+        empresaId, produtoId: form.id, produtoNome: form.nome,
+        tipo: estoque > produto.estoque ? 'ajuste_entrada' : 'ajuste_saida',
+        quantidade: Math.abs(estoque - produto.estoque),
+        estoqueAnterior: produto.estoque, estoqueNovo: estoque,
+        motivo: 'Editado no cadastro do produto', referenciaTipo: 'produto', referenciaId: form.id,
+      })
+    }
 
     if (form.tipo === 'kit' && kitItens.length > 0) {
       await sb.from('kit_itens').delete().eq('kit_id', form.id)

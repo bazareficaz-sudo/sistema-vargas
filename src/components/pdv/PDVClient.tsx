@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { calcSaude, type SaudeConfig, type FaixaSaude, FAIXAS_PADRAO, CONFIG_PADRAO } from '@/lib/saude-venda'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 
 type Produto = {
   id: string; nome: string; sku: string; ean: string | null
@@ -448,6 +449,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
       }
 
       // Movimentação de estoque
+      const depositoPrincipalId = await buscarDepositoPrincipal(sb, empresaId)
       for (const item of itens) {
         const { data: p } = await sb.from('produtos').select('estoque, monitorar').eq('id', item.produto_id).single()
         if (!p) continue
@@ -462,6 +464,12 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           // muda a cada venda mas o quadro por depósito fica parado, dando
           // a impressão de erro no sistema (ver src/lib/produtos/depositoPrincipal.ts).
           await ajustarDepositoPrincipal(sb, empresaId, item.produto_id, estoqueFinal - p.estoque)
+          await registrarMovimentoEstoque(sb, {
+            empresaId, depositoId: depositoPrincipalId, produtoId: item.produto_id, produtoNome: item.nome,
+            tipo: 'venda', quantidade: item.quantidade, estoqueAnterior: p.estoque, estoqueNovo: estoqueFinal,
+            motivo: `Venda #${venda.id?.slice(-6).toUpperCase()}`, referenciaTipo: 'venda', referenciaId: venda.id,
+            usuario: operadorNome,
+          })
           if (p.monitorar) {
             fetch('/api/produtos/notificar-movimento', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -476,6 +484,12 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           // Entrada por devolução (qty é negativa, usar abs)
           const estoqueFinalDevolucao = p.estoque + Math.abs(item.quantidade)
           await sb.from('produtos').update({ estoque: estoqueFinalDevolucao }).eq('id', item.produto_id)
+          await registrarMovimentoEstoque(sb, {
+            empresaId, depositoId: depositoDevolucaoId ?? depositoPrincipalId, produtoId: item.produto_id, produtoNome: item.nome,
+            tipo: 'devolucao', quantidade: Math.abs(item.quantidade), estoqueAnterior: p.estoque, estoqueNovo: estoqueFinalDevolucao,
+            motivo: `Devolução — Venda #${venda.id?.slice(-6).toUpperCase()}`, referenciaTipo: 'venda', referenciaId: venda.id,
+            usuario: operadorNome,
+          })
           if (p.monitorar) {
             fetch('/api/produtos/notificar-movimento', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },

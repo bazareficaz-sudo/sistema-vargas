@@ -95,6 +95,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/dashboard/relatorios/estoque',     label: 'Visão do Estoque',   icon: '📊', modulo: 'relatorios_avancados' },
       { href: '/dashboard/depositos',              label: 'Depósitos',           icon: '🏭', modulo: 'depositos' },
+      { href: '/dashboard/movimentacoes-estoque',  label: 'Movimentação de Estoque', icon: '📑', modulo: 'depositos' },
       { href: '/dashboard/inventarios',            label: 'Inventário',          icon: '🔢', modulo: 'inventario' },
       { href: '/dashboard/entradas',               label: 'Entradas',            icon: '📥', modulo: 'entradas' },
       { href: '/dashboard/entradas/produtos',      label: 'Produtos Comprados',  icon: '🛍', modulo: 'entradas' },
