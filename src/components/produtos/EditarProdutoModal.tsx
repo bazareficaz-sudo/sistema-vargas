@@ -53,9 +53,26 @@ type KitItem = { id?: string; produto_id: string; nome: string; unidade: string;
 
 type ProdutoImagem = { id: string; url: string; ordem: number; principal: boolean }
 
+type AnuncioVinculado = {
+  id: string; canalNome: string; plataforma: string; titulo: string
+  variacaoNome?: string | null; preco: number; status: string; urlAnuncio: string | null
+}
+
 type Props = { produto: Produto | null; onClose: () => void; onSaved: () => void; empresaId: string }
 
-type Aba = 'geral' | 'preco' | 'promocao' | 'imagens' | 'kit' | 'fiscal'
+type Aba = 'geral' | 'preco' | 'promocao' | 'imagens' | 'kit' | 'fiscal' | 'anuncios'
+
+const PLATAFORMA_LABEL: Record<string, string> = {
+  mercadolivre: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', outro: 'Outro',
+}
+
+const STATUS_ANUNCIO: Record<string, { label: string; cls: string }> = {
+  ativo:     { label: 'Ativo',     cls: 'bg-green-100 text-green-700' },
+  pausado:   { label: 'Pausado',   cls: 'bg-amber-100 text-amber-700' },
+  rascunho:  { label: 'Rascunho',  cls: 'bg-gray-100 text-gray-500' },
+  encerrado: { label: 'Encerrado', cls: 'bg-gray-100 text-gray-500' },
+  erro:      { label: 'Erro',      cls: 'bg-red-100 text-red-600' },
+}
 
 export default function EditarProdutoModal({ produto, onClose, onSaved, empresaId }: Props) {
   const [form, setForm] = useState<Produto | null>(null)
@@ -72,6 +89,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
   const [mensagemIA, setMensagemIA] = useState('')
+  const [anunciosVinculados, setAnunciosVinculados] = useState<AnuncioVinculado[]>([])
+  const [carregandoAnuncios, setCarregandoAnuncios] = useState(false)
 
   // Imagens
   const [imagens, setImagens] = useState<ProdutoImagem[]>([])
@@ -91,8 +110,41 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       setPromocaoInfinita(!produto.promocao_fim)
       if (produto.tipo === 'kit') carregarKitItens(produto.id)
       carregarImagens(produto.id)
+      carregarAnunciosVinculados(produto.id)
     }
   }, [produto])
+
+  async function carregarAnunciosVinculados(produtoId: string) {
+    setCarregandoAnuncios(true)
+    const [{ data: diretos }, { data: variacoes }] = await Promise.all([
+      sb.from('marketplace_anuncios')
+        .select('id, titulo, preco_venda, status, url_anuncio, marketplace_canais(nome, plataforma)')
+        .eq('produto_id', produtoId).eq('tem_variacao', false),
+      sb.from('marketplace_anuncio_variacoes')
+        .select('id, nome_variacao, preco, marketplace_anuncios!inner(titulo, status, url_anuncio, marketplace_canais(nome, plataforma))')
+        .eq('produto_id', produtoId),
+    ])
+
+    const lista: AnuncioVinculado[] = []
+    for (const a of (diretos ?? []) as any[]) {
+      const canal = Array.isArray(a.marketplace_canais) ? a.marketplace_canais[0] : a.marketplace_canais
+      lista.push({
+        id: a.id, canalNome: canal?.nome ?? '—', plataforma: canal?.plataforma ?? '',
+        titulo: a.titulo, preco: a.preco_venda ?? 0, status: a.status, urlAnuncio: a.url_anuncio,
+      })
+    }
+    for (const v of (variacoes ?? []) as any[]) {
+      const anuncio = Array.isArray(v.marketplace_anuncios) ? v.marketplace_anuncios[0] : v.marketplace_anuncios
+      const canal = anuncio ? (Array.isArray(anuncio.marketplace_canais) ? anuncio.marketplace_canais[0] : anuncio.marketplace_canais) : null
+      lista.push({
+        id: v.id, canalNome: canal?.nome ?? '—', plataforma: canal?.plataforma ?? '',
+        titulo: anuncio?.titulo ?? '—', variacaoNome: v.nome_variacao,
+        preco: v.preco ?? 0, status: anuncio?.status ?? 'rascunho', urlAnuncio: anuncio?.url_anuncio ?? null,
+      })
+    }
+    setAnunciosVinculados(lista)
+    setCarregandoAnuncios(false)
+  }
 
   useEffect(() => {
     Promise.all([
@@ -441,6 +493,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     { key: 'imagens',  label: `Imagens${imagens.length > 0 ? ` (${imagens.length})` : ''}` },
     { key: 'kit',      label: 'Composição', show: form.tipo === 'kit' },
     { key: 'fiscal',   label: 'Fiscal' },
+    { key: 'anuncios', label: `Anúncios${anunciosVinculados.length > 0 ? ` (${anunciosVinculados.length})` : ''}` },
   ]
 
   return (
@@ -1165,6 +1218,59 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── ABA ANÚNCIOS ── */}
+          {aba === 'anuncios' && (
+            <div className="space-y-4">
+              {carregandoAnuncios ? (
+                <div className="text-center py-10 text-gray-400 text-sm">Carregando...</div>
+              ) : anunciosVinculados.length === 0 ? (
+                <div className="text-center py-10 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
+                  <p className="text-3xl mb-2">🛍️</p>
+                  <p className="text-sm">Nenhum anúncio de marketplace vinculado a este produto ainda.</p>
+                  <p className="text-xs mt-1">Vincule em Marketplaces → Anúncios, usando o botão "Mapear".</p>
+                </div>
+              ) : (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-600">Canal</th>
+                        <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-600">Anúncio</th>
+                        <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-600">Preço no canal</th>
+                        <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-600">Situação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {anunciosVinculados.map(a => {
+                        const st = STATUS_ANUNCIO[a.status] ?? { label: a.status, cls: 'bg-gray-100 text-gray-500' }
+                        return (
+                          <tr key={a.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2.5 text-gray-900">
+                              {PLATAFORMA_LABEL[a.plataforma] ?? (a.plataforma || '—')}
+                              <span className="text-gray-400 text-xs block">{a.canalNome}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-gray-700">
+                              {a.urlAnuncio ? (
+                                <a href={a.urlAnuncio} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{a.titulo}</a>
+                              ) : a.titulo}
+                              {a.variacaoNome && <span className="text-gray-400 text-xs block">{a.variacaoNome}</span>}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono text-gray-900">
+                              {a.preco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.cls}`}>{st.label}</span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
