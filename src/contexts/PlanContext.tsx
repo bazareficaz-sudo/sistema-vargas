@@ -3,6 +3,7 @@
 import { createContext, useContext } from 'react'
 import type { PlanData, PlanLimits } from '@/lib/plans/types'
 import { DEFAULT_LIMITS } from '@/lib/plans/types'
+import { temPermissao, type Papel, type PermissaoCodigo } from '@/lib/auth/permissoes'
 
 const DEFAULT_PLAN: PlanData = {
   planId: '',
@@ -17,6 +18,7 @@ const DEFAULT_PLAN: PlanData = {
   limites: DEFAULT_LIMITS,
   isSystemAdmin: false,
   empresaId: '',
+  role: null,
 }
 
 export const PlanContext = createContext<PlanData>(DEFAULT_PLAN)
@@ -43,4 +45,13 @@ export function useLimite(campo: keyof PlanLimits): { limite: number; permitido:
     limite,
     permitido: (atual: number) => plan.isSystemAdmin || limite === -1 || atual < limite,
   }
+}
+
+// Camada só de UI (esconder/mostrar botão) — a validação real acontece no
+// servidor via exigirPermissao(). System admin (suporte da plataforma)
+// sempre passa.
+export function usePermissao(codigo: PermissaoCodigo): boolean {
+  const plan = usePlan()
+  if (plan.isSystemAdmin) return true
+  return temPermissao(plan.role as Papel, codigo)
 }

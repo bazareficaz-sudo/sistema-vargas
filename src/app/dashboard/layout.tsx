@@ -13,7 +13,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   let { data: profile } = await supabase
     .from('profiles')
-    .select('empresa_id, role, empresas(nome)')
+    .select('empresa_id, role, status, empresas(nome)')
     .eq('id', user.id)
     .single()
 
@@ -25,16 +25,29 @@ export default async function DashboardLayout({ children }: { children: React.Re
     await provisionarEmpresaEUsuario(createAdminClient(), user.id, user.user_metadata)
     const retry = await supabase
       .from('profiles')
-      .select('empresa_id, role, empresas(nome)')
+      .select('empresa_id, role, status, empresas(nome)')
       .eq('id', user.id)
       .single()
     profile = retry.data
   }
 
+  // Usuário bloqueado/inativado por um admin perde acesso na hora — não
+  // basta esconder menu, tem que deslogar de verdade.
+  if (profile?.status === 'inativo' || profile?.status === 'bloqueado') {
+    await supabase.auth.signOut()
+    redirect('/login?erro=acesso_bloqueado')
+  }
+
+  // Primeiro login depois de aceitar um convite — promove pra ativo.
+  if (profile?.status === 'convite_pendente') {
+    await supabase.from('profiles').update({ status: 'ativo' }).eq('id', user.id)
+    profile.status = 'ativo'
+  }
+
   const empresaId = profile?.empresa_id ?? ''
   const empresaNome = (profile?.empresas as unknown as { nome: string } | null)?.nome ?? 'Minha Empresa'
 
-  const planData = await loadPlanData(empresaId, user.id)
+  const planData = { ...(await loadPlanData(empresaId, user.id)), role: profile?.role ?? null }
 
   return (
     <PlanProvider data={planData}>

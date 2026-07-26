@@ -1,15 +1,30 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  )
+}
+
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [erro, setErro] = useState('')
   const [carregando, setCarregando] = useState(false)
+
+  useEffect(() => {
+    if (searchParams.get('erro') === 'acesso_bloqueado') {
+      setErro('Seu acesso foi bloqueado ou inativado por um administrador.')
+    }
+  }, [searchParams])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()

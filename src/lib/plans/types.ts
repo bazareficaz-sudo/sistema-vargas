@@ -38,6 +38,9 @@ export interface PlanData {
   limites: PlanLimits
   isSystemAdmin: boolean
   empresaId: string
+  // Papel do usuário logado (não vem de loadPlanData — é mesclado por quem
+  // chama, a partir de profiles.role, pra não duplicar consulta).
+  role: string | null
 }
 
 export const DEFAULT_LIMITS: PlanLimits = {

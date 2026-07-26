@@ -50,6 +50,7 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
       limites: DEFAULT_LIMITS,
       isSystemAdmin,
       empresaId,
+      role: null,
     }
   }
 
@@ -101,6 +102,7 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
     limites,
     isSystemAdmin,
     empresaId,
+    role: null,
   }
 }
 
