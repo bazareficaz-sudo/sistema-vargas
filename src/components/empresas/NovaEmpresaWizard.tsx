@@ -166,13 +166,14 @@ type Deposito = { id: string; nome: string }
 
 type Props = {
   grupos: Grupo[]
+  tenantId: string
   empresaEditando: any | null
   depositos?: Deposito[]
   onClose: () => void
   onSaved: () => void
 }
 
-export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos = [], onClose, onSaved }: Props) {
+export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, depositos = [], onClose, onSaved }: Props) {
   const [etapa, setEtapa] = useState(1)
   const [form, setForm] = useState<WizardForm>(FORM_INICIAL)
   const [salvando, setSalvando] = useState(false)
@@ -326,7 +327,11 @@ export default function NovaEmpresaWizard({ grupos, empresaEditando, depositos =
         if (error) throw error
         empresaId = empresaEditando.id
       } else {
-        const { data, error } = await sb.from('empresas').insert(dadosEmpresa).select('id').single()
+        // tenant_id não é campo do formulário — vem sempre do usuário
+        // logado, senão a empresa nasce "solta" (sem tenant) e passa a
+        // aparecer pra qualquer outro cliente do sistema, não só no
+        // próprio grupo empresarial de quem está criando.
+        const { data, error } = await sb.from('empresas').insert({ ...dadosEmpresa, tenant_id: tenantId }).select('id').single()
         if (error) throw error
         empresaId = data.id
       }

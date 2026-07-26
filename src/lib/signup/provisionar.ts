@@ -40,9 +40,27 @@ export async function provisionarEmpresaEUsuario(
   ).data
   if (!plano) return { ok: false, error: 'Nenhum plano disponível no momento. Fale com a gente.' }
 
+  // Cada empresa que se cadastra pelo signup público é um cliente SaaS
+  // independente — precisa do próprio tenant (e de um grupo empresarial
+  // padrão dentro dele), senão fica com tenant_id nulo e "solta" nas
+  // consultas que filtram por tenant, ou pior, visível/editável por outro
+  // cliente (foi exatamente o que aconteceu antes desta correção: uma
+  // empresa cadastrada pelo signup apareceu na tela de Empresas de outro
+  // cliente porque a consulta ali não tinha filtro nenhum).
+  const nomeEmpresa = pending.nomeFantasia || pending.razaoSocial || pending.nome
+  const { data: tenant, error: erroTenant } = await admin.from('tenants').insert({
+    nome: nomeEmpresa, plano: 'essencial', status: 'ativo',
+  }).select('id').single()
+  if (erroTenant || !tenant) return { ok: false, error: 'Erro ao criar tenant: ' + (erroTenant?.message ?? 'desconhecido') }
+
+  const { data: grupo, error: erroGrupo } = await admin.from('grupos_empresariais').insert({
+    tenant_id: tenant.id, nome: 'Grupo Principal',
+  }).select('id').single()
+  if (erroGrupo || !grupo) return { ok: false, error: 'Erro ao criar grupo empresarial: ' + (erroGrupo?.message ?? 'desconhecido') }
+
   const endereco = pending.endereco ?? {} as PendingSignup['endereco']
   const { data: empresa, error: erroEmpresa } = await admin.from('empresas').insert({
-    nome: pending.nomeFantasia || pending.razaoSocial || pending.nome,
+    nome: nomeEmpresa,
     razao_social: pending.razaoSocial || null,
     nome_fantasia: pending.nomeFantasia || null,
     cnpj: cnpjLimpo || null,
@@ -53,6 +71,9 @@ export async function provisionarEmpresaEUsuario(
     cidade: endereco.municipio || null,
     uf: endereco.uf || null,
     status: 'em_implantacao',
+    tenant_id: tenant.id,
+    grupo_id: grupo.id,
+    empresa_principal: true,
   }).select('id').single()
   if (erroEmpresa || !empresa) return { ok: false, error: 'Erro ao criar empresa: ' + (erroEmpresa?.message ?? 'desconhecido') }
 
@@ -62,6 +83,7 @@ export async function provisionarEmpresaEUsuario(
 
   const { error: erroProfile } = await admin.from('profiles').insert({
     id: userId, empresa_id: empresa.id, role: 'admin', nome: pending.nome,
+    tenant_id: tenant.id, grupo_id: grupo.id,
   })
   if (erroProfile) return { ok: false, error: 'Erro ao criar perfil: ' + erroProfile.message }
 

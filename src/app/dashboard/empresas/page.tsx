@@ -13,7 +13,12 @@ export default async function EmpresasPage() {
     .single()
 
   const empresaAtualId = profile?.empresa_id ?? ''
+  const tenantId = profile?.tenant_id ?? ''
 
+  // Sem filtro por tenant_id aqui, essa consulta trazia TODAS as empresas
+  // já cadastradas no sistema — de qualquer cliente SaaS, não só do grupo
+  // empresarial de quem está logado. Um tenant chegou a ver e poder editar
+  // a empresa de outro cliente nesta tela por causa disso.
   const { data: empresas } = await supabase
     .from('empresas')
     .select(`
@@ -26,6 +31,7 @@ export default async function EmpresasPage() {
       empresa_config_comercial(id, limite_desconto, permite_estoque_negativo),
       empresa_config_estoque(id, permite_multiplos_depositos, reservar_em_orcamento, reservar_em_pedido, baixar_estoque_em, tipo_custo, controlar_lote, deposito_devolucao_id)
     `)
+    .eq('tenant_id', tenantId)
     .order('empresa_principal', { ascending: false })
     .order('nome')
 
@@ -42,14 +48,14 @@ export default async function EmpresasPage() {
   const { data: grupos } = await supabase
     .from('grupos_empresariais')
     .select('id, nome')
+    .eq('tenant_id', tenantId)
     .eq('ativo', true)
     .order('nome')
 
-  const { data: depositos } = await supabase
-    .from('depositos')
-    .select('id, nome, empresa_id')
-    .eq('ativo', true)
-    .order('nome')
+  const { data: depositos } = empresaIds.length > 0
+    ? await supabase.from('depositos').select('id, nome, empresa_id')
+        .in('empresa_id', empresaIds).eq('ativo', true).order('nome')
+    : { data: [] as any[] }
 
   const depositosPorEmpresa = new Set((depositos ?? []).map(d => d.empresa_id))
 
@@ -58,6 +64,7 @@ export default async function EmpresasPage() {
       empresas={empresasComNfeConfig as any[]}
       grupos={grupos ?? []}
       empresaAtualId={empresaAtualId}
+      tenantId={tenantId}
       depositosPorEmpresa={[...depositosPorEmpresa]}
       depositos={depositos ?? []}
       role={profile?.role ?? 'gerente'}

@@ -51,6 +51,7 @@ type Props = {
   empresas: Empresa[]
   grupos: Grupo[]
   empresaAtualId: string
+  tenantId: string
   depositosPorEmpresa: string[]
   depositos: Deposito[]
   role: string
@@ -228,6 +229,7 @@ export default function EmpresasClient({
   empresas: inicial,
   grupos,
   empresaAtualId,
+  tenantId,
   depositosPorEmpresa,
   depositos,
   role,
@@ -278,6 +280,7 @@ export default function EmpresasClient({
       {wizardAberto && (
         <NovaEmpresaWizard
           grupos={grupos}
+          tenantId={tenantId}
           empresaEditando={editando}
           depositos={editando ? depositos.filter(d => d.empresa_id === editando.id) : []}
           onClose={() => { setWizardAberto(false); setEditando(null) }}

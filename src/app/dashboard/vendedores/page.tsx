@@ -35,9 +35,13 @@ export default async function VendedoresPage() {
     .eq('empresa_id', empresaAtualId)
     .order('nome')
 
+  // Sem filtro de tenant_id aqui, essa consulta trazia as empresas de
+  // QUALQUER cliente do sistema pro vínculo multi-empresa do vendedor —
+  // não só as do próprio grupo empresarial de quem está logado.
   const { data: empresas } = await supabase
     .from('empresas')
     .select('id, nome, nome_fantasia')
+    .eq('tenant_id', profile?.tenant_id ?? '')
     .order('nome')
 
   const vendedorIds = (vendedores ?? []).map(v => v.id)

@@ -21,9 +21,13 @@ export default async function UsuariosPdvPage() {
     .eq('empresa_id', empresaAtualId)
     .order('created_at', { ascending: false })
 
+  // Sem filtro de tenant_id aqui, essa consulta trazia as empresas de
+  // QUALQUER cliente do sistema pro seletor — não só as do próprio grupo
+  // empresarial de quem está logado.
   const { data: empresas } = await supabase
     .from('empresas')
     .select('id, nome, nome_fantasia')
+    .eq('tenant_id', profile?.tenant_id ?? '')
     .order('nome')
 
   const { data: depositos } = await supabase
