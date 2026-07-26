@@ -449,7 +449,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
 
       // Movimentação de estoque
       for (const item of itens) {
-        const { data: p } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
+        const { data: p } = await sb.from('produtos').select('estoque, monitorar').eq('id', item.produto_id).single()
         if (!p) continue
         if (item.tipo === 'venda') {
           // Baixa por venda. Só trava em 0 se a empresa não permitir estoque
@@ -462,9 +462,30 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           // muda a cada venda mas o quadro por depósito fica parado, dando
           // a impressão de erro no sistema (ver src/lib/produtos/depositoPrincipal.ts).
           await ajustarDepositoPrincipal(sb, empresaId, item.produto_id, estoqueFinal - p.estoque)
+          if (p.monitorar) {
+            fetch('/api/produtos/notificar-movimento', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                produtoId: item.produto_id, tipo: 'venda', quantidade: item.quantidade,
+                estoqueAnterior: p.estoque, estoqueNovo: estoqueFinal,
+                quem: clienteSelecionado?.nome ?? operadorNome, origem: 'PDV',
+              }),
+            }).catch(() => {})
+          }
         } else {
           // Entrada por devolução (qty é negativa, usar abs)
-          await sb.from('produtos').update({ estoque: p.estoque + Math.abs(item.quantidade) }).eq('id', item.produto_id)
+          const estoqueFinalDevolucao = p.estoque + Math.abs(item.quantidade)
+          await sb.from('produtos').update({ estoque: estoqueFinalDevolucao }).eq('id', item.produto_id)
+          if (p.monitorar) {
+            fetch('/api/produtos/notificar-movimento', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                produtoId: item.produto_id, tipo: 'devolucao', quantidade: item.quantidade,
+                estoqueAnterior: p.estoque, estoqueNovo: estoqueFinalDevolucao,
+                quem: clienteSelecionado?.nome ?? operadorNome, origem: 'PDV',
+              }),
+            }).catch(() => {})
+          }
           if (depositoDevolucaoId) {
             const { data: pe } = await sb.from('produto_estoque').select('quantidade')
               .eq('deposito_id', depositoDevolucaoId).eq('produto_id', item.produto_id).maybeSingle()

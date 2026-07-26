@@ -30,6 +30,23 @@ type Produto = {
   ibs_cclasstrib?: string | null
   ibs_aliquota?: number | null
   cbs_aliquota?: number | null
+  monitorar?: boolean
+  descricao_marketplace?: string | null
+  obs_interna?: string | null
+  peso_kg?: number | null
+  altura_cm?: number | null
+  largura_cm?: number | null
+  comprimento_cm?: number | null
+  cfop?: string | null
+  icms_cst?: string | null
+  icms_origem?: number | null
+  csosn?: string | null
+  icms_percentual?: number | null
+  pis_cst?: string | null
+  pis_percentual?: number | null
+  cofins_cst?: string | null
+  cofins_percentual?: number | null
+  ipi_percentual?: number | null
 }
 
 type KitItem = { id?: string; produto_id: string; nome: string; unidade: string; quantidade: number }
@@ -321,10 +338,27 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       permite_fracao: form.permite_fracao,
       ncm: form.ncm || null,
       cest: form.cest || null,
+      cfop: form.cfop || null,
+      icms_cst: form.icms_cst || null,
+      icms_origem: form.icms_origem ?? null,
+      csosn: form.csosn || null,
+      icms_percentual: form.icms_percentual ?? null,
+      pis_cst: form.pis_cst || null,
+      pis_percentual: form.pis_percentual ?? null,
+      cofins_cst: form.cofins_cst || null,
+      cofins_percentual: form.cofins_percentual ?? null,
+      ipi_percentual: form.ipi_percentual ?? null,
       ibs_cst: form.ibs_cst || null,
       ibs_cclasstrib: form.ibs_cclasstrib || null,
       ibs_aliquota: form.ibs_aliquota ?? null,
       cbs_aliquota: form.cbs_aliquota ?? null,
+      monitorar: form.monitorar ?? false,
+      descricao_marketplace: form.descricao_marketplace || null,
+      obs_interna: form.obs_interna || null,
+      peso_kg: form.peso_kg ?? null,
+      altura_cm: form.altura_cm ?? null,
+      largura_cm: form.largura_cm ?? null,
+      comprimento_cm: form.comprimento_cm ?? null,
       updated_at: new Date().toISOString(),
     }).eq('id', form.id)
     if (error) { setSalvando(false); setErro(error.message); return }
@@ -429,11 +463,12 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               </div>
 
               {/* Status toggles */}
-              <div className="flex gap-5 py-1">
+              <div className="flex gap-5 py-1 flex-wrap">
                 {[
                   { field: 'ativo' as const,          label: 'Ativo' },
                   { field: 'disponivel_pdv' as const,  label: 'Disponível no PDV' },
                   { field: 'permite_fracao' as const,  label: 'Permite fração' },
+                  { field: 'monitorar' as const,       label: '👁 Monitorar produto' },
                 ].map(({ field, label }) => (
                   <label key={field} className="flex items-center gap-2 cursor-pointer select-none">
                     <div onClick={() => campo(field, !form[field])}
@@ -444,6 +479,12 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   </label>
                 ))}
               </div>
+              {form.monitorar && (
+                <p className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 -mt-1">
+                  Você receberá um alerta no WhatsApp do gestor a cada venda, devolução ou baixa de estoque deste produto, com quem comprou e o saldo atual.
+                  Configure o número em Configurações → WhatsApp / Z-API.
+                </p>
+              )}
 
               {/* Nome */}
               <div>
@@ -527,6 +568,54 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                     onChange={e => campo('estoque_minimo', parseFloat(e.target.value) || 0)}
                     className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${form.tipo === 'kit' ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 text-gray-900 focus:border-blue-500'}`} />
                 </div>
+              </div>
+
+              {/* Peso e dimensões */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Peso e dimensões (embalagem)</label>
+                <div className="grid grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">Peso (kg)</label>
+                    <input type="number" step="0.001" min="0" value={form.peso_kg ?? ''}
+                      onChange={e => campo('peso_kg', e.target.value === '' ? null : parseFloat(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">Altura (cm)</label>
+                    <input type="number" step="0.01" min="0" value={form.altura_cm ?? ''}
+                      onChange={e => campo('altura_cm', e.target.value === '' ? null : parseFloat(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">Largura (cm)</label>
+                    <input type="number" step="0.01" min="0" value={form.largura_cm ?? ''}
+                      onChange={e => campo('largura_cm', e.target.value === '' ? null : parseFloat(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-gray-500 mb-1">Comprimento (cm)</label>
+                    <input type="number" step="0.01" min="0" value={form.comprimento_cm ?? ''}
+                      onChange={e => campo('comprimento_cm', e.target.value === '' ? null : parseFloat(e.target.value))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Usado no cálculo de frete e no envio de anúncios pra Shopee/Mercado Livre.</p>
+              </div>
+
+              {/* Descrição para marketplace/site */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Descrição para Site / Marketplace</label>
+                <textarea value={form.descricao_marketplace ?? ''} onChange={e => campo('descricao_marketplace', e.target.value)}
+                  rows={4} placeholder="Texto de apresentação do produto, enviado ao publicar em Shopee, Mercado Livre etc."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 resize-y" />
+              </div>
+
+              {/* Obs interna */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Observação Interna</label>
+                <textarea value={form.obs_interna ?? ''} onChange={e => campo('obs_interna', e.target.value)}
+                  rows={3} placeholder="Anotações visíveis só pra equipe — não aparece no PDV nem em anúncios."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 resize-y" />
               </div>
             </div>
           )}
@@ -900,7 +989,79 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                     placeholder="Se aplicável (substituição tributária)"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">CFOP</label>
+                  <input value={form.cfop ?? ''} onChange={e => campo('cfop', e.target.value)}
+                    placeholder="Ex: 5102"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Origem</label>
+                  <select value={form.icms_origem ?? ''} onChange={e => campo('icms_origem', e.target.value === '' ? null : parseInt(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500">
+                    <option value="">—</option>
+                    <option value="0">0 - Nacional</option>
+                    <option value="1">1 - Estrangeira - Importação direta</option>
+                    <option value="2">2 - Estrangeira - Mercado interno</option>
+                    <option value="3">3 - Nacional - Conteúdo importado &gt; 40%</option>
+                    <option value="4">4 - Nacional - Processo produtivo básico</option>
+                    <option value="5">5 - Nacional - Conteúdo importado ≤ 40%</option>
+                    <option value="6">6 - Estrangeira - Importação direta, sem similar nacional</option>
+                    <option value="7">7 - Estrangeira - Mercado interno, sem similar nacional</option>
+                    <option value="8">8 - Nacional - Conteúdo importado &gt; 70%</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">CST ICMS</label>
+                  <input value={form.icms_cst ?? ''} onChange={e => campo('icms_cst', e.target.value)}
+                    placeholder="Ex: 00, 20, 60..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">CSOSN</label>
+                  <input value={form.csosn ?? ''} onChange={e => campo('csosn', e.target.value)}
+                    placeholder="Ex: 102, 500... (Simples Nacional)"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">ICMS %</label>
+                  <input type="number" step="0.0001" min="0" value={form.icms_percentual ?? ''}
+                    onChange={e => campo('icms_percentual', e.target.value === '' ? null : parseFloat(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">CST PIS</label>
+                  <input value={form.pis_cst ?? ''} onChange={e => campo('pis_cst', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">PIS %</label>
+                  <input type="number" step="0.0001" min="0" value={form.pis_percentual ?? ''}
+                    onChange={e => campo('pis_percentual', e.target.value === '' ? null : parseFloat(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">CST COFINS</label>
+                  <input value={form.cofins_cst ?? ''} onChange={e => campo('cofins_cst', e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">COFINS %</label>
+                  <input type="number" step="0.0001" min="0" value={form.cofins_percentual ?? ''}
+                    onChange={e => campo('cofins_percentual', e.target.value === '' ? null : parseFloat(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">IPI %</label>
+                  <input type="number" step="0.0001" min="0" value={form.ipi_percentual ?? ''}
+                    onChange={e => campo('ipi_percentual', e.target.value === '' ? null : parseFloat(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                </div>
               </div>
+              <p className="text-xs text-gray-400">
+                CFOP, Origem e CST ICMS já são usados de verdade na emissão de NFC-e. CSOSN e os demais percentuais (ICMS/PIS/COFINS/IPI)
+                ficam guardados aqui pra referência e para uso futuro — confirme com a contabilidade antes de basear apuração real neles.
+              </p>
 
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-xs font-semibold text-gray-700 mb-1">Reforma tributária — IBS/CBS</p>
@@ -935,7 +1096,6 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   </div>
                 </div>
               </div>
-              <p className="text-xs text-gray-400">Demais configurações fiscais (CFOP, CST, ICMS) são gerenciadas diretamente no PDV.</p>
             </div>
           )}
 

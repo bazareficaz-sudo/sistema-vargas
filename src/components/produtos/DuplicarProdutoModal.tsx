@@ -22,13 +22,22 @@ type ProdutoCompleto = {
   cfop: string | null
   icms_cst: string | null
   icms_origem: number | null
+  csosn: string | null
+  icms_percentual: number | null
   pis_cst: string | null
+  pis_percentual: number | null
   cofins_cst: string | null
+  cofins_percentual: number | null
+  ipi_percentual: number | null
   codigo_fornecedor: string | null
   ibs_cst: string | null
   ibs_cclasstrib: string | null
   ibs_aliquota: number | null
   cbs_aliquota: number | null
+  peso_kg: number | null
+  altura_cm: number | null
+  largura_cm: number | null
+  comprimento_cm: number | null
 }
 
 type ProdutoImagem = { url: string; ordem: number; principal: boolean }
@@ -149,13 +158,22 @@ export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDu
       cfop: copiarFiscal ? origem.cfop : null,
       icms_cst: copiarFiscal ? origem.icms_cst : null,
       icms_origem: copiarFiscal ? origem.icms_origem : null,
+      csosn: copiarFiscal ? origem.csosn : null,
+      icms_percentual: copiarFiscal ? origem.icms_percentual : null,
       pis_cst: copiarFiscal ? origem.pis_cst : null,
+      pis_percentual: copiarFiscal ? origem.pis_percentual : null,
       cofins_cst: copiarFiscal ? origem.cofins_cst : null,
+      cofins_percentual: copiarFiscal ? origem.cofins_percentual : null,
+      ipi_percentual: copiarFiscal ? origem.ipi_percentual : null,
       codigo_fornecedor: copiarFiscal ? origem.codigo_fornecedor : null,
       ibs_cst: copiarFiscal ? origem.ibs_cst : null,
       ibs_cclasstrib: copiarFiscal ? origem.ibs_cclasstrib : null,
       ibs_aliquota: copiarFiscal ? origem.ibs_aliquota : null,
       cbs_aliquota: copiarFiscal ? origem.cbs_aliquota : null,
+      peso_kg: origem.peso_kg,
+      altura_cm: origem.altura_cm,
+      largura_cm: origem.largura_cm,
+      comprimento_cm: origem.comprimento_cm,
     }
 
     const { data: novoProduto, error } = await sb.from('produtos').insert(payload).select().single()

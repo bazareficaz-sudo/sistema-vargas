@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 type Config = {
   id?: string; nome: string; ativo: boolean
   instance_id: string; token: string; client_token: string; url_base: string
-  numero_whatsapp: string; nome_exibido: string; webhook_url: string
+  numero_whatsapp: string; nome_exibido: string; webhook_url: string; numero_gestor: string
   status_conexao: string; ultima_sincronizacao: string | null; ultima_mensagem_enviada: string | null
   ambiente: string; observacoes: string
   texto_cupom: string; texto_cobranca: string; texto_orcamento: string
@@ -41,7 +41,7 @@ function StatusBadge({ status }: { status: string }) {
 const BLANK: Config = {
   nome: 'WhatsApp Principal', ativo: false,
   instance_id: '', token: '', client_token: '', url_base: 'https://api.z-api.io',
-  numero_whatsapp: '', nome_exibido: '', webhook_url: '',
+  numero_whatsapp: '', nome_exibido: '', webhook_url: '', numero_gestor: '',
   status_conexao: 'desconectado', ultima_sincronizacao: null, ultima_mensagem_enviada: null,
   ambiente: 'producao', observacoes: '',
   texto_cupom: 'Olá {nome_cliente}! 👋\nAqui está o seu cupom de compra na *{nome_empresa}*.\n\n🛍️ *Resumo:*\n{produtos}\n\n💰 *Total:* {valor_total}\n📅 {data_pedido}\n\nObrigado! 🙏',
@@ -340,6 +340,12 @@ export default function WhatsAppConfigClient({
             <div className="grid grid-cols-2 gap-4">
               <F label="Número WhatsApp conectado" value={cfg.numero_whatsapp} onChange={v => upd('numero_whatsapp', v)} placeholder="5511999999999" />
               <F label="Nome exibido" value={cfg.nome_exibido} onChange={v => upd('nome_exibido', v)} placeholder="Loja Vargas" />
+            </div>
+            <div>
+              <F label="Número do gestor (alertas de produtos monitorados)" value={cfg.numero_gestor} onChange={v => upd('numero_gestor', v)} placeholder="5511999999999" />
+              <p className="text-xs text-gray-400 mt-1">
+                Recebe um WhatsApp a cada venda, devolução ou baixa de estoque de produtos marcados como "Monitorar produto" no cadastro.
+              </p>
             </div>
           </div>
 

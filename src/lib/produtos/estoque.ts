@@ -1,4 +1,5 @@
 import { recalcularKitsQueUsam } from './kit'
+import { notificarMovimentoProduto } from './monitoramento'
 
 // Baixa de estoque de um item de pedido de marketplace. Evita o risco real
 // de baixar duas vezes o mesmo item quando cron automático e botão manual
@@ -54,8 +55,9 @@ async function incrementarEstoque(sb: any, produtoId: string, quantidade: number
 async function registrarMovimentoVendaMarketplace(sb: any, params: {
   empresaId: string; produtoId: string; quantidade: number
   estoqueAnterior: number; estoqueNovo: number; motivo: string; referenciaId: string
+  clienteNome?: string | null
 }): Promise<void> {
-  const { data: produto } = await sb.from('produtos').select('nome').eq('id', params.produtoId).maybeSingle()
+  const { data: produto } = await sb.from('produtos').select('nome, monitorar').eq('id', params.produtoId).maybeSingle()
   await sb.from('estoque_movimentacoes').insert({
     empresa_id: params.empresaId,
     produto_id: params.produtoId,
@@ -68,11 +70,24 @@ async function registrarMovimentoVendaMarketplace(sb: any, params: {
     referencia_id: params.referenciaId,
     referencia_tipo: 'marketplace_pedido_item',
   })
+
+  if (produto?.monitorar) {
+    await notificarMovimentoProduto(sb, params.empresaId, {
+      produtoId: params.produtoId,
+      produtoNome: produto.nome,
+      tipo: 'venda',
+      quantidade: params.quantidade,
+      estoqueAnterior: params.estoqueAnterior,
+      estoqueNovo: params.estoqueNovo,
+      quem: params.clienteNome,
+      origem: params.motivo,
+    })
+  }
 }
 
 async function baixarComponentesKit(
   sb: any, kitProdutoId: string, quantidadePedido: number,
-  contexto: { empresaId: string; motivo: string; referenciaId: string }
+  contexto: { empresaId: string; motivo: string; referenciaId: string; clienteNome?: string | null }
 ): Promise<{ ok: true } | { ok: false; motivo: string }> {
   const { data: itens } = await sb.from('kit_itens').select('produto_id, quantidade').eq('kit_id', kitProdutoId)
   if (!itens || itens.length === 0) return { ok: false, motivo: 'Kit sem componentes cadastrados' }
@@ -90,6 +105,7 @@ async function baixarComponentesKit(
       empresaId: contexto.empresaId, produtoId: item.produto_id, quantidade: qtdNecessaria,
       estoqueAnterior: resultado.estoqueAnterior, estoqueNovo: resultado.estoqueNovo,
       motivo: `${contexto.motivo} (componente de kit)`, referenciaId: contexto.referenciaId,
+      clienteNome: contexto.clienteNome,
     })
   }
 
@@ -99,7 +115,7 @@ async function baixarComponentesKit(
 
 export async function baixarEstoquePedidoItem(sb: any, pedidoItemId: string): Promise<ResultadoBaixa> {
   const { data: itemAtual } = await sb.from('marketplace_pedido_itens')
-    .select('id, pedido_id, produto_id, quantidade, baixou_estoque, marketplace_pedidos(numero_pedido, empresa_id, marketplace_canais(nome, plataforma))')
+    .select('id, pedido_id, produto_id, quantidade, baixou_estoque, marketplace_pedidos(numero_pedido, empresa_id, cliente_nome, marketplace_canais(nome, plataforma))')
     .eq('id', pedidoItemId).single()
   if (!itemAtual) return { ok: false, motivo: 'Item do pedido não encontrado' }
   if (itemAtual.baixou_estoque) return { ok: true, jaProcessado: true }
@@ -126,14 +142,14 @@ export async function baixarEstoquePedidoItem(sb: any, pedidoItemId: string): Pr
 
   let resultado: { ok: true } | { ok: false; motivo: string }
   if (produto.tipo === 'kit') {
-    resultado = await baixarComponentesKit(sb, produto.id, itemAtual.quantidade, { empresaId, motivo, referenciaId: pedidoItemId })
+    resultado = await baixarComponentesKit(sb, produto.id, itemAtual.quantidade, { empresaId, motivo, referenciaId: pedidoItemId, clienteNome: pedido?.cliente_nome })
   } else {
     const decremento = await decrementarEstoqueAtomico(sb, produto.id, itemAtual.quantidade)
     if (decremento.ok) {
       await registrarMovimentoVendaMarketplace(sb, {
         empresaId, produtoId: produto.id, quantidade: itemAtual.quantidade,
         estoqueAnterior: decremento.estoqueAnterior, estoqueNovo: decremento.estoqueNovo,
-        motivo, referenciaId: pedidoItemId,
+        motivo, referenciaId: pedidoItemId, clienteNome: pedido?.cliente_nome,
       })
     }
     resultado = decremento
