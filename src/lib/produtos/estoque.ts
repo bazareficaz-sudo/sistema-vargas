@@ -89,11 +89,14 @@ async function baixarComponentesKit(
   sb: any, kitProdutoId: string, quantidadePedido: number,
   contexto: { empresaId: string; motivo: string; referenciaId: string; clienteNome?: string | null }
 ): Promise<{ ok: true } | { ok: false; motivo: string }> {
-  const { data: itens } = await sb.from('kit_itens').select('produto_id, quantidade').eq('kit_id', kitProdutoId)
+  const { data: itens } = await sb.from('kit_itens').select('produto_id, quantidade, controla_estoque').eq('kit_id', kitProdutoId)
   if (!itens || itens.length === 0) return { ok: false, motivo: 'Kit sem componentes cadastrados' }
 
   const decrementados: { produtoId: string; quantidade: number }[] = []
   for (const item of itens) {
+    // Componente sem controle de estoque (ex: parafusos, buchas) nunca é
+    // baixado nem gera movimento — considerado sempre disponível.
+    if (item.controla_estoque === false) continue
     const qtdNecessaria = item.quantidade * quantidadePedido
     const resultado = await decrementarEstoqueAtomico(sb, item.produto_id, qtdNecessaria)
     if (!resultado.ok) {

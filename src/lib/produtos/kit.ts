@@ -14,7 +14,7 @@ export async function calcularKit(
 ): Promise<ResultadoKit | null> {
   const { data: itens } = await sb
     .from('kit_itens')
-    .select('produto_id, quantidade')
+    .select('produto_id, quantidade, controla_estoque')
     .eq('kit_id', produtoId)
 
   if (!itens || itens.length === 0) return null
@@ -46,6 +46,10 @@ export async function calcularKit(
     const componente = (componentes ?? []).find((c: any) => c.id === item.produto_id)
     if (!componente) continue
     custo += (componente.preco_custo ?? 0) * item.quantidade
+    // Componente marcado como "não controlar estoque" (ex: parafusos,
+    // buchas) nunca limita quantos kits dá pra montar — trata como se
+    // tivesse estoque infinito, só não entra no min().
+    if (item.controla_estoque === false) continue
     const estoqueComponente = estoquePorComponente.get(item.produto_id) ?? 0
     estoqueMinimo = Math.min(estoqueMinimo, Math.floor(estoqueComponente / item.quantidade))
   }

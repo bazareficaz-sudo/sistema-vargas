@@ -49,7 +49,7 @@ type Produto = {
   ipi_percentual?: number | null
 }
 
-type KitItem = { id?: string; produto_id: string; nome: string; unidade: string; quantidade: number }
+type KitItem = { id?: string; produto_id: string; nome: string; unidade: string; quantidade: number; controla_estoque: boolean }
 
 type ProdutoImagem = { id: string; url: string; ordem: number; principal: boolean }
 
@@ -119,7 +119,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     // consulta por ambiguidade e "data" vem undefined/vazio silenciosamente.
     const { data, error } = await sb
       .from('kit_itens')
-      .select('id, produto_id, quantidade, produtos!produto_id(nome, unidade)')
+      .select('id, produto_id, quantidade, controla_estoque, produtos!produto_id(nome, unidade)')
       .eq('kit_id', kitId)
     if (error) { setErro('Erro ao carregar componentes do kit: ' + error.message); return }
     setKitItens((data ?? []).map((d: any) => ({
@@ -128,6 +128,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       nome: d.produtos?.nome ?? '',
       unidade: d.produtos?.unidade ?? 'UN',
       quantidade: d.quantidade,
+      controla_estoque: d.controla_estoque ?? true,
     })))
   }
 
@@ -215,7 +216,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
   async function adicionarKitItem(prod: Produto) {
     if (kitItens.find(k => k.produto_id === prod.id)) return
-    const novoItem: KitItem = { produto_id: prod.id, nome: prod.nome, unidade: prod.unidade, quantidade: 1 }
+    const novoItem: KitItem = { produto_id: prod.id, nome: prod.nome, unidade: prod.unidade, quantidade: 1, controla_estoque: true }
     setKitItens(prev => [...prev, novoItem])
     setBuscaKit(''); setResultadosKit([])
     if (form?.id) {
@@ -240,6 +241,14 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     setKitItens(prev => prev.filter(k => k.produto_id !== produtoId))
     if (form?.id) {
       await sb.from('kit_itens').delete().eq('kit_id', form.id).eq('produto_id', produtoId)
+      await recalcularEPersistirKit()
+    }
+  }
+
+  async function alternarControlaEstoqueKit(produtoId: string, controla: boolean) {
+    setKitItens(prev => prev.map(k => k.produto_id === produtoId ? { ...k, controla_estoque: controla } : k))
+    if (form?.id) {
+      await sb.from('kit_itens').update({ controla_estoque: controla }).eq('kit_id', form.id).eq('produto_id', produtoId)
       await recalcularEPersistirKit()
     }
   }
@@ -404,7 +413,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     if (form.tipo === 'kit' && kitItens.length > 0) {
       await sb.from('kit_itens').delete().eq('kit_id', form.id)
       const { error: kitError } = await sb.from('kit_itens').insert(
-        kitItens.map(k => ({ kit_id: form.id, produto_id: k.produto_id, quantidade: k.quantidade }))
+        kitItens.map(k => ({ kit_id: form.id, produto_id: k.produto_id, quantidade: k.quantidade, controla_estoque: k.controla_estoque }))
       )
       if (kitError) { setSalvando(false); setErro('Produto salvo, mas erro na composição: ' + kitError.message); return }
     }
@@ -977,6 +986,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                       <tr className="bg-gray-50 border-b border-gray-200">
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-600">Produto</th>
                         <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-600">Qtd</th>
+                        <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-600">Controla estoque</th>
                         <th className="w-12 px-4 py-2.5"></th>
                       </tr>
                     </thead>
@@ -985,6 +995,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                         <tr key={item.produto_id} className="hover:bg-gray-50">
                           <td className="px-4 py-2.5 text-gray-900">{item.nome}
                             <span className="text-gray-400 text-xs ml-1">{item.unidade}</span>
+                            {!item.controla_estoque && (
+                              <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-600 font-medium align-middle">∞ sempre disponível</span>
+                            )}
                           </td>
                           <td className="px-4 py-2.5 text-center">
                             <div className="inline-flex items-center gap-1.5">
@@ -1003,6 +1016,13 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                                 +
                               </button>
                             </div>
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer select-none" title="Desmarque para componentes baratos/abundantes (ex: parafusos, buchas) que não limitam a montagem do kit nem têm baixa registrada">
+                              <input type="checkbox" checked={item.controla_estoque}
+                                onChange={e => alternarControlaEstoqueKit(item.produto_id, e.target.checked)}
+                                className="w-4 h-4 accent-blue-600" />
+                            </label>
                           </td>
                           <td className="px-4 py-2.5 text-center">
                             <button onClick={() => removerKitItem(item.produto_id)}
