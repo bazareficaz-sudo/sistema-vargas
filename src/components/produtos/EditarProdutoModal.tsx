@@ -70,6 +70,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [resultadosKit, setResultadosKit] = useState<Produto[]>([])
   const [promocaoInfinita, setPromocaoInfinita] = useState(false)
   const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
+  const [preenchendoIA, setPreenchendoIA] = useState(false)
+  const [mensagemIA, setMensagemIA] = useState('')
 
   // Imagens
   const [imagens, setImagens] = useState<ProdutoImagem[]>([])
@@ -131,6 +133,42 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
   function campo<K extends keyof Produto>(field: K, value: Produto[K]) {
     setForm(prev => prev ? { ...prev, [field]: value } : prev)
+  }
+
+  async function preencherComIA() {
+    if (!form || !form.nome.trim()) return
+    setPreenchendoIA(true); setErro(''); setMensagemIA('')
+    try {
+      const res = await fetch('/api/produtos/ia-enriquecer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ produtoNome: form.nome, produtoEan: form.ean }),
+      })
+      const data = await res.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao consultar a IA'); return }
+
+      let preenchidos = 0
+      setForm(prev => {
+        if (!prev) return prev
+        const novo = { ...prev }
+        if (!novo.categoria && data.categoria) { novo.categoria = data.categoria; preenchidos++ }
+        if (!novo.marca && data.marca) { novo.marca = data.marca; preenchidos++ }
+        if (!novo.ncm && data.ncm) { novo.ncm = data.ncm; preenchidos++ }
+        if (!novo.cest && data.cest) { novo.cest = data.cest; preenchidos++ }
+        if (!novo.descricao_marketplace && data.descricao_marketplace) { novo.descricao_marketplace = data.descricao_marketplace; preenchidos++ }
+        if (novo.peso_kg == null && data.peso_kg != null) { novo.peso_kg = data.peso_kg; preenchidos++ }
+        if (novo.altura_cm == null && data.altura_cm != null) { novo.altura_cm = data.altura_cm; preenchidos++ }
+        if (novo.largura_cm == null && data.largura_cm != null) { novo.largura_cm = data.largura_cm; preenchidos++ }
+        if (novo.comprimento_cm == null && data.comprimento_cm != null) { novo.comprimento_cm = data.comprimento_cm; preenchidos++ }
+        return novo
+      })
+      setMensagemIA(preenchidos > 0
+        ? `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar (NCM/CEST estão na aba Fiscal).`
+        : 'A IA não encontrou sugestões novas — os campos já estavam preenchidos ou não há confiança suficiente.')
+    } catch {
+      setErro('Erro ao consultar a IA — tente novamente.')
+    } finally {
+      setPreenchendoIA(false)
+    }
   }
 
   function aplicarMarkup(markup: number) {
@@ -505,6 +543,17 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   <input value={form.ean ?? ''} onChange={e => campo('ean', e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
                 </div>
+              </div>
+
+              {/* Preencher com IA */}
+              <div>
+                <button type="button" onClick={preencherComIA} disabled={preenchendoIA || !form.nome.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 border border-violet-200 text-violet-700 text-sm font-medium rounded-lg transition-colors">
+                  {preenchendoIA ? '✨ Pensando...' : '✨ Preencher campos vazios com IA (categoria, marca, NCM, descrição, dimensões...)'}
+                </button>
+                {mensagemIA && (
+                  <p className="text-xs text-violet-600 mt-1.5">{mensagemIA}</p>
+                )}
               </div>
 
               {/* Código do fornecedor */}
