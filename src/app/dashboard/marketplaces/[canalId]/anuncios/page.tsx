@@ -30,16 +30,26 @@ export default async function AnunciosPage({ params, searchParams }: {
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: true })
 
-  let query = supabase
-    .from('marketplace_anuncios')
-    .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao, produto_id)')
-    .eq('canal_id', canalId)
-    .order('created_at', { ascending: false })
-
-  if (status) query = query.eq('status', status)
-  if (q) query = query.ilike('titulo', `%${q}%`)
-
-  const { data: anuncios } = await query.limit(5000)
+  // O projeto Supabase tem "Max Rows" do PostgREST em 1000 — um .limit(5000)
+  // único fica travado em 1000 linhas silenciosamente, mesmo com bem mais
+  // anúncios cadastrados (confirmado ao vivo: canal com 4999 linhas na
+  // tabela só devolvia 1000). Pagina em blocos de 1000 via .range() até
+  // esgotar, em vez de confiar num limit alto.
+  const TAMANHO_PAGINA = 1000
+  const anuncios: any[] = []
+  for (let offset = 0; offset < 20 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
+    let pagina = supabase
+      .from('marketplace_anuncios')
+      .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao, produto_id)')
+      .eq('canal_id', canalId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + TAMANHO_PAGINA - 1)
+    if (status) pagina = pagina.eq('status', status)
+    if (q) pagina = pagina.ilike('titulo', `%${q}%`)
+    const { data } = await pagina
+    anuncios.push(...(data ?? []))
+    if (!data || data.length < TAMANHO_PAGINA) break
+  }
 
   // A busca de produto no modal de vínculo consulta o banco ao vivo
   // (ver AnunciosClient.tsx), então essa lista só serve como valor inicial/

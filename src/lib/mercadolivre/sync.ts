@@ -205,14 +205,20 @@ export async function syncCatalogo(
   let scrollIdParaSalvar: string | null = null
   let passeCompleto = true // só vira false se paramos no meio (maxItems atingido)
 
+  // Sempre consome a página inteira antes de checar o limite — checar
+  // no meio (por id) fazia o corte cair bem no início de uma página recém
+  // buscada quando maxItems era múltiplo exato do tamanho de página (500 /
+  // 50), descartando os ~50 ids dela sem nunca processá-los E salvando o
+  // scroll_id JÁ APONTANDO PRA PÁGINA SEGUINTE — ou seja, aqueles itens
+  // ficavam pulados pra sempre, em toda sincronização futura. maxItems vira
+  // um orçamento aproximado (pode passar um pouco, até pageSize-1 a mais),
+  // mas nenhum id de uma página já buscada é descartado.
   paginacao: for await (const pagina of listItemIdsScan(ctx, { scrollIdInicial: canal.mlScanScrollId ?? null })) {
-    for (const id of pagina.ids) {
-      if (encontrados.length >= maxItems) {
-        scrollIdParaSalvar = pagina.scrollId
-        passeCompleto = false
-        break paginacao
-      }
-      encontrados.push(id)
+    encontrados.push(...pagina.ids)
+    if (encontrados.length >= maxItems) {
+      scrollIdParaSalvar = pagina.scrollId
+      passeCompleto = false
+      break paginacao
     }
   }
   // passeCompleto=true (chegou ao fim do catálogo) → reseta o cursor pra
