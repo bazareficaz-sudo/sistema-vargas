@@ -34,6 +34,24 @@ export async function mlGet(path: string, params: Record<string, string | number
   return parseMLResponse(res, path)
 }
 
+export async function mlPost(path: string, body: unknown, accessToken: string) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return parseMLResponse(res, path)
+}
+
+export async function mlPut(path: string, body: unknown, accessToken: string) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return parseMLResponse(res, path)
+}
+
 // Garante um access_token válido para o canal, renovando via refresh_token
 // quando estiver perto de expirar. O ML rotaciona o refresh_token a cada
 // uso — sempre persiste o novo, o antigo deixa de funcionar.

@@ -8,6 +8,7 @@ import MapearAnuncioModal from './MapearAnuncioModal'
 import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
+import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
 import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
@@ -111,6 +112,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [enriquecendoAberto, setEnriquecendoAberto] = useState<any | null>(null)
   const [enviandoPrecoAberto, setEnviandoPrecoAberto] = useState<any | null>(null)
   const [criarAnuncioShopeeAberto, setCriarAnuncioShopeeAberto] = useState(false)
+  const [criarAnuncioMLAberto, setCriarAnuncioMLAberto] = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [previewMassa, setPreviewMassa] = useState<{ encontrados: any[]; naoEncontrados: any[] } | null>(null)
   const [aplicandoMassa, setAplicandoMassa] = useState(false)
@@ -589,20 +591,23 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setAnuncios(prev => prev.filter(a => a.id !== id))
   }
 
-  // Trocar entre ativo/pausado num anúncio Shopee já sincronizado precisa
-  // refletir na Shopee de verdade — esse dropdown historicamente só mudava
-  // a coluna local (nada avisava a Shopee), então o anúncio continuava do
-  // jeito que estava lá mesmo depois de "pausar" aqui. rascunho/encerrado
-  // não têm equivalente em unlist_item, continuam só locais.
+  // Trocar entre ativo/pausado num anúncio Shopee ou Mercado Livre já
+  // sincronizado precisa refletir no marketplace de verdade — esse dropdown
+  // historicamente só mudava a coluna local (nada avisava o marketplace),
+  // então o anúncio continuava do jeito que estava lá mesmo depois de
+  // "pausar" aqui. rascunho/encerrado não têm equivalente em
+  // unlist_item/status, continuam só locais.
   async function alterarStatus(id: string, novoStatus: string) {
     const anuncio = anuncios.find(a => a.id === id)
     const ehTogglePausarAtivar = (novoStatus === 'pausado' || novoStatus === 'ativo')
       && (anuncio?.status === 'pausado' || anuncio?.status === 'ativo')
+    const plataformaComEscrita = canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre'
 
-    if (canal.plataforma === 'shopee' && ehTogglePausarAtivar && anuncio?.id_externo) {
+    if (plataformaComEscrita && ehTogglePausarAtivar && anuncio?.id_externo) {
       const acao = novoStatus === 'pausado' ? 'pausar' : 'ativar'
+      const nomePlataforma = canal.plataforma === 'mercadolivre' ? 'Mercado Livre' : 'Shopee'
       try {
-        const resp = await fetch('/api/marketplace/shopee/pausar-ativar', {
+        const resp = await fetch(`/api/marketplace/${canal.plataforma}/pausar-ativar`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canalId: canal.id, anuncioIds: [id], acao }),
@@ -611,10 +616,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         if (data.atualizados?.length > 0) {
           setAnuncios(prev => prev.map(a => a.id === id ? { ...a, status: novoStatus } : a))
         } else {
-          alert(`Não foi possível ${acao} na Shopee: ${data.erros?.[0] ?? data.erro ?? 'erro desconhecido'}`)
+          alert(`Não foi possível ${acao} n${canal.plataforma === 'mercadolivre' ? 'o' : 'a'} ${nomePlataforma}: ${data.erros?.[0] ?? data.erro ?? 'erro desconhecido'}`)
         }
       } catch (e: any) {
-        alert(`Erro ao ${acao} na Shopee: ${e.message ?? 'falha de rede'}`)
+        alert(`Erro ao ${acao} n${canal.plataforma === 'mercadolivre' ? 'o' : 'a'} ${nomePlataforma}: ${e.message ?? 'falha de rede'}`)
       }
       return
     }
@@ -711,6 +716,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               title="Cria um anúncio de verdade na Shopee via API, a partir de um produto do catálogo"
               className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors">
               Publicar na Shopee
+            </button>
+          )}
+          {canal.plataforma === 'mercadolivre' && (
+            <button onClick={() => setCriarAnuncioMLAberto(true)}
+              title="Cria um anúncio de verdade no Mercado Livre via API, a partir de um produto do catálogo"
+              className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg transition-colors">
+              Publicar no Mercado Livre
             </button>
           )}
           <button onClick={abrirNovo}
@@ -936,8 +948,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                     {a.produtos && (
                       <button onClick={() => setEnriquecendoAberto(a)} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium">Enriquecer</button>
                     )}
-                    {canal.plataforma === 'shopee' && a.id_externo && (
-                      <button onClick={() => setEnviandoPrecoAberto(a)} className="text-xs text-orange-600 hover:text-orange-800 font-medium">Enviar p/ Shopee</button>
+                    {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && a.id_externo && (
+                      <button onClick={() => setEnviandoPrecoAberto(a)} className="text-xs text-orange-600 hover:text-orange-800 font-medium">
+                        Enviar p/ {canal.plataforma === 'mercadolivre' ? 'ML' : 'Shopee'}
+                      </button>
                     )}
                     <button onClick={() => setDetalheAberto(a)} className="text-xs text-gray-600 hover:text-gray-900 font-medium">Detalhes</button>
                     <button onClick={() => abrirEditar(a)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Editar</button>
@@ -1132,6 +1146,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           canal={{ id: canal.id, nome: canal.nome }}
           empresaId={empresaId}
           onClose={() => setCriarAnuncioShopeeAberto(false)}
+          onCriado={() => router.refresh()}
+        />
+      )}
+
+      {criarAnuncioMLAberto && (
+        <CriarAnuncioMercadoLivreModal
+          canal={{ id: canal.id, nome: canal.nome }}
+          empresaId={empresaId}
+          onClose={() => setCriarAnuncioMLAberto(false)}
           onCriado={() => router.refresh()}
         />
       )}

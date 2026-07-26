@@ -8,6 +8,13 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
   onClose: () => void
   onEnviado: (anuncioAtualizado: any) => void
 }) {
+  const plataforma: 'shopee' | 'mercadolivre' = canal.plataforma === 'mercadolivre' ? 'mercadolivre' : 'shopee'
+  const nomePlataforma = plataforma === 'mercadolivre' ? 'o Mercado Livre' : 'a Shopee'
+  // Atualização de preço/estoque de anúncio com variação só está implementada
+  // pra Shopee nesta fase — o Mercado Livre ainda não tem write por variação
+  // (ver src/lib/mercadolivre/write.ts), só o item inteiro.
+  const variacaoBloqueadaML = plataforma === 'mercadolivre' && anuncio.tem_variacao
+
   const [carregando, setCarregando] = useState(true)
   const [precoAnuncio, setPrecoAnuncio] = useState(String(anuncio.preco_venda ?? 0))
   const [estoqueAnuncio, setEstoqueAnuncio] = useState(String(anuncio.estoque_reservado ?? 0))
@@ -15,12 +22,12 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
   const [formVariacoes, setFormVariacoes] = useState<Record<string, { preco: string; estoque: string }>>({})
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
-  const [resultado, setResultado] = useState<{ ok: boolean; erroPreco?: string; erroEstoque?: string } | null>(null)
+  const [resultado, setResultado] = useState<{ ok: boolean; erroPreco?: string; erroEstoque?: string; erro?: string } | null>(null)
 
   useEffect(() => {
     let ativo = true
     async function carregar() {
-      if (!anuncio.tem_variacao) { setCarregando(false); return }
+      if (!anuncio.tem_variacao || variacaoBloqueadaML) { setCarregando(false); return }
       const sb = createClient()
       const { data } = await sb.from('marketplace_anuncio_variacoes')
         .select('id, model_id, nome_variacao, sku_variacao, preco, estoque')
@@ -39,6 +46,7 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
   }, [anuncio.id, anuncio.tem_variacao])
 
   async function enviar() {
+    if (variacaoBloqueadaML) return
     setEnviando(true); setErro(''); setResultado(null)
     const sb = createClient()
 
@@ -61,7 +69,7 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
         }).eq('id', anuncio.id)
       }
 
-      const resp = await fetch('/api/marketplace/shopee/push', {
+      const resp = await fetch(`/api/marketplace/${plataforma}/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ canalId: canal.id, anuncioId: anuncio.id }),
@@ -89,7 +97,7 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto flex flex-col">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0 sticky top-0 bg-white z-10">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Enviar preço/estoque para a Shopee</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Enviar preço/estoque para {nomePlataforma}</h2>
             <p className="text-xs text-gray-400 truncate max-w-md">{anuncio.titulo}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
@@ -97,10 +105,14 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
 
         <div className="px-6 py-5 space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-            ⚠️ Isso atualiza o preço/estoque direto na Shopee — a mudança fica visível para os clientes imediatamente.
+            ⚠️ Isso atualiza o preço/estoque direto n{plataforma === 'mercadolivre' ? 'o Mercado Livre' : 'a Shopee'} — a mudança fica visível para os clientes imediatamente.
           </div>
 
-          {carregando ? (
+          {variacaoBloqueadaML ? (
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Anúncios com variação no Mercado Livre ainda não têm atualização automática de preço/estoque por aqui — atualize direto no Mercado Livre por enquanto.
+            </p>
+          ) : carregando ? (
             <p className="text-sm text-gray-400">Carregando...</p>
           ) : anuncio.tem_variacao ? (
             <div className="space-y-2">
@@ -142,12 +154,13 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
 
           {resultado && (
             resultado.ok ? (
-              <p className="text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">✓ Enviado com sucesso para a Shopee.</p>
+              <p className="text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">✓ Enviado com sucesso para {nomePlataforma}.</p>
             ) : (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 space-y-1">
                 {resultado.erroPreco && <p>Preço: {resultado.erroPreco}</p>}
                 {resultado.erroEstoque && <p>Estoque: {resultado.erroEstoque}</p>}
-                {!resultado.erroPreco && !resultado.erroEstoque && <p>Falha ao enviar.</p>}
+                {resultado.erro && <p>{resultado.erro}</p>}
+                {!resultado.erroPreco && !resultado.erroEstoque && !resultado.erro && <p>Falha ao enviar.</p>}
               </div>
             )
           )}
@@ -155,9 +168,9 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
-          <button onClick={enviar} disabled={enviando || carregando}
+          <button onClick={enviar} disabled={enviando || carregando || variacaoBloqueadaML}
             className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-            {enviando ? 'Enviando...' : 'Enviar para a Shopee'}
+            {enviando ? 'Enviando...' : `Enviar para ${nomePlataforma}`}
           </button>
         </div>
       </div>
