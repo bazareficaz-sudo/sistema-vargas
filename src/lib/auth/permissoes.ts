@@ -19,6 +19,7 @@ export type PermissaoCodigo =
   | 'cancelar_venda'
   | 'gerenciar_whatsapp'
   | 'exportar_dados'
+  | 'ver_dados_grupo'
 
 export const PAPEIS: { valor: Papel; label: string }[] = [
   { valor: 'admin', label: 'Administrador' },
@@ -34,11 +35,12 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
     'gerenciar_usuarios', 'gerenciar_configuracoes', 'ver_custos_margens', 'excluir_cadastros',
     'gerenciar_financeiro', 'gerenciar_estoque', 'gerenciar_compras', 'gerenciar_fiscal',
     'gerenciar_marketplaces', 'realizar_vendas', 'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados',
+    'ver_dados_grupo',
   ]),
   gerente: new Set([
     'ver_custos_margens', 'excluir_cadastros', 'gerenciar_financeiro', 'gerenciar_estoque',
     'gerenciar_compras', 'gerenciar_fiscal', 'gerenciar_marketplaces', 'realizar_vendas',
-    'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados',
+    'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados', 'ver_dados_grupo',
   ]),
   financeiro: new Set([
     'ver_custos_margens', 'gerenciar_financeiro', 'gerenciar_fiscal', 'exportar_dados',
@@ -58,7 +60,7 @@ export function temPermissao(papel: Papel | null | undefined, codigo: PermissaoC
 }
 
 export type ResultadoGuarda =
-  | { ok: true; userId: string; empresaId: string; role: Papel }
+  | { ok: true; userId: string; empresaId: string; role: Papel; tenantId: string | null }
   | { ok: false; status: 401 | 403; erro: string }
 
 // Guarda de servidor pra rotas novas: autentica, confirma que o usuário
@@ -70,13 +72,13 @@ export async function exigirPermissao(supabase: any, codigo: PermissaoCodigo): P
   if (!user) return { ok: false, status: 401, erro: 'Não autenticado' }
 
   const { data: profile } = await supabase.from('profiles')
-    .select('empresa_id, role, status').eq('id', user.id).single()
+    .select('empresa_id, role, status, tenant_id').eq('id', user.id).single()
 
   if (!profile?.empresa_id) return { ok: false, status: 403, erro: 'Empresa não identificada' }
   if (profile.status && profile.status !== 'ativo') return { ok: false, status: 403, erro: 'Usuário sem acesso ativo' }
   if (!temPermissao(profile.role as Papel, codigo)) return { ok: false, status: 403, erro: 'Sem permissão para esta ação' }
 
-  return { ok: true, userId: user.id, empresaId: profile.empresa_id, role: profile.role as Papel }
+  return { ok: true, userId: user.id, empresaId: profile.empresa_id, role: profile.role as Papel, tenantId: profile.tenant_id ?? null }
 }
 
 // Insere em empresa_auditoria (tabela já existente no schema, dormente até

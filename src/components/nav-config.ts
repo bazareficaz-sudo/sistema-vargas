@@ -168,6 +168,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/dashboard/marketplaces', label: 'Marketplaces', icon: '🏪', modulo: 'marketplace' },
       { href: '/dashboard/marketplaces/anuncios', label: 'Anúncios', icon: '📢', modulo: 'marketplace' },
+      { href: '/dashboard/mapa-anuncios', label: 'Mapa de Anúncios', icon: '🗺️', modulo: 'marketplace' },
       { href: '/dashboard/pedidos-ecommerce', label: 'Pedidos', icon: '📦', modulo: 'marketplace' },
     ],
   },
