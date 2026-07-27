@@ -51,6 +51,7 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
       isSystemAdmin,
       empresaId,
       role: null,
+      suporte: null,
     }
   }
 
@@ -103,6 +104,7 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
     isSystemAdmin,
     empresaId,
     role: null,
+    suporte: null,
   }
 }
 

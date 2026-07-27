@@ -19,6 +19,7 @@ const DEFAULT_PLAN: PlanData = {
   isSystemAdmin: false,
   empresaId: '',
   role: null,
+  suporte: null,
 }
 
 export const PlanContext = createContext<PlanData>(DEFAULT_PLAN)

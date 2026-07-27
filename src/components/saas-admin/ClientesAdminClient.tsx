@@ -40,6 +40,28 @@ export default function ClientesAdminClient({ clientes, plans }: Props) {
   const [editDias, setEditDias] = useState(0)
   const [saving, setSaving] = useState(false)
 
+  const [modalSuporte, setModalSuporte] = useState<Cliente | null>(null)
+  const [motivoSuporte, setMotivoSuporte] = useState('')
+  const [iniciandoSuporte, setIniciandoSuporte] = useState(false)
+  const [erroSuporte, setErroSuporte] = useState('')
+
+  async function iniciarSuporte() {
+    if (!modalSuporte) return
+    if (motivoSuporte.trim().length < 10) { setErroSuporte('Descreva o motivo (mínimo 10 caracteres).'); return }
+    setIniciandoSuporte(true)
+    setErroSuporte('')
+    const res = await fetch('/api/saas-admin/suporte/iniciar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ empresaId: modalSuporte.empresa_id, motivo: motivoSuporte }),
+    })
+    const data = await res.json()
+    setIniciandoSuporte(false)
+    if (!data.ok) { setErroSuporte(data.erro ?? 'Erro ao iniciar suporte'); return }
+    window.open(data.actionLink, '_blank')
+    setModalSuporte(null)
+    setMotivoSuporte('')
+  }
+
   const filtrados = clientes.filter(c => {
     if (busca && !c.empresa_nome.toLowerCase().includes(busca.toLowerCase())) return false
     if (filtroStatus && c.status !== filtroStatus) return false
@@ -176,6 +198,10 @@ export default function ClientesAdminClient({ clientes, plans }: Props) {
                         className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg">
                         ✏ Gerir
                       </button>
+                      <button onClick={() => { setModalSuporte(c); setMotivoSuporte(''); setErroSuporte('') }}
+                        className="text-xs px-2 py-1 bg-purple-900/50 hover:bg-purple-900 text-purple-300 rounded-lg">
+                        🛟 Suporte
+                      </button>
                       {c.status !== 'suspended' && c.status !== 'blocked' && (
                         <button onClick={() => acao(c, 'suspended')}
                           className="text-xs px-2 py-1 bg-red-900/50 hover:bg-red-900 text-red-400 rounded-lg">
@@ -249,6 +275,45 @@ export default function ClientesAdminClient({ clientes, plans }: Props) {
               <button onClick={salvarAlteracao} disabled={saving}
                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold disabled:opacity-50">
                 {saving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de acesso de suporte */}
+      {modalSuporte && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="bg-slate-900 border border-purple-900/60 rounded-2xl w-[480px] p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="font-bold text-white">🛟 Acessar como suporte</h2>
+                <p className="text-xs text-slate-400 mt-0.5">{modalSuporte.empresa_nome}</p>
+              </div>
+              <button onClick={() => setModalSuporte(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Abre uma sessão temporária (2h) logada como o administrador dessa empresa, numa aba nova.
+              Fica registrada em auditoria e o cliente vê um aviso ao logar de novo.
+            </p>
+
+            <div>
+              <label className="text-xs text-slate-400">Motivo do acesso *</label>
+              <textarea value={motivoSuporte} onChange={e => setMotivoSuporte(e.target.value)} rows={3}
+                placeholder="Ex: cliente pediu ajuda pra configurar o fiscal via ticket #123"
+                className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
+            </div>
+
+            {erroSuporte && <p className="text-xs text-red-400">{erroSuporte}</p>}
+
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setModalSuporte(null)} className="flex-1 py-2 text-sm text-slate-400 hover:text-white border border-slate-700 rounded-xl">
+                Cancelar
+              </button>
+              <button onClick={iniciarSuporte} disabled={iniciandoSuporte}
+                className="flex-1 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-semibold disabled:opacity-50">
+                {iniciandoSuporte ? 'Gerando acesso...' : 'Iniciar suporte'}
               </button>
             </div>
           </div>

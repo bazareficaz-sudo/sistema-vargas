@@ -41,6 +41,16 @@ export interface PlanData {
   // Papel do usuário logado (não vem de loadPlanData — é mesclado por quem
   // chama, a partir de profiles.role, pra não duplicar consulta).
   role: string | null
+  // Acesso de suporte (impersonação temporária) — também mesclado por quem
+  // chama loadPlanData, a partir de suporte_acessos.
+  suporte: {
+    sessionId: string
+    tipo: 'ativa' | 'encerrada_recente'
+    motivo: string
+    empresaNome: string
+    expiraEm: string | null
+    encerradoEm: string | null
+  } | null
 }
 
 export const DEFAULT_LIMITS: PlanLimits = {

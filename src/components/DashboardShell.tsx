@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Sidebar from '@/components/Sidebar'
 import TopMenu from '@/components/TopMenu'
 import { PlanAlertBanner } from '@/components/plan/PlanBanner'
+import SupportModeBanner from '@/components/plan/SupportModeBanner'
 
 export type LayoutMenu = 'sidebar' | 'topbar'
 export const LAYOUT_MENU_KEY = 'layout_menu'
@@ -33,6 +34,7 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
           style={{ marginLeft: 0, paddingTop: '3.5rem' }}
         >
           <PlanAlertBanner />
+          <SupportModeBanner />
           <div className="flex-1 p-7">{children}</div>
         </main>
       </div>
@@ -48,6 +50,7 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
         style={{ marginLeft: '4.5rem' }}
       >
         <PlanAlertBanner />
+        <SupportModeBanner />
         <div className="flex-1 p-7">{children}</div>
       </main>
     </div>

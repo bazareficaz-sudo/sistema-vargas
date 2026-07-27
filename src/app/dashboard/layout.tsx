@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadPlanData } from '@/lib/plans/access'
+import type { PlanData } from '@/lib/plans/types'
 import { provisionarEmpresaEUsuario } from '@/lib/signup/provisionar'
 import PlanProvider from '@/components/plan/PlanProvider'
 import DashboardShell from '@/components/DashboardShell'
@@ -47,7 +48,44 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const empresaId = profile?.empresa_id ?? ''
   const empresaNome = (profile?.empresas as unknown as { nome: string } | null)?.nome ?? 'Minha Empresa'
 
-  const planData = { ...(await loadPlanData(empresaId, user.id)), role: profile?.role ?? null }
+  // Acesso de suporte — pega a sessão mais recente pra esse usuário. Se
+  // estiver ativa mas vencida, encerra e desloga (mesma lógica do bloqueio
+  // acima). Se estiver ativa e válida, ou foi encerrada há menos de 24h,
+  // vira o aviso mostrado no dashboard (SupportModeBanner).
+  const { data: suporteRow } = await supabase
+    .from('suporte_acessos')
+    .select('id, motivo, status, expira_em, encerrado_em, empresas(nome, nome_fantasia)')
+    .eq('usuario_alvo_id', user.id)
+    .order('iniciado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  let suporte: PlanData['suporte'] = null
+  if (suporteRow?.status === 'ativa') {
+    if (new Date(suporteRow.expira_em) < new Date()) {
+      await supabase.from('suporte_acessos').update({ status: 'expirada' }).eq('id', suporteRow.id)
+      await supabase.auth.signOut()
+      redirect('/login')
+    }
+    const empresaSuporte = suporteRow.empresas as unknown as { nome: string; nome_fantasia: string | null } | null
+    suporte = {
+      sessionId: suporteRow.id, tipo: 'ativa', motivo: suporteRow.motivo,
+      empresaNome: empresaSuporte?.nome_fantasia ?? empresaSuporte?.nome ?? '',
+      expiraEm: suporteRow.expira_em, encerradoEm: null,
+    }
+  } else if (suporteRow?.status === 'encerrada' && suporteRow.encerrado_em) {
+    const horasDesde = (Date.now() - new Date(suporteRow.encerrado_em).getTime()) / 3600000
+    if (horasDesde < 24) {
+      const empresaSuporte = suporteRow.empresas as unknown as { nome: string; nome_fantasia: string | null } | null
+      suporte = {
+        sessionId: suporteRow.id, tipo: 'encerrada_recente', motivo: suporteRow.motivo,
+        empresaNome: empresaSuporte?.nome_fantasia ?? empresaSuporte?.nome ?? '',
+        expiraEm: null, encerradoEm: suporteRow.encerrado_em,
+      }
+    }
+  }
+
+  const planData = { ...(await loadPlanData(empresaId, user.id)), role: profile?.role ?? null, suporte }
 
   return (
     <PlanProvider data={planData}>
