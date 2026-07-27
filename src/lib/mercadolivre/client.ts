@@ -19,10 +19,30 @@ export async function getIntegracaoCredentials(sb: any): Promise<MLCredentials> 
   return { appId: integracao.app_id, appSecret: integracao.app_secret }
 }
 
+// O erro genérico do ML (ex: "body.required_fields") só diz o TIPO do
+// problema — os campos específicos que faltam/estão errados vêm no array
+// `cause`. Sem isso, o usuário só vê um código sem sentido; formatamos aqui
+// pra virar uma mensagem acionável. Formato de cada item de `cause` varia
+// (nem sempre tem `message`), então tenta várias chaves com fallback.
+function formatarCausaML(cause: unknown): string | null {
+  if (!Array.isArray(cause) || cause.length === 0) return null
+  const partes = cause.map((c: any) => {
+    if (typeof c === 'string') return c
+    const campo = c?.references?.attribute_id ?? c?.attribute_id ?? c?.code ?? null
+    const texto = c?.message ?? c?.description ?? null
+    if (texto && campo && !String(texto).includes(String(campo))) return `${campo}: ${texto}`
+    return texto ?? campo ?? null
+  }).filter(Boolean)
+  return partes.length > 0 ? partes.join(' · ') : null
+}
+
 async function parseMLResponse(res: Response, path: string) {
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new MLApiError(body?.message ?? `Erro Mercado Livre em ${path} (status ${res.status})`, body?.error, body)
+    const detalheCausa = formatarCausaML(body?.cause)
+    const base = body?.message ?? `Erro Mercado Livre em ${path} (status ${res.status})`
+    const mensagem = detalheCausa ? `${base} — ${detalheCausa}` : base
+    throw new MLApiError(mensagem, body?.error, body)
   }
   return body
 }
