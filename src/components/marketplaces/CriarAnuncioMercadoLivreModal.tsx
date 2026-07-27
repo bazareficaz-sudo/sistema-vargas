@@ -53,6 +53,38 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
+  const [preenchendoIA, setPreenchendoIA] = useState(false)
+
+  // Preenche descrição + o máximo de atributos possível via IA — nunca
+  // publica sozinha, só sugere valores editáveis (mesmo padrão do botão
+  // equivalente em CriarAnuncioShopeeModal.tsx). Existe porque o ML às vezes
+  // rejeita a criação citando atributos que nem apareciam como obrigatórios
+  // na lista carregada (atributos condicionais) — preencher mais do que só
+  // os marcados "obrigatório" reduz a chance de bater nesse erro de novo.
+  async function preencherComIA() {
+    if (!produto || atributos.length === 0) return
+    setPreenchendoIA(true); setErro('')
+    try {
+      const resp = await fetch('/api/marketplace/mercadolivre/ia-gerar-conteudo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          produtoNome: produto.nome, produtoMarca: produto.marca, produtoDescricao: produto.descricao_marketplace,
+          categoriaPath: caminhoCategoria.map(c => c.name).join(' › '),
+          atributos,
+        }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao gerar conteúdo com IA'); return }
+      if (data.descricao) setDescricao(data.descricao)
+      if (data.atributos && Object.keys(data.atributos).length > 0) {
+        setValoresAtributos(prev => ({ ...prev, ...data.atributos }))
+      }
+    } catch (e: any) {
+      setErro(e.message ?? 'Erro ao usar IA')
+    } finally {
+      setPreenchendoIA(false)
+    }
+  }
 
   useEffect(() => {
     if (!produtoIdInicial) return
@@ -456,7 +488,16 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                   )}
                   {atributos.length > 0 && (
                     <div>
-                      <p className="text-xs font-medium text-gray-500 mb-2">Atributos da categoria</p>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-medium text-gray-500">Atributos da categoria</p>
+                        <button type="button" onClick={preencherComIA} disabled={preenchendoIA}
+                          className="text-xs text-violet-600 hover:text-violet-800 font-medium disabled:opacity-50">
+                          {preenchendoIA ? 'Preenchendo…' : '✨ Preencher com IA'}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-gray-400 -mt-1 mb-2">
+                        O Mercado Livre às vezes exige atributos que nem aparecem como obrigatórios aqui — a IA tenta preencher o máximo possível pra reduzir erro na publicação. Confira antes de publicar.
+                      </p>
                       <div className="space-y-3">
                         {atributos.map(a => (
                           <div key={a.id}>

@@ -8,6 +8,7 @@ export default async function EntradasPage() {
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
   const empresaId = profile?.empresa_id ?? ''
+  const operador = user?.email ?? ''
 
   const { data: entradas } = await supabase
     .from('entradas')
@@ -64,6 +65,8 @@ export default async function EntradasPage() {
       entradas={lista as any}
       fornecedores={fornecedores ?? []}
       pendencias={pendencias}
+      empresaId={empresaId}
+      operador={operador}
     />
   )
 }

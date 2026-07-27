@@ -3,6 +3,8 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
+import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 
 type Entrada = {
   id: string
@@ -58,10 +60,14 @@ export default function EntradasListClient({
   entradas: inicial,
   fornecedores,
   pendencias,
+  empresaId,
+  operador,
 }: {
   entradas: Entrada[]
   fornecedores: Fornecedor[]
   pendencias: { semRevisao: number; semContas: number; rascunho: number }
+  empresaId: string
+  operador: string
 }) {
   const [lista, setLista] = useState<Entrada[]>(inicial)
   const [busca, setBusca] = useState('')
@@ -73,6 +79,49 @@ export default function EntradasListClient({
   const [confirmando, setConfirmando] = useState<Entrada | null>(null)
   const [excluindo, setExcluindo] = useState(false)
   const [erroExclusao, setErroExclusao] = useState('')
+  const [carregandoAcao, setCarregandoAcao] = useState<string | null>(null)
+  const [etiquetaProdutos, setEtiquetaProdutos] = useState<(ProdutoParaEtiqueta & { estoque: number })[] | null>(null)
+
+  // Mesmo padrão de src/components/entradas-xml/EntradasXmlClient.tsx, mas
+  // lendo direto de entrada_itens (entrada manual já vincula produto_id sem
+  // precisar de mapeamento intermediário, diferente da entrada por XML).
+  async function imprimirEtiquetasEntrada(entradaId: string) {
+    setCarregandoAcao(`etiqueta-${entradaId}`)
+    const sb = createClient()
+    try {
+      const { data: itens, error } = await sb.from('entrada_itens')
+        .select('produto_id, quantidade').eq('entrada_id', entradaId)
+      if (error) { alert('Erro ao buscar itens da entrada: ' + error.message); return }
+      if (!itens || itens.length === 0) { alert('Esta entrada não tem itens vinculados a produto.'); return }
+
+      const qtdPorProduto = new Map<string, number>()
+      for (const item of itens) {
+        if (!item.produto_id) continue
+        qtdPorProduto.set(item.produto_id, (qtdPorProduto.get(item.produto_id) ?? 0) + (item.quantidade || 0))
+      }
+      const ids = Array.from(qtdPorProduto.keys())
+      if (ids.length === 0) { alert('Nenhum item desta entrada está vinculado a um produto.'); return }
+
+      const { data: dadosProdutos, error: errProdutos } = await sb.from('produtos')
+        .select('id, nome, sku, ean, preco_venda, preco_promocional, marca, unidade, categoria')
+        .in('id', ids)
+      if (errProdutos) { alert('Erro ao buscar produtos: ' + errProdutos.message); return }
+      const porId = new Map((dadosProdutos ?? []).map(p => [p.id, p]))
+
+      const produtosEtiqueta = ids.map(id => {
+        const p = porId.get(id)
+        return {
+          id, nome: p?.nome ?? '(produto)', sku: p?.sku ?? null, ean: p?.ean ?? null,
+          preco_venda: p?.preco_venda ?? 0, preco_promocional: p?.preco_promocional ?? null,
+          marca: p?.marca ?? null, unidade: p?.unidade ?? 'UN', categoria: p?.categoria ?? null,
+          estoque: qtdPorProduto.get(id) ?? 0,
+        } as ProdutoParaEtiqueta & { estoque: number }
+      })
+      setEtiquetaProdutos(produtosEtiqueta)
+    } finally {
+      setCarregandoAcao(null)
+    }
+  }
 
   async function excluirEntrada(entrada: Entrada) {
     setExcluindo(true)
@@ -305,6 +354,14 @@ export default function EntradasListClient({
                         className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">
                         {e.status === 'rascunho' ? 'Continuar →' : 'Abrir →'}
                       </Link>
+                      {e.status === 'confirmada' && (
+                        <button
+                          onClick={() => imprimirEtiquetasEntrada(e.id)}
+                          disabled={carregandoAcao === `etiqueta-${e.id}`}
+                          className="text-xs text-purple-600 hover:text-purple-800 font-medium whitespace-nowrap disabled:opacity-50">
+                          {carregandoAcao === `etiqueta-${e.id}` ? 'Carregando…' : '🏷️ Etiquetas'}
+                        </button>
+                      )}
                       {e.status !== 'cancelada' && (
                         <button
                           onClick={() => { setErroExclusao(''); setConfirmando(e) }}
@@ -376,6 +433,17 @@ export default function EntradasListClient({
             </div>
           </div>
         </div>
+      )}
+
+      {etiquetaProdutos && (
+        <ImprimirEtiquetaModal
+          produtos={etiquetaProdutos}
+          empresaId={empresaId}
+          operadorNome={operador}
+          modoQtdPadrao="estoque"
+          labelModoEstoque="Igual à quantidade recebida"
+          onClose={() => setEtiquetaProdutos(null)}
+        />
       )}
     </div>
   )

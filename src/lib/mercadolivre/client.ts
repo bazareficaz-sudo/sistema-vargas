@@ -39,9 +39,17 @@ function formatarCausaML(cause: unknown): string | null {
 async function parseMLResponse(res: Response, path: string) {
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const detalheCausa = formatarCausaML(body?.cause)
+    // `cause` é o formato mais comum, mas alguns endpoints do ML devolvem
+    // `causes` (plural) ou nem preenchem nenhum dos dois — nesses casos o
+    // fallback bruto no fim garante que a mensagem nunca fica só com o
+    // código genérico (ex: "body.required_fields") sem nenhuma pista real.
+    const causaBruta = body?.cause ?? body?.causes ?? null
+    const detalheCausa = formatarCausaML(causaBruta)
     const base = body?.message ?? `Erro Mercado Livre em ${path} (status ${res.status})`
-    const mensagem = detalheCausa ? `${base} — ${detalheCausa}` : base
+    let mensagem = detalheCausa ? `${base} — ${detalheCausa}` : base
+    if (!detalheCausa && body && Object.keys(body).length > 0) {
+      mensagem += ` [detalhe bruto: ${JSON.stringify(body).slice(0, 400)}]`
+    }
     throw new MLApiError(mensagem, body?.error, body)
   }
   return body
