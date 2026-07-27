@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
@@ -68,6 +69,14 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
   const [mapearAberto, setMapearAberto] = useState<{ anuncio: any; canal: any } | null>(null)
   const [precoAberto, setPrecoAberto] = useState<{ anuncio: any; canal: any } | null>(null)
   const [prefAberto, setPrefAberto] = useState<{ produtoId: string; canalId: string; canalNome: string; naoAnunciar: boolean; observacao: string } | null>(null)
+
+  const [sugestoesPendentes, setSugestoesPendentes] = useState(0)
+  useEffect(() => {
+    fetch('/api/marketplaces/mapa-anuncios/sugestoes?page=1&pageSize=1')
+      .then(r => r.json())
+      .then(data => { if (data.ok) setSugestoesPendentes(data.resumo.totalCandidatos) })
+      .catch(() => {})
+  }, [])
 
   function avisar(msg: string) { setMensagem(msg); setTimeout(() => setMensagem(''), 4000) }
 
@@ -137,6 +146,13 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
       </div>
 
       {mensagem && <div className="px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg">{mensagem}</div>}
+
+      {sugestoesPendentes > 0 && (
+        <Link href="/dashboard/mapa-anuncios/revisar-sugestoes"
+          className="block px-4 py-2.5 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-lg hover:bg-blue-100">
+          🔍 {sugestoesPendentes} sugestões de mapeamento aguardando revisão →
+        </Link>
+      )}
 
       {/* Busca */}
       <div className="relative">
