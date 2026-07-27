@@ -19,13 +19,15 @@ export default async function FinanceiroPage() {
   const em30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
   const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
 
+  try { await supabase.rpc('atualizar_contas_vencidas') } catch {}
+
   const [crRes, cpRes, vendasMesRes] = await Promise.all([
     supabase.from('contas_receber')
-      .select('valor_original, valor_pago, status, data_vencimento')
+      .select('valor_original, valor_recebido, valor_aberto, status, data_vencimento')
       .eq('empresa_id', empresaId)
-      .neq('status', 'cancelado'),
+      .not('status', 'in', '(cancelado,renegociado)'),
     supabase.from('contas_pagar')
-      .select('valor, valor_pago, status, vencimento')
+      .select('valor, status, vencimento')
       .eq('empresa_id', empresaId)
       .neq('status', 'cancelado'),
     supabase.from('vendas')
@@ -38,17 +40,22 @@ export default async function FinanceiroPage() {
   const cr = crRes.data ?? []
   const cp = cpRes.data ?? []
 
-  const crVencido = cr.filter(c => c.status === 'vencido').reduce((s, c) => s + Math.max(0, (c.valor_original ?? 0) - (c.valor_pago ?? 0)), 0)
-  const crPendente = cr.filter(c => c.status === 'pendente').reduce((s, c) => s + Math.max(0, (c.valor_original ?? 0) - (c.valor_pago ?? 0)), 0)
-  const crRecebido = cr.filter(c => c.status === 'recebido').reduce((s, c) => s + (c.valor_pago ?? 0), 0)
-  const crVence7 = cr.filter(c => c.status === 'pendente' && c.data_vencimento >= hoje && c.data_vencimento <= em7).reduce((s, c) => s + Math.max(0, (c.valor_original ?? 0) - (c.valor_pago ?? 0)), 0)
-  const crVence30 = cr.filter(c => c.status === 'pendente' && c.data_vencimento >= hoje && c.data_vencimento <= em30).reduce((s, c) => s + Math.max(0, (c.valor_original ?? 0) - (c.valor_pago ?? 0)), 0)
+  // status real de contas_receber: aberto | parcial | recebido | vencido |
+  // cancelado | renegociado (não "pendente") — e valor_aberto já vem
+  // calculado do banco (valor_original - valor_recebido), sem valor_pago.
+  const crVencido = cr.filter(c => c.status === 'vencido').reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
+  const crPendente = cr.filter(c => ['aberto', 'parcial'].includes(c.status)).reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
+  const crRecebido = cr.filter(c => c.status === 'recebido').reduce((s, c) => s + (c.valor_recebido ?? 0), 0)
+  const crVence7 = cr.filter(c => ['aberto', 'parcial'].includes(c.status) && c.data_vencimento >= hoje && c.data_vencimento <= em7).reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
+  const crVence30 = cr.filter(c => ['aberto', 'parcial'].includes(c.status) && c.data_vencimento >= hoje && c.data_vencimento <= em30).reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
 
-  const cpVencido = cp.filter(c => c.status === 'vencido').reduce((s, c) => s + Math.max(0, (c.valor ?? 0) - (c.valor_pago ?? 0)), 0)
-  const cpPendente = cp.filter(c => c.status === 'pendente').reduce((s, c) => s + Math.max(0, (c.valor ?? 0) - (c.valor_pago ?? 0)), 0)
-  const cpPago = cp.filter(c => c.status === 'pago').reduce((s, c) => s + (c.valor_pago ?? 0), 0)
-  const cpVence7 = cp.filter(c => c.status === 'pendente' && c.vencimento >= hoje && c.vencimento <= em7).reduce((s, c) => s + Math.max(0, (c.valor ?? 0) - (c.valor_pago ?? 0)), 0)
-  const cpHoje = cp.filter(c => c.vencimento === hoje && c.status === 'pendente').reduce((s, c) => s + Math.max(0, (c.valor ?? 0) - (c.valor_pago ?? 0)), 0)
+  // status real de contas_pagar: pendente | pago | vencido | cancelado —
+  // sem valor_pago (não existe a coluna, e não há pagamento parcial aqui).
+  const cpVencido = cp.filter(c => c.status === 'vencido').reduce((s, c) => s + Number(c.valor ?? 0), 0)
+  const cpPendente = cp.filter(c => c.status === 'pendente').reduce((s, c) => s + Number(c.valor ?? 0), 0)
+  const cpPago = cp.filter(c => c.status === 'pago').reduce((s, c) => s + Number(c.valor ?? 0), 0)
+  const cpVence7 = cp.filter(c => c.status === 'pendente' && c.vencimento >= hoje && c.vencimento <= em7).reduce((s, c) => s + Number(c.valor ?? 0), 0)
+  const cpHoje = cp.filter(c => c.vencimento === hoje && c.status === 'pendente').reduce((s, c) => s + Number(c.valor ?? 0), 0)
 
   const faturamentoMes = (vendasMesRes.data ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
   const saldoLiquido = (crPendente + crVencido) - (cpPendente + cpVencido)
