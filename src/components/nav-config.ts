@@ -223,14 +223,20 @@ export const NAV: NavGroup[] = [
     color: 'bg-slate-800',
     textColor: 'text-slate-300',
     badgeColor: 'bg-slate-500',
-    modulo: 'configuracoes',
+    // Sem `modulo` no grupo nem nos itens abaixo (exceto Usuários do PDV) de
+    // propósito: configurar a própria empresa, dados fiscais/certificado e
+    // quem acessa o sistema não é recurso "premium" — todo plano precisa,
+    // independente de quais módulos operacionais (vendas, marketplace etc.)
+    // estejam incluídos. Um plano enxuto como o "Fiscal" (só contas a pagar/
+    // entradas XML/fornecedores) ficava sem conseguir configurar o próprio
+    // certificado — bug real, corrigido aqui.
     defaultOpen: false,
     items: [
-      { href: '/dashboard/empresas',                  label: 'Empresas',        icon: '🏢', modulo: 'multiempresa' },
-      { href: '/dashboard/configuracoes/usuarios',    label: 'Usuários',        icon: '👤', modulo: 'configuracoes' },
+      { href: '/dashboard/empresas',                  label: 'Empresas',        icon: '🏢' },
+      { href: '/dashboard/configuracoes/usuarios',    label: 'Usuários',        icon: '👤' },
       { href: '/dashboard/usuarios-pdv',               label: 'Usuários do PDV', icon: '🔐', modulo: 'pdv' },
-      { href: '/dashboard/configuracoes/integracoes', label: 'Integrações',     icon: '🔌', modulo: 'configuracoes' },
-      { href: '/dashboard/configuracoes/aparencia',   label: 'Aparência',       icon: '🎨', modulo: 'configuracoes' },
+      { href: '/dashboard/configuracoes/integracoes', label: 'Integrações',     icon: '🔌' },
+      { href: '/dashboard/configuracoes/aparencia',   label: 'Aparência',       icon: '🎨' },
     ],
   },
 ]
