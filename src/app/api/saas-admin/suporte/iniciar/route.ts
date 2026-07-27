@@ -40,11 +40,14 @@ export async function POST(req: Request) {
   })
   if (erroInsert) return NextResponse.json({ ok: false, erro: erroInsert.message }, { status: 400 })
 
-  const { data: link, error: erroLink } = await admin.auth.admin.generateLink({
-    type: 'magiclink', email,
-    options: { redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/auth/callback` },
-  })
-  if (erroLink || !link?.properties?.action_link) {
+  // Não usamos o action_link direto (fluxo de troca por "code"/PKCE do
+  // Supabase) porque, no mesmo navegador do system admin, ele já tem uma
+  // sessão válida — a troca de código falha em silêncio e a aba nova acaba
+  // ficando com a sessão antiga. token_hash + verifyOtp (feito client-side
+  // em /suporte/entrar) é uma verificação direta, sem depender de nenhum
+  // estado de PKCE guardado no navegador, e troca a sessão de verdade.
+  const { data: link, error: erroLink } = await admin.auth.admin.generateLink({ type: 'magiclink', email })
+  if (erroLink || !link?.properties?.hashed_token) {
     return NextResponse.json({ ok: false, erro: erroLink?.message ?? 'Erro ao gerar link de acesso' }, { status: 400 })
   }
 
@@ -54,5 +57,5 @@ export async function POST(req: Request) {
     valorNovo: { motivo, usuarioAlvo: alvo.id, empresa: empresa.nome_fantasia ?? empresa.nome },
   })
 
-  return NextResponse.json({ ok: true, actionLink: link.properties.action_link, expiraEm })
+  return NextResponse.json({ ok: true, tokenHash: link.properties.hashed_token, expiraEm })
 }

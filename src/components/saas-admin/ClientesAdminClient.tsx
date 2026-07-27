@@ -57,7 +57,7 @@ export default function ClientesAdminClient({ clientes, plans }: Props) {
     const data = await res.json()
     setIniciandoSuporte(false)
     if (!data.ok) { setErroSuporte(data.erro ?? 'Erro ao iniciar suporte'); return }
-    window.open(data.actionLink, '_blank')
+    window.open(`/suporte/entrar?token_hash=${encodeURIComponent(data.tokenHash)}`, '_blank')
     setModalSuporte(null)
     setMotivoSuporte('')
   }
@@ -294,8 +294,12 @@ export default function ClientesAdminClient({ clientes, plans }: Props) {
             </div>
 
             <p className="text-xs text-slate-400">
-              Abre uma sessão temporária (2h) logada como o administrador dessa empresa, numa aba nova.
-              Fica registrada em auditoria e o cliente vê um aviso ao logar de novo.
+              Abre uma sessão temporária (2h) logada como o administrador dessa empresa. Fica registrada em
+              auditoria e o cliente vê um aviso ao logar de novo.
+            </p>
+            <p className="text-xs text-amber-400 bg-amber-950/40 border border-amber-900/60 rounded-lg px-3 py-2">
+              ⚠ Isso troca a sessão de login do <strong>navegador inteiro</strong> (abas compartilham login) —
+              use uma janela anônima/privada se quiser manter seu acesso de admin aberto ao mesmo tempo.
             </p>
 
             <div>
