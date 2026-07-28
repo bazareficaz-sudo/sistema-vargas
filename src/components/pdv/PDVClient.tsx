@@ -69,8 +69,13 @@ function SaudeCard({ label, valor, cor }: { label: string; valor: string; cor?: 
   )
 }
 
-export default function PDVClient({ empresaId, empresaNome, operadorNome, clientes, saudeConfig, saudeFaixas }: {
-  empresaId: string; empresaNome: string; operadorNome: string; clientes: Cliente[]
+export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, empresaEstoqueNome, operadorNome, clientes, saudeConfig, saudeFaixas }: {
+  empresaId: string; empresaNome: string
+  // Empresa que fornece o catálogo e recebe a baixa de estoque desta venda
+  // — igual a empresaId no caso comum (sem override configurado em
+  // Empresas → Estoque). vendas.empresa_id continua sempre = empresaId.
+  empresaEstoqueId: string; empresaEstoqueNome: string
+  operadorNome: string; clientes: Cliente[]
   saudeConfig?: SaudeConfig | null
   saudeFaixas?: FaixaSaude[] | null
 }) {
@@ -136,14 +141,14 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
 
   useEffect(() => {
     let ativo = true
-    sb.from('empresa_config_estoque').select('deposito_devolucao_id, permite_estoque_negativo').eq('empresa_id', empresaId).maybeSingle()
+    sb.from('empresa_config_estoque').select('deposito_devolucao_id, permite_estoque_negativo').eq('empresa_id', empresaEstoqueId).maybeSingle()
       .then(({ data }) => {
         if (!ativo) return
         setDepositoDevolucaoId(data?.deposito_devolucao_id ?? null)
         setPermiteEstoqueNegativo(data?.permite_estoque_negativo ?? false)
       })
     return () => { ativo = false }
-  }, [empresaId])
+  }, [empresaEstoqueId])
 
   // Fiado
   const [fiadoParcelas, setFiadoParcelas]   = useState('1')
@@ -181,7 +186,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
 
     if (palavras.length === 1 && /^\d{8,14}$/.test(palavras[0])) {
       const { data } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaId).eq('ativo', true).eq('ean', palavras[0]).limit(1)
+        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true).eq('ean', palavras[0]).limit(1)
       if (data && data.length > 0) {
         adicionarProdutoE(data[0] as Produto)
         setBusca(''); setSugestoes([]); setBuscando(false); return
@@ -189,24 +194,24 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
     }
     if (palavras.length === 1) {
       const { data } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaId).eq('ativo', true).eq('sku', palavras[0]).limit(1)
+        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true).eq('sku', palavras[0]).limit(1)
       if (data && data.length > 0) {
         adicionarProdutoE(data[0] as Produto)
         setBusca(''); setSugestoes([]); setBuscando(false); return
       }
     }
-    let query = sb.from('produtos').select(selectCols).eq('empresa_id', empresaId).eq('ativo', true)
+    let query = sb.from('produtos').select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
     for (const p of palavras) { query = query.ilike('nome', `%${p}%`) }
     const { data, error } = await query.order('nome').limit(20)
     let lista: Produto[] = (error ? [] : data ?? []) as Produto[]
     if (lista.length === 0) {
       const { data: d2 } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaId).eq('ativo', true)
+        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
         .ilike('sku', `%${palavras[0]}%`).order('nome').limit(20)
       lista = (d2 ?? []) as Produto[]
     }
     setSugestoes(lista); setSugestaoIdx(-1); setBuscando(false)
-  }, [empresaId])
+  }, [empresaEstoqueId])
 
   useEffect(() => {
     const t = setTimeout(() => buscarProdutos(busca), 220)
@@ -448,8 +453,10 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
         capNfce = { status: 'pendente' }
       }
 
-      // Movimentação de estoque
-      const depositoPrincipalId = await buscarDepositoPrincipal(sb, empresaId)
+      // Movimentação de estoque — sempre na empresa de estoque configurada
+      // (empresaEstoqueId), que só diverge de empresaId quando um override
+      // foi configurado em Empresas → Estoque.
+      const depositoPrincipalId = await buscarDepositoPrincipal(sb, empresaEstoqueId)
       for (const item of itens) {
         const { data: p } = await sb.from('produtos').select('estoque, monitorar').eq('id', item.produto_id).single()
         if (!p) continue
@@ -463,9 +470,9 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           // Espelha no depósito principal — sem isso, o total no campo único
           // muda a cada venda mas o quadro por depósito fica parado, dando
           // a impressão de erro no sistema (ver src/lib/produtos/depositoPrincipal.ts).
-          await ajustarDepositoPrincipal(sb, empresaId, item.produto_id, estoqueFinal - p.estoque)
+          await ajustarDepositoPrincipal(sb, empresaEstoqueId, item.produto_id, estoqueFinal - p.estoque)
           await registrarMovimentoEstoque(sb, {
-            empresaId, depositoId: depositoPrincipalId, produtoId: item.produto_id, produtoNome: item.nome,
+            empresaId: empresaEstoqueId, depositoId: depositoPrincipalId, produtoId: item.produto_id, produtoNome: item.nome,
             tipo: 'venda', quantidade: item.quantidade, estoqueAnterior: p.estoque, estoqueNovo: estoqueFinal,
             motivo: `Venda #${venda.id?.slice(-6).toUpperCase()}`, referenciaTipo: 'venda', referenciaId: venda.id,
             usuario: operadorNome,
@@ -485,7 +492,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
           const estoqueFinalDevolucao = p.estoque + Math.abs(item.quantidade)
           await sb.from('produtos').update({ estoque: estoqueFinalDevolucao }).eq('id', item.produto_id)
           await registrarMovimentoEstoque(sb, {
-            empresaId, depositoId: depositoDevolucaoId ?? depositoPrincipalId, produtoId: item.produto_id, produtoNome: item.nome,
+            empresaId: empresaEstoqueId, depositoId: depositoDevolucaoId ?? depositoPrincipalId, produtoId: item.produto_id, produtoNome: item.nome,
             tipo: 'devolucao', quantidade: Math.abs(item.quantidade), estoqueAnterior: p.estoque, estoqueNovo: estoqueFinalDevolucao,
             motivo: `Devolução — Venda #${venda.id?.slice(-6).toUpperCase()}`, referenciaTipo: 'venda', referenciaId: venda.id,
             usuario: operadorNome,
@@ -510,7 +517,7 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
               }).eq('deposito_id', depositoDevolucaoId).eq('produto_id', item.produto_id)
             } else {
               await sb.from('produto_estoque').insert({
-                empresa_id: empresaId, deposito_id: depositoDevolucaoId, produto_id: item.produto_id,
+                empresa_id: empresaEstoqueId, deposito_id: depositoDevolucaoId, produto_id: item.produto_id,
                 quantidade: Math.abs(item.quantidade),
               })
             }
@@ -779,6 +786,14 @@ export default function PDVClient({ empresaId, empresaNome, operadorNome, client
       {modoDevol && (
         <div className="bg-red-500 text-white text-center py-1.5 text-xs font-bold tracking-wide flex-shrink-0">
           🔄 MODO DEVOLUÇÃO ATIVO — Os produtos adicionados serão registrados como devolução · F6 para desativar
+        </div>
+      )}
+
+      {/* Aviso: este PDV está configurado (Empresas → Estoque) pra vender
+          do catálogo e debitar o estoque de outra empresa do grupo. */}
+      {empresaEstoqueId !== empresaId && (
+        <div className="bg-violet-600 text-white text-center py-1.5 text-xs font-bold tracking-wide flex-shrink-0">
+          🔁 Este PDV está vendendo do estoque de {empresaEstoqueNome}
         </div>
       )}
 

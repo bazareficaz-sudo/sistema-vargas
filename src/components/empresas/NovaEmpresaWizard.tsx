@@ -52,6 +52,9 @@ type WizardForm = {
   cfop_compra: string
   natureza_operacao: string
   obs_fiscal: string
+  // Empresa que emite o documento fiscal das vendas do PDV desta empresa
+  // — vazio = a própria empresa (comportamento de hoje).
+  empresa_fiscal_id: string
   // Emissão — token por ambiente e certificado (movido de "XML/NF-e" pra
   // cá a pedido do usuário: quem configura isso é o cliente, na tela da
   // própria empresa, não numa tela solta de importação de XML)
@@ -74,6 +77,9 @@ type WizardForm = {
   tipo_custo: string
   controlar_lote: boolean
   deposito_devolucao_id: string
+  // Empresa que debita o estoque das vendas do PDV desta empresa — vazio
+  // = a própria empresa (comportamento de hoje).
+  empresa_estoque_id: string
   // Etapa 7 — Compartilhamento
   compartilhar_produtos: boolean
   compartilhar_clientes: boolean
@@ -95,13 +101,13 @@ const FORM_INICIAL: WizardForm = {
   ambiente_fiscal: 'homologacao', serie_nfe: 1, serie_nfce: 1,
   proximo_nfe: 1, proximo_nfce: 1, csc_nfce: '', id_csc_nfce: '',
   cfop_venda_dentro: '5102', cfop_venda_fora: '6102', cfop_compra: '1102',
-  natureza_operacao: 'Venda de Mercadorias', obs_fiscal: '',
+  natureza_operacao: 'Venda de Mercadorias', obs_fiscal: '', empresa_fiscal_id: '',
   token_producao: '', token_homologacao: '', certificado_ref: '', certificado_validade: '',
   limite_desconto: 10, margem_minima: 0, permite_venda_sem_cliente: true,
   permite_estoque_negativo: false, permite_fiado: false, permite_credito: true,
   permite_multiplos_depositos: false, reservar_em_orcamento: false,
   reservar_em_pedido: true, baixar_estoque_em: 'faturamento',
-  tipo_custo: 'ultimo', controlar_lote: false, deposito_devolucao_id: '',
+  tipo_custo: 'ultimo', controlar_lote: false, deposito_devolucao_id: '', empresa_estoque_id: '',
   compartilhar_produtos: false, compartilhar_clientes: false,
   compartilhar_fornecedores: false, compartilhar_marcas: false,
   compartilhar_categorias: false, compartilhar_tabelas_preco: false,
@@ -163,17 +169,21 @@ const INPUT = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-
 const SELECT = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-blue-400 bg-white'
 
 type Deposito = { id: string; nome: string }
+type EmpresaOpcao = { id: string; nome: string; nome_fantasia: string | null }
 
 type Props = {
   grupos: Grupo[]
   tenantId: string
   empresaEditando: any | null
   depositos?: Deposito[]
+  // Empresas do mesmo tenant, pra escolher "empresa do estoque"/"empresa
+  // fiscal" do PDV — nunca inclui empresa de outro cliente do sistema.
+  empresas?: EmpresaOpcao[]
   onClose: () => void
   onSaved: () => void
 }
 
-export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, depositos = [], onClose, onSaved }: Props) {
+export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, depositos = [], empresas = [], onClose, onSaved }: Props) {
   const [etapa, setEtapa] = useState(1)
   const [form, setForm] = useState<WizardForm>(FORM_INICIAL)
   const [salvando, setSalvando] = useState(false)
@@ -235,6 +245,7 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
         cfop_compra: empresaEditando.empresa_config_fiscal?.cfop_compra ?? '1102',
         natureza_operacao: empresaEditando.empresa_config_fiscal?.natureza_operacao ?? 'Venda de Mercadorias',
         obs_fiscal: empresaEditando.empresa_config_fiscal?.observacoes ?? '',
+        empresa_fiscal_id: empresaEditando.empresa_config_fiscal?.empresa_fiscal_id ?? '',
         certificado_ref: empresaEditando.empresa_config_fiscal?.certificado_ref ?? '',
         certificado_validade: empresaEditando.empresa_config_fiscal?.certificado_validade ?? '',
         token_producao: empresaEditando.nfe_config?.credenciais?.token_producao ?? '',
@@ -246,6 +257,7 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
         tipo_custo: empresaEditando.empresa_config_estoque?.tipo_custo ?? 'ultimo',
         controlar_lote: empresaEditando.empresa_config_estoque?.controlar_lote ?? false,
         deposito_devolucao_id: empresaEditando.empresa_config_estoque?.deposito_devolucao_id ?? '',
+        empresa_estoque_id: empresaEditando.empresa_config_estoque?.empresa_estoque_id ?? '',
         // Compartilhamento — antes nunca era relido aqui, então a aba
         // sempre voltava pro padrão (tudo desmarcado) mesmo já salvo.
         compartilhar_produtos: empresaEditando.empresa_compartilhamento_dados?.compartilhar_produtos ?? false,
@@ -362,6 +374,7 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
         certificado_ref: form.certificado_ref || null,
         certificado_validade: form.certificado_validade || null,
         observacoes: form.obs_fiscal || null,
+        empresa_fiscal_id: form.empresa_fiscal_id || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id' })
 
@@ -426,6 +439,7 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
         tipo_custo: form.tipo_custo,
         controlar_lote: form.controlar_lote,
         deposito_devolucao_id: form.deposito_devolucao_id || null,
+        empresa_estoque_id: form.empresa_estoque_id || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id' })
 
@@ -912,6 +926,16 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
                 <input value={form.natureza_operacao} onChange={e => set('natureza_operacao', e.target.value)} className={INPUT} />
               </Field>
 
+              <Field label="Empresa que emite o documento fiscal das vendas do PDV">
+                <select value={form.empresa_fiscal_id} onChange={e => set('empresa_fiscal_id', e.target.value)} className={SELECT}>
+                  <option value="">Esta empresa (padrão)</option>
+                  {empresas.filter(e => e.id !== empresaEditando?.id).map(e => (
+                    <option key={e.id} value={e.id}>{e.nome_fantasia ?? e.nome}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">A NFC-e das vendas feitas no PDV será emitida com o CNPJ e a numeração da empresa escolhida.</p>
+              </Field>
+
               <div className="grid grid-cols-3 gap-3">
                 <Field label="CFOP venda dentro do estado">
                   <input value={form.cfop_venda_dentro} onChange={e => set('cfop_venda_dentro', e.target.value)} className={`${INPUT} font-mono`} placeholder="5102" maxLength={5} />
@@ -997,6 +1021,16 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
                   <option value="">{depositos.length === 0 ? 'Nenhum depósito cadastrado ainda' : 'Selecione um depósito'}</option>
                   {depositos.map(d => <option key={d.id} value={d.id}>{d.nome}</option>)}
                 </select>
+              </Field>
+
+              <Field label="Empresa que debita o estoque das vendas do PDV">
+                <select value={form.empresa_estoque_id} onChange={e => set('empresa_estoque_id', e.target.value)} className={SELECT}>
+                  <option value="">Esta empresa (padrão)</option>
+                  {empresas.filter(e => e.id !== empresaEditando?.id).map(e => (
+                    <option key={e.id} value={e.id}>{e.nome_fantasia ?? e.nome}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">Ao vender no PDV, o sistema vai buscar produtos e baixar estoque da empresa escolhida, não da empresa atual.</p>
                 <p className="text-[11px] text-slate-400 mt-1">Quando uma devolução é feita no PDV, o estoque devolvido é creditado neste depósito.</p>
               </Field>
 

@@ -43,11 +43,25 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     : { data: [] as any[] }
   const produtoPorId = new Map((produtos ?? []).map((p: any) => [p.id, p]))
 
-  const { data: empresa } = await sb.from('empresas').select('cnpj').eq('id', empresaId).single()
-  if (!empresa?.cnpj) {
-    return { ok: false, erro: 'CNPJ da empresa não cadastrado — preencha em Empresas antes de emitir.' }
+  // Empresa que efetivamente emite o documento — igual a empresaId no caso
+  // comum. Só diverge quando configurado em Empresas → Fiscal ("Empresa
+  // que emite o documento fiscal das vendas do PDV"): a venda continua
+  // pertencendo a empresaId (checado acima), mas CNPJ, numeração/série e
+  // credenciais do provedor passam a ser os da empresa fiscal escolhida —
+  // resolvido aqui, um ponto só, então os 4 lugares que chamam esta função
+  // (PDV, "Emitir agora", emissão em massa, automação) ficam consistentes
+  // sem precisar mudar nada nelas.
+  let { data: configFiscal } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaId).single()
+  const empresaFiscalId: string = configFiscal?.empresa_fiscal_id || empresaId
+  if (empresaFiscalId !== empresaId) {
+    const { data: configFiscalEmitente } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaFiscalId).single()
+    configFiscal = configFiscalEmitente
   }
-  const { data: configFiscal } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaId).single()
+
+  const { data: empresa } = await sb.from('empresas').select('cnpj').eq('id', empresaFiscalId).single()
+  if (!empresa?.cnpj) {
+    return { ok: false, erro: 'CNPJ da empresa emitente não cadastrado — preencha em Empresas antes de emitir.' }
+  }
 
   const semNcm = itensVenda.filter((i: any) => !i.produto_id || !(produtoPorId.get(i.produto_id) as any)?.ncm)
   if (semNcm.length > 0) {
@@ -109,7 +123,7 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
   }
 
   try {
-    const provider = await getFiscalProvider(sb, empresaId)
+    const provider = await getFiscalProvider(sb, empresaFiscalId)
     const resultado = await provider.emissao.emitirNFCe(input)
 
     await sb.from('vendas').update({
@@ -129,7 +143,7 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     // nfe_logs é auditoria de melhor esforço — falha aqui não pode derrubar a resposta
     try {
       await sb.from('nfe_logs').insert({
-        empresa_id: empresaId,
+        empresa_id: empresaFiscalId,
         acao: 'emitir_nfce',
         descricao: `Venda ${vendaId} — ${resultado.status}`,
         dados: { vendaId, status: resultado.status, chave: resultado.chave, motivoRejeicao: resultado.motivoRejeicao },

@@ -133,7 +133,13 @@ export default function UsuarioPdvModal({ usuario, empresas, depositos, empresaA
         payload.senha_hash = await sha256Hex(senha)
       }
 
-      const { error: errU } = await supabase.from('usuarios_pdv').upsert(payload, { onConflict: 'id' })
+      // Edição usa update, não upsert: um upsert valida as colunas
+      // obrigatórias (senha_hash) como se fosse um INSERT novo antes de
+      // resolver o conflito — trava mesmo numa edição que nunca mexe
+      // na senha, já que o payload nesse caso não inclui senha_hash.
+      const { error: errU } = isNovo
+        ? await supabase.from('usuarios_pdv').insert(payload)
+        : await supabase.from('usuarios_pdv').update(payload).eq('id', id)
       if (errU) throw errU
 
       onSalvar({ ...(usuario ?? {}), ...payload, id } as UsuarioPdv)

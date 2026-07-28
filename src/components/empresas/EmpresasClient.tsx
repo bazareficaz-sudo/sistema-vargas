@@ -309,6 +309,7 @@ export default function EmpresasClient({
           tenantId={tenantId}
           empresaEditando={editando}
           depositos={editando ? depositos.filter(d => d.empresa_id === editando.id) : []}
+          empresas={empresas}
           onClose={() => { setWizardAberto(false); setEditando(null) }}
           onSaved={onSaved}
         />
