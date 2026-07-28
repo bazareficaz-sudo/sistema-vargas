@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -54,8 +55,18 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
 
     const sb = createClient()
     const { error } = await sb.from('produtos').update(payload).in('id', ids)
+    if (error) { setSalvando(false); setErro(error.message); return }
+
+    // Propaga categoria/marca (os únicos campos de identidade desta tela)
+    // pros produtos vinculados numa empresa parceira, se houver.
+    if (aplicarCategoria || aplicarMarca) {
+      const camposIdentidade: Record<string, unknown> = {}
+      if (aplicarCategoria) camposIdentidade.categoria = payload.categoria
+      if (aplicarMarca) camposIdentidade.marca = payload.marca
+      await Promise.all(ids.map(id => sincronizarProdutoVinculado(sb, id, camposIdentidade)))
+    }
+
     setSalvando(false)
-    if (error) { setErro(error.message); return }
     onAplicado()
   }
 

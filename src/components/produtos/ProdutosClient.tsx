@@ -14,6 +14,7 @@ import GerenciarTagsModal from './GerenciarTagsModal'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import EstoqueDetalhadoModal from './EstoqueDetalhadoModal'
 import CriarAnuncioShopeeModal from '@/components/marketplaces/CriarAnuncioShopeeModal'
+import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 
 type Produto = {
   id: string
@@ -204,6 +205,7 @@ export default function ProdutosClient({
     const sb = createClient()
     const { error } = await sb.from('produtos').update({ nome: valor, updated_at: new Date().toISOString() }).eq('id', id)
     if (error) return
+    await sincronizarProdutoVinculado(sb, id, { nome: valor })
     setProdutos(prev => prev.map(p => p.id === id ? { ...p, nome: valor } : p))
   }
 

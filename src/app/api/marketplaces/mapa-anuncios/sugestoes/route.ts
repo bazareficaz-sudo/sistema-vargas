@@ -1,33 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
+import { normalizarChave, similaridadeTexto } from '@/lib/texto/similaridade'
 
 const LIMIAR_ALTA_CONFIANCA = 50
-
-function normalizarChave(v: string | null | undefined) {
-  return (v ?? '').toString().trim().toUpperCase()
-}
-
-// Similaridade de texto entre o título do anúncio e o nome do produto —
-// único sinal confiável quando o SKU por si só pode ser coincidência (ver
-// contexto no plano: SKUs deste sistema são só sequenciais, sem prefixo).
-function similaridadeTexto(a: string | null | undefined, b: string | null | undefined): number {
-  const tokenizar = (s: string) => (s ?? '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(w => w.length >= 3)
-
-  const setA = new Set(tokenizar(a ?? ''))
-  const setB = new Set(tokenizar(b ?? ''))
-  if (setA.size === 0 || setB.size === 0) return 0
-
-  let intersecao = 0
-  for (const w of setA) if (setB.has(w)) intersecao++
-  const uniao = new Set([...setA, ...setB]).size
-  return Math.round((intersecao / uniao) * 100)
-}
 
 async function fetchAll(sb: any, table: string, select: string, applyFilters: (q: any) => any) {
   let all: any[] = []

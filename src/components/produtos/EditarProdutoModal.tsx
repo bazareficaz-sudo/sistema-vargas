@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
+import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 
 const TIPOS = [
@@ -472,6 +473,16 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       updated_at: new Date().toISOString(),
     }).eq('id', form.id)
     if (error) { setSalvando(false); setErro(error.message); return }
+
+    // Propaga campos de identidade pro produto vinculado numa empresa
+    // parceira, se houver (nunca preço/estoque/fiscal — ver vinculo.ts).
+    await sincronizarProdutoVinculado(sb, form.id, {
+      nome: form.nome,
+      descricao_marketplace: form.descricao_marketplace || null,
+      categoria: form.categoria || null,
+      marca: form.marca || null,
+      ean: form.ean || null,
+    })
 
     // Estoque editado direto no cadastro (não-kit — kit é recalculado a
     // partir dos componentes, não é uma edição deliberada do usuário) —

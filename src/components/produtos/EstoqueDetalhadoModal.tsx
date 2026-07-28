@@ -53,6 +53,11 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
   const [filtro, setFiltro] = useState('')
   const [estoqueAtual, setEstoqueAtual] = useState(produto.estoque)
 
+  const [estoqueParceiro, setEstoqueParceiro] = useState<{
+    empresaId: string; empresaNome: string; produtoNome: string; produtoSku: string | null
+    estoquePorDeposito: { depositoNome: string; quantidade: number }[]
+  }[]>([])
+
   const [ajustando, setAjustando] = useState(false)
   const [novaQtd, setNovaQtd] = useState('')
   const [motivoAjuste, setMotivoAjuste] = useState('')
@@ -224,6 +229,19 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
     return () => { ativo = false }
   }, [produto.id, empresaId])
 
+  // Estoque de empresa parceira (Parcerias entre Empresas) — só aparece se
+  // o produto tiver vínculo E o usuário tiver a permissão ver_dados_grupo;
+  // a rota devolve lista vazia (ou 403, tratado como vazio) quando não há
+  // nada a mostrar, então isso nunca aparece pra quem não deveria ver.
+  useEffect(() => {
+    let ativo = true
+    fetch(`/api/produtos/${produto.id}/estoque-parceiro`)
+      .then(r => r.json())
+      .then(data => { if (ativo && data.ok) setEstoqueParceiro(data.empresas ?? []) })
+      .catch(() => {})
+    return () => { ativo = false }
+  }, [produto.id])
+
   const movimentosFiltrados = movimentos.filter(m => {
     if (!filtro) return true
     if (filtro === 'outros') return !['venda', 'venda_marketplace', 'entrada', 'devolucao'].includes(m.tipo)
@@ -328,6 +346,28 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                       </tr>
                     </tfoot>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {estoqueParceiro.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Estoque em empresa parceira (só consulta)</p>
+                <div className="space-y-2">
+                  {estoqueParceiro.map(ep => (
+                    <div key={ep.empresaId} className="border border-violet-200 bg-violet-50 rounded-lg px-3 py-2">
+                      <p className="text-xs font-medium text-violet-800">{ep.empresaNome} — {ep.produtoNome} (SKU {ep.produtoSku ?? '—'})</p>
+                      {ep.estoquePorDeposito.length === 0 ? (
+                        <p className="text-xs text-violet-500 mt-1">Sem estoque cadastrado.</p>
+                      ) : (
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
+                          {ep.estoquePorDeposito.map((d, i) => (
+                            <span key={i} className="text-xs text-violet-700">{d.depositoNome}: <strong>{d.quantidade}</strong></span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
