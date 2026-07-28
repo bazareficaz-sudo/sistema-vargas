@@ -123,8 +123,8 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
         <div className="px-6 py-5 space-y-4">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Quantidade por kit</label>
-            <input type="number" min={1} step={1} value={quantidade}
-              onChange={e => alterarQuantidade(parseInt(e.target.value) || 0)}
+            <input type="number" min={0.0001} step={0.0001} value={quantidade}
+              onChange={e => alterarQuantidade(parseFloat(e.target.value) || 0)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
           </div>
 

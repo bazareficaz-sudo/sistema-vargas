@@ -19,9 +19,11 @@ type Produto = {
   promocao_fim: string | null
   ativo: boolean
   unidade: string
+  preco_atualizado_em: string | null
 }
 
-type Categoria = { id: string; nome: string }
+type Categoria = { id: string; nome: string; pai_id: string | null }
+type Marca = { id: string; nome: string }
 
 type Props = {
   produtos: Produto[]
@@ -31,7 +33,18 @@ type Props = {
   q: string
   abaAtiva: string
   categoriaFiltro: string
-  categorias: Categoria[]
+  categoriasRaiz: Categoria[]
+  categoriasTodas: Categoria[]
+  marcas: Marca[]
+  marcaFiltro: string
+  subcategoriaFiltro: string
+  tagFiltro: string
+  tagsDisponiveis: string[]
+  entradaFiltro: string
+  entradaDeFiltro: string
+  entradaAteFiltro: string
+  precoDeFiltro: string
+  precoAteFiltro: string
   empresaId: string
   idsFiltro?: string
   origemFiltro?: string
@@ -53,7 +66,10 @@ function calcMarkup(custo: number, venda: number) {
 
 export default function PrecosClient({
   produtos: inicial, total, pagina, totalPaginas, q: qInicial,
-  abaAtiva: abaInicial, categoriaFiltro, categorias, empresaId, idsFiltro, origemFiltro
+  abaAtiva: abaInicial, categoriaFiltro, categoriasRaiz, categoriasTodas, marcas,
+  marcaFiltro, subcategoriaFiltro, tagFiltro, tagsDisponiveis,
+  entradaFiltro, entradaDeFiltro, entradaAteFiltro, precoDeFiltro, precoAteFiltro,
+  empresaId, idsFiltro, origemFiltro
 }: Props) {
   const router = useRouter()
   const filtroPorIds = !!idsFiltro
@@ -63,6 +79,16 @@ export default function PrecosClient({
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState('')
+  const [mostrarFiltros, setMostrarFiltros] = useState(false)
+  const [categoriaF, setCategoriaF] = useState(categoriaFiltro)
+  const [marcaF, setMarcaF] = useState(marcaFiltro)
+  const [subcategoriaF, setSubcategoriaF] = useState(subcategoriaFiltro)
+  const [tagF, setTagF] = useState(tagFiltro)
+  const [entradaF, setEntradaF] = useState(entradaFiltro)
+  const [entradaDeF, setEntradaDeF] = useState(entradaDeFiltro)
+  const [entradaAteF, setEntradaAteF] = useState(entradaAteFiltro)
+  const [precoDeF, setPrecoDeF] = useState(precoDeFiltro)
+  const [precoAteF, setPrecoAteF] = useState(precoAteFiltro)
 
   // Painel de alteração em massa
   const [painelMassa, setPainelMassa] = useState<'markup' | 'reajuste' | null>(null)
@@ -82,10 +108,40 @@ export default function PrecosClient({
   useEffect(() => { setProdutos(inicial) }, [inicial])
   useEffect(() => { setAba(abaInicial) }, [abaInicial])
   useEffect(() => { setQ(qInicial) }, [qInicial])
+  useEffect(() => { setCategoriaF(categoriaFiltro) }, [categoriaFiltro])
+  useEffect(() => { setMarcaF(marcaFiltro) }, [marcaFiltro])
+  useEffect(() => { setSubcategoriaF(subcategoriaFiltro) }, [subcategoriaFiltro])
+  useEffect(() => { setTagF(tagFiltro) }, [tagFiltro])
+  useEffect(() => { setEntradaF(entradaFiltro) }, [entradaFiltro])
+  useEffect(() => { setEntradaDeF(entradaDeFiltro) }, [entradaDeFiltro])
+  useEffect(() => { setEntradaAteF(entradaAteFiltro) }, [entradaAteFiltro])
+  useEffect(() => { setPrecoDeF(precoDeFiltro) }, [precoDeFiltro])
+  useEffect(() => { setPrecoAteF(precoAteFiltro) }, [precoAteFiltro])
+
+  const subcategoriasDisponiveis = categoriaF
+    ? categoriasTodas.filter(c => c.pai_id && categoriasTodas.find(r => r.id === c.pai_id)?.nome === categoriaF)
+    : []
+
+  const filtrosAtivos = [marcaF, categoriaF, subcategoriaF, tagF, entradaF, entradaDeF, entradaAteF, precoDeF, precoAteF].filter(Boolean).length
 
   function navegar(params: Record<string, string>) {
-    const sp = new URLSearchParams({ q, aba, pagina: String(pagina), ...params })
+    const sp = new URLSearchParams({
+      q, aba, pagina: String(pagina),
+      categoria: categoriaF, marca: marcaF, subcategoria: subcategoriaF, tag: tagF,
+      entrada: entradaF, entradaDe: entradaDeF, entradaAte: entradaAteF,
+      precoDe: precoDeF, precoAte: precoAteF,
+      ...params,
+    })
     router.push(`/dashboard/precos?${sp.toString()}`)
+  }
+
+  function limparFiltros() {
+    setCategoriaF(''); setMarcaF(''); setSubcategoriaF(''); setTagF('')
+    setEntradaF(''); setEntradaDeF(''); setEntradaAteF(''); setPrecoDeF(''); setPrecoAteF('')
+    navegar({
+      categoria: '', marca: '', subcategoria: '', tag: '',
+      entrada: '', entradaDe: '', entradaAte: '', precoDe: '', precoAte: '', pagina: '1',
+    })
   }
 
   function toggleAll(checked: boolean) {
@@ -138,7 +194,8 @@ export default function PrecosClient({
       preco_custo: novoCusto,
       preco_venda: novoPreco,
       markup: novoMarkup,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      preco_atualizado_em: new Date().toISOString(),
     }).eq('id', produto.id)
 
     setProdutos(prev => prev.map(p => p.id === produto.id
@@ -197,7 +254,7 @@ export default function PrecosClient({
         markup: mk,
       }))
     for (const u of updates) {
-      await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString() }).eq('id', u.id)
+      await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() }).eq('id', u.id)
     }
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
@@ -233,7 +290,7 @@ export default function PrecosClient({
         return { id: p.id, preco_venda: novoPreco, markup: p.preco_custo > 0 ? calcMarkup(p.preco_custo, novoPreco) : p.markup }
       })
     for (const u of updates) {
-      await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString() }).eq('id', u.id)
+      await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() }).eq('id', u.id)
     }
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
@@ -349,26 +406,113 @@ export default function PrecosClient({
 
       {/* Busca + filtro */}
       {!filtroPorIds && (
-        <div className="flex items-center gap-3 mb-4">
-          <form onSubmit={e => { e.preventDefault(); navegar({ q, pagina: '1' }) }} className="flex gap-2 flex-1 max-w-lg">
-            <div className="relative flex-1">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input value={q} onChange={e => setQ(e.target.value)}
-                placeholder="Buscar produto..."
-                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
+        <>
+          <div className="flex items-center gap-3 mb-2">
+            <form onSubmit={e => { e.preventDefault(); navegar({ q, pagina: '1' }) }} className="flex gap-2 flex-1 max-w-lg">
+              <div className="relative flex-1">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input value={q} onChange={e => setQ(e.target.value)}
+                  placeholder="Buscar produto..."
+                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
+              </div>
+              <button type="submit" className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 bg-white">Buscar</button>
+            </form>
+            <button type="button" onClick={() => setMostrarFiltros(v => !v)}
+              className={`px-3 py-1.5 text-xs rounded-full border transition-colors flex items-center gap-1.5 ${
+                mostrarFiltros || filtrosAtivos > 0
+                  ? 'border-blue-500 text-blue-600 bg-blue-50 font-medium'
+                  : 'border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
+              }`}>
+              ⚙ filtros
+              {filtrosAtivos > 0 && (
+                <span className="min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+                  {filtrosAtivos}
+                </span>
+              )}
+            </button>
+            {filtrosAtivos > 0 && (
+              <button type="button" onClick={limparFiltros} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700">
+                ⊗ limpar filtros
+              </button>
+            )}
+            <span className="text-sm text-gray-500 ml-auto">{total.toLocaleString('pt-BR')} produtos</span>
+          </div>
+
+          {mostrarFiltros && (
+            <div className="flex flex-wrap items-end gap-3 mb-4 p-3 border border-gray-200 rounded-xl bg-white">
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Marca</label>
+                <select value={marcaF}
+                  onChange={e => { const v = e.target.value; setMarcaF(v); navegar({ marca: v, pagina: '1' }) }}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[140px]">
+                  <option value="">Todas</option>
+                  {marcas.map(m => <option key={m.id} value={m.nome}>{m.nome}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Categoria</label>
+                <select value={categoriaF}
+                  onChange={e => { const v = e.target.value; setCategoriaF(v); setSubcategoriaF(''); navegar({ categoria: v, subcategoria: '', pagina: '1' }) }}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[140px]">
+                  <option value="">Todas</option>
+                  {categoriasRaiz.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Subcategoria</label>
+                <select value={subcategoriaF} disabled={subcategoriasDisponiveis.length === 0}
+                  onChange={e => { const v = e.target.value; setSubcategoriaF(v); navegar({ subcategoria: v, pagina: '1' }) }}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[140px] disabled:bg-gray-100 disabled:text-gray-400">
+                  <option value="">Todas</option>
+                  {subcategoriasDisponiveis.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Tag</label>
+                <select value={tagF}
+                  onChange={e => { const v = e.target.value; setTagF(v); navegar({ tag: v, pagina: '1' }) }}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[140px]">
+                  <option value="">Todas</option>
+                  {tagsDisponiveis.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Entrada (nº ou NF)</label>
+                <input value={entradaF} onChange={e => setEntradaF(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') navegar({ entrada: entradaF.trim(), pagina: '1' }) }}
+                  onBlur={() => navegar({ entrada: entradaF.trim(), pagina: '1' })}
+                  placeholder="Ex: 1234"
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[120px]" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Data de entrada — de</label>
+                <input type="date" value={entradaDeF} onChange={e => setEntradaDeF(e.target.value)}
+                  onBlur={() => navegar({ entradaDe: entradaDeF, pagina: '1' })}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">até</label>
+                <input type="date" value={entradaAteF} onChange={e => setEntradaAteF(e.target.value)}
+                  onBlur={() => navegar({ entradaAte: entradaAteF, pagina: '1' })}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Última atualização de preço — de</label>
+                <input type="date" value={precoDeF} onChange={e => setPrecoDeF(e.target.value)}
+                  onBlur={() => navegar({ precoDe: precoDeF, pagina: '1' })}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">até</label>
+                <input type="date" value={precoAteF} onChange={e => setPrecoAteF(e.target.value)}
+                  onBlur={() => navegar({ precoAte: precoAteF, pagina: '1' })}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white" />
+              </div>
             </div>
-            <button type="submit" className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 bg-white">Buscar</button>
-          </form>
-          <select value={categoriaFiltro}
-            onChange={e => navegar({ categoria: e.target.value, pagina: '1' })}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500 bg-white">
-            <option value="">Todas as categorias</option>
-            {categorias.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
-          </select>
-          <span className="text-sm text-gray-500">{total.toLocaleString('pt-BR')} produtos</span>
-        </div>
+          )}
+        </>
       )}
 
       {/* Barra de ações em massa */}

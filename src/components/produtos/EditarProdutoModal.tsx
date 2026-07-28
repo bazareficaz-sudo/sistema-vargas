@@ -425,6 +425,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       const resultado = await calcularKit(sb, form.id)
       if (resultado) { precoCusto = resultado.custo; estoque = resultado.estoque }
     }
+    const precoMudou = form.preco_venda !== produto.preco_venda || precoCusto !== produto.preco_custo
 
     const { error } = await sb.from('produtos').update({
       nome: form.nome,
@@ -471,6 +472,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       largura_cm: form.largura_cm ?? null,
       comprimento_cm: form.comprimento_cm ?? null,
       updated_at: new Date().toISOString(),
+      ...(precoMudou ? { preco_atualizado_em: new Date().toISOString() } : {}),
     }).eq('id', form.id)
     if (error) { setSalvando(false); setErro(error.message); return }
 
@@ -1107,16 +1109,16 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                           <td className="px-4 py-2.5 text-center">
                             <div className="inline-flex items-center gap-1.5">
                               <button type="button"
-                                onClick={() => atualizarQtdKit(item.produto_id, Math.max(1, Math.round(item.quantidade) - 1))}
-                                disabled={Math.round(item.quantidade) <= 1}
+                                onClick={() => atualizarQtdKit(item.produto_id, Math.max(0.0001, parseFloat((item.quantidade - 1).toFixed(4))))}
+                                disabled={item.quantidade <= 0.0001}
                                 className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                                 −
                               </button>
-                              <input type="number" min="1" step="1" value={Math.round(item.quantidade)}
-                                onChange={e => atualizarQtdKit(item.produto_id, Math.max(1, parseInt(e.target.value) || 1))}
-                                className="w-14 border border-gray-300 rounded px-2 py-1 text-sm text-center focus:outline-none focus:border-blue-500" />
+                              <input type="number" min="0.0001" step="0.0001" value={item.quantidade}
+                                onChange={e => atualizarQtdKit(item.produto_id, Math.max(0.0001, parseFloat(e.target.value) || 0.0001))}
+                                className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-center focus:outline-none focus:border-blue-500" />
                               <button type="button"
-                                onClick={() => atualizarQtdKit(item.produto_id, Math.round(item.quantidade) + 1)}
+                                onClick={() => atualizarQtdKit(item.produto_id, parseFloat((item.quantidade + 1).toFixed(4)))}
                                 className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors">
                                 +
                               </button>
