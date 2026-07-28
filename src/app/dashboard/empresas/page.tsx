@@ -30,9 +30,9 @@ export default async function EmpresasPage() {
       logo_url, cor_primaria, created_at, updated_at,
       grupo_id,
       grupos_empresariais(id, nome),
-      empresa_config_fiscal(ambiente, certificado_validade, certificado_ref, serie_nfe, proximo_nfe, serie_nfce, proximo_nfce, csc_nfce, id_csc_nfce, cfop_venda_dentro, cfop_venda_fora, cfop_compra, natureza_operacao, observacoes),
+      empresa_config_fiscal!empresa_config_fiscal_empresa_id_fkey(ambiente, certificado_validade, certificado_ref, serie_nfe, proximo_nfe, serie_nfce, proximo_nfce, csc_nfce, id_csc_nfce, cfop_venda_dentro, cfop_venda_fora, cfop_compra, natureza_operacao, observacoes),
       empresa_config_comercial(id, limite_desconto, permite_estoque_negativo),
-      empresa_config_estoque(id, permite_multiplos_depositos, reservar_em_orcamento, reservar_em_pedido, baixar_estoque_em, tipo_custo, controlar_lote, deposito_devolucao_id),
+      empresa_config_estoque!empresa_config_estoque_empresa_id_fkey(id, permite_multiplos_depositos, reservar_em_orcamento, reservar_em_pedido, baixar_estoque_em, tipo_custo, controlar_lote, deposito_devolucao_id),
       empresa_compartilhamento_dados(compartilhar_produtos, compartilhar_clientes, compartilhar_fornecedores, compartilhar_marcas, compartilhar_categorias, compartilhar_tabelas_preco)
     `)
     .eq('tenant_id', tenantId)
