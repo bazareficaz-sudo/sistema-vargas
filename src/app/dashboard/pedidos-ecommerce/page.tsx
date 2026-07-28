@@ -18,6 +18,21 @@ export default async function PedidosEcommercePage({ searchParams }: {
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: true })
 
+  // Empresa que debita estoque e empresa que emite fiscal — config da
+  // conta (Empresas → Estoque/Fiscal), mesma resolução usada no PDV web.
+  // Igual pra toda linha da listagem hoje (não existe override por canal).
+  const [{ data: configEstoque }, { data: configFiscal }] = await Promise.all([
+    supabase.from('empresa_config_estoque').select('empresa_estoque_id').eq('empresa_id', empresaId).maybeSingle(),
+    supabase.from('empresa_config_fiscal').select('empresa_fiscal_id').eq('empresa_id', empresaId).maybeSingle(),
+  ])
+  const empresaEstoqueId = configEstoque?.empresa_estoque_id || empresaId
+  const empresaFiscalId = configFiscal?.empresa_fiscal_id || empresaId
+  const idsParaNome = [...new Set([empresaEstoqueId, empresaFiscalId])]
+  const { data: empresasNomes } = await supabase.from('empresas').select('id, nome, nome_fantasia').in('id', idsParaNome)
+  const nomePorId = new Map((empresasNomes ?? []).map(e => [e.id, e.nome_fantasia ?? e.nome]))
+  const empresaEstoqueNome = nomePorId.get(empresaEstoqueId) ?? ''
+  const empresaFiscalNome = nomePorId.get(empresaFiscalId) ?? ''
+
   let query = supabase
     .from('marketplace_pedidos')
     .select('*, marketplace_pedido_itens(*, produtos(nome, sku), marketplace_anuncios(imagens)), marketplace_pedido_pacotes(*), marketplace_canais(id, nome, plataforma)')
@@ -48,6 +63,8 @@ export default async function PedidosEcommercePage({ searchParams }: {
       pedidos={pedidos ?? []}
       totalReal={totalReal ?? (pedidos ?? []).length}
       empresaId={empresaId}
+      empresaEstoqueNome={empresaEstoqueNome}
+      empresaFiscalNome={empresaFiscalNome}
       statusInicial={status}
       qInicial={q}
       canalIdInicial={canalId}

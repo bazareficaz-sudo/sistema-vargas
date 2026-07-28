@@ -49,8 +49,12 @@ function prazoInfo(pedido: any): { texto: string; cor: string } | null {
   return { texto: `${Math.round(diffH / 24)}d restantes`, cor: 'text-gray-500' }
 }
 
-export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, statusInicial, qInicial, canalIdInicial, operador }: {
-  canais: any[]; pedidos: any[]; totalReal: number; empresaId: string; statusInicial: string; qInicial: string; canalIdInicial: string; operador: string
+export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, empresaEstoqueNome, empresaFiscalNome, statusInicial, qInicial, canalIdInicial, operador }: {
+  canais: any[]; pedidos: any[]; totalReal: number; empresaId: string
+  // Config da conta (Empresas → Estoque/Fiscal) — igual em toda linha hoje,
+  // já que não existe override por canal ainda.
+  empresaEstoqueNome: string; empresaFiscalNome: string
+  statusInicial: string; qInicial: string; canalIdInicial: string; operador: string
 }) {
   const router = useRouter()
   const [pedidos, setPedidos] = useState(pedidosIniciais)
@@ -88,9 +92,16 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [pollingEtiqueta, setPollingEtiqueta] = useState(false)
   const [erroEtiqueta, setErroEtiqueta] = useState('')
 
-  // Informar NF-e (registro manual — não emite de verdade)
+  // Informar NF-e (registro manual — pra quem já emitiu por fora)
   const [nfeForm, setNfeForm] = useState({ numero: '', chave: '' })
   const [salvandoNfe, setSalvandoNfe] = useState(false)
+
+  // Emissão fiscal real (via venda criada sob demanda a partir do pedido)
+  const [nfceStatus, setNfceStatus] = useState<{
+    status?: string; numero?: string; chave?: string; danfeUrl?: string; motivoRejeicao?: string
+  } | null>(null)
+  const [emitindoNfce, setEmitindoNfce] = useState(false)
+  const [erroEmitirNfce, setErroEmitirNfce] = useState('')
 
   const canaisSincronizaveis = canais.filter(c => (c.plataforma === 'shopee' || c.plataforma === 'mercadolivre') && c.ativo && c.access_token)
 
@@ -189,6 +200,40 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     if (detalhe?.id === pedido.id) setDetalhe((p: any) => ({ ...p, ...patch }))
     setNfeForm({ numero: '', chave: '' })
     setSalvandoNfe(false)
+  }
+
+  // Emissão fiscal real: se o pedido já tem venda vinculada, busca o status
+  // atual (mesmo padrão de DetalheVendaModal.tsx); senão fica pendente até
+  // o primeiro "Emitir NF-e".
+  async function abrirNotaFiscal(pedido: any) {
+    setErroEmitirNfce('')
+    if (!pedido.venda_id) { setNfceStatus(null); return }
+    const sb = createClient()
+    const { data } = await sb.from('vendas')
+      .select('nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf')
+      .eq('id', pedido.venda_id).maybeSingle()
+    setNfceStatus(data ? {
+      status: data.nfce_status, numero: data.nfce_numero, chave: data.nfce_chave,
+      motivoRejeicao: data.nfce_motivo_rejeicao, danfeUrl: data.nfce_url_pdf,
+    } : null)
+  }
+
+  async function emitirNfceDoPedido(pedido: any) {
+    setEmitindoNfce(true)
+    setErroEmitirNfce('')
+    try {
+      const resp = await fetch(`/api/marketplaces/pedidos/${pedido.id}/emitir-nfce`, { method: 'POST' })
+      const data = await resp.json()
+      if (!data.ok && !data.jaEmitida) { setErroEmitirNfce(data.erro ?? 'Erro ao emitir NF-e'); setNfceStatus({ status: 'erro', motivoRejeicao: data.erro }); return }
+      setNfceStatus({ status: data.status, numero: data.numero, chave: data.chave, danfeUrl: data.danfeUrl, motivoRejeicao: data.motivoRejeicao })
+      // O pedido pode não ter venda_id ainda na lista local (primeira emissão) — atualiza pra reabrir corretamente depois.
+      setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, venda_id: p.venda_id } : p))
+      router.refresh()
+    } catch (e: any) {
+      setErroEmitirNfce(e?.message ?? 'Erro ao emitir NF-e')
+    } finally {
+      setEmitindoNfce(false)
+    }
   }
 
   // Roda a sincronização em todas as lojas Shopee/Mercado Livre conectadas
@@ -453,7 +498,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         <span className="text-gray-600 font-medium">pedidos</span>
       </div>
 
-      <div className="flex items-start justify-between mb-5">
+      <div className="flex items-start justify-between mb-2">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Pedidos de E-commerce</h1>
           <p className="text-gray-500 text-sm mt-0.5">
@@ -461,6 +506,10 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
           </p>
         </div>
         <div className="flex gap-2">
+          <button onClick={() => router.refresh()} title="Recarrega a lista a partir do banco, sem chamar Shopee/Mercado Livre"
+            className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+            🔄 Atualizar
+          </button>
           {canaisSincronizaveis.length > 0 && (
             <button onClick={sincronizarPedidos} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
@@ -472,6 +521,13 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
             + Lançar pedido manual
           </button>
         </div>
+      </div>
+
+      <div className="mb-5">
+        <p className="text-xs text-gray-400">
+          📦 Estoque debitado de: <strong className="text-gray-600">{empresaEstoqueNome}</strong>
+          {' · '}🧾 Fiscal emitido por: <strong className="text-gray-600">{empresaFiscalNome}</strong>
+        </p>
       </div>
 
       {resumoSync && (
@@ -556,7 +612,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                 const qtdItens = p.marketplace_pedido_itens?.length ?? 0
                 const etapa = calcularEtapaExibicao(p)
                 return (
-                <tr key={p.id} onClick={() => { setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }) }}
+                <tr key={p.id} onClick={() => { setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }); abrirNotaFiscal(p) }}
                   className={`hover:bg-blue-50 transition-colors cursor-pointer ${detalhe?.id === p.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -735,10 +791,39 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                 </div>
               </div>
 
-              {/* Informar NF-e — só registro manual, não emite de verdade */}
+              {/* Nota Fiscal — emissão real, mesmo padrão de DetalheVendaModal.tsx.
+                  Cria a venda por trás na primeira emissão (garantirVendaDoPedido),
+                  reaproveita nas próximas — reemitir/consultar usa a mesma venda. */}
+              <div className="border border-gray-200 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-600">Nota Fiscal</p>
+                {nfceStatus?.status === 'autorizada' ? (
+                  <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5">
+                    <p>✓ Autorizada — Nº <span className="font-mono">{nfceStatus.numero}</span></p>
+                    {nfceStatus.chave && <p className="font-mono text-[10px] break-all mt-0.5">{nfceStatus.chave}</p>}
+                    {nfceStatus.danfeUrl && <a href={nfceStatus.danfeUrl} target="_blank" rel="noreferrer" className="underline">Ver DANFE</a>}
+                  </div>
+                ) : (
+                  <>
+                    {nfceStatus?.status && nfceStatus.status !== 'pendente' && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                        ⚠ {nfceStatus.status === 'erro' ? 'Erro ao emitir' : 'Não emitida'}{nfceStatus.motivoRejeicao ? ` — ${nfceStatus.motivoRejeicao}` : ''}
+                      </p>
+                    )}
+                    {erroEmitirNfce && (
+                      <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{erroEmitirNfce}</p>
+                    )}
+                    <button onClick={() => emitirNfceDoPedido(detalhe)} disabled={emitindoNfce}
+                      className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                      {emitindoNfce ? 'Emitindo...' : (nfceStatus?.status === 'erro' ? '🧾 Tentar emitir de novo' : '🧾 Emitir NF-e')}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Informar NF-e — só registro manual, pra quem já emitiu por fora */}
               {(calcularEtapaExibicao(detalhe) === 'emitir' || calcularEtapaExibicao(detalhe) === 'reservar') && (
                 <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-                  <p className="text-xs font-semibold text-gray-600">Informar NF-e</p>
+                  <p className="text-xs font-semibold text-gray-600">Já emiti por fora — registrar manualmente</p>
                   <input value={nfeForm.numero} onChange={e => setNfeForm(p => ({ ...p, numero: e.target.value }))}
                     placeholder="Número da nota"
                     className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500" />
