@@ -22,14 +22,18 @@ export default async function EmpresasPage() {
   const { data: empresas } = await supabase
     .from('empresas')
     .select(`
-      id, nome, razao_social, nome_fantasia, cnpj, inscricao_estadual,
-      regime_tributario, status, empresa_principal, cidade, uf,
-      telefone, email, logo_url, cor_primaria, created_at, updated_at,
+      id, nome, razao_social, nome_fantasia, cnpj, inscricao_estadual, inscricao_municipal, cnae,
+      regime_tributario, status, empresa_principal,
+      cep, logradouro, numero, complemento, bairro, cidade, uf, ibge, pais,
+      telefone, whatsapp, email, email_financeiro, email_fiscal, site,
+      responsavel_legal, cpf_responsavel, contador, email_contador, telefone_contador,
+      logo_url, cor_primaria, created_at, updated_at,
       grupo_id,
       grupos_empresariais(id, nome),
       empresa_config_fiscal(ambiente, certificado_validade, certificado_ref, serie_nfe, proximo_nfe, serie_nfce, proximo_nfce, csc_nfce, id_csc_nfce, cfop_venda_dentro, cfop_venda_fora, cfop_compra, natureza_operacao, observacoes),
       empresa_config_comercial(id, limite_desconto, permite_estoque_negativo),
-      empresa_config_estoque(id, permite_multiplos_depositos, reservar_em_orcamento, reservar_em_pedido, baixar_estoque_em, tipo_custo, controlar_lote, deposito_devolucao_id)
+      empresa_config_estoque(id, permite_multiplos_depositos, reservar_em_orcamento, reservar_em_pedido, baixar_estoque_em, tipo_custo, controlar_lote, deposito_devolucao_id),
+      empresa_compartilhamento_dados(compartilhar_produtos, compartilhar_clientes, compartilhar_fornecedores, compartilhar_marcas, compartilhar_categorias, compartilhar_tabelas_preco)
     `)
     .eq('tenant_id', tenantId)
     .order('empresa_principal', { ascending: false })

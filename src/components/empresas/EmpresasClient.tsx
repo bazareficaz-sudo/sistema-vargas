@@ -18,13 +18,31 @@ type Empresa = {
   nome_fantasia: string | null
   cnpj: string | null
   inscricao_estadual: string | null
+  inscricao_municipal: string | null
+  cnae: string | null
   regime_tributario: string | null
   status: string
   empresa_principal: boolean
+  cep: string | null
+  logradouro: string | null
+  numero: string | null
+  complemento: string | null
+  bairro: string | null
   cidade: string | null
   uf: string | null
+  ibge: string | null
+  pais: string | null
   telefone: string | null
+  whatsapp: string | null
   email: string | null
+  email_financeiro: string | null
+  email_fiscal: string | null
+  site: string | null
+  responsavel_legal: string | null
+  cpf_responsavel: string | null
+  contador: string | null
+  email_contador: string | null
+  telefone_contador: string | null
   logo_url: string | null
   cor_primaria: string | null
   created_at: string
@@ -41,6 +59,14 @@ type Empresa = {
     tipo_custo: string | null
     controlar_lote: boolean | null
     deposito_devolucao_id: string | null
+  } | null
+  empresa_compartilhamento_dados: {
+    compartilhar_produtos: boolean | null
+    compartilhar_clientes: boolean | null
+    compartilhar_fornecedores: boolean | null
+    compartilhar_marcas: boolean | null
+    compartilhar_categorias: boolean | null
+    compartilhar_tabelas_preco: boolean | null
   } | null
 }
 

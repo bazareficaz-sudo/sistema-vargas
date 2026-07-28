@@ -246,6 +246,14 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
         tipo_custo: empresaEditando.empresa_config_estoque?.tipo_custo ?? 'ultimo',
         controlar_lote: empresaEditando.empresa_config_estoque?.controlar_lote ?? false,
         deposito_devolucao_id: empresaEditando.empresa_config_estoque?.deposito_devolucao_id ?? '',
+        // Compartilhamento — antes nunca era relido aqui, então a aba
+        // sempre voltava pro padrão (tudo desmarcado) mesmo já salvo.
+        compartilhar_produtos: empresaEditando.empresa_compartilhamento_dados?.compartilhar_produtos ?? false,
+        compartilhar_clientes: empresaEditando.empresa_compartilhamento_dados?.compartilhar_clientes ?? false,
+        compartilhar_fornecedores: empresaEditando.empresa_compartilhamento_dados?.compartilhar_fornecedores ?? false,
+        compartilhar_marcas: empresaEditando.empresa_compartilhamento_dados?.compartilhar_marcas ?? false,
+        compartilhar_categorias: empresaEditando.empresa_compartilhamento_dados?.compartilhar_categorias ?? false,
+        compartilhar_tabelas_preco: empresaEditando.empresa_compartilhamento_dados?.compartilhar_tabelas_preco ?? false,
       })
     } else {
       setForm(FORM_INICIAL)
