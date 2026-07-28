@@ -1,4 +1,4 @@
-import { brasilNFeRequest, brasilNFeRequestUserToken } from './client'
+import { brasilNFeRequest, brasilNFeRequestUserToken, tipoAmbiente } from './client'
 import { FiscalProviderError } from '../types'
 
 // Cadastro de empresa na Brasil NFe (doc.brasilnfe.com.br/api/empresas —
@@ -181,4 +181,43 @@ export async function alterarCertificado(
     return { ok: false, erro }
   }
   return { ok: true, expirado: !!json?.Expirado, dtExpiracao: json?.DtExpiracao ?? null }
+}
+
+export type ResultadoNumeracao =
+  | { ok: true }
+  | { ok: false; erro: string }
+
+// Alinha o contador de numeração da Brasil NFe (doc.brasilnfe.com.br/api/empresas
+// #atualizar-numeracao — POST /services/empresa/AtualizarNumeracao) com o que a
+// empresa já vinha usando num emissor anterior. Sem isso, a primeira nota
+// emitida por aqui sairia do zero (ou do valor padrão 1), colidindo com
+// numeração já usada perante a SEFAZ — por isso `numero` deve ser o PRÓXIMO
+// número a emitir (último já emitido + 1), não o último emitido em si.
+export async function atualizarNumeracao(
+  userToken: string,
+  empresaToken: string,
+  params: { ambiente: 'producao' | 'homologacao'; modeloDocumento: number; serie: string; numero: number }
+): Promise<ResultadoNumeracao> {
+  const { status, text } = await brasilNFeRequest(
+    { token: empresaToken, userToken, ambiente: params.ambiente },
+    '/services/empresa/AtualizarNumeracao',
+    {
+      TipoAmbiente: tipoAmbiente(params.ambiente),
+      ModeloDocumento: params.modeloDocumento,
+      Serie: params.serie,
+      Numero: params.numero,
+      Padrao: true,
+    }
+  )
+  let json: any
+  try {
+    json = text ? JSON.parse(text) : {}
+  } catch {
+    throw new FiscalProviderError(`Resposta inesperada da Brasil NFe ao atualizar numeração (status ${status}): ${text.slice(0, 300)}`, 'resposta_invalida')
+  }
+  if (status >= 400 || json?.status === false || json?.Error) {
+    const erro = json?.Error ?? (Array.isArray(json?.Avisos) ? json.Avisos.join('; ') : null) ?? `Erro ${status} ao atualizar numeração na Brasil NFe`
+    return { ok: false, erro }
+  }
+  return { ok: true }
 }

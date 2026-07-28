@@ -193,6 +193,8 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
   const [certSenha, setCertSenha] = useState('')
   const [enviandoCert, setEnviandoCert] = useState(false)
   const [resultadoCert, setResultadoCert] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [atualizandoNumeracao, setAtualizandoNumeracao] = useState<'nfe' | 'nfce' | null>(null)
+  const [resultadoNumeracao, setResultadoNumeracao] = useState<{ tipo: 'nfe' | 'nfce'; ok: boolean; msg: string } | null>(null)
 
   const editando = !!empresaEditando
 
@@ -514,6 +516,38 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
       setResultadoCert({ ok: false, msg: e?.message ?? 'Erro ao enviar certificado' })
     } finally {
       setEnviandoCert(false)
+    }
+  }
+
+  // Alinha o contador de numeração da Brasil NFe com o que a empresa já
+  // vinha usando num emissor anterior — lê a série/próximo número que já
+  // estão digitados nos campos logo abaixo (o operador ajusta lá antes de
+  // clicar). `proximo` deve ser o PRÓXIMO número a emitir (último já
+  // emitido + 1), não o último emitido em si.
+  async function atualizarNumeracaoBrasilNFe(tipo: 'nfe' | 'nfce') {
+    if (!empresaEditando?.id) return
+    setAtualizandoNumeracao(tipo)
+    setResultadoNumeracao(null)
+    const serie = tipo === 'nfce' ? form.serie_nfce : form.serie_nfe
+    const numero = tipo === 'nfce' ? form.proximo_nfce : form.proximo_nfe
+    try {
+      const resp = await fetch('/api/fiscal/brasilnfe/atualizar-numeracao', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          empresaId: empresaEditando.id,
+          modeloDocumento: tipo === 'nfce' ? 65 : 55,
+          serie, numero, ambiente: form.ambiente_fiscal,
+        }),
+      })
+      const data = await resp.json()
+      setResultadoNumeracao({
+        tipo, ok: data.ok,
+        msg: data.ok ? `Numeração atualizada na Brasil NFe: série ${serie}, próximo número ${numero}.` : data.erro,
+      })
+    } catch (e: any) {
+      setResultadoNumeracao({ tipo, ok: false, msg: e?.message ?? 'Erro ao atualizar numeração' })
+    } finally {
+      setAtualizandoNumeracao(null)
     }
   }
 
@@ -899,6 +933,17 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
                       <input type="number" min={1} value={form.proximo_nfe} onChange={e => set('proximo_nfe', parseInt(e.target.value) || 1)} className={INPUT} />
                     </Field>
                   </div>
+                  {editando && empresaEditando?.nfe_config?.provider === 'brasilnfe' && empresaEditando?.nfe_config?.credenciais?.token_producao && (
+                    <>
+                      <button type="button" disabled={atualizandoNumeracao === 'nfe'} onClick={() => atualizarNumeracaoBrasilNFe('nfe')}
+                        className="w-full px-2 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-40">
+                        {atualizandoNumeracao === 'nfe' ? 'Atualizando...' : 'Atualizar numeração na Brasil NFe'}
+                      </button>
+                      {resultadoNumeracao?.tipo === 'nfe' && (
+                        <p className={`text-[11px] ${resultadoNumeracao.ok ? 'text-emerald-600' : 'text-red-600'}`}>{resultadoNumeracao.msg}</p>
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
                   <p className="text-xs font-semibold text-slate-600">NFC-e</p>
@@ -910,8 +955,24 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
                       <input type="number" min={1} value={form.proximo_nfce} onChange={e => set('proximo_nfce', parseInt(e.target.value) || 1)} className={INPUT} />
                     </Field>
                   </div>
+                  {editando && empresaEditando?.nfe_config?.provider === 'brasilnfe' && empresaEditando?.nfe_config?.credenciais?.token_producao && (
+                    <>
+                      <button type="button" disabled={atualizandoNumeracao === 'nfce'} onClick={() => atualizarNumeracaoBrasilNFe('nfce')}
+                        className="w-full px-2 py-1.5 rounded-lg text-[11px] font-medium bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-40">
+                        {atualizandoNumeracao === 'nfce' ? 'Atualizando...' : 'Atualizar numeração na Brasil NFe'}
+                      </button>
+                      {resultadoNumeracao?.tipo === 'nfce' && (
+                        <p className={`text-[11px] ${resultadoNumeracao.ok ? 'text-emerald-600' : 'text-red-600'}`}>{resultadoNumeracao.msg}</p>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
+              {editando && empresaEditando?.nfe_config?.provider === 'brasilnfe' && (
+                <p className="text-[11px] text-slate-400 -mt-3">
+                  "Próx. número" é o PRÓXIMO número a emitir (último já emitido em outro sistema + 1), não o último já emitido.
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <Field label="CSC NFC-e">
