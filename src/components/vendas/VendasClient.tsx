@@ -23,6 +23,11 @@ export type Venda = {
   operador_nome: string | null
   canal: string | null
   clientes: Cliente
+  nfce_status: string | null
+  nfce_numero: string | null
+  nfce_chave: string | null
+  nfce_motivo_rejeicao: string | null
+  nfce_url_pdf: string | null
 }
 
 type VendaItemLite = {
@@ -63,10 +68,12 @@ function calcularRange(periodo: Periodo, custom: { inicio: string; fim: string }
   return { inicio, fim }
 }
 
-const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj)'
+const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf'
 
-export default function VendasClient({ empresaId, vendasIniciais, totalInicial, saudeConfig, saudeFaixas, erroInicial }: {
+export default function VendasClient({ empresaId, vendasIniciais, totalInicial, empresaEstoqueNome, empresaFiscalNome, saudeConfig, saudeFaixas, erroInicial }: {
   empresaId: string; vendasIniciais: Venda[]; totalInicial: number
+  // Config da conta (Empresas → Estoque/Fiscal) — igual em toda linha hoje.
+  empresaEstoqueNome: string; empresaFiscalNome: string
   saudeConfig?: SaudeConfig | null; saudeFaixas?: FaixaSaude[]; erroInicial?: string | null
 }) {
   const [vendas, setVendas] = useState<Venda[]>(vendasIniciais)
@@ -92,6 +99,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const [resumoMassa, setResumoMassa] = useState('')
   const [trocandoPagamento, setTrocandoPagamento] = useState(false)
   const [novaFormaMassa, setNovaFormaMassa] = useState('pix')
+  const [emitindoId, setEmitindoId] = useState<string | null>(null)
 
   const cfgSaude = saudeConfig ?? CONFIG_PADRAO
   const faixasSaude = (saudeFaixas && saudeFaixas.length > 0) ? saudeFaixas : FAIXAS_PADRAO
@@ -363,6 +371,33 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     buscarVendas() // recarrega pra refletir o status fiscal atualizado
   }
 
+  // Emissão individual direto na linha da listagem — mesmo endpoint já
+  // usado no modal de detalhe e na emissão em massa, só que sem precisar
+  // abrir a venda. Também serve de "tentar de novo" quando o status é erro.
+  async function emitirNfceLinha(v: Venda) {
+    setEmitindoId(v.id)
+    try {
+      const resp = await fetch('/api/fiscal/emitir-nfce', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendaId: v.id }),
+      })
+      const data = await resp.json()
+      const patch = {
+        nfce_status: data.status ?? (data.ok ? 'autorizada' : 'erro'),
+        nfce_numero: data.numero ?? v.nfce_numero,
+        nfce_chave: data.chave ?? v.nfce_chave,
+        nfce_motivo_rejeicao: data.motivoRejeicao ?? (data.ok ? null : (data.erro ?? 'Erro ao emitir')),
+        nfce_url_pdf: data.danfeUrl ?? v.nfce_url_pdf,
+      }
+      setVendas(prev => prev.map(x => x.id === v.id ? { ...x, ...patch } : x))
+      if (detalheAberto?.id === v.id) setDetalheAberto(prev => prev ? { ...prev, ...patch } : prev)
+    } catch (e: any) {
+      setVendas(prev => prev.map(x => x.id === v.id ? { ...x, nfce_status: 'erro', nfce_motivo_rejeicao: e?.message ?? 'Erro ao emitir' } : x))
+    } finally {
+      setEmitindoId(null)
+    }
+  }
+
   const CHIPS: { id: Periodo; label: string }[] = [
     { id: 'hoje', label: 'Hoje' }, { id: 'ontem', label: 'Ontem' },
     { id: '7dias', label: '7 dias' }, { id: 'mes', label: 'Este mês' }, { id: 'custom', label: 'Período' },
@@ -370,13 +405,21 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div className="flex items-center justify-between mb-1 flex-wrap gap-3">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Vendas</h1>
           <p className="text-gray-500 text-sm mt-0.5">
             {total} transações · {fmt(totalFaturado)} faturados
           </p>
+          <p className="text-xs text-gray-400 mt-1">
+            📦 Estoque debitado de: <strong className="text-gray-500">{empresaEstoqueNome}</strong>
+            {' · '}🧾 Fiscal emitido por: <strong className="text-gray-500">{empresaFiscalNome}</strong>
+          </p>
         </div>
+        <button onClick={() => buscarVendas()} disabled={carregando}
+          className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
+          🔄 Atualizar
+        </button>
         <input
           value={busca}
           onChange={e => setBusca(e.target.value)}
@@ -477,6 +520,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
               <th className="text-right px-4 py-3 font-medium">Desconto</th>
               <th className="text-right px-4 py-3 font-medium">Total</th>
               <th className="text-center px-4 py-3 font-medium">Status</th>
+              <th className="text-center px-4 py-3 font-medium">Nota Fiscal</th>
               <th className="text-center px-4 py-3 font-medium">Ações</th>
             </tr>
           </thead>
@@ -523,6 +567,28 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                     'bg-yellow-100 text-yellow-700 border-yellow-200'
                   }`}>{v.status}</span>
                 </td>
+                <td className="px-4 py-2.5 text-center">
+                  {v.tipo_operacao !== 'venda' ? (
+                    <span className="text-xs text-gray-300">—</span>
+                  ) : v.nfce_status === 'autorizada' ? (
+                    <a href={v.nfce_url_pdf ?? '#'} target="_blank" rel="noreferrer"
+                      className="text-xs px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200 hover:bg-green-200">
+                      ✅ {v.nfce_numero ?? 'Autorizada'}
+                    </a>
+                  ) : v.nfce_status === 'erro' ? (
+                    <button onClick={() => emitirNfceLinha(v)} disabled={emitindoId === v.id} title={v.nfce_motivo_rejeicao ?? 'Erro ao emitir'}
+                      className="text-xs px-2 py-0.5 rounded-full border bg-red-100 text-red-600 border-red-200 hover:bg-red-200 disabled:opacity-50">
+                      {emitindoId === v.id ? '⏳' : '⚠️ Tentar de novo'}
+                    </button>
+                  ) : v.nfce_status === 'pendente' ? (
+                    <span className="text-xs px-2 py-0.5 rounded-full border bg-yellow-100 text-yellow-700 border-yellow-200">⏳ Pendente</span>
+                  ) : (
+                    <button onClick={() => emitirNfceLinha(v)} disabled={emitindoId === v.id}
+                      className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 disabled:opacity-50">
+                      {emitindoId === v.id ? '⏳' : 'Emitir'}
+                    </button>
+                  )}
+                </td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center justify-center gap-1">
                     <button onClick={() => abrirDetalhe(v, false)} title="Ver detalhes"
@@ -543,7 +609,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             )})}
             {vendas.length === 0 && !carregando && (
               <tr>
-                <td colSpan={13} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={14} className="px-4 py-8 text-center text-gray-400">
                   Nenhuma venda encontrada neste período.
                 </td>
               </tr>
