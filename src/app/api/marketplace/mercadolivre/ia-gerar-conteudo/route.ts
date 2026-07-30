@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { instrucaoTitulos, validarTitulos } from '@/lib/ia/tituloAnuncio'
+import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
 
 // O Mercado Livre corta o titulo em 60 caracteres.
 const MAX_TITULO_ML = 60
@@ -32,6 +33,9 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
+  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const padrao = profile?.empresa_id ? await buscarPadraoAnuncio(sb, profile.empresa_id) : null
+
   const atributosTexto = (atributos ?? []).map(a => {
     const valores = a.valores.length > 0
       ? ` — opções válidas (use o texto exato de uma delas): ${a.valores.map(v => `"${v.name}"`).join(', ')}`
@@ -50,6 +54,7 @@ ${atributos?.length ? `Atributos que a categoria pede:\n${atributosTexto}\n` : '
 O Mercado Livre às vezes rejeita a criação do anúncio citando atributos que nem apareceram como obrigatórios na lista acima (atributos condicionais). Por isso, tente preencher o MÁXIMO de atributos possível com confiança razoável — não só os marcados como obrigatórios — mas nunca invente um valor sem nenhuma base no nome/marca/descrição do produto.
 
 ${instrucaoTitulos(MAX_TITULO_ML)}
+${blocoPadraoAnuncio(padrao)}
 
 Responda SOMENTE com um JSON neste formato exato:
 {

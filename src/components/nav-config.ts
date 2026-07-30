@@ -239,6 +239,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/usuarios-pdv',               label: 'Usuários do PDV', icon: '🔐', modulo: 'pdv' },
       { href: '/dashboard/configuracoes/integracoes', label: 'Integrações',     icon: '🔌' },
       { href: '/dashboard/configuracoes/impressao',   label: 'Impressão',       icon: '🖨️' },
+      { href: '/dashboard/configuracoes/anuncios',    label: 'Padrão de anúncios', icon: '✨' },
       { href: '/dashboard/configuracoes/aparencia',   label: 'Aparência',       icon: '🎨' },
     ],
   },

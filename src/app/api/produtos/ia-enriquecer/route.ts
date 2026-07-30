@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
+import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
 
 // Sugestão por IA pra completar campos vazios do cadastro de produto, com
 // base só no nome e no EAN — nunca inventa categoria/marca nova (só aceita
@@ -69,6 +70,8 @@ export async function POST(req: Request) {
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 
+  const padrao = await buscarPadraoAnuncio(sb, empresaId)
+
   const [{ data: categorias }, { data: marcas }, { data: configPropria }] = await Promise.all([
     sb.from('categorias').select('nome').eq('empresa_id', empresaId).eq('ativo', true),
     sb.from('marcas').select('nome').eq('empresa_id', empresaId).eq('ativo', true),
@@ -133,6 +136,7 @@ Responda SOMENTE com um JSON neste formato exato:
   "comprimento_cm": <comprimento estimado da embalagem em cm, número, ou null>
 }
 
+${blocoPadraoAnuncio(padrao)}
 Se não tiver informação suficiente e confiável pra algum campo, use null nesse campo em vez de chutar um valor genérico.`
 
   try {

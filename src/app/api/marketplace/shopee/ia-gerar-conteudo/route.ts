@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { instrucaoTitulos, validarTitulos } from '@/lib/ia/tituloAnuncio'
+import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
 
 const MAX_TITULO_SHOPEE = 120
 
@@ -22,6 +23,9 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
+  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const padrao = profile?.empresa_id ? await buscarPadraoAnuncio(sb, profile.empresa_id) : null
+
   const atributosTexto = (atributos ?? []).map(a => {
     const valores = a.attribute_value_list.length > 0
       ? ` — opções: ${a.attribute_value_list.map(v => `${v.value_id}=${v.original_value_name}`).join(', ')}`
@@ -40,6 +44,7 @@ ${atributos?.length ? `Atributos que a categoria pede:\n${atributosTexto}\n` : '
 ${marcas?.length ? `Marcas aceitas nesta categoria (escolha uma pelo id se fizer sentido, senão não inclua "brand_id" na resposta): ${marcasTexto}\n` : ''}
 
 ${instrucaoTitulos(MAX_TITULO_SHOPEE)}
+${blocoPadraoAnuncio(padrao)}
 
 Responda SOMENTE com um JSON neste formato exato:
 {
