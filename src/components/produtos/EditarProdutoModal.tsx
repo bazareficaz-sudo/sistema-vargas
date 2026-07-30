@@ -219,10 +219,23 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         if (novo.altura_cm == null && data.altura_cm != null) { novo.altura_cm = data.altura_cm; preenchidos++ }
         if (novo.largura_cm == null && data.largura_cm != null) { novo.largura_cm = data.largura_cm; preenchidos++ }
         if (novo.comprimento_cm == null && data.comprimento_cm != null) { novo.comprimento_cm = data.comprimento_cm; preenchidos++ }
+
+        // Aba Fiscal. CFOP/CST/CSOSN/PIS/COFINS vêm do regime da empresa
+        // (determinístico, não é palpite da IA); origem, alíquotas e IBS/CBS
+        // vêm da IA. Só preenche o que está vazio — nunca sobrescreve o que
+        // a contabilidade já ajustou à mão.
+        const textoFiscal: (keyof typeof novo)[] = ['cfop', 'csosn', 'icms_cst', 'pis_cst', 'cofins_cst', 'ibs_cst', 'ibs_cclasstrib']
+        for (const c of textoFiscal) {
+          if (!novo[c] && data[c]) { (novo as any)[c] = data[c]; preenchidos++ }
+        }
+        const numFiscal: (keyof typeof novo)[] = ['icms_origem', 'icms_percentual', 'pis_percentual', 'cofins_percentual', 'ibs_aliquota', 'cbs_aliquota']
+        for (const c of numFiscal) {
+          if (novo[c] == null && data[c] != null) { (novo as any)[c] = data[c]; preenchidos++ }
+        }
         return novo
       })
       setMensagemIA(preenchidos > 0
-        ? `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar (NCM/CEST estão na aba Fiscal).`
+        ? `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar. Os dados fiscais estão na aba Fiscal e devem ser conferidos com a contabilidade.`
         : 'A IA não encontrou sugestões novas — os campos já estavam preenchidos ou não há confiança suficiente.')
     } catch {
       setErro('Erro ao consultar a IA — tente novamente.')
@@ -1235,8 +1248,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                 </div>
               </div>
               <p className="text-xs text-gray-400">
-                CFOP, Origem e CST ICMS já são usados de verdade na emissão de NFC-e. CSOSN e os demais percentuais (ICMS/PIS/COFINS/IPI)
-                ficam guardados aqui pra referência e para uso futuro — confirme com a contabilidade antes de basear apuração real neles.
+                NCM, CFOP, Origem, CST ICMS/CSOSN e CST de PIS/COFINS são usados de verdade na emissão de NFC-e — a SEFAZ rejeita a nota
+                se vierem errados. Os percentuais (ICMS/PIS/COFINS/IPI) ficam guardados aqui pra referência e uso futuro.
+                Confirme com a contabilidade antes de basear apuração real neles.
               </p>
 
               <div className="border-t border-gray-100 pt-4">
