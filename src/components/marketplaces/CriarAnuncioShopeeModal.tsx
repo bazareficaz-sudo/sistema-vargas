@@ -53,6 +53,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const [logisticaSelecionada, setLogisticaSelecionada] = useState<Set<number>>(new Set())
 
   const [titulo, setTitulo] = useState('')
+  // Opcoes de titulo geradas pela IA — nunca aplicadas sozinhas: o operador
+  // escolhe qual usar (ou mantem o que digitou).
+  const [titulosSugeridos, setTitulosSugeridos] = useState<string[]>([])
   const [descricao, setDescricao] = useState('')
   const [preco, setPreco] = useState('')
   const [estoque, setEstoque] = useState('')
@@ -99,6 +102,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     // O cadastro guarda o nome em CAIXA ALTA; anúncio em caixa alta é ruim de
     // ler e a Shopee penaliza. Continua editável no campo.
     setTitulo(formatarTituloAnuncio(p.nome))
+    setTitulosSugeridos([])
     setPreco(p.preco_venda ? String(p.preco_venda) : '')
     setEstoque(p.estoque != null ? String(p.estoque) : '0')
     setPeso(p.peso_kg ? String(p.peso_kg) : '')
@@ -385,6 +389,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         return
       }
 
+      if (Array.isArray(dataConteudo.titulos) && dataConteudo.titulos.length > 0) setTitulosSugeridos(dataConteudo.titulos)
       if (dataConteudo.descricao) setDescricao(dataConteudo.descricao)
       if (dataConteudo.atributos && Object.keys(dataConteudo.atributos).length > 0) {
         setValoresAtributos(prev => {
@@ -669,6 +674,18 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                     <label className="block text-xs font-medium text-gray-500 mb-1">Título do anúncio *</label>
                     <input value={titulo} onChange={e => setTitulo(e.target.value)} maxLength={120}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                    {titulosSugeridos.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-violet-700 font-medium">✨ Sugestões de título — clique pra usar:</p>
+                        {titulosSugeridos.map(t => (
+                          <button key={t} type="button" onClick={() => setTitulo(t)}
+                            className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${t === titulo ? 'border-violet-400 bg-violet-50 text-violet-900' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50 text-gray-700'}`}>
+                            {t}
+                            <span className="text-xs text-gray-400 ml-2">{t.length} car.</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Descrição</label>

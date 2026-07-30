@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { perguntarJSON } from '@/lib/ia/claude'
+import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
+import { instrucaoTitulos, validarTitulos } from '@/lib/ia/tituloAnuncio'
+
+// O Mercado Livre corta o titulo em 60 caracteres.
+const MAX_TITULO_ML = 60
 
 type AtributoInput = {
   id: string; name: string; obrigatorio: boolean; tipo: string
@@ -45,8 +49,11 @@ ${atributos?.length ? `Atributos que a categoria pede:\n${atributosTexto}\n` : '
 
 O Mercado Livre às vezes rejeita a criação do anúncio citando atributos que nem apareceram como obrigatórios na lista acima (atributos condicionais). Por isso, tente preencher o MÁXIMO de atributos possível com confiança razoável — não só os marcados como obrigatórios — mas nunca invente um valor sem nenhuma base no nome/marca/descrição do produto.
 
+${instrucaoTitulos(MAX_TITULO_ML)}
+
 Responda SOMENTE com um JSON neste formato exato:
 {
+  "titulos": ["<opção 1>", "<opção 2>", "<opção 3>"],
   "descricao": "texto de descrição do anúncio em português, vendedor, 2 a 4 parágrafos curtos, sem inventar características que não foram informadas",
   "atributos": { "<id do atributo>": "<texto do valor — pra atributos com opções, use exatamente uma das strings da lista>", ... }
 }
@@ -54,7 +61,8 @@ Responda SOMENTE com um JSON neste formato exato:
 Não invente id de atributo fora da lista acima. Pra atributos com opções, o valor tem que ser exatamente igual (mesma grafia) a uma das opções informadas. Se não tiver informação suficiente pra decidir um atributo, simplesmente não inclua ele no JSON — não adivinhe.`
 
   try {
-    const resultado = await perguntarJSON(prompt)
+    // Modelo forte: titulo de venda e redacao, nao preenchimento de campo.
+    const resultado = await perguntarJSON(prompt, MODELO_FORTE)
 
     // Nunca confia cegamente na IA: só aceita atributos com id conhecido, e
     // pra atributos com lista fixa exige match exato (case-insensitive) com
@@ -76,6 +84,7 @@ Não invente id de atributo fora da lista acima. Pra atributos com opções, o v
 
     return NextResponse.json({
       ok: true,
+      titulos: validarTitulos(resultado?.titulos, MAX_TITULO_ML),
       descricao: typeof resultado?.descricao === 'string' ? resultado.descricao.trim() : '',
       atributos: atributosValidados,
     })

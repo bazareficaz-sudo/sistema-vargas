@@ -2,6 +2,7 @@
 
 import { useState, useEffect, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { formatarTituloAnuncio } from '@/lib/texto/titulo'
 import { fmt } from './utils'
 
 type Categoria = { id: string; name: string }
@@ -46,6 +47,8 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
 
   const [condicao, setCondicao] = useState<'new' | 'used'>('new')
   const [titulo, setTitulo] = useState('')
+  // Opcoes de titulo geradas pela IA — o operador escolhe, nunca aplica sozinha.
+  const [titulosSugeridos, setTitulosSugeridos] = useState<string[]>([])
   const [descricao, setDescricao] = useState('')
   const [preco, setPreco] = useState('')
   const [estoque, setEstoque] = useState('')
@@ -88,6 +91,7 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
       })
       const data = await resp.json()
       if (!data.ok) { setErro(data.erro ?? 'Erro ao gerar conteúdo com IA'); return }
+      if (Array.isArray(data.titulos) && data.titulos.length > 0) setTitulosSugeridos(data.titulos)
       if (data.descricao) setDescricao(data.descricao)
       if (data.atributos && Object.keys(data.atributos).length > 0) {
         setValoresAtributos(prev => ({ ...prev, ...data.atributos }))
@@ -217,7 +221,9 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
 
   function selecionarProduto(p: any) {
     setProduto(p)
-    setTitulo(p.nome)
+    // Cadastro guarda em CAIXA ALTA — anuncio pede texto legivel.
+    setTitulo(formatarTituloAnuncio(p.nome).slice(0, 60))
+    setTitulosSugeridos([])
     setPreco(p.preco_venda ? String(p.preco_venda) : '')
     setEstoque(p.estoque != null ? String(p.estoque) : '0')
     setDescricao(p.descricao_marketplace ?? '')
@@ -682,6 +688,18 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                     <input value={titulo} onChange={e => setTitulo(e.target.value)} maxLength={60}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                     <p className="text-xs text-gray-400 mt-1">{titulo.length}/60 caracteres</p>
+                    {titulosSugeridos.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-violet-700 font-medium">✨ Sugestões de título — clique pra usar:</p>
+                        {titulosSugeridos.map(t => (
+                          <button key={t} type="button" onClick={() => setTitulo(t.slice(0, 60))}
+                            className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${t === titulo ? 'border-violet-400 bg-violet-50 text-violet-900' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50 text-gray-700'}`}>
+                            {t}
+                            <span className="text-xs text-gray-400 ml-2">{t.length} car.</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Descrição</label>

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { perguntarJSON } from '@/lib/ia/claude'
+import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
+import { instrucaoTitulos, validarTitulos } from '@/lib/ia/tituloAnuncio'
+
+const MAX_TITULO_SHOPEE = 120
 
 type AtributoInput = {
   attribute_id: number; attribute_name: string; is_mandatory: boolean; attribute_type: string
@@ -36,8 +39,11 @@ Categoria escolhida na Shopee: ${categoriaPath}
 ${atributos?.length ? `Atributos que a categoria pede:\n${atributosTexto}\n` : 'Esta categoria não tem atributos.'}
 ${marcas?.length ? `Marcas aceitas nesta categoria (escolha uma pelo id se fizer sentido, senão não inclua "brand_id" na resposta): ${marcasTexto}\n` : ''}
 
+${instrucaoTitulos(MAX_TITULO_SHOPEE)}
+
 Responda SOMENTE com um JSON neste formato exato:
 {
+  "titulos": ["<opção 1>", "<opção 2>", "<opção 3>"],
   "descricao": "texto de descrição do anúncio em português, vendedor, 2 a 4 parágrafos curtos, sem inventar características que não foram informadas",
   "atributos": { "<attribute_id>": { "value_id": <id, se a opção tiver lista> } ou { "texto": "<valor>", "se for campo livre" } , ... só inclua os que você tem confiança razoável },
   "brand_id": <id da marca, opcional>
@@ -46,7 +52,9 @@ Responda SOMENTE com um JSON neste formato exato:
 Não invente atributos com id fora da lista acima. Pra atributos com lista de opções, use exatamente um dos value_id informados — nunca invente um id que não está na lista. Se não tiver informação suficiente pra decidir um atributo (obrigatório ou não), simplesmente não inclua ele no JSON — não adivinhe.`
 
   try {
-    const resultado = await perguntarJSON(prompt)
+    // Modelo forte: escrever título de venda que expande abreviação, acerta
+    // acentuação e ainda diferencia o anúncio é redação, não preenchimento.
+    const resultado = await perguntarJSON(prompt, MODELO_FORTE)
 
     // Validação: nunca confia cegamente no que a IA devolveu — filtra pra só
     // aceitar attribute_id conhecidos e, no caso de listas, value_id que
@@ -75,6 +83,7 @@ Não invente atributos com id fora da lista acima. Pra atributos com lista de op
 
     return NextResponse.json({
       ok: true,
+      titulos: validarTitulos(resultado?.titulos, MAX_TITULO_SHOPEE),
       descricao: typeof resultado?.descricao === 'string' ? resultado.descricao.trim() : '',
       atributos: atributosValidados,
       brandId,
