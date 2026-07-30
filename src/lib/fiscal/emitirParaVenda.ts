@@ -39,7 +39,7 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
 
   const produtoIds = [...new Set(itensVenda.map((i: any) => i.produto_id).filter(Boolean))]
   const { data: produtos } = produtoIds.length > 0
-    ? await sb.from('produtos').select('id, nome, sku, ncm, cfop, icms_cst, icms_origem, unidade').in('id', produtoIds)
+    ? await sb.from('produtos').select('id, nome, sku, ncm, cfop, icms_cst, csosn, pis_cst, cofins_cst, icms_origem, unidade').in('id', produtoIds)
     : { data: [] as any[] }
   const produtoPorId = new Map((produtos ?? []).map((p: any) => [p.id, p]))
 
@@ -76,6 +76,35 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
   }
 
   const cfopPadrao = configFiscal?.cfop_venda_dentro ?? '5102'
+
+  // CRT da empresa QUE EMITE (1 Simples Nacional, 2 Simples c/ excesso,
+  // 3 regime normal). Isso decide se o item leva CSOSN ou CST de ICMS —
+  // mandar o do regime errado é rejeitado na hora ("CST do ICMS é inválido
+  // para empresa no regime normal" / "CSOSN é inválido para empresa no
+  // regime simples nacional ou MEI"). Antes o código mandava '102' fixo,
+  // que só funciona no Simples — toda emissão de empresa em regime normal
+  // era rejeitada.
+  const crt = String(configFiscal?.crt ?? '1')
+  const simplesNacional = crt === '1' || crt === '2'
+
+  // O cadastro de produto tem as duas colunas (`csosn` e `icms_cst`), mas na
+  // prática os códigos foram misturados: há produto com CSOSN gravado em
+  // `icms_cst`. Dá pra separar pelo formato — CST tem 2 dígitos (00, 40, 60)
+  // e CSOSN tem 3 (102, 400) — e assim nunca mandar o código do regime
+  // errado, que a SEFAZ rejeita item por item.
+  const ehCsosn = (v: unknown) => /^\d{3}$/.test(String(v ?? ''))
+  const ehCst = (v: unknown) => /^\d{2}$/.test(String(v ?? ''))
+
+  function situacaoTributariaIcms(produto: any): string {
+    if (simplesNacional) {
+      if (ehCsosn(produto.csosn)) return String(produto.csosn)
+      if (ehCsosn(produto.icms_cst)) return String(produto.icms_cst)
+      return '102' // sem permissão de crédito — padrão do varejo no Simples
+    }
+    if (ehCst(produto.icms_cst)) return String(produto.icms_cst)
+    return '00' // tributada integralmente
+  }
+
   const itens: EmissaoNFCeInput['itens'] = itensVenda.map((it: any, idx: number) => {
     const produto = produtoPorId.get(it.produto_id) as any
     return {
@@ -90,7 +119,12 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
       valorUnitario: Number(it.preco_unitario),
       valorDesconto: Number(it.desconto ?? 0),
       icmsOrigem: String(produto.icms_origem ?? 0),
-      icmsSituacaoTributaria: produto.icms_cst || '102',
+      icmsSituacaoTributaria: situacaoTributariaIcms(produto),
+      // 49 = "outras operações": aceito nos dois regimes e não exige
+      // alíquota, que o cadastro de produto não obriga hoje. Quando o
+      // produto tem CST próprio cadastrado, ele manda.
+      pisCst: produto.pis_cst || '49',
+      cofinsCst: produto.cofins_cst || '49',
     }
   })
 

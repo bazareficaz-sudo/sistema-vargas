@@ -195,6 +195,8 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
   const [resultadoCert, setResultadoCert] = useState<{ ok: boolean; msg: string } | null>(null)
   const [atualizandoNumeracao, setAtualizandoNumeracao] = useState<'nfe' | 'nfce' | null>(null)
   const [resultadoNumeracao, setResultadoNumeracao] = useState<{ tipo: 'nfe' | 'nfce'; ok: boolean; msg: string } | null>(null)
+  const [enviandoCsc, setEnviandoCsc] = useState(false)
+  const [resultadoCsc, setResultadoCsc] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const editando = !!empresaEditando
 
@@ -548,6 +550,33 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
       setResultadoNumeracao({ tipo, ok: false, msg: e?.message ?? 'Erro ao atualizar numeração' })
     } finally {
       setAtualizandoNumeracao(null)
+    }
+  }
+
+  // O CSC/idCSC precisa estar cadastrado do lado da Brasil NFe, senão a
+  // SEFAZ rejeita toda NFC-e ("Codigo identificador do CSC no QR-Code nao
+  // cadastrado na SEFAZ"). Salvar aqui só grava no nosso banco — este botão
+  // é o que empurra pra eles. Envia o CSC do ambiente selecionado acima.
+  async function enviarCscBrasilNFe() {
+    if (!empresaEditando?.id) return
+    setEnviandoCsc(true)
+    setResultadoCsc(null)
+    try {
+      const resp = await fetch('/api/fiscal/brasilnfe/atualizar-csc', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ empresaId: empresaEditando.id, ambiente: form.ambiente_fiscal }),
+      })
+      const data = await resp.json()
+      setResultadoCsc({
+        ok: data.ok,
+        msg: data.ok
+          ? `CSC de ${form.ambiente_fiscal === 'homologacao' ? 'homologação' : 'produção'} enviado para a Brasil NFe.`
+          : data.erro,
+      })
+    } catch (e: any) {
+      setResultadoCsc({ ok: false, msg: e?.message ?? 'Erro ao enviar o CSC' })
+    } finally {
+      setEnviandoCsc(false)
     }
   }
 
@@ -982,6 +1011,26 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
                   <input value={form.id_csc_nfce} onChange={e => set('id_csc_nfce', e.target.value)} className={`${INPUT} font-mono text-xs`} placeholder="000001" />
                 </Field>
               </div>
+
+              {editando && empresaEditando?.nfe_config?.provider === 'brasilnfe' && (
+                <div className="-mt-2">
+                  <p className="text-[11px] text-slate-500 mb-1.5">
+                    O CSC entra no QR-Code da NFC-e e precisa estar cadastrado na Brasil NFe — sem isso a SEFAZ
+                    rejeita toda NFC-e. Salve a empresa primeiro e depois envie. Ele é diferente para homologação
+                    e produção: envia o do ambiente selecionado acima ({form.ambiente_fiscal === 'homologacao' ? 'homologação' : 'produção'}).
+                  </p>
+                  <button type="button" disabled={enviandoCsc || !form.csc_nfce || !form.id_csc_nfce}
+                    onClick={enviarCscBrasilNFe}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                    {enviandoCsc ? 'Enviando...' : 'Enviar CSC para a Brasil NFe'}
+                  </button>
+                  {resultadoCsc && (
+                    <p className={`text-[11px] mt-1.5 ${resultadoCsc.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {resultadoCsc.ok ? '✓ ' : '⚠ '}{resultadoCsc.msg}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <Field label="Natureza de operação padrão">
                 <input value={form.natureza_operacao} onChange={e => set('natureza_operacao', e.target.value)} className={INPUT} />

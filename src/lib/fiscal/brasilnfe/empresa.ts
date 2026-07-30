@@ -183,6 +183,62 @@ export async function alterarCertificado(
   return { ok: true, expirado: !!json?.Expirado, dtExpiracao: json?.DtExpiracao ?? null }
 }
 
+// O CSC (Código de Segurança do Contribuinte) e seu id são emitidos pela
+// SEFAZ do estado, por CNPJ e por ambiente, e entram no QR-Code da NFC-e.
+// Sem eles cadastrados na Brasil NFe, toda NFC-e é rejeitada com "Codigo
+// identificador do CSC no QR-Code nao cadastrado na SEFAZ" — confirmado em
+// homologação. A Brasil NFe guarda isso em Configuracao.NFCe (campos
+// IdCSCProducao/CSCProducao/IdCSCHomologacao/CSCHomologacao) e o único jeito
+// de gravar é reenviando o cadastro inteiro por EditarEmpresa — por isso
+// buscamos o cadastro atual primeiro e só sobrescrevemos o bloco de NFC-e,
+// pra não zerar nenhum outro campo já configurado.
+export type ResultadoCsc =
+  | { ok: true }
+  | { ok: false; erro: string }
+
+export async function atualizarCscNfce(
+  userToken: string,
+  empresaToken: string,
+  params: { ambiente: 'producao' | 'homologacao'; idCsc: string; csc: string }
+): Promise<ResultadoCsc> {
+  const atual = await brasilNFeRequest(
+    { token: empresaToken, userToken, ambiente: params.ambiente },
+    '/services/empresa/BuscarEmpresa',
+    {}
+  )
+  let cadastro: any
+  try {
+    cadastro = atual.text ? JSON.parse(atual.text) : {}
+  } catch {
+    throw new FiscalProviderError(`Resposta inesperada da Brasil NFe ao buscar a empresa (status ${atual.status}): ${atual.text.slice(0, 300)}`, 'resposta_invalida')
+  }
+  if (!cadastro?.CNPJ) {
+    return { ok: false, erro: 'Não foi possível ler o cadastro atual da empresa na Brasil NFe — confirme o token da empresa e o UserToken da conta.' }
+  }
+
+  const nfceAtual = cadastro?.Configuracao?.NFCe ?? {}
+  const nfce = params.ambiente === 'homologacao'
+    ? { ...nfceAtual, IdCSCHomologacao: params.idCsc, CSCHomologacao: params.csc }
+    : { ...nfceAtual, IdCSCProducao: params.idCsc, CSCProducao: params.csc }
+
+  const { status, text } = await brasilNFeRequest(
+    { token: empresaToken, userToken, ambiente: params.ambiente },
+    '/services/empresa/EditarEmpresa',
+    { ...cadastro, Configuracao: { ...(cadastro.Configuracao ?? {}), NFCe: nfce } }
+  )
+  let json: any
+  try {
+    json = text ? JSON.parse(text) : {}
+  } catch {
+    throw new FiscalProviderError(`Resposta inesperada da Brasil NFe ao gravar o CSC (status ${status}): ${text.slice(0, 300)}`, 'resposta_invalida')
+  }
+  if (status >= 400 || json?.status === false || json?.Error) {
+    const erro = json?.Error ?? (Array.isArray(json?.Avisos) ? json.Avisos.join('; ') : null) ?? `Erro ${status} ao gravar o CSC na Brasil NFe`
+    return { ok: false, erro }
+  }
+  return { ok: true }
+}
+
 export type ResultadoNumeracao =
   | { ok: true }
   | { ok: false; erro: string }

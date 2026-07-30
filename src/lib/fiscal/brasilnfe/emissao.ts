@@ -10,11 +10,29 @@ import { FiscalProviderError, type EmissaoNFCeInput, type EmissaoNFCeResultado, 
 // o que tende a ser correto pra Simples Nacional/CSOSN, mas não foi
 // validado contra um regime de Lucro Presumido/Real real).
 
+// Campos obrigatórios confirmados um a um contra a API real em homologação
+// (2026-07), porque a doc em prosa não lista o que é obrigatório:
+// - Finalidade (1 Normal): sem ele → "A Finalidade da NF informada é inválida."
+// - IdentificadorInterno: sem ele → "Identificador Interno não foi enviado
+//   (A verificação do identificador interno esta ativada)". Serve de chave de
+//   idempotência do lado deles; usamos o id da venda.
+// - ValorTotal por produto: sem ele o desconto é comparado contra zero
+//   ("O valor de desconto do produto é maior que o valor total").
+// - PIS e COFINS por produto: sem eles → "Os dados de impostos PIS/COFINS do
+//   produto não foi informado."
+// Não enviamos alíquota de ICMS/PIS/COFINS: a API aceitou CST 00 e CSOSN 102
+// sem alíquota, e o cadastro de produto não obriga esses percentuais hoje.
 function montarPayload(input: EmissaoNFCeInput, ambiente: 'producao' | 'homologacao') {
   return {
     ModeloDocumento: 65,
     TipoAmbiente: tipoAmbiente(ambiente),
-    DataEmissao: new Date().toISOString(),
+    Finalidade: 1,
+    IdentificadorInterno: input.referencia,
+    // DataEmissao é omitida de propósito: a Brasil NFe estampa a hora local
+    // dela. Enviar `new Date().toISOString()` (UTC) fazia a SEFAZ rejeitar
+    // com "Data-Hora de Emissao posterior ao horario de recebimento" —
+    // o horário de Brasília vai 3h atrás do UTC, então toda emissão parecia
+    // estar no futuro. Confirmado em homologação: sem o campo, passa.
     NaturezaOperacao: input.naturezaOperacao,
     ConsumidorFinal: true,
     IndicadorPresenca: 1, // operação presencial — padrão do PDV de balcão
@@ -33,8 +51,14 @@ function montarPayload(input: EmissaoNFCeInput, ambiente: 'producao' | 'homologa
       UnidadeComercial: it.unidade,
       Quantidade: it.quantidade,
       ValorUnitario: it.valorUnitario,
+      // Valor bruto do item; o desconto vai separado (é assim que a API
+      // valida um contra o outro).
+      ValorTotal: Number((it.quantidade * it.valorUnitario).toFixed(2)),
+      ...(it.valorDesconto > 0 ? { ValorDesconto: it.valorDesconto } : {}),
       Imposto: {
         ICMS: { CodSituacaoTributaria: it.icmsSituacaoTributaria },
+        PIS: { CodSituacaoTributaria: it.pisCst },
+        COFINS: { CodSituacaoTributaria: it.cofinsCst },
       },
     })),
     Pagamentos: input.pagamentos.map(p => ({

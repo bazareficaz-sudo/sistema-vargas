@@ -28,7 +28,13 @@ export type EmissaoNFCeItem = {
   valorUnitario: number
   valorDesconto: number
   icmsOrigem: string
+  // CST (regime normal) ou CSOSN (Simples Nacional) — quem monta o input
+  // resolve qual dos dois vale a partir do CRT da empresa emitente, porque
+  // enviar um no lugar do outro é rejeitado ("CST inválido para empresa no
+  // regime normal" / "CSOSN inválido para empresa no simples nacional").
   icmsSituacaoTributaria: string
+  pisCst: string
+  cofinsCst: string
 }
 
 export type EmissaoNFCePagamento = {
