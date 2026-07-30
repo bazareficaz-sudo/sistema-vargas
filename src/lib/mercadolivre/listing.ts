@@ -47,6 +47,7 @@ export type AtributoML = {
   id: string
   name: string
   obrigatorio: boolean
+  condicional?: boolean
   tipo: string // string | number | boolean | list ...
   valores: { id: string; name: string }[]
 }
@@ -54,13 +55,24 @@ export type AtributoML = {
 export async function getAtributos(ctx: CallCtx, categoryId: string): Promise<AtributoML[]> {
   const data = await mlGet(`/categories/${categoryId}/attributes`, {}, ctx.canal.accessToken)
   const lista: any[] = data ?? []
-  return lista.map(a => ({
-    id: a.id,
-    name: a.name ?? a.id,
-    obrigatorio: !!a.tags?.required,
-    tipo: a.value_type ?? 'string',
-    valores: (a.values ?? []).map((v: any) => ({ id: v.id, name: v.name })),
-  }))
+  return lista
+    // A categoria devolve TUDO que o Mercado Livre conhece, inclusive campo
+    // que o próprio formulário deles não mostra. Medido na categoria
+    // "Extensores de Torneiras": 54 atributos, dos quais 45 `hidden` e 34
+    // `read_only` — "IEPS", "Chave do produto", "Transportabilidade Hazmat".
+    // Enchiam a tela e não podiam nem ser enviados. Sobram 9 de verdade.
+    .filter(a => !a.tags?.hidden && !a.tags?.read_only)
+    .map(a => ({
+      id: a.id,
+      name: a.name ?? a.id,
+      obrigatorio: !!(a.tags?.required || a.tags?.catalog_required),
+      // "conditional_required" é o que o ML cobra só em certas situações —
+      // é daí que vinham as recusas citando atributo que não estava marcado
+      // como obrigatório na tela.
+      condicional: !!a.tags?.conditional_required,
+      tipo: a.value_type ?? 'string',
+      valores: (a.values ?? []).map((v: any) => ({ id: v.id, name: v.name })),
+    }))
 }
 
 export type TipoAnuncioML = { id: string; name: string }

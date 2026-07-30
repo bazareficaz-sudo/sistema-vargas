@@ -6,7 +6,13 @@ import { formatarTituloAnuncio } from '@/lib/texto/titulo'
 import { fmt } from './utils'
 
 type Categoria = { id: string; name: string }
-type Atributo = { id: string; name: string; obrigatorio: boolean; tipo: string; valores: { id: string; name: string }[] }
+type Atributo = {
+  id: string; name: string; obrigatorio: boolean; tipo: string
+  // O ML marca alguns como exigidos só em certas situações — tratamos junto
+  // com os obrigatórios, porque é deles que vinham as recusas surpresa.
+  condicional?: boolean
+  valores: { id: string; name: string }[]
+}
 type TipoAnuncio = { id: string; name: string }
 
 export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, onClose, onCriado }: {
@@ -38,6 +44,8 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [carregandoCategorias, setCarregandoCategorias] = useState(false)
   const [categoriaEhFolha, setCategoriaEhFolha] = useState(false)
   const categoriaFolha = categoriaEhFolha && caminhoCategoria.length > 0 ? caminhoCategoria[caminhoCategoria.length - 1] : null
+  // Obrigatório inclui o "condicional" do ML — é o que ele cobra em certas
+  // situações e que aparecia como recusa surpresa na hora de publicar.
   const [origemCategoria, setOrigemCategoria] = useState<'sugerida' | 'importada' | 'replicada' | null>(null)
   const [origem, setOrigem] = useState<any | null>(null)
 
@@ -45,6 +53,12 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [atributosCarregados, setAtributosCarregados] = useState(false)
   const [valoresAtributos, setValoresAtributos] = useState<Record<string, string>>({})
   const [carregandoAtributos, setCarregandoAtributos] = useState(false)
+  // Atributos opcionais começam recolhidos: mesmo depois de tirar os ocultos,
+  // sobra uma lista longa e só os obrigatórios travam a publicação.
+  const [verTodosAtributos, setVerTodosAtributos] = useState(false)
+  const atributosObrigatorios = atributos.filter(a => a.obrigatorio || a.condicional)
+  const atributosOpcionais = atributos.filter(a => !a.obrigatorio && !a.condicional)
+  const atributosVisiveis = verTodosAtributos ? [...atributosObrigatorios, ...atributosOpcionais] : atributosObrigatorios
   const [tiposAnuncio, setTiposAnuncio] = useState<TipoAnuncio[]>([])
   const [listingTypeId, setListingTypeId] = useState('')
 
@@ -429,6 +443,21 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
     }
   }
 
+  // A categoria resolvida automaticamente vem sem os selects de navegação
+  // (o ML não devolve os ancestrais). Isso deixava o operador preso na
+  // sugestão. Aqui volta pro modo manual, do primeiro nível.
+  function trocarCategoria() {
+    setCaminhoCategoria([])
+    setOpcoesPorNivel([])
+    setCategoriaEhFolha(false)
+    setOrigemCategoria(null)
+    setAtributos([])
+    setAtributosCarregados(false)
+    setValoresAtributos({})
+    setVerTodosAtributos(false)
+    carregarNivelCategoria(undefined, 0)
+  }
+
   async function carregarNivelCategoria(parentId: string | undefined, nivel: number) {
     if (!canalAtivo) return
     setCarregandoCategorias(true)
@@ -679,7 +708,11 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                     </div>
                     {carregandoCategorias && <p className="text-xs text-gray-400 mt-1">Carregando...</p>}
                     {categoriaFolha && (
-                      <p className="text-xs text-emerald-600 mt-1">✓ {caminhoCategoria.map(c => c.name).join(' › ')}</p>
+                      <p className="text-xs text-emerald-600 mt-1">
+                        ✓ {caminhoCategoria.map(c => c.name).join(' › ')}
+                        <button type="button" onClick={trocarCategoria}
+                          className="ml-2 text-blue-600 hover:text-blue-800 font-medium">trocar categoria</button>
+                      </p>
                     )}
                     {categoriaFolha && origemCategoria === 'sugerida' && (
                       <p className="text-xs text-gray-400 mt-0.5">✨ sugerida pelo próprio Mercado Livre com base no título — confira antes de publicar</p>
@@ -690,6 +723,30 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                     {categoriaFolha && origemCategoria === 'importada' && (
                       <p className="text-xs text-gray-400 mt-0.5">📥 veio do anúncio importado — confira antes de publicar</p>
                     )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Título do anúncio *</label>
+                    <input value={titulo} onChange={e => setTitulo(e.target.value)} maxLength={60}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                    <p className="text-xs text-gray-400 mt-1">{titulo.length}/60 caracteres</p>
+                    {titulosSugeridos.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-violet-700 font-medium">✨ Sugestões de título — clique pra usar:</p>
+                        {titulosSugeridos.map(t => (
+                          <button key={t} type="button" onClick={() => setTitulo(t.slice(0, 60))}
+                            className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${t === titulo ? 'border-violet-400 bg-violet-50 text-violet-900' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50 text-gray-700'}`}>
+                            {t}
+                            <span className="text-xs text-gray-400 ml-2">{t.length} car.</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Descrição</label>
+                    <textarea value={descricao} onChange={e => setDescricao(e.target.value)} rows={4}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                   </div>
 
                   {carregandoAtributos && <p className="text-xs text-gray-400">Carregando atributos da categoria...</p>}
@@ -707,10 +764,11 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                         </button>
                       </div>
                       <p className="text-[11px] text-gray-400 -mt-1 mb-2">
-                        O Mercado Livre às vezes exige atributos que nem aparecem como obrigatórios aqui — a IA tenta preencher o máximo possível pra reduzir erro na publicação. Confira antes de publicar.
+                        Só os que o Mercado Livre realmente aceita nesta categoria — os campos internos dele (impostos, chaves fiscais, dados de embalagem) ficam de fora.
+                        Os marcados com <span className="text-red-500">*</span> travam a publicação; o resto ajuda a aparecer na busca.
                       </p>
                       <div className="space-y-3">
-                        {atributos.map(a => (
+                        {atributosVisiveis.map(a => (
                           <div key={a.id}>
                             <label className="block text-xs text-gray-600 mb-1">
                               {a.name} {a.obrigatorio && <span className="text-red-500">*</span>}
@@ -732,6 +790,14 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                           </div>
                         ))}
                       </div>
+                      {atributosOpcionais.length > 0 && (
+                        <button type="button" onClick={() => setVerTodosAtributos(v => !v)}
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2">
+                          {verTodosAtributos
+                            ? '− Esconder atributos opcionais'
+                            : `+ Mostrar mais ${atributosOpcionais.length} atributo(s) opcional(is)`}
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -766,30 +832,6 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                       <p className="text-xs text-indigo-700 mt-1">Preço e estoque continuam sendo os do cadastro — confira antes de publicar.</p>
                     </div>
                   )}
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Título do anúncio *</label>
-                    <input value={titulo} onChange={e => setTitulo(e.target.value)} maxLength={60}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-                    <p className="text-xs text-gray-400 mt-1">{titulo.length}/60 caracteres</p>
-                    {titulosSugeridos.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        <p className="text-xs text-violet-700 font-medium">✨ Sugestões de título — clique pra usar:</p>
-                        {titulosSugeridos.map(t => (
-                          <button key={t} type="button" onClick={() => setTitulo(t.slice(0, 60))}
-                            className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${t === titulo ? 'border-violet-400 bg-violet-50 text-violet-900' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50 text-gray-700'}`}>
-                            {t}
-                            <span className="text-xs text-gray-400 ml-2">{t.length} car.</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Descrição</label>
-                    <textarea value={descricao} onChange={e => setDescricao(e.target.value)} rows={4}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-                  </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
