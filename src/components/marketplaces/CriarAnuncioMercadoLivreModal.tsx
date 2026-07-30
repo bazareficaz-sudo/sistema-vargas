@@ -9,10 +9,12 @@ type Categoria = { id: string; name: string }
 type Atributo = { id: string; name: string; obrigatorio: boolean; tipo: string; valores: { id: string; name: string }[] }
 type TipoAnuncio = { id: string; name: string }
 
-export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId, produtoIdInicial, onClose, onCriado }: {
+export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, onClose, onCriado }: {
   canal?: { id: string; nome: string }
   canais?: { id: string; nome: string }[]
   empresaId: string; produtoIdInicial?: string
+  // Anúncio já publicado em outro canal, usado como base (replicar).
+  origemAnuncioId?: string
   onClose: () => void
   onCriado: () => void
 }) {
@@ -36,7 +38,8 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [carregandoCategorias, setCarregandoCategorias] = useState(false)
   const [categoriaEhFolha, setCategoriaEhFolha] = useState(false)
   const categoriaFolha = categoriaEhFolha && caminhoCategoria.length > 0 ? caminhoCategoria[caminhoCategoria.length - 1] : null
-  const [origemCategoria, setOrigemCategoria] = useState<'sugerida' | 'importada' | null>(null)
+  const [origemCategoria, setOrigemCategoria] = useState<'sugerida' | 'importada' | 'replicada' | null>(null)
+  const [origem, setOrigem] = useState<any | null>(null)
 
   const [atributos, setAtributos] = useState<Atributo[]>([])
   const [atributosCarregados, setAtributosCarregados] = useState(false)
@@ -310,6 +313,49 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
     if (!produto || !canalAtivo) return
     let ativo = true
     ;(async () => {
+      // Replicar de outro canal: o conteúdo já trabalhado vence a sugestão
+      // automática — foi pra não refazer esse trabalho que o operador clicou.
+      if (origemAnuncioId) {
+        try {
+          const respOrigem = await fetch(`/api/marketplaces/anuncios/${origemAnuncioId}/replicar`)
+          const dOrigem = await respOrigem.json()
+          if (!ativo) return
+          if (dOrigem.ok) {
+            const o = dOrigem.origem
+            setOrigem(o)
+            if (o.titulo) setTitulo(String(o.titulo).slice(0, 60))
+            if (o.descricao) setDescricao(o.descricao)
+
+            // Categoria e atributos só se aproveitam dentro do próprio ML —
+            // a taxonomia da Shopee não corresponde à do Mercado Livre.
+            if (o.plataforma === 'mercadolivre' && o.categoriaExterna) {
+              setOrigemCategoria('replicada')
+              const atributosCategoria = await resolverCaminhoCategoria(String(o.categoriaExterna))
+              if (!ativo) return
+              if (atributosCategoria) {
+                const porId = new Map<string, any>(atributosCategoria.map((a: any) => [a.id, a]))
+                const aplicar: Record<string, string> = {}
+                for (const at of (o.atributos ?? [])) {
+                  const def = porId.get(at.id)
+                  if (!def) continue // atributo não existe nesta categoria
+                  if (Array.isArray(def.valores) && def.valores.length > 0) {
+                    // Lista fechada: só aceita valor que exista nas opções.
+                    const match = def.valores.find((v: any) => String(v.name).toLowerCase() === String(at.valor).toLowerCase())
+                    if (match) aplicar[at.id] = match.name
+                  } else {
+                    aplicar[at.id] = at.valor
+                  }
+                }
+                if (Object.keys(aplicar).length > 0) setValoresAtributos(prev => ({ ...prev, ...aplicar }))
+              }
+              return
+            }
+          }
+        } catch {
+          // origem indisponível — segue com a sugestão normal
+        }
+      }
+
       try {
         const resp = await fetch('/api/marketplace/mercadolivre/categoria-sugerida', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -334,8 +380,11 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
 
   // Reconstrói o caminho nível a nível a partir de uma categoria-folha
   // sugerida (o domain_discovery só devolve o id final, não o caminho).
-  async function resolverCaminhoCategoria(categoryId: string, caminho?: { id: string; name: string }[]) {
-    if (!canalAtivo) return
+  // Devolve a lista de atributos da categoria resolvida (ou null) — quem
+  // replica um anúncio precisa dela pra só aplicar atributo que existe mesmo
+  // nesta categoria.
+  async function resolverCaminhoCategoria(categoryId: string, caminho?: { id: string; name: string }[]): Promise<any[] | null> {
+    if (!canalAtivo) return null
     setCarregandoCategorias(true)
     try {
       // Sem endpoint de "ancestrais" nesta integração ainda — quem chama
@@ -348,7 +397,7 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
         body: JSON.stringify({ canalId: canalAtivo.id, categoryId }),
       })
       const nomeData = await nomeResp.json()
-      if (!nomeData.ok) { carregarNivelCategoria(undefined, 0); return }
+      if (!nomeData.ok) { carregarNivelCategoria(undefined, 0); return null }
       setCaminhoCategoria(caminho?.length ? caminho : [{ id: categoryId, name: categoryId }])
       setOpcoesPorNivel([])
       setCategoriaEhFolha(true)
@@ -356,6 +405,7 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
       setTiposAnuncio(nomeData.tiposAnuncio ?? [])
       setAtributosCarregados(true)
       if ((nomeData.tiposAnuncio ?? []).length > 0) setListingTypeId(nomeData.tiposAnuncio[0].id)
+      return nomeData.atributos ?? []
     } finally {
       setCarregandoCategorias(false)
     }
@@ -616,6 +666,9 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                     {categoriaFolha && origemCategoria === 'sugerida' && (
                       <p className="text-xs text-gray-400 mt-0.5">✨ sugerida pelo próprio Mercado Livre com base no título — confira antes de publicar</p>
                     )}
+                    {categoriaFolha && origemCategoria === 'replicada' && (
+                      <p className="text-xs text-gray-400 mt-0.5">⧉ mesma categoria do anúncio de origem</p>
+                    )}
                     {categoriaFolha && origemCategoria === 'importada' && (
                       <p className="text-xs text-gray-400 mt-0.5">📥 veio do anúncio importado — confira antes de publicar</p>
                     )}
@@ -682,6 +735,19 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                       </select>
                     </div>
                   </div>
+
+                  {origem && (
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
+                      <p className="text-sm text-indigo-900 font-medium">⧉ Replicando o anúncio de <strong>{origem.canalNome}</strong></p>
+                      <p className="text-xs text-indigo-700 mt-1">
+                        Título e descrição vieram de lá.{' '}
+                        {origem.plataforma === 'mercadolivre'
+                          ? 'A categoria e os atributos compatíveis também foram reaproveitados.'
+                          : 'A categoria e os atributos NÃO vieram: o anúncio de origem é da Shopee e as categorias das duas plataformas não se correspondem.'}
+                      </p>
+                      <p className="text-xs text-indigo-700 mt-1">Preço e estoque continuam sendo os do cadastro — confira antes de publicar.</p>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Título do anúncio *</label>

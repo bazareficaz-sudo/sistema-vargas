@@ -93,6 +93,17 @@ function montarResolucao(arvore: CategoriaShopeeFlat[], folhaId: number): Caminh
   return { opcoesPorNivel, caminho, resolvidoAteFolha: true }
 }
 
+// Monta o caminho completo (e as opções de cada nível, pros selects da tela)
+// a partir de um category_id já conhecido. Usado ao replicar um anúncio de
+// outra conta Shopee: o id da categoria é da plataforma, não da conta, então
+// vale igual nas duas — não precisa adivinhar de novo.
+export async function resolverCaminhoPorCategoria(ctx: CallCtx, categoryId: number): Promise<CaminhoCategoriaResolvido | null> {
+  const arvore = await buscarArvoreCompleta(ctx)
+  const alvo = arvore.find(c => c.category_id === categoryId)
+  if (!alvo) return null
+  return montarResolucao(arvore, categoryId)
+}
+
 // Ferramenta oficial da Shopee pra sugerir categoria a partir do nome do
 // produto (aprendizado deles em cima de milhões de anúncios reais — muito
 // mais confiável que qualquer heurística nossa). Usada como 1º fallback,

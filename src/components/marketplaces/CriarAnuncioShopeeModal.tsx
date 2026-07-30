@@ -13,10 +13,12 @@ type Atributo = {
 type Marca = { brand_id: number; original_brand_name: string }
 type CanalLogistica = { logistic_id: number; logistic_name: string; enabled: boolean }
 
-export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, produtoIdInicial, onClose, onCriado }: {
+export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, onClose, onCriado }: {
   canal?: { id: string; nome: string }
   canais?: { id: string; nome: string }[]
   empresaId: string; produtoIdInicial?: string
+  // Anúncio já publicado em outro canal, usado como base (replicar).
+  origemAnuncioId?: string
   onClose: () => void
   onCriado: () => void
 }) {
@@ -68,7 +70,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
-  const [origemCategoria, setOrigemCategoria] = useState<'recomendada' | 'lembrada' | 'deduzida' | null>(null)
+  const [origemCategoria, setOrigemCategoria] = useState<'recomendada' | 'lembrada' | 'deduzida' | 'replicada' | null>(null)
+  const [origem, setOrigem] = useState<any | null>(null)
+  const [importandoImagens, setImportandoImagens] = useState(false)
 
   // Carrega o produto pré-selecionado (entrada a partir da tela de Produtos)
   useEffect(() => {
@@ -164,6 +168,26 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     setUrlImgInput(''); setAdicionandoUrlImg(false); setUploadandoImg(false)
   }
 
+  // Traz pro cadastro do produto as imagens que só existem no anúncio de
+  // origem (comparando pela URL, pra não duplicar as que já estão aqui).
+  async function importarImagensDaOrigem() {
+    if (!produto || !origem?.imagens?.length) return
+    setImportandoImagens(true); setErroImg('')
+    const sb = createClient()
+    const jaTem = new Set(imagens.map(i => i.url))
+    const novas = (origem.imagens as string[]).filter(u => !jaTem.has(u))
+    let ordem = imagens.length
+    for (const url of novas) {
+      const { data: img, error } = await sb.from('produto_imagens')
+        .insert({ empresa_id: empresaId, produto_id: produto.id, url, ordem, principal: ordem === 0 })
+        .select('id, url, principal, ordem').single()
+      if (error) { setErroImg('Erro ao importar imagem: ' + error.message); break }
+      setImagens(prev => [...prev, img])
+      ordem++
+    }
+    setImportandoImagens(false)
+  }
+
   async function definirImagemPrincipal(id: string) {
     if (!produto) return
     const sb = createClient()
@@ -202,7 +226,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     if (!produto || !canalAtivo) return
     let ativo = true
 
-    async function aplicarCaminho(data: any, origem: 'recomendada' | 'lembrada' | 'deduzida') {
+    async function aplicarCaminho(data: any, origem: 'recomendada' | 'lembrada' | 'deduzida' | 'replicada') {
       setOrigemCategoria(origem)
       setOpcoesPorNivel(data.opcoesPorNivel)
       setCaminhoCategoria(data.caminho)
@@ -214,6 +238,44 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     }
 
     ;(async () => {
+      // Replicar de outro canal: o conteúdo já trabalhado da origem vence
+      // qualquer pré-seleção automática — foi justamente pra não refazer esse
+      // trabalho que o operador clicou em replicar.
+      if (origemAnuncioId) {
+        try {
+          const respOrigem = await fetch(`/api/marketplaces/anuncios/${origemAnuncioId}/replicar`)
+          const dOrigem = await respOrigem.json()
+          if (!ativo) return
+          if (dOrigem.ok) {
+            const o = dOrigem.origem
+            setOrigem(o)
+            if (o.titulo) setTitulo(String(o.titulo).slice(0, 120))
+            if (o.descricao) setDescricao(o.descricao)
+            if (o.pesoKg) setPeso(String(o.pesoKg))
+            if (o.comprimentoCm) setComprimento(String(o.comprimentoCm))
+            if (o.larguraCm) setLargura(String(o.larguraCm))
+            if (o.alturaCm) setAltura(String(o.alturaCm))
+
+            // O category_id é da plataforma, não da conta — vale igual na
+            // outra loja Shopee. Vindo do Mercado Livre não serve pra nada.
+            if (o.plataforma === 'shopee' && o.categoriaExterna) {
+              const respCat = await fetch('/api/marketplace/shopee/categoria-caminho', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ canalId: canalAtivo.id, categoryId: o.categoriaExterna }),
+              })
+              const dCat = await respCat.json()
+              if (!ativo) return
+              if (dCat.ok && dCat.encontrado && dCat.caminho?.length > 0) {
+                await aplicarCaminho(dCat, 'replicada')
+                return
+              }
+            }
+          }
+        } catch {
+          // origem indisponível — segue com a pré-seleção normal
+        }
+      }
+
       try {
         const respRec = await fetch('/api/marketplace/shopee/categoria-recomendada', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -537,6 +599,25 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                 </div>
               )}
 
+              {origem && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
+                  <p className="text-sm text-indigo-900 font-medium">⧉ Replicando o anúncio de <strong>{origem.canalNome}</strong></p>
+                  <p className="text-xs text-indigo-700 mt-1">
+                    Título, descrição e medidas vieram de lá.{' '}
+                    {origem.plataforma === 'shopee'
+                      ? 'A categoria também foi reaproveitada — os atributos precisam ser preenchidos aqui (o Shopee não devolve os atributos do anúncio na sincronização).'
+                      : 'A categoria e os atributos NÃO vieram: o anúncio de origem é do Mercado Livre e as categorias das duas plataformas não se correspondem.'}
+                  </p>
+                  <p className="text-xs text-indigo-700 mt-1">Preço e estoque continuam sendo os do cadastro — confira antes de publicar.</p>
+                  {origem.imagens?.length > 0 && origem.imagens.some((u: string) => !imagens.some(i => i.url === u)) && (
+                    <button type="button" onClick={importarImagensDaOrigem} disabled={importandoImagens}
+                      className="mt-2 text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg">
+                      {importandoImagens ? 'Importando...' : `Importar ${origem.imagens.filter((u: string) => !imagens.some(i => i.url === u)).length} imagem(ns) do anúncio de origem`}
+                    </button>
+                  )}
+                </div>
+              )}
+
               {produto && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 mb-2">Imagens do anúncio ({imagens.length}/9) *</p>
@@ -615,6 +696,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                     )}
                     {categoriaFolha && origemCategoria === 'lembrada' && (
                       <p className="text-xs text-gray-400 mt-0.5">📌 pré-selecionada com base num anúncio anterior — confira antes de publicar</p>
+                    )}
+                    {categoriaFolha && origemCategoria === 'replicada' && (
+                      <p className="text-xs text-gray-400 mt-0.5">⧉ mesma categoria do anúncio de origem</p>
                     )}
                     {categoriaFolha && origemCategoria === 'deduzida' && (
                       <p className="text-xs text-gray-400 mt-0.5">🔎 sugerida por palavras-chave do produto — confira antes de publicar</p>

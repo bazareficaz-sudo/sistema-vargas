@@ -64,7 +64,9 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
 
   const [filtroStatus, setFiltroStatus] = useState('')
 
-  const [criarAberto, setCriarAberto] = useState<{ produtoId: string; canal: { id: string; nome: string; plataforma: string } } | null>(null)
+  // origemAnuncioId presente = está replicando um anúncio já trabalhado.
+  const [criarAberto, setCriarAberto] = useState<{ produtoId: string; canal: { id: string; nome: string; plataforma: string }; origemAnuncioId?: string } | null>(null)
+  const [escolherOrigem, setEscolherOrigem] = useState<{ produtoId: string; canal: { id: string; nome: string; plataforma: string } } | null>(null)
   const [selecionarAberto, setSelecionarAberto] = useState<{ canal: { id: string; nome: string; plataforma: string } } | null>(null)
   const [mapearAberto, setMapearAberto] = useState<{ anuncio: any; canal: any } | null>(null)
   const [precoAberto, setPrecoAberto] = useState<{ anuncio: any; canal: any } | null>(null)
@@ -294,6 +296,21 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
                         <>
                           <button onClick={() => setCriarAberto({ produtoId: detalhe.produto.id, canal: { id: c.canalId, nome: c.canalNome, plataforma: c.plataforma } })}
                             className="text-xs px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">+ Criar anúncio</button>
+                          {detalhe.anuncios.length > 0 && (
+                            <button
+                              onClick={() => {
+                                const canalDestino = { id: c.canalId, nome: c.canalNome, plataforma: c.plataforma }
+                                // Com um anúncio só não faz sentido perguntar de qual copiar.
+                                if (detalhe.anuncios.length === 1) {
+                                  setCriarAberto({ produtoId: detalhe.produto.id, canal: canalDestino, origemAnuncioId: detalhe.anuncios[0].id })
+                                } else {
+                                  setEscolherOrigem({ produtoId: detalhe.produto.id, canal: canalDestino })
+                                }
+                              }}
+                              className="text-xs px-2.5 py-1.5 border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100">
+                              ⧉ Replicar anúncio
+                            </button>
+                          )}
                           <button onClick={() => setSelecionarAberto({ canal: { id: c.canalId, nome: c.canalNome, plataforma: c.plataforma } })}
                             className="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">Mapear existente</button>
                         </>
@@ -338,12 +355,38 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
       {/* Modais */}
       {criarAberto && criarAberto.canal.plataforma === 'shopee' && (
         <CriarAnuncioShopeeModal canal={{ id: criarAberto.canal.id, nome: criarAberto.canal.nome }} empresaId={empresaId}
-          produtoIdInicial={criarAberto.produtoId} onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
+          produtoIdInicial={criarAberto.produtoId} origemAnuncioId={criarAberto.origemAnuncioId}
+          onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
       )}
       {criarAberto && criarAberto.canal.plataforma === 'mercadolivre' && (
         <CriarAnuncioMercadoLivreModal canal={{ id: criarAberto.canal.id, nome: criarAberto.canal.nome }} empresaId={empresaId}
-          produtoIdInicial={criarAberto.produtoId} onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
+          produtoIdInicial={criarAberto.produtoId} origemAnuncioId={criarAberto.origemAnuncioId}
+          onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
       )}
+
+      {/* Escolha de qual anúncio servir de base, quando há mais de um */}
+      {escolherOrigem && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setEscolherOrigem(null)}>
+          <div className="bg-white rounded-xl max-w-lg w-full p-5" onClick={e => e.stopPropagation()}>
+            <p className="text-sm font-semibold text-gray-900">Replicar para {escolherOrigem.canal.nome}</p>
+            <p className="text-xs text-gray-500 mt-1 mb-3">De qual anúncio quer copiar o conteúdo?</p>
+            <div className="space-y-2">
+              {detalhe?.anuncios.map(a => (
+                <button key={a.id}
+                  onClick={() => { setCriarAberto({ produtoId: escolherOrigem.produtoId, canal: escolherOrigem.canal, origemAnuncioId: a.id }); setEscolherOrigem(null) }}
+                  className="w-full text-left px-3 py-2.5 border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50">
+                  <p className="text-sm text-gray-900">{a.titulo}</p>
+                  <p className="text-xs text-gray-400">{a.canalNome} ({a.plataforma})
+                    {a.plataforma === escolherOrigem.canal.plataforma ? ' · mesma plataforma: copia categoria também' : ' · plataforma diferente: só texto e imagens'}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setEscolherOrigem(null)} className="mt-4 text-xs text-gray-500 hover:underline">Cancelar</button>
+          </div>
+        </div>
+      )}
+
       {selecionarAberto && (
         <SelecionarAnuncioModal empresaId={empresaId} canal={selecionarAberto.canal}
           onClose={() => setSelecionarAberto(null)}
