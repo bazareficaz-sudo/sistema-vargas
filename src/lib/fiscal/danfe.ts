@@ -21,14 +21,39 @@ export type ResultadoDanfe = { ok: true } | { ok: false; erro: string }
 // bobina sair no tamanho certo em vez de espremida numa folha A4.
 export type FormatoPapel = 'a4' | 'bobina_80' | 'bobina_58'
 
-function cssDaPagina(formato: FormatoPapel): string {
-  if (formato === 'a4') return '@page { size: A4; margin: 10mm; }'
-  const largura = formato === 'bobina_80' ? '80mm' : '58mm'
+const MARGEM_BOBINA_MM = 2
+
+function larguraDoFormato(formato: FormatoPapel): number | null {
+  if (formato === 'bobina_80') return 80
+  if (formato === 'bobina_58') return 58
+  return null // A4
+}
+
+// Só a largura: a altura só dá pra saber depois que o conteúdo é medido na
+// janela (ver ajustarPaginaBobina).
+function cssLarguraBobina(larguraMm: number): string {
   return `
-    @page { size: ${largura} auto; margin: 2mm; }
-    html, body { width: ${largura}; margin: 0; padding: 0; }
+    html, body { width: ${larguraMm}mm; margin: 0; padding: 0; }
     body * { max-width: 100%; }
   `
+}
+
+// A regra `@page { size: 80mm auto }` NÃO existe: `size` aceita `auto` OU
+// medidas, nunca a mistura. Sendo inválida, o navegador descartava a regra
+// inteira e imprimia no papel padrão (A4) — a DANFE saía no topo e a
+// impressora ejetava ~20cm de papel em branco até o fim da "folha".
+// A altura então é medida do conteúdo já renderizado na largura da bobina
+// e escrita em milímetros (96px = 1in = 25,4mm).
+function ajustarPaginaBobina(janela: Window, larguraMm: number) {
+  const doc = janela.document
+  const alturaPx = Math.max(
+    doc.body?.scrollHeight ?? 0,
+    doc.documentElement?.scrollHeight ?? 0,
+  )
+  const alturaMm = Math.ceil(alturaPx * 25.4 / 96) + MARGEM_BOBINA_MM * 2
+  const style = doc.createElement('style')
+  style.textContent = `@page { size: ${larguraMm}mm ${alturaMm}mm; margin: ${MARGEM_BOBINA_MM}mm; }`
+  doc.head.appendChild(style)
 }
 
 function decodificarBase64(base64: string): string {
@@ -89,11 +114,19 @@ export function abrirDanfe(
 
   const janela = window.open('', '_blank')
   if (!janela) return { ok: false, erro: 'O navegador bloqueou a janela. Permita pop-ups para este site.' }
+  const larguraMm = larguraDoFormato(opcoes.formato ?? 'a4')
+
   janela.document.open()
   janela.document.write(conteudo)
   // Vai depois do conteúdo pra ganhar do CSS que a própria DANFE traz.
-  janela.document.write(`<style>${cssDaPagina(opcoes.formato ?? 'a4')}</style>`)
+  janela.document.write(`<style>${
+    larguraMm ? cssLarguraBobina(larguraMm) : '@page { size: A4; margin: 10mm; }'
+  }</style>`)
   janela.document.close()
+
+  // Precisa acontecer com o conteúdo já renderizado na largura final, senão
+  // a altura medida é a da largura errada.
+  const ajustarPagina = () => { if (larguraMm) ajustarPaginaBobina(janela, larguraMm) }
 
   if (opcoes.imprimir) {
     // Espera o layout/imagens (a DANFE tem QR-Code) antes de imprimir, senão
@@ -104,10 +137,15 @@ export function abrirDanfe(
     const imprimirUmaVez = () => {
       if (jaImprimiu) return
       jaImprimiu = true
-      try { janela.print() } catch { /* janela fechada pelo usuário */ }
+      try { ajustarPagina(); janela.print() } catch { /* janela fechada pelo usuário */ }
     }
     janela.onload = imprimirUmaVez
     setTimeout(imprimirUmaVez, 700)
+  } else {
+    // Só visualizando: ainda assim ajusta a página, senão um Ctrl+P na
+    // janela aberta cairia no papel padrão e ejetaria a folha inteira.
+    janela.onload = ajustarPagina
+    setTimeout(ajustarPagina, 700)
   }
   return { ok: true }
 }

@@ -74,15 +74,23 @@ const LARGURA_BOBINA: Record<'bobina_80' | 'bobina_58', number> = {
   bobina_58: 164,
 }
 
-// react-pdf exige altura fixa — não existe "papel contínuo". Estimar a altura
-// pelo conteúdo evita duas coisas ruins na térmica: cupom cortado no meio
-// (altura curta demais) e um palmo de papel em branco antes do corte (altura
-// fixa grande demais).
+// react-pdf exige altura fixa — não existe "papel contínuo". Os números abaixo
+// saem da soma dos estilos usados no layout de bobina (fonte 10pt ≈ 12pt de
+// linha), não de chute:
+//
+//   cabeçalho  padding 10 + nome 18 + CNPJ 10 + endereço 20 (2 linhas) +
+//              telefone 10 + título 21 + separador 13 + data 12 + cliente 12
+//   por item   marginTop 5 + nome 12 (24 quando quebra) + qtd/total 12
+//   rodapé     totais 98 + separador 9 + pagamento 24 + rodapé 28 + padding 10
+//
+// Errar pra menos é pior que errar pra mais: o fim do cupom vai pra uma
+// segunda página e a impressora avança a bobina duas vezes. Por isso o item
+// usa 34 (assume que um nome longo quebra em duas linhas de vez em quando).
 function alturaEstimadaBobina(qtdItens: number, temMensagem: boolean, temObs: boolean, temNfce: boolean) {
-  const cabecalho = 150
-  const porItem = 26
-  const rodape = 130
-  const extras = (temMensagem ? 40 : 0) + (temObs ? 34 : 0) + (temNfce ? 44 : 0)
+  const cabecalho = 135
+  const porItem = 34
+  const rodape = 170
+  const extras = (temMensagem ? 26 : 0) + (temObs ? 34 : 0) + (temNfce ? 32 : 0)
   return Math.max(320, cabecalho + qtdItens * porItem + rodape + extras)
 }
 
