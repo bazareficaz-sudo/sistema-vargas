@@ -83,8 +83,12 @@ function mapResultado(json: any): EmissaoNFCeResultado {
     numero: ret.Numero != null ? String(ret.Numero) : undefined,
     serie: ret.Serie != null ? String(ret.Serie) : undefined,
     protocolo: ret.NumeroProtocolo ?? undefined,
-    xmlUrl: base64ParaDataUrl(json?.Base64Xml, 'application/xml'),
-    danfeUrl: base64ParaDataUrl(json?.Base64File, 'application/pdf'),
+    // Só expõe XML/DANFE de nota autorizada. A Brasil NFe devolve Base64File
+    // mesmo quando a SEFAZ rejeita, e esse PDF sai com cara de cupom válido
+    // (inclusive com "Data de autorização") — guardar isso numa nota
+    // rejeitada faz o sistema parecer ter emitido o que não emitiu.
+    xmlUrl: ok ? base64ParaDataUrl(json?.Base64Xml, 'application/xml') : undefined,
+    danfeUrl: ok ? base64ParaDataUrl(json?.Base64File, 'application/pdf') : undefined,
     motivoRejeicao: !ok ? (ret.DsStatusRespostaSefaz ?? json?.Error ?? 'Rejeitado pela SEFAZ') : undefined,
     dadosBrutos: json,
   }
