@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { calcSaude, type SaudeConfig, type FaixaSaude, FAIXAS_PADRAO, CONFIG_PADRAO } from '@/lib/saude-venda'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
+import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 
 type Produto = {
   id: string; nome: string; sku: string; ean: string | null
@@ -523,6 +524,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             }
           }
         }
+        // Estoque do kit é um valor calculado e guardado (não ao vivo) —
+        // sem isso, kits que usam esse produto (venda ou devolução) ficam
+        // com estoque desatualizado até alguém recalcular manualmente.
+        await recalcularKitsQueUsam(sb, item.produto_id)
       }
 
       // Fiado

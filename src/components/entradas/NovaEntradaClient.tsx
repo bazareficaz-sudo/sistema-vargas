@@ -7,6 +7,7 @@ import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
+import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { gerarProximoSku } from '@/components/produtos/sku'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
@@ -539,6 +540,10 @@ export default function NovaEntradaClient({
             tipo: 'entrada_compra', quantidade: item.quantidade, estoqueAnterior: qtdAtual, estoqueNovo: qtdNova,
             motivo: `Entrada NF ${numeroNf || entrada.id.slice(0, 8)}`, referenciaTipo: 'entrada', referenciaId: entrada.id,
           })
+          // Estoque do kit é um valor calculado e guardado (não ao vivo) —
+          // sem isso, kits que usam esse componente ficam com estoque
+          // desatualizado até alguém abrir e recalcular manualmente.
+          await recalcularKitsQueUsam(sb, item.produto_id!)
         }
       }
 

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 
 type ProdutoBusca = { id: string; nome: string; sku: string | null; ean: string | null; estoque: number; unidade: string }
 
@@ -68,6 +69,7 @@ export default function AjusteEstoqueModal({ empresaId, onClose, onSalvo }: {
       quantidade: Math.abs(delta), estoqueAnterior, estoqueNovo: nova,
       motivo: motivo.trim(), referenciaTipo: 'ajuste_manual',
     })
+    await recalcularKitsQueUsam(sb, produto.id)
 
     setSalvando(false)
     onSalvo()
