@@ -35,7 +35,7 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [carregandoCategorias, setCarregandoCategorias] = useState(false)
   const [categoriaEhFolha, setCategoriaEhFolha] = useState(false)
   const categoriaFolha = categoriaEhFolha && caminhoCategoria.length > 0 ? caminhoCategoria[caminhoCategoria.length - 1] : null
-  const [origemCategoria, setOrigemCategoria] = useState<'sugerida' | null>(null)
+  const [origemCategoria, setOrigemCategoria] = useState<'sugerida' | 'importada' | null>(null)
 
   const [atributos, setAtributos] = useState<Atributo[]>([])
   const [atributosCarregados, setAtributosCarregados] = useState(false)
@@ -54,6 +54,19 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
+
+  // Importação a partir de um anúncio já publicado (o nosso ou de outro
+  // vendedor) — puxa título, descrição, imagens, categoria e atributos pela
+  // API pública do ML, sem publicar nada sozinha.
+  const [urlImport, setUrlImport] = useState('')
+  const [importando, setImportando] = useState(false)
+  const [erroImport, setErroImport] = useState('')
+  const [resumoImport, setResumoImport] = useState<string | null>(null)
+  const [precoImportado, setPrecoImportado] = useState<number | null>(null)
+  // Guardado à parte porque os atributos da categoria carregam depois (e
+  // podem recarregar se o usuário trocar a categoria) — o efeito abaixo
+  // reaplica os valores importados sempre que a lista muda.
+  const [atributosImportados, setAtributosImportados] = useState<Record<string, string>>({})
 
   // Preenche descrição + o máximo de atributos possível via IA — nunca
   // publica sozinha, só sugere valores editáveis (mesmo padrão do botão
@@ -84,6 +97,97 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
     } finally {
       setPreenchendoIA(false)
     }
+  }
+
+  // Aplica os atributos importados assim que a lista da categoria carrega —
+  // casa por id do atributo (BRAND, MODEL, COLOR...), que é o mesmo em
+  // qualquer categoria do ML. Quando o atributo é de lista fechada, só
+  // aceita o valor se ele existir entre as opções (comparação sem acento/
+  // maiúscula), pra não mandar texto livre onde o ML espera um id de opção.
+  useEffect(() => {
+    if (atributos.length === 0 || Object.keys(atributosImportados).length === 0) return
+    const normalizar = (v: string) => v.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+    const aplicar: Record<string, string> = {}
+    for (const a of atributos) {
+      const valor = atributosImportados[a.id]
+      if (!valor) continue
+      if (a.valores.length > 0) {
+        const opcao = a.valores.find(v => normalizar(v.name) === normalizar(valor))
+        if (opcao) aplicar[a.id] = opcao.name
+      } else {
+        aplicar[a.id] = valor
+      }
+    }
+    if (Object.keys(aplicar).length > 0) setValoresAtributos(prev => ({ ...prev, ...aplicar }))
+  }, [atributos, atributosImportados])
+
+  async function importarDeUrl() {
+    if (!urlImport.trim() || !produto) return
+    setImportando(true); setErroImport(''); setResumoImport(null)
+    try {
+      const resp = await fetch('/api/marketplace/mercadolivre/importar-url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: urlImport.trim(), canalId: canalAtivo?.id }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErroImport(data.erro ?? 'Erro ao importar anúncio'); return }
+      const d = data.dados as {
+        titulo: string; descricao: string; preco: number; imagens: string[]
+        categoriaId: string | null; categoriaCaminho: { id: string; name: string }[]
+        atributos: { id: string; name: string; valueName: string }[]
+        condicao: 'new' | 'used' | null; temVariacoes: boolean
+      }
+
+      const feito: string[] = []
+      if (d.titulo) { setTitulo(d.titulo.slice(0, 60)); feito.push('título') }
+      if (d.descricao) { setDescricao(d.descricao); feito.push('descrição') }
+      if (d.condicao) setCondicao(d.condicao)
+      if (d.preco > 0) setPrecoImportado(d.preco)
+
+      const novasImagens = await importarImagens(d.imagens)
+      if (novasImagens > 0) feito.push(`${novasImagens} ${novasImagens > 1 ? 'imagens' : 'imagem'}`)
+
+      if (d.atributos.length > 0) {
+        setAtributosImportados(Object.fromEntries(d.atributos.map(a => [a.id, a.valueName])))
+        feito.push(`${d.atributos.length} atributos`)
+      }
+
+      if (d.categoriaId) {
+        setOrigemCategoria('importada')
+        await resolverCaminhoCategoria(d.categoriaId, d.categoriaCaminho)
+        feito.push('categoria')
+      }
+
+      const aviso = d.temVariacoes
+        ? ' ⚠ O anúncio de origem tem variações — aqui só é criado anúncio simples, confira preço e atributos.'
+        : ''
+      setResumoImport((feito.length > 0 ? `Importado: ${feito.join(', ')}.` : 'Nada foi encontrado nesse anúncio.') + aviso)
+    } catch (e: any) {
+      setErroImport(e.message ?? 'Erro ao importar anúncio')
+    } finally {
+      setImportando(false)
+    }
+  }
+
+  // As imagens ficam no cadastro do produto (produto_imagens), não só neste
+  // formulário — mesmo comportamento do "+ Adicionar por URL" já existente,
+  // que também guarda a URL remota em vez de baixar o arquivo.
+  async function importarImagens(urls: string[]): Promise<number> {
+    if (!produto || urls.length === 0) return 0
+    const jaExistentes = new Set(imagens.map(i => i.url))
+    const novas = urls.filter(u => !jaExistentes.has(u))
+    if (novas.length === 0) return 0
+    const sb = createClient()
+    const { error } = await sb.from('produto_imagens').insert(novas.map((url, i) => ({
+      empresa_id: empresaId,
+      produto_id: produto.id,
+      url,
+      ordem: imagens.length + i,
+      principal: imagens.length === 0 && i === 0,
+    })))
+    if (error) { setErroImport('Imagens: ' + error.message); return 0 }
+    await carregarImagens(produto.id)
+    return novas.length
   }
 
   useEffect(() => {
@@ -209,7 +313,10 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
         if (!ativo) return
         if (data.ok && data.sugestao?.categoryId) {
           setOrigemCategoria('sugerida')
-          await resolverCaminhoCategoria(data.sugestao.categoryId)
+          await resolverCaminhoCategoria(
+            data.sugestao.categoryId,
+            data.sugestao.categoryName ? [{ id: data.sugestao.categoryId, name: data.sugestao.categoryName }] : undefined,
+          )
           return
         }
       } catch { /* segue pro comportamento padrão */ }
@@ -221,20 +328,22 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
 
   // Reconstrói o caminho nível a nível a partir de uma categoria-folha
   // sugerida (o domain_discovery só devolve o id final, não o caminho).
-  async function resolverCaminhoCategoria(categoryId: string) {
+  async function resolverCaminhoCategoria(categoryId: string, caminho?: { id: string; name: string }[]) {
     if (!canalAtivo) return
     setCarregandoCategorias(true)
     try {
-      // Sem endpoint de "ancestrais" nesta integração ainda — mostra a
-      // categoria sugerida como único nível já resolvido e carrega os
-      // atributos dela direto; o usuário pode trocar manualmente abaixo.
+      // Sem endpoint de "ancestrais" nesta integração ainda — quem chama
+      // passa o caminho quando conhece (a importação traz o path_from_root
+      // do próprio ML); sem isso, mostra o id como único nível resolvido.
+      // Em ambos os casos os atributos da categoria carregam direto e o
+      // usuário pode trocar manualmente abaixo.
       const nomeResp = await fetch('/api/marketplace/mercadolivre/atributos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ canalId: canalAtivo.id, categoryId }),
       })
       const nomeData = await nomeResp.json()
       if (!nomeData.ok) { carregarNivelCategoria(undefined, 0); return }
-      setCaminhoCategoria([{ id: categoryId, name: categoryId }])
+      setCaminhoCategoria(caminho?.length ? caminho : [{ id: categoryId, name: categoryId }])
       setOpcoesPorNivel([])
       setCategoriaEhFolha(true)
       setAtributos(nomeData.atributos ?? [])
@@ -416,6 +525,28 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
               )}
 
               {produto && (
+                <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+                  <p className="text-xs font-medium text-violet-800 mb-1">Importar de um anúncio existente</p>
+                  <p className="text-[11px] text-violet-600 mb-2">
+                    Cole o link de um anúncio do Mercado Livre (seu ou de outro vendedor) pra puxar título, descrição,
+                    imagens, categoria e atributos de uma vez. Nada é publicado — tudo fica editável abaixo.
+                  </p>
+                  <div className="flex gap-2">
+                    <input value={urlImport} onChange={e => setUrlImport(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && importarDeUrl()}
+                      placeholder="https://produto.mercadolivre.com.br/MLB-..."
+                      className="flex-1 border border-violet-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-violet-500" />
+                    <button type="button" onClick={importarDeUrl} disabled={importando || !urlImport.trim()}
+                      className="px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg whitespace-nowrap">
+                      {importando ? 'Importando...' : 'Importar'}
+                    </button>
+                  </div>
+                  {erroImport && <p className="text-xs text-red-600 mt-2">{erroImport}</p>}
+                  {resumoImport && <p className="text-xs text-violet-700 mt-2">✓ {resumoImport}</p>}
+                </div>
+              )}
+
+              {produto && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 mb-2">Imagens do anúncio ({imagens.length}) *</p>
                   {imagens.length === 0 && (
@@ -478,6 +609,9 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                     )}
                     {categoriaFolha && origemCategoria === 'sugerida' && (
                       <p className="text-xs text-gray-400 mt-0.5">✨ sugerida pelo próprio Mercado Livre com base no título — confira antes de publicar</p>
+                    )}
+                    {categoriaFolha && origemCategoria === 'importada' && (
+                      <p className="text-xs text-gray-400 mt-0.5">📥 veio do anúncio importado — confira antes de publicar</p>
                     )}
                   </div>
 
@@ -560,6 +694,16 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                       <label className="block text-xs font-medium text-gray-500 mb-1">Preço de venda (R$) *</label>
                       <input type="number" step="0.01" value={preco} onChange={e => setPreco(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                      {/* Preço nunca é sobrescrito pela importação — é decisão
+                          comercial nossa, não do anúncio de origem. Fica só
+                          como referência, com um atalho pra adotar. */}
+                      {precoImportado != null && Number(preco) !== precoImportado && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          No anúncio importado: {fmt(precoImportado)}{' '}
+                          <button type="button" onClick={() => setPreco(String(precoImportado))}
+                            className="text-blue-600 hover:text-blue-800 font-medium">usar este preço</button>
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Estoque *</label>
