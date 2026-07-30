@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { abrirDanfe, type FormatoPapel } from '@/lib/fiscal/danfe'
 import type { Venda } from './VendasClient'
 
 type Item = {
@@ -19,7 +20,7 @@ const FORMA_LABEL: Record<string, string> = {
 function fmt(v: number) { return (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 
 export default function DetalheVendaModal({
-  venda, empresaId, modoEdicaoInicial, onClose, onImprimir, onWhatsapp, gerandoPdf, onAtualizado,
+  venda, empresaId, modoEdicaoInicial, onClose, onImprimir, onWhatsapp, gerandoPdf, formatoImpressao, onAtualizado,
 }: {
   venda: Venda
   empresaId: string
@@ -28,6 +29,7 @@ export default function DetalheVendaModal({
   onImprimir: () => void
   onWhatsapp: () => void
   gerandoPdf: boolean
+  formatoImpressao?: FormatoPapel
   onAtualizado: (patch: Partial<Venda>) => void
 }) {
   const [carregando, setCarregando] = useState(true)
@@ -133,6 +135,11 @@ export default function DetalheVendaModal({
       setDetalhe(prev => prev ? { ...prev, nfce_status: 'erro', nfce_motivo_rejeicao: e.message } : prev)
     }
     setEmitindoNfce(false)
+  }
+
+  function abrirDanfeDaVenda(imprimir: boolean) {
+    const r = abrirDanfe(detalhe?.nfce_url_pdf, { imprimir, formato: formatoImpressao })
+    if (!r.ok) alert(r.erro)
   }
 
   const itensVenda = itens.filter(i => i.tipo !== 'devolucao')
@@ -273,7 +280,14 @@ export default function DetalheVendaModal({
                 {detalhe?.nfce_status === 'autorizada' ? (
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm text-gray-700">Número {detalhe.nfce_numero} <span className="text-xs text-gray-400 block">{detalhe.nfce_chave}</span></p>
-                    {detalhe.nfce_url_pdf && <a href={detalhe.nfce_url_pdf} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:text-blue-700 underline flex-shrink-0">Ver DANFE</a>}
+                    {detalhe.nfce_url_pdf && (
+                      // Botões, não link: a DANFE é guardada como data: URL e o
+                      // navegador não abre data: em aba nova.
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <button onClick={() => abrirDanfeDaVenda(false)} className="text-xs text-blue-600 hover:text-blue-700 underline">Ver DANFE</button>
+                        <button onClick={() => abrirDanfeDaVenda(true)} className="text-xs text-blue-600 hover:text-blue-700 underline">🖨️ Imprimir</button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">

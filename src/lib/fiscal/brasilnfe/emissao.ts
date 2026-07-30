@@ -68,8 +68,19 @@ function montarPayload(input: EmissaoNFCeInput, ambiente: 'producao' | 'homologa
   }
 }
 
-function base64ParaDataUrl(base64: string | undefined, mime: string): string | undefined {
+// O tipo sai do CONTEÚDO, não do nome do campo: apesar de se chamar
+// "Base64File", a DANFE da NFC-e que a Brasil NFe devolve é HTML, não PDF
+// (verificado numa NFC-e autorizada de verdade). Rotular HTML como
+// application/pdf faz o visualizador do navegador falhar ao abrir.
+function base64ParaDataUrl(base64: string | undefined, mimePadrao: string): string | undefined {
   if (!base64) return undefined
+  let mime = mimePadrao
+  try {
+    const inicio = Buffer.from(base64.slice(0, 64), 'base64').toString('utf8')
+    if (/^\s*<(!doctype|html)/i.test(inicio)) mime = 'text/html'
+    else if (inicio.startsWith('%PDF')) mime = 'application/pdf'
+    else if (/^\s*<\?xml|^\s*<nfeProc/i.test(inicio)) mime = 'application/xml'
+  } catch { /* mantém o padrão se não der pra inspecionar */ }
   return `data:${mime};base64,${base64}`
 }
 

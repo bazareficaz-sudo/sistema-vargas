@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import DetalheVendaModal from './DetalheVendaModal'
 import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integracoes/EnviarWhatsAppModal'
 import { calcSaude, CONFIG_PADRAO, FAIXAS_PADRAO, type SaudeConfig, type FaixaSaude, type ResultadoSaude } from '@/lib/saude-venda'
+import { abrirDanfe, type FormatoPapel } from '@/lib/fiscal/danfe'
 
 type Cliente = { nome: string; telefone: string | null; cpf_cnpj: string | null } | null
 
@@ -70,11 +71,13 @@ function calcularRange(periodo: Periodo, custom: { inicio: string; fim: string }
 
 const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf'
 
-export default function VendasClient({ empresaId, vendasIniciais, totalInicial, empresaEstoqueNome, empresaFiscalNome, saudeConfig, saudeFaixas, erroInicial }: {
+export default function VendasClient({ empresaId, vendasIniciais, totalInicial, empresaEstoqueNome, empresaFiscalNome, saudeConfig, saudeFaixas, formatoImpressao, erroInicial }: {
   empresaId: string; vendasIniciais: Venda[]; totalInicial: number
   // Config da conta (Empresas → Estoque/Fiscal) — igual em toda linha hoje.
   empresaEstoqueNome: string; empresaFiscalNome: string
-  saudeConfig?: SaudeConfig | null; saudeFaixas?: FaixaSaude[]; erroInicial?: string | null
+  saudeConfig?: SaudeConfig | null; saudeFaixas?: FaixaSaude[]
+  formatoImpressao?: FormatoPapel
+  erroInicial?: string | null
 }) {
   const [vendas, setVendas] = useState<Venda[]>(vendasIniciais)
   const [total, setTotal] = useState(totalInicial)
@@ -259,6 +262,41 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   }
 
   function aguardar(ms: number) { return new Promise(r => setTimeout(r, ms)) }
+
+  // NFC-e autorizada = cStat 100 da SEFAZ ("Autorizado o uso da NF-e"). Só
+  // nesse caso existe DANFE pra imprimir; rejeitada/pendente/não emitida não
+  // tem documento válido.
+  function podeImprimirNfce(v: Venda) {
+    return v.nfce_status === 'autorizada' && !!v.nfce_url_pdf
+  }
+
+  function imprimirNfce(v: Venda, imprimir = true) {
+    const r = abrirDanfe(v.nfce_url_pdf, { imprimir, formato: formatoImpressao })
+    if (!r.ok) alert(`NFC-e da venda #${v.numero}: ${r.erro}`)
+  }
+
+  async function imprimirNfceSelecionadas() {
+    const todas = vendas.filter(v => selecionados.has(v.id))
+    const comNfce = todas.filter(podeImprimirNfce)
+    const semNfce = todas.length - comNfce.length
+    if (comNfce.length === 0) {
+      alert('Nenhuma das vendas selecionadas tem NFC-e autorizada pra imprimir.')
+      return
+    }
+    setAplicandoMassa(true); setResumoMassa('')
+    let ok = 0
+    const falhas: string[] = []
+    for (const v of comNfce) {
+      const r = abrirDanfe(v.nfce_url_pdf, { imprimir: true })
+      if (r.ok) ok++; else falhas.push(`#${v.numero}: ${r.erro}`)
+      await aguardar(400) // evita o navegador barrar várias janelas de uma vez
+    }
+    const partes = [`${ok} NFC-e aberta(s) pra impressão`]
+    if (semNfce > 0) partes.push(`${semNfce} pulada(s) sem NFC-e autorizada`)
+    if (falhas.length > 0) partes.push(falhas.join('; '))
+    setResumoMassa(partes.join(' · '))
+    setAplicandoMassa(false)
+  }
 
   async function imprimirSelecionados() {
     const alvos = vendas.filter(v => selecionados.has(v.id))
@@ -471,6 +509,11 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
             🧾 Emitir NFC-e
           </button>
+          <button onClick={imprimirNfceSelecionadas} disabled={aplicandoMassa}
+            title="Imprime a DANFE das vendas com NFC-e autorizada; as demais são puladas"
+            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            🖨️ Imprimir NFC-e
+          </button>
           {!trocandoPagamento ? (
             <button onClick={() => setTrocandoPagamento(true)} disabled={aplicandoMassa}
               className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
@@ -571,10 +614,13 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                   {v.tipo_operacao !== 'venda' ? (
                     <span className="text-xs text-gray-300">—</span>
                   ) : v.nfce_status === 'autorizada' ? (
-                    <a href={v.nfce_url_pdf ?? '#'} target="_blank" rel="noreferrer"
-                      className="text-xs px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200 hover:bg-green-200">
+                    // Botão, não link: a DANFE fica guardada como data: URL, e
+                    // navegador não navega pra data: — <a href> não abria nada.
+                    <button onClick={() => imprimirNfce(v, false)} disabled={!v.nfce_url_pdf}
+                      title={v.nfce_url_pdf ? 'Ver DANFE da NFC-e' : 'NFC-e autorizada, mas sem DANFE guardada'}
+                      className="text-xs px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200 hover:bg-green-200 disabled:opacity-60 disabled:hover:bg-green-100">
                       ✅ {v.nfce_numero ?? 'Autorizada'}
-                    </a>
+                    </button>
                   ) : v.nfce_status === 'erro' ? (
                     <button onClick={() => emitirNfceLinha(v)} disabled={emitindoId === v.id} title={v.nfce_motivo_rejeicao ?? 'Erro ao emitir'}
                       className="text-xs px-2 py-0.5 rounded-full border bg-red-100 text-red-600 border-red-200 hover:bg-red-200 disabled:opacity-50">
@@ -595,10 +641,14 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                       className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500">👁</button>
                     <button onClick={() => abrirDetalhe(v, true)} title="Editar"
                       className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500">✏️</button>
-                    <button onClick={() => imprimirVenda(v)} disabled={gerandoPdfId === v.id} title="Imprimir"
+                    <button onClick={() => imprimirVenda(v)} disabled={gerandoPdfId === v.id} title="Imprimir comprovante"
                       className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 disabled:opacity-40">
                       {gerandoPdfId === v.id ? '⏳' : '🖨️'}
                     </button>
+                    {podeImprimirNfce(v) && (
+                      <button onClick={() => imprimirNfce(v)} title={`Imprimir NFC-e nº ${v.nfce_numero ?? ''}`.trim()}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-green-50 text-green-600">🧾</button>
+                    )}
                     <button onClick={() => abrirWhatsapp(v)} disabled={gerandoPdfId === v.id} title="Enviar via WhatsApp"
                       className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 disabled:opacity-40">
                       {gerandoPdfId === v.id ? '⏳' : '📱'}
@@ -627,6 +677,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           onImprimir={() => imprimirVenda(detalheAberto)}
           onWhatsapp={() => abrirWhatsapp(detalheAberto)}
           gerandoPdf={gerandoPdfId === detalheAberto.id}
+          formatoImpressao={formatoImpressao}
           onAtualizado={(patch) => {
             setVendas(prev => prev.map(v => v.id === detalheAberto.id ? { ...v, ...patch } : v))
             setDetalheAberto(prev => prev ? { ...prev, ...patch } : prev)
