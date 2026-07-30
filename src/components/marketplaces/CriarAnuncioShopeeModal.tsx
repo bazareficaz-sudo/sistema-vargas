@@ -3,6 +3,7 @@
 import { useState, useEffect, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
+import { formatarTituloAnuncio } from '@/lib/texto/titulo'
 
 type Categoria = { category_id: number; original_category_name: string; has_children: boolean }
 type Atributo = {
@@ -95,7 +96,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
 
   function selecionarProduto(p: any) {
     setProduto(p)
-    setTitulo(p.nome)
+    // O cadastro guarda o nome em CAIXA ALTA; anúncio em caixa alta é ruim de
+    // ler e a Shopee penaliza. Continua editável no campo.
+    setTitulo(formatarTituloAnuncio(p.nome))
     setPreco(p.preco_venda ? String(p.preco_venda) : '')
     setEstoque(p.estoque != null ? String(p.estoque) : '0')
     setPeso(p.peso_kg ? String(p.peso_kg) : '')
@@ -335,32 +338,38 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
       let atributosAtuais = atributos
       let marcasAtuais = marcas
 
+      // Aviso de categoria é acumulado, não interrompe: descrição e título não
+      // dependem de ter categoria-folha resolvida, e antes um tropeço aqui
+      // fazia o botão inteiro voltar sem preencher nada.
+      let avisoCategoria = ''
+
       if (!categoriaFolha) {
         const resp = await fetch('/api/marketplace/shopee/ia-sugerir-categoria', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canalId: canalAtivo.id, produtoNome: produto.nome, produtoMarca: produto.marca, produtoCategoria: produto.categoria }),
         })
         const data = await resp.json()
-        if (!data.ok) { setErro(data.erro ?? 'Erro ao sugerir categoria com IA'); return }
-        if (!data.caminho || data.caminho.length === 0) {
-          setErro('A IA não conseguiu sugerir uma categoria pra esse produto — escolha manualmente abaixo.')
-          return
-        }
-        setOpcoesPorNivel(data.opcoesPorNivel)
-        setCaminhoCategoria(data.caminho)
-        setOrigemCategoria(null) // categoria escolhida pela IA — não é "lembrada" nem "deduzida" por palavras
-        categoriaPathAtual = data.caminho.map((c: Categoria) => c.original_category_name).join(' › ')
+        if (!data.ok) {
+          avisoCategoria = data.erro ?? 'Erro ao sugerir categoria com IA'
+        } else if (!data.caminho || data.caminho.length === 0) {
+          avisoCategoria = 'A IA não conseguiu sugerir uma categoria pra esse produto — escolha manualmente acima.'
+        } else {
+          setOpcoesPorNivel(data.opcoesPorNivel)
+          setCaminhoCategoria(data.caminho)
+          setOrigemCategoria(null) // categoria escolhida pela IA — não é "lembrada" nem "deduzida" por palavras
+          categoriaPathAtual = data.caminho.map((c: Categoria) => c.original_category_name).join(' › ')
 
-        if (!data.resolvidoAteFolha) {
-          setErro('A IA chegou perto (' + categoriaPathAtual + ') mas não fechou numa categoria final — continue escolhendo manualmente a partir daí.')
-          return
+          if (!data.resolvidoAteFolha) {
+            avisoCategoria = 'A IA chegou até ' + categoriaPathAtual + ' mas não fechou numa categoria final — continue escolhendo a partir daí.'
+          } else {
+            const folha = data.caminho[data.caminho.length - 1]
+            const carregado = await carregarAtributosEMarcas(folha.category_id)
+            if (carregado) {
+              atributosAtuais = carregado.atributos
+              marcasAtuais = carregado.marcas
+            }
+          }
         }
-
-        const folha = data.caminho[data.caminho.length - 1]
-        const carregado = await carregarAtributosEMarcas(folha.category_id)
-        if (!carregado) return
-        atributosAtuais = carregado.atributos
-        marcasAtuais = carregado.marcas
       }
 
       const respConteudo = await fetch('/api/marketplace/shopee/ia-gerar-conteudo', {
@@ -371,7 +380,10 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         }),
       })
       const dataConteudo = await respConteudo.json()
-      if (!dataConteudo.ok) { setErro(dataConteudo.erro ?? 'Erro ao gerar conteúdo com IA'); return }
+      if (!dataConteudo.ok) {
+        setErro([avisoCategoria, dataConteudo.erro ?? 'Erro ao gerar conteúdo com IA'].filter(Boolean).join(' · '))
+        return
+      }
 
       if (dataConteudo.descricao) setDescricao(dataConteudo.descricao)
       if (dataConteudo.atributos && Object.keys(dataConteudo.atributos).length > 0) {
@@ -382,6 +394,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         })
       }
       if (dataConteudo.brandId != null) setBrandId(String(dataConteudo.brandId))
+      if (avisoCategoria) setErro(avisoCategoria)
     } catch (e: any) {
       setErro(e.message ?? 'Erro ao usar IA')
     } finally {

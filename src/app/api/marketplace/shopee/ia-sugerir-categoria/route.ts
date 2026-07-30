@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCategoryTree, type CategoriaShopee } from '@/lib/shopee/listing'
-import { perguntarJSON } from '@/lib/ia/claude'
+import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 
 const MAX_NIVEIS = 6
@@ -15,13 +15,21 @@ Produto: "${produtoNome}"${produtoMarca ? ` — marca: ${produtoMarca}` : ''}${p
 
 ${contexto}
 
-Escolha, entre as opções abaixo, a categoria que melhor representa esse produto neste nível da árvore. Responda SOMENTE com um JSON no formato {"category_id": <id>} usando o id de uma das opções. Se nenhuma opção fizer sentido pro produto, responda {"category_id": null}.
+Nomes de produto de loja vêm abreviados e sem acento ("BOCAL FLEXIVEL C/BOTAO" = bocal flexível com botão; "C/" = "com", "P/" = "para"). Interprete a abreviação antes de decidir.
+
+Escolha, entre as opções abaixo, a categoria que melhor representa esse produto neste nível da árvore. Prefira sempre a opção mais próxima, mesmo que não seja perfeita — responder null faz o vendedor ter que navegar a árvore inteira na mão. Use {"category_id": null} só se NENHUMA opção tiver qualquer relação com o produto.
+
+Responda SOMENTE com um JSON no formato {"category_id": <id>} usando o id de uma das opções.
 
 Opções:
 ${lista}`
 
   try {
-    const resultado = await perguntarJSON(prompt)
+    // Modelo forte: escolher o ramo raiz certo entre dezenas de categorias a
+    // partir de um nome abreviado é a mesma classe de tarefa em que o Haiku
+    // falhou no NCM. Quando ele responde null no primeiro nível, a sugestão
+    // inteira morre e o usuário fica sem categoria e sem descrição.
+    const resultado = await perguntarJSON(prompt, MODELO_FORTE)
     const id = resultado?.category_id
     if (id == null) return null
     const valido = opcoes.some(o => o.category_id === Number(id))

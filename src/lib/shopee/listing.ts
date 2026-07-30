@@ -62,6 +62,13 @@ function montarCaminho(arvore: CategoriaShopeeFlat[], categoryId: number): Categ
 const PALAVRAS_IGNORADAS = new Set([
   'de', 'da', 'do', 'das', 'dos', 'com', 'para', 'pra', 'sem', 'em', 'e', 'ou', 'a', 'o', 'as', 'os',
   'kit', 'un', 'unid', 'pc', 'pct', 'cm', 'mm', 'kg', 'ml', 'und', 'peca', 'pecas',
+  // Palavras genéricas demais pra identificar categoria: aparecem em ramos
+  // completamente diferentes da árvore. Sem isso, um produto da categoria
+  // interna "ACESSORIOS HIDRAULICOS" casava com "Acessórios de Sutiã" só
+  // pela palavra "acessórios" — e vencia sozinha, porque bastava 1 ponto.
+  'acessorio', 'acessorios', 'outro', 'outros', 'outra', 'outras', 'geral', 'gerais',
+  'diverso', 'diversos', 'produto', 'produtos', 'artigo', 'artigos', 'item', 'itens',
+  'material', 'materiais', 'tipo', 'tipos', 'linha', 'uso', 'novo', 'nova',
 ])
 
 function normalizarPalavras(texto: string): string[] {
@@ -116,16 +123,25 @@ export async function deduzirCategoriaPorPalavras(ctx: CallCtx, produtoNome: str
   const folhas = arvore.filter(c => !c.has_children)
   if (folhas.length === 0) return null
 
-  const palavrasProduto = new Set([...normalizarPalavras(produtoNome), ...normalizarPalavras(produtoCategoria ?? '')])
-  if (palavrasProduto.size === 0) return null
+  const palavrasNome = new Set(normalizarPalavras(produtoNome))
+  const palavrasCategoriaInterna = new Set(normalizarPalavras(produtoCategoria ?? ''))
+  if (palavrasNome.size === 0 && palavrasCategoriaInterna.size === 0) return null
 
   let melhor: { folha: CategoriaShopeeFlat; pontos: number } | null = null
   for (const folha of folhas) {
     const caminhoAncestral = montarCaminho(arvore, folha.category_id)
     const palavrasCategoria = new Set(caminhoAncestral.flatMap(c => normalizarPalavras(c.original_category_name)))
     let pontos = 0
-    for (const p of palavrasProduto) if (palavrasCategoria.has(p)) pontos += p.length
-    if (pontos > 0 && (!melhor || pontos > melhor.pontos)) melhor = { folha, pontos }
+    let bateuNoNome = false
+    // O nome do produto pesa o dobro da categoria interna: é o que descreve o
+    // item de verdade. A categoria interna é da organização da loja e usa
+    // vocabulário próprio, que nem sempre conversa com a árvore da Shopee.
+    for (const p of palavrasNome) if (palavrasCategoria.has(p)) { pontos += p.length * 2; bateuNoNome = true }
+    for (const p of palavrasCategoriaInterna) if (!palavrasNome.has(p) && palavrasCategoria.has(p)) pontos += p.length
+    // Exige que ao menos uma palavra do NOME tenha batido. Casar só pela
+    // categoria interna produzia sugestões absurdas com aparência de acerto
+    // (a tela mostra o caminho com ✓), o que é pior do que não sugerir nada.
+    if (bateuNoNome && pontos >= 8 && (!melhor || pontos > melhor.pontos)) melhor = { folha, pontos }
   }
   if (!melhor) return null
 
