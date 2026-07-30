@@ -26,7 +26,9 @@ export default async function AnunciosPage({ params, searchParams }: {
 
   const { data: canais } = await supabase
     .from('marketplace_canais')
-    .select('id, nome')
+    // plataforma entra pra tela saber quais canais aceitam replicação em
+    // massa (só vale entre contas do mesmo marketplace).
+    .select('id, nome, plataforma, ativo')
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: true })
 

@@ -85,7 +85,7 @@ const FACETAS: { key: string; label: string }[] = [
 ]
 
 export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [] }: {
-  canal: any; canais?: { id: string; nome: string }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
+  canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
   regras?: any[]; depositos?: { id: string; nome: string }[]
 }) {
   const router = useRouter()
@@ -114,6 +114,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [criarAnuncioShopeeAberto, setCriarAnuncioShopeeAberto] = useState(false)
   const [criarAnuncioMLAberto, setCriarAnuncioMLAberto] = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  // Replicação em massa pra outra conta do MESMO marketplace.
+  const [replicarAberto, setReplicarAberto] = useState(false)
+  const [replicarDestino, setReplicarDestino] = useState('')
+  const [replicando, setReplicando] = useState(false)
+  const [replicarResultado, setReplicarResultado] = useState<any | null>(null)
   const [previewMassa, setPreviewMassa] = useState<{ encontrados: any[]; naoEncontrados: any[] } | null>(null)
   const [aplicandoMassa, setAplicandoMassa] = useState(false)
   const [pagina, setPagina] = useState(1)
@@ -152,6 +157,29 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       if (novo.has(id)) novo.delete(id); else novo.add(id)
       return novo
     })
+  }
+
+  // Só canais da mesma plataforma e diferentes do atual: replicar pra outra
+  // plataforma exigiria adivinhar categoria e atributos item a item, o que em
+  // massa e sem revisão é o que estraga catálogo.
+  const canaisDestino = canais.filter(c => c.id !== canal.id && (c.plataforma ?? canal.plataforma) === canal.plataforma && c.ativo !== false)
+
+  async function replicarSelecionados() {
+    if (!replicarDestino || selecionados.size === 0) return
+    setReplicando(true); setReplicarResultado(null)
+    try {
+      const resp = await fetch('/api/marketplaces/anuncios/replicar-massa', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ anuncioIds: Array.from(selecionados), canalDestinoId: replicarDestino }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setReplicarResultado({ erro: data.erro ?? 'Erro ao replicar' }); return }
+      setReplicarResultado(data)
+    } catch (e: any) {
+      setReplicarResultado({ erro: e?.message ?? 'Erro ao replicar' })
+    } finally {
+      setReplicando(false)
+    }
   }
 
   async function prepararMapeamentoMassa() {
@@ -794,6 +822,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg">
             Mapear selecionados por SKU
           </button>
+          {canaisDestino.length > 0 && (
+            <button onClick={() => { setReplicarAberto(true); setReplicarResultado(null); setReplicarDestino(canaisDestino[0].id) }}
+              title="Cria os mesmos anúncios em outra conta deste marketplace"
+              className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium rounded-lg">
+              ⧉ Replicar p/ outro canal
+            </button>
+          )}
           {canal.plataforma === 'shopee' && (
             <button onClick={() => { setRegraSelecionadaId(''); setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', arredondamento: 'nenhum', considerarPix: false, valorEmbalagem: '', percentualImposto: '', modoEstoque: 'nao', valorEstoque: '', depositoId: '', estoqueComplementar: '', estoqueRisco: '' }) }}
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg">
@@ -1407,6 +1442,70 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                 {aplicandoMassa ? 'Aplicando...' : `Confirmar mapeamento (${previewMassa.encontrados.length})`}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Replicação em massa pra outra conta do mesmo marketplace */}
+      {replicarAberto && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => !replicando && setReplicarAberto(false)}>
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()}>
+            <p className="text-base font-semibold text-gray-900">⧉ Replicar {selecionados.size} anúncio(s) para outro canal</p>
+
+            {!replicarResultado ? (
+              <>
+                <label className="block text-xs font-medium text-gray-600 mt-4 mb-1">Canal de destino</label>
+                <select value={replicarDestino} onChange={e => setReplicarDestino(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+                  {canaisDestino.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+
+                <div className="mt-4 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 space-y-1.5">
+                  <p className="text-xs font-medium text-gray-700">O que é copiado</p>
+                  <p className="text-xs text-gray-600">✓ Título, descrição e categoria de cada anúncio</p>
+                  <p className="text-xs text-gray-600">✓ Imagens e preço vêm do cadastro do produto, não do anúncio de origem</p>
+                  {canal.plataforma === 'mercadolivre'
+                    ? <p className="text-xs text-gray-600">✓ Atributos compatíveis com a categoria de destino</p>
+                    : <p className="text-xs text-gray-600">✗ Atributos não vêm (a sincronização da Shopee não os traz) — categoria que exige atributo obrigatório falha aqui e precisa do fluxo individual</p>}
+                  <p className="text-xs text-gray-500 pt-1">São pulados: anúncio sem produto vinculado, produto sem imagem ou sem preço, anúncio com variação, e produto que já tem anúncio no destino.</p>
+                  {selecionados.size > 15 && (
+                    <p className="text-xs text-amber-700 pt-1">⚠️ São processados 15 por vez. Os {selecionados.size - 15} restantes ficam de fora deste lote — repita a operação depois.</p>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-2 mt-4">
+                  <button onClick={() => setReplicarAberto(false)} disabled={replicando}
+                    className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
+                  <button onClick={replicarSelecionados} disabled={replicando || !replicarDestino}
+                    className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg">
+                    {replicando ? 'Replicando... (pode levar alguns minutos)' : 'Replicar agora'}
+                  </button>
+                </div>
+              </>
+            ) : replicarResultado.erro ? (
+              <>
+                <p className="text-sm text-red-600 mt-4">{replicarResultado.erro}</p>
+                <button onClick={() => setReplicarAberto(false)} className="mt-4 px-4 py-2 bg-gray-600 text-white text-sm rounded-lg">Fechar</button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-700 mt-4">
+                  <strong className="text-emerald-700">{replicarResultado.resultados.filter((r: any) => r.ok).length} criado(s)</strong>
+                  {replicarResultado.resultados.some((r: any) => !r.ok) && <> · <strong className="text-red-600">{replicarResultado.resultados.filter((r: any) => !r.ok).length} não criado(s)</strong></>}
+                  {replicarResultado.naoProcessados > 0 && <> · {replicarResultado.naoProcessados} fora deste lote</>}
+                </p>
+                <div className="mt-3 space-y-1.5 max-h-80 overflow-y-auto">
+                  {replicarResultado.resultados.map((r: any) => (
+                    <div key={r.anuncioId} className={`px-3 py-2 rounded-lg border text-xs ${r.ok ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'}`}>
+                      <p className={r.ok ? 'text-emerald-800' : 'text-red-800'}>{r.ok ? '✓' : '✗'} {r.titulo}</p>
+                      {!r.ok && <p className="text-red-600 mt-0.5">{r.erro}</p>}
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => { setReplicarAberto(false); setSelecionados(new Set()); router.refresh() }}
+                  className="mt-4 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg">Fechar e atualizar</button>
+              </>
+            )}
           </div>
         </div>
       )}
