@@ -269,8 +269,12 @@ export async function criarAnuncio(sb: any, canal: ShopeeChannel, input: CriarAn
       item_name: input.titulo,
       description: input.descricao,
       category_id: input.categoryId,
-      price: input.preco,
-      stock: input.estoque,
+      // Nomes exigidos pela versão atual da API: `price`/`stock` (planos, do
+      // formato antigo) são recusados com "invalid field seller_stock, value
+      // must Not Null". É o mesmo formato que update_price/update_stock em
+      // write.ts já usam com sucesso em produção.
+      original_price: input.preco,
+      seller_stock: [{ stock: input.estoque }],
       weight: input.pesoKg,
       logistic_info: input.logisticaHabilitada.map(logistic_id => ({ logistic_id, enabled: true })),
     }
