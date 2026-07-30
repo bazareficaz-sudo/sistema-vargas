@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { gerarComprovanteVendaPdfBuffer } from '@/lib/vendas/comprovantePdf'
+import { gerarComprovanteVendaPdfBuffer, CONFIG_IMPRESSAO_PADRAO, type ConfigImpressao } from '@/lib/vendas/comprovantePdf'
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: vendaId } = await params
@@ -29,11 +29,22 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     .eq('id', empresaId).single()
   if (!empresa) return NextResponse.json({ ok: false, erro: 'Empresa não encontrada' }, { status: 400 })
 
+  // Preferências de impressão (Configurações → Impressão). Empresa sem linha
+  // configurada continua saindo em A4, como sempre foi.
+  const { data: cfgImpressao } = await sb.from('empresa_config_impressao')
+    .select('formato, mensagem_rodape, mostrar_sku').eq('empresa_id', empresaId).maybeSingle()
+  const config: ConfigImpressao = {
+    formato: (cfgImpressao?.formato as ConfigImpressao['formato']) ?? CONFIG_IMPRESSAO_PADRAO.formato,
+    mensagem_rodape: cfgImpressao?.mensagem_rodape ?? null,
+    mostrar_sku: cfgImpressao?.mostrar_sku ?? CONFIG_IMPRESSAO_PADRAO.mostrar_sku,
+  }
+
   const buffer = await gerarComprovanteVendaPdfBuffer({
     empresa,
     cliente,
     venda,
     itens: itens ?? [],
+    config,
   })
 
   const path = `${empresaId}/${vendaId}.pdf`

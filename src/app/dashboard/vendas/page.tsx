@@ -14,7 +14,7 @@ export default async function VendasPage() {
   const fimHoje = new Date(hoje)
   fimHoje.setHours(23, 59, 59, 999)
 
-  const [{ data: vendas, count, error: erroVendas }, { data: saudeConfig }, { data: saudeFaixas }, { data: configEstoque }, { data: configFiscal }] = await Promise.all([
+  const [{ data: vendas, count, error: erroVendas }, { data: saudeConfig }, { data: saudeFaixas }, { data: configEstoque }, { data: configFiscal }, { data: configImpressao }] = await Promise.all([
     supabase
       .from('vendas')
       .select('id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf', { count: 'exact' })
@@ -27,6 +27,7 @@ export default async function VendasPage() {
     supabase.from('saude_faixas').select('*').eq('empresa_id', empresaId).order('ordem'),
     supabase.from('empresa_config_estoque').select('empresa_estoque_id').eq('empresa_id', empresaId).maybeSingle(),
     supabase.from('empresa_config_fiscal').select('empresa_fiscal_id').eq('empresa_id', empresaId).maybeSingle(),
+    supabase.from('empresa_config_impressao').select('formato').eq('empresa_id', empresaId).maybeSingle(),
   ])
 
   // Mesmo padrão de resolução usado no PDV interno (src/app/pdv/page.tsx) —
@@ -53,6 +54,7 @@ export default async function VendasPage() {
       empresaFiscalNome={empresaFiscalNome}
       saudeConfig={saudeConfig ?? null}
       saudeFaixas={saudeFaixas ?? []}
+      formatoImpressao={(configImpressao?.formato as 'a4' | 'bobina_80' | 'bobina_58') ?? 'a4'}
       erroInicial={erroVendas?.message ?? null}
     />
   )
