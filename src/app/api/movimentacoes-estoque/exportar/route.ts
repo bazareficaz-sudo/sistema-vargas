@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { calcularPeriodo, TIPO_LABEL, type PeriodoPreset } from '@/lib/estoque/periodo'
+import { calcularPeriodo, TIPO_LABEL, deltaMovimento, type PeriodoPreset } from '@/lib/estoque/periodo'
 
 function escapar(v: unknown): string {
   return `"${String(v ?? '').replace(/"/g, '""')}"`
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
 
   const cabecalho = ['Data/Hora', 'Produto', 'Tipo', 'Depósito', 'Documento/Motivo', 'Entrada', 'Saída', 'Saldo após', 'Usuário', 'Observação']
   const corpo = linhas.map(m => {
-    const delta = m.estoque_novo - m.estoque_anterior
+    const delta = deltaMovimento(m)
     return [
       new Date(m.created_at).toLocaleString('pt-BR'),
       m.produto_nome,
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
       m.motivo ?? '',
       delta > 0 ? delta : '',
       delta < 0 ? Math.abs(delta) : '',
-      m.estoque_novo,
+      m.estoque_novo ?? '',
       m.usuario ?? '',
       m.observacao ?? '',
     ].map(escapar).join(';')

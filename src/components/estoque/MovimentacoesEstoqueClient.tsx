@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { PERIODO_OPCOES, PERIODO_LABELS, TIPOS_MOVIMENTO, TIPO_LABEL, type PeriodoPreset } from '@/lib/estoque/periodo'
+import { PERIODO_OPCOES, PERIODO_LABELS, TIPOS_MOVIMENTO, TIPO_LABEL, deltaMovimento, type PeriodoPreset } from '@/lib/estoque/periodo'
 import AjusteEstoqueModal from './AjusteEstoqueModal'
 import GraficoEvolucaoEstoque from './GraficoEvolucaoEstoque'
 
@@ -12,9 +12,11 @@ type ProdutoSelecionado = {
   id: string; nome: string; sku: string | null; ean: string | null
   categoria: string | null; unidade: string; estoque: number; estoque_minimo: number
 }
+// estoque_anterior/estoque_novo são nulos em movimentações antigas (gravadas
+// antes deste módulo existir) — ver deltaMovimento em lib/estoque/periodo.ts.
 type Movimento = {
   id: string; deposito_id: string | null; produto_id: string; produto_nome: string
-  tipo: string; quantidade: number; estoque_anterior: number; estoque_novo: number
+  tipo: string; quantidade: number | null; estoque_anterior: number | null; estoque_novo: number | null
   motivo: string | null; referencia_tipo: string | null; referencia_id: string | null
   usuario: string | null; observacao: string | null; created_at: string
 }
@@ -22,7 +24,7 @@ type ProdutoBusca = { id: string; nome: string; sku: string | null; ean: string 
 
 const DATA_LANCAMENTO = '26/07/2026'
 
-function delta(m: Movimento) { return m.estoque_novo - m.estoque_anterior }
+function delta(m: Movimento) { return deltaMovimento(m) }
 
 function badgeTipo(m: Movimento) {
   const d = delta(m)
@@ -128,16 +130,21 @@ export default function MovimentacoesEstoqueClient({
 
   const movimentos = modo === 'produto' ? movimentosProduto : movimentosPeriodo
 
-  // Cards do período (só fazem sentido narrativa de saldo no modo produto)
+  // Cards do período (só fazem sentido narrativa de saldo no modo produto).
+  // Pega o primeiro/último movimento que REALMENTE tem saldo gravado — os
+  // antigos vêm com estoque_anterior/estoque_novo nulos e, antes desta
+  // guarda, o card estourava com "null.toLocaleString()" (erro 500 na tela).
+  const primeiroComSaldo = movimentosProduto.find(m => m.estoque_anterior != null)
+  const ultimoComSaldo = [...movimentosProduto].reverse().find(m => m.estoque_novo != null)
   const saldoInicial = produtoSelecionado
-    ? (movimentosProduto.length > 0 ? movimentosProduto[0].estoque_anterior : produtoSelecionado.estoque)
+    ? (primeiroComSaldo?.estoque_anterior ?? produtoSelecionado.estoque ?? 0)
     : 0
   const saldoFinalCalculado = produtoSelecionado
-    ? (movimentosProduto.length > 0 ? movimentosProduto[movimentosProduto.length - 1].estoque_novo : produtoSelecionado.estoque)
+    ? (ultimoComSaldo?.estoque_novo ?? produtoSelecionado.estoque ?? 0)
     : 0
   const totalEntradas = movimentosProduto.reduce((s, m) => s + Math.max(0, delta(m)), 0)
   const totalSaidas = movimentosProduto.reduce((s, m) => s + Math.max(0, -delta(m)), 0)
-  const diferenca = produtoSelecionado ? produtoSelecionado.estoque - saldoFinalCalculado : 0
+  const diferenca = produtoSelecionado ? (produtoSelecionado.estoque ?? 0) - saldoFinalCalculado : 0
 
   const totalPaginas = Math.max(1, Math.ceil(totalPeriodo / porPagina))
 
@@ -289,10 +296,12 @@ export default function MovimentacoesEstoqueClient({
           <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
             <p className="text-sm font-semibold text-gray-900 mb-3">Evolução do Estoque</p>
             <GraficoEvolucaoEstoque
-              pontos={movimentosProduto.map(m => ({
-                data: new Date(m.created_at).toLocaleDateString('pt-BR'),
-                saldo: m.estoque_novo,
-              }))}
+              pontos={movimentosProduto
+                .filter(m => m.estoque_novo != null)   // movimentação antiga sem saldo não vira ponto
+                .map(m => ({
+                  data: new Date(m.created_at).toLocaleDateString('pt-BR'),
+                  saldo: m.estoque_novo as number,
+                }))}
             />
           </div>
         </>
@@ -341,7 +350,7 @@ export default function MovimentacoesEstoqueClient({
                       <td className="px-3 py-2 text-gray-600 text-xs max-w-[240px] truncate" title={m.motivo ?? ''}>{m.motivo || '—'}</td>
                       <td className="px-3 py-2 text-right font-mono text-green-600">{d > 0 ? `+${d}` : ''}</td>
                       <td className="px-3 py-2 text-right font-mono text-red-600">{d < 0 ? Math.abs(d) : ''}</td>
-                      <td className="px-3 py-2 text-right font-mono text-gray-900 font-medium">{m.estoque_novo}</td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-900 font-medium">{m.estoque_novo ?? '—'}</td>
                       <td className="px-3 py-2 text-gray-500 text-xs">{m.usuario || '—'}</td>
                     </tr>
                   )
@@ -372,11 +381,12 @@ export default function MovimentacoesEstoqueClient({
   )
 }
 
-function Card({ label, valor, cls }: { label: string; valor: number; cls?: string }) {
+function Card({ label, valor, cls }: { label: string; valor: number | null | undefined; cls?: string }) {
+  const texto = valor == null || Number.isNaN(valor) ? '—' : valor.toLocaleString('pt-BR')
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-3">
       <p className="text-[11px] text-gray-500">{label}</p>
-      <p className={`text-lg font-semibold mt-0.5 ${cls ?? 'text-gray-900'}`}>{valor.toLocaleString('pt-BR')}</p>
+      <p className={`text-lg font-semibold mt-0.5 ${cls ?? 'text-gray-900'}`}>{texto}</p>
     </div>
   )
 }

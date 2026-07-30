@@ -70,3 +70,29 @@ export const TIPOS_MOVIMENTO: { value: TipoMovimentoExtrato; label: string }[] =
 ]
 
 export const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS_MOVIMENTO.map(t => [t.value, t.label]))
+
+// Tipos que SOMAM estoque. Usado só no caminho de fallback abaixo.
+const TIPOS_ENTRADA = new Set([
+  'devolucao', 'entrada_compra', 'entrada_nfe', 'entrada', 'compra',
+  'transferencia_entrada', 'ajuste_entrada',
+])
+
+// Quanto essa movimentação mexeu no estoque (positivo = entrada).
+//
+// Nem toda linha de estoque_movimentacoes tem estoque_anterior/estoque_novo:
+// movimentações gravadas antes deste módulo existir (ex.: baixas antigas de
+// marketplace) só registraram `quantidade`, com os dois saldos nulos. Sem
+// esse tratamento a conta vira `null - null = 0` (movimento some do extrato)
+// ou, pior, `null.toLocaleString()` estoura a página inteira.
+// No fallback o sentido vem do tipo — para um tipo desconhecido assume saída,
+// que é a esmagadora maioria dos casos legados (venda).
+export function deltaMovimento(m: {
+  tipo: string
+  quantidade: number | null
+  estoque_anterior: number | null
+  estoque_novo: number | null
+}): number {
+  if (m.estoque_anterior != null && m.estoque_novo != null) return m.estoque_novo - m.estoque_anterior
+  const qtd = Math.abs(Number(m.quantidade ?? 0))
+  return TIPOS_ENTRADA.has(m.tipo) ? qtd : -qtd
+}
