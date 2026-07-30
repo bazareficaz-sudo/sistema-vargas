@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, type ChangeEvent } from 'react'
+import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatarTituloAnuncio } from '@/lib/texto/titulo'
 import { fmt } from './utils'
@@ -52,6 +52,11 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [titulo, setTitulo] = useState('')
   // Opcoes de titulo geradas pela IA — o operador escolhe, nunca aplica sozinha.
   const [titulosSugeridos, setTitulosSugeridos] = useState<string[]>([])
+  // Espelho do título num ref: o efeito de sugerir categoria roda uma vez por
+  // produto/canal e precisa do valor atual sem entrar nas dependências (senão
+  // re-dispararia a cada tecla digitada no campo).
+  const tituloRef = useRef('')
+  useEffect(() => { tituloRef.current = titulo }, [titulo])
   const [descricao, setDescricao] = useState('')
   const [preco, setPreco] = useState('')
   const [estoque, setEstoque] = useState('')
@@ -225,7 +230,9 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   function selecionarProduto(p: any) {
     setProduto(p)
     // Cadastro guarda em CAIXA ALTA — anuncio pede texto legivel.
-    setTitulo(formatarTituloAnuncio(p.nome).slice(0, 60))
+    const tituloInicial = formatarTituloAnuncio(p.nome).slice(0, 60)
+    setTitulo(tituloInicial)
+    tituloRef.current = tituloInicial
     setTitulosSugeridos([])
     setPreco(p.preco_venda ? String(p.preco_venda) : '')
     setEstoque(p.estoque != null ? String(p.estoque) : '0')
@@ -323,7 +330,14 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
           if (dOrigem.ok) {
             const o = dOrigem.origem
             setOrigem(o)
-            if (o.titulo) setTitulo(String(o.titulo).slice(0, 60))
+            if (o.titulo) {
+              const tituloOrigem = String(o.titulo).slice(0, 60)
+              setTitulo(tituloOrigem)
+              // Também no ref, pra sugestão de categoria logo abaixo já usar o
+              // título trabalhado da origem (o setState só reflete no próximo
+              // render, tarde demais pra esta função).
+              tituloRef.current = tituloOrigem
+            }
             if (o.descricao) setDescricao(o.descricao)
 
             // Categoria e atributos só se aproveitam dentro do próprio ML —
@@ -359,7 +373,11 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
       try {
         const resp = await fetch('/api/marketplace/mercadolivre/categoria-sugerida', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ canalId: canalAtivo.id, titulo: produto.nome }),
+          // Manda o título já tratado (nome do cadastro com acento e sem
+          // abreviação, ou o título herdado do anúncio replicado) em vez do
+          // nome cru: a busca do ML é literal e não acha nada com
+          // "BOCAL FLEXIVEL C/BOTAO".
+          body: JSON.stringify({ canalId: canalAtivo.id, titulo: tituloRef.current || produto.nome, produtoCategoria: produto.categoria ?? null }),
         })
         const data = await resp.json()
         if (!ativo) return
