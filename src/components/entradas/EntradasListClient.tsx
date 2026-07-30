@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
@@ -23,6 +23,15 @@ type Entrada = {
 }
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
+
+type ItemEntrada = {
+  id: string
+  nome_produto: string | null
+  sku: string | null
+  quantidade: number
+  preco_custo_novo: number | null
+  subtotal: number | null
+}
 
 const STATUS_CLS: Record<string, string> = {
   confirmada: 'bg-green-100 text-green-700',
@@ -81,6 +90,56 @@ export default function EntradasListClient({
   const [erroExclusao, setErroExclusao] = useState('')
   const [carregandoAcao, setCarregandoAcao] = useState<string | null>(null)
   const [etiquetaProdutos, setEtiquetaProdutos] = useState<(ProdutoParaEtiqueta & { estoque: number })[] | null>(null)
+
+  // Busca por produto: o nome/SKU do item fica em entrada_itens (já
+  // desnormalizado), então dá pra achar a entrada pelo que foi comprado sem
+  // precisar abrir uma por uma. `idsComProduto = null` significa "sem busca
+  // de produto ativa" — diferente de Set vazio, que é "buscou e não achou".
+  const [buscaProduto, setBuscaProduto] = useState('')
+  const [idsComProduto, setIdsComProduto] = useState<Set<string> | null>(null)
+  const [buscandoProduto, setBuscandoProduto] = useState(false)
+
+  // Itens expandidos direto na linha, sem abrir a entrada. Carrega sob
+  // demanda e guarda em cache — reabrir a mesma entrada não consulta de novo.
+  const [expandida, setExpandida] = useState<string | null>(null)
+  const [itensPorEntrada, setItensPorEntrada] = useState<Record<string, ItemEntrada[]>>({})
+  const [carregandoItens, setCarregandoItens] = useState<string | null>(null)
+
+  useEffect(() => {
+    const termo = buscaProduto.trim()
+    if (termo.length < 2) { setIdsComProduto(null); setBuscandoProduto(false); return }
+    setBuscandoProduto(true)
+    let ativo = true
+    const timer = setTimeout(async () => {
+      const sb = createClient()
+      // Restringe às entradas já carregadas: além de ser mais rápido, é o que
+      // garante que o resultado é só desta empresa (entrada_itens não tem
+      // empresa_id próprio).
+      const escapado = termo.replace(/[%,()]/g, ' ')
+      const { data } = await sb.from('entrada_itens')
+        .select('entrada_id')
+        .in('entrada_id', lista.map(e => e.id))
+        .or(`nome_produto.ilike.%${escapado}%,sku.ilike.%${escapado}%`)
+      if (!ativo) return
+      setIdsComProduto(new Set((data ?? []).map(r => r.entrada_id)))
+      setBuscandoProduto(false)
+    }, 350)
+    return () => { ativo = false; clearTimeout(timer) }
+  }, [buscaProduto, lista])
+
+  async function alternarItens(entradaId: string) {
+    if (expandida === entradaId) { setExpandida(null); return }
+    setExpandida(entradaId)
+    if (itensPorEntrada[entradaId]) return // já em cache
+    setCarregandoItens(entradaId)
+    const sb = createClient()
+    const { data } = await sb.from('entrada_itens')
+      .select('id, nome_produto, sku, quantidade, preco_custo_novo, subtotal')
+      .eq('entrada_id', entradaId)
+      .order('nome_produto')
+    setItensPorEntrada(prev => ({ ...prev, [entradaId]: (data ?? []) as ItemEntrada[] }))
+    setCarregandoItens(null)
+  }
 
   // Mesmo padrão de src/components/entradas-xml/EntradasXmlClient.tsx, mas
   // lendo direto de entrada_itens (entrada manual já vincula produto_id sem
@@ -173,16 +232,20 @@ export default function EntradasListClient({
       if (filtroForn && e.fornecedores && !(e.fornecedores.razao_social + (e.fornecedores.nome_fantasia ?? '')).toLowerCase().includes(filtroForn.toLowerCase())) return false
       if (dataInicio && e.data_entrada < dataInicio) return false
       if (dataFim && e.data_entrada > dataFim) return false
+      if (idsComProduto && !idsComProduto.has(e.id)) return false
       if (q) {
         const hay = [e.numero_entrada, e.numero_nf, e.fornecedores?.razao_social, e.fornecedores?.nome_fantasia].join(' ').toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
     })
-  }, [lista, busca, filtroStatus, filtroRevisao, filtroForn, dataInicio, dataFim])
+  }, [lista, busca, filtroStatus, filtroRevisao, filtroForn, dataInicio, dataFim, idsComProduto])
 
-  const temFiltro = busca || filtroStatus || filtroRevisao || filtroForn || dataInicio || dataFim
-  function limpar() { setBusca(''); setFiltroStatus(''); setFiltroRevisao(''); setFiltroForn(''); setDataInicio(''); setDataFim('') }
+  const temFiltro = busca || buscaProduto || filtroStatus || filtroRevisao || filtroForn || dataInicio || dataFim
+  function limpar() {
+    setBusca(''); setBuscaProduto(''); setFiltroStatus(''); setFiltroRevisao('')
+    setFiltroForn(''); setDataInicio(''); setDataFim('')
+  }
 
   return (
     <div>
@@ -253,6 +316,18 @@ export default function EntradasListClient({
           <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="ENT-000001, 12345..."
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
         </div>
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-xs text-gray-500 mb-1">
+            Buscar por produto comprado
+            {buscandoProduto && <span className="text-gray-400 font-normal"> · procurando…</span>}
+            {!buscandoProduto && idsComProduto && (
+              <span className="text-blue-500 font-normal"> · {idsComProduto.size} entrada(s)</span>
+            )}
+          </label>
+          <input value={buscaProduto} onChange={e => setBuscaProduto(e.target.value)}
+            placeholder="Nome ou SKU do produto..."
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+        </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1">Status</label>
           <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}
@@ -310,7 +385,7 @@ export default function EntradasListClient({
           <tbody className="divide-y divide-gray-100">
             {filtradas.map(e => {
               const revisao = e.status_revisao ?? 'pendente'
-              return (
+              const linhaPrincipal = (
                 <tr key={e.id} className="hover:bg-gray-50 transition-colors group">
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded">
@@ -327,7 +402,19 @@ export default function EntradasListClient({
                     )}
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span className="text-xs text-gray-500">{e.qtd_itens ?? '—'}</span>
+                    {(e.qtd_itens ?? 0) > 0 ? (
+                      <button onClick={() => alternarItens(e.id)}
+                        title={expandida === e.id ? 'Esconder itens' : 'Ver os itens comprados'}
+                        className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                          expandida === e.id
+                            ? 'bg-blue-100 text-blue-700 border-blue-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200'
+                        }`}>
+                        {expandida === e.id ? '▾' : '▸'} {e.qtd_itens}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
                     {fmtData(e.data_entrada)}
@@ -374,6 +461,45 @@ export default function EntradasListClient({
                   </td>
                 </tr>
               )
+              const linhaItens = expandida === e.id ? (
+                <tr key={`${e.id}-itens`} className="bg-blue-50/30">
+                  <td colSpan={9} className="px-4 py-3">
+                    {carregandoItens === e.id ? (
+                      <p className="text-xs text-gray-400">Carregando itens…</p>
+                    ) : (itensPorEntrada[e.id] ?? []).length === 0 ? (
+                      <p className="text-xs text-gray-400">Esta entrada não tem itens.</p>
+                    ) : (
+                      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-gray-50 text-gray-500 border-b border-gray-200">
+                              <th className="text-left px-3 py-1.5 font-medium">SKU</th>
+                              <th className="text-left px-3 py-1.5 font-medium">Produto</th>
+                              <th className="text-right px-3 py-1.5 font-medium">Qtd</th>
+                              <th className="text-right px-3 py-1.5 font-medium">Custo un.</th>
+                              <th className="text-right px-3 py-1.5 font-medium">Subtotal</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {(itensPorEntrada[e.id] ?? []).map(item => (
+                              <tr key={item.id} className="text-gray-600">
+                                <td className="px-3 py-1.5 font-mono text-gray-400">{item.sku ?? '—'}</td>
+                                <td className="px-3 py-1.5 text-gray-900">{item.nome_produto ?? '—'}</td>
+                                <td className="px-3 py-1.5 text-right">{Number(item.quantidade).toLocaleString('pt-BR')}</td>
+                                <td className="px-3 py-1.5 text-right">{item.preco_custo_novo != null ? fmt(Number(item.preco_custo_novo)) : '—'}</td>
+                                <td className="px-3 py-1.5 text-right font-medium text-gray-900">
+                                  {item.subtotal != null ? fmt(Number(item.subtotal)) : '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ) : null
+              return linhaItens ? [linhaPrincipal, linhaItens] : linhaPrincipal
             })}
             {filtradas.length === 0 && (
               <tr>
