@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import PermissoesUsuarioModal from './PermissoesUsuarioModal'
 import { PAPEIS, type Papel } from '@/lib/auth/permissoes'
 
 type Usuario = {
@@ -54,6 +55,7 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
   const noLimite = limiteUsuarios !== -1 && ativos >= limiteUsuarios
 
   const [linkAcesso, setLinkAcesso] = useState<{ email: string; link: string } | null>(null)
+  const [permissoesDe, setPermissoesDe] = useState<{ id: string; nome: string } | null>(null)
   const [copiado, setCopiado] = useState(false)
 
   function avisar(msg: string) {
@@ -173,6 +175,10 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
                         <button onClick={() => setEditando(u)} className="text-xs px-2 py-1 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
                           Editar
                         </button>
+                        <button onClick={() => setPermissoesDe({ id: u.id, nome: u.nome ?? u.email ?? 'usuário' })}
+                          className="text-xs px-2 py-1 border border-blue-200 text-blue-700 bg-blue-50 rounded-lg hover:bg-blue-100">
+                          Permissões
+                        </button>
                         {u.status === 'ativo' || u.status === 'convite_pendente' ? (
                           <button onClick={() => acaoRapida(u.id, { status: 'inativo' })} className="text-xs px-2 py-1 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
                             Inativar
@@ -205,6 +211,14 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
       )}
       {editando && (
         <EditarModal usuario={editando} onClose={() => setEditando(null)} onSaved={() => { setEditando(null); router.refresh() }} onErro={avisar} />
+      )}
+      {permissoesDe && (
+        <PermissoesUsuarioModal
+          usuarioId={permissoesDe.id}
+          usuarioNome={permissoesDe.nome}
+          onClose={() => setPermissoesDe(null)}
+          onSalvo={() => { setPermissoesDe(null); avisar('Permissões salvas.'); router.refresh() }}
+        />
       )}
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { usePermissao } from '@/contexts/PlanContext'
 import { PERIODO_OPCOES, PERIODO_LABELS, type PeriodoPreset } from '@/lib/estoque/periodo'
 import { ORIGEM_ROTULO, ORIGEM_COR, type PedidoUnificado, type IndicadoresPedidos, type OrigemPedido } from '@/lib/pedidos/unificado'
 
@@ -28,6 +29,9 @@ export default function PedidosClient({
   limitePorFonte: number
 }) {
   const router = useRouter()
+  // Sem esta permissao a pessoa continua vendo e trabalhando os pedidos —
+  // some so o dinheiro: faturamento, ticket medio e o valor de cada linha.
+  const podeVerTotais = usePermissao('ver_totais_vendas')
   const [busca, setBusca] = useState('')
   const [origens, setOrigens] = useState<Set<OrigemPedido>>(new Set())
   const [situacao, setSituacao] = useState<FiltroSituacao>('todos')
@@ -93,8 +97,8 @@ export default function PedidosClient({
       {/* Indicadores */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
         <Card label="Pedidos" valor={String(indicadores.quantidade)} />
-        <Card label="Valor vendido" valor={brl(indicadores.valor)} />
-        <Card label="Ticket médio" valor={brl(indicadores.ticketMedio)} />
+        {podeVerTotais && <Card label="Valor vendido" valor={brl(indicadores.valor)} />}
+        {podeVerTotais && <Card label="Ticket médio" valor={brl(indicadores.ticketMedio)} />}
         <Card label="Aguardando nota" valor={String(indicadores.aguardandoNota)}
           cls={indicadores.aguardandoNota > 0 ? 'text-amber-600' : undefined}
           onClick={() => setSituacao(situacao === 'sem_nota' ? 'todos' : 'sem_nota')} ativo={situacao === 'sem_nota'} />
@@ -160,13 +164,13 @@ export default function PedidosClient({
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Cliente</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Situação</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Nota</th>
-                <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-600">Total</th>
+                {podeVerTotais && <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-600">Total</th>}
                 <th className="px-3 py-2.5"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtrados.length === 0 && (
-                <tr><td colSpan={8} className="text-center py-10 text-gray-400 text-sm">Nenhum pedido com os filtros atuais.</td></tr>
+                <tr><td colSpan={podeVerTotais ? 8 : 7} className="text-center py-10 text-gray-400 text-sm">Nenhum pedido com os filtros atuais.</td></tr>
               )}
               {filtrados.map(p => {
                 const fb = FISCAL_BADGE[p.fiscal]
@@ -188,7 +192,7 @@ export default function PedidosClient({
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${fb.cls}`}>{fb.texto}</span>
                       {p.fiscalNumero && <span className="block text-[11px] text-gray-400">nº {p.fiscalNumero}</span>}
                     </td>
-                    <td className="px-3 py-2 text-right font-medium text-gray-900 whitespace-nowrap">{brl(p.total)}</td>
+                    {podeVerTotais && <td className="px-3 py-2 text-right font-medium text-gray-900 whitespace-nowrap">{brl(p.total)}</td>}
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <a href={p.fonte === 'venda' ? '/dashboard/vendas' : '/dashboard/pedidos-ecommerce'}
                         className="text-xs text-blue-600 hover:underline">abrir →</a>

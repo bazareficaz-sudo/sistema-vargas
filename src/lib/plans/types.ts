@@ -41,6 +41,9 @@ export interface PlanData {
   // Papel do usuário logado (não vem de loadPlanData — é mesclado por quem
   // chama, a partir de profiles.role, pra não duplicar consulta).
   role: string | null
+  // Permissoes efetivas (papel + excecoes do usuario). Calculado no
+  // layout do dashboard pra tela nao precisar consultar de novo.
+  permissoes?: string[]
   // Acesso de suporte (impersonação temporária) — também mesclado por quem
   // chama loadPlanData, a partir de suporte_acessos.
   suporte: {

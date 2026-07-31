@@ -54,5 +54,8 @@ export function useLimite(campo: keyof PlanLimits): { limite: number; permitido:
 export function usePermissao(codigo: PermissaoCodigo): boolean {
   const plan = usePlan()
   if (plan.isSystemAdmin) return true
+  // A lista efetiva ja vem do layout com as excecoes por usuario aplicadas.
+  // O papel puro so vale como reserva, pra tela renderizada fora do dashboard.
+  if (Array.isArray(plan.permissoes)) return plan.permissoes.includes(codigo)
   return temPermissao(plan.role as Papel, codigo)
 }

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { loadPlanData } from '@/lib/plans/access'
+import { permissoesEfetivas, buscarExcecoes, type Papel } from '@/lib/auth/permissoes'
 import FiltroMes from '@/components/dashboard/FiltroMes'
 import Link from 'next/link'
 
@@ -21,6 +22,17 @@ export default async function DashboardPage({
 
   const empresaId = profile?.empresa_id ?? ''
   const plan = await loadPlanData(empresaId, user!.id)
+
+  // Painel financeiro da Visao Geral respeita a permissao do usuario: sem
+  // 'ver_dashboard_financeiro' o funcionario entra na tela e nao ve venda do
+  // dia, faturamento do mes nem contas. Vale por usuario, configurado em
+  // Usuarios -> Permissoes.
+  const { data: perfilPermissao } = await supabase.from('profiles').select('role').eq('id', user!.id).single()
+  const permissoesUsuario = permissoesEfetivas(
+    (perfilPermissao?.role ?? null) as Papel | null,
+    await buscarExcecoes(supabase, user!.id),
+  )
+  const podeVerFinanceiro = permissoesUsuario.includes('ver_dashboard_financeiro')
   const tem = (modulo: string) => plan.modulos.includes('*') || plan.modulos.includes(modulo)
   const temVendas = tem('vendas') || tem('pdv')
   const temCompras = tem('entradas') || tem('entradas_xml')
@@ -157,7 +169,7 @@ export default async function DashboardPage({
       )}
 
       {/* ── KPIs principais ────────────────────────────────────────────────── */}
-      {(temVendas || tem('contas_receber') || tem('contas_pagar')) && (
+      {podeVerFinanceiro && (temVendas || tem('contas_receber') || tem('contas_pagar')) && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {temVendas && (
             <KpiCard

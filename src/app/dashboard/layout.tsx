@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadPlanData } from '@/lib/plans/access'
+import { permissoesEfetivas, buscarExcecoes, type Papel } from '@/lib/auth/permissoes'
 import type { PlanData } from '@/lib/plans/types'
 import { provisionarEmpresaEUsuario } from '@/lib/signup/provisionar'
 import PlanProvider from '@/components/plan/PlanProvider'
@@ -85,7 +86,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
     }
   }
 
-  const planData = { ...(await loadPlanData(empresaId, user.id)), role: profile?.role ?? null, suporte }
+  // Permissoes efetivas resolvidas uma vez por carga do dashboard: papel do
+  // usuario mais as excecoes configuradas em Usuarios -> Permissoes.
+  const excecoes = await buscarExcecoes(supabase, user.id)
+  const permissoes = permissoesEfetivas((profile?.role ?? null) as Papel | null, excecoes)
+  const planData = { ...(await loadPlanData(empresaId, user.id)), role: profile?.role ?? null, permissoes, suporte }
 
   return (
     <PlanProvider data={planData}>
