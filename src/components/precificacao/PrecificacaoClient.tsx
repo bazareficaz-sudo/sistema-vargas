@@ -7,11 +7,12 @@ import type { SaudePreco } from '@/lib/precificacao/tipos'
 import TaxasCanal from './TaxasCanal'
 import RegrasPrecificacao from './RegrasPrecificacao'
 import RecalculoMassa from './RecalculoMassa'
+import AnalisePrecos from './AnalisePrecos'
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const pct = (v: number) => `${v.toFixed(1).replace('.', ',')}%`
 
-type Aba = 'simulador' | 'regras' | 'recalcular' | 'taxas'
+type Aba = 'analise' | 'simulador' | 'regras' | 'recalcular' | 'taxas'
 
 type TipoObjetivo = 'regra' | 'margem_liquida' | 'sobre_custo' | 'markup' | 'lucro_fixo' | 'preco'
 
@@ -25,7 +26,7 @@ const OBJETIVOS: { valor: TipoObjetivo; label: string; unidade: string; ajuda: s
 ]
 
 export default function PrecificacaoClient({ empresaId }: { empresaId: string }) {
-  const [aba, setAba] = useState<Aba>('simulador')
+  const [aba, setAba] = useState<Aba>('analise')
 
   // ── Simulador ──────────────────────────────────────────────
   const [busca, setBusca] = useState('')
@@ -114,13 +115,15 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 mb-5">
-        {([['simulador', 'Simulador e comparador'], ['regras', 'Regras'], ['recalcular', 'Recalcular em massa'], ['taxas', 'Taxas por canal']] as [Aba, string][]).map(([k, label]) => (
+        {([['analise', 'Análise'], ['simulador', 'Simulador e comparador'], ['regras', 'Regras'], ['recalcular', 'Recalcular em massa'], ['taxas', 'Taxas por canal']] as [Aba, string][]).map(([k, label]) => (
           <button key={k} onClick={() => setAba(k)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${aba === k ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {label}
           </button>
         ))}
       </div>
+
+      {aba === 'analise' && <AnalisePrecos />}
 
       {aba === 'simulador' && (
         <div className="space-y-5">
