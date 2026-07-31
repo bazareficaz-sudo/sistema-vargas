@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 // Tela onde o usuário define a senha dele.
@@ -16,8 +16,19 @@ import { createClient } from '@/lib/supabase/client'
 
 const MINIMO = 8
 
+// A página inteira fica dentro de Suspense por causa do useSearchParams —
+// exigência do Next pra rota que lê query string no cliente.
 export default function DefinirSenhaPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-950" />}>
+      <FormularioSenha />
+    </Suspense>
+  )
+}
+
+function FormularioSenha() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [senha, setSenha] = useState('')
   const [confirmacao, setConfirmacao] = useState('')
   const [email, setEmail] = useState('')
@@ -25,12 +36,41 @@ export default function DefinirSenhaPage() {
   const [erro, setErro] = useState('')
   const [salvando, setSalvando] = useState(false)
 
+  const [verificando, setVerificando] = useState(true)
+
   useEffect(() => {
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data }) => {
+    const tokenHash = searchParams.get('token_hash')
+    const tipo = searchParams.get('type')
+
+    ;(async () => {
+      // Link gerado pelo gestor: o token vem na URL e é trocado por sessão
+      // aqui. É o caminho confiável — não depende de fragmento de URL nem de
+      // chave guardada no navegador que pediu (PKCE), então funciona mesmo
+      // abrindo o link em outro aparelho.
+      if (tokenHash) {
+        const { data, error } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: (tipo === 'invite' ? 'invite' : 'recovery') as 'invite' | 'recovery',
+        })
+        if (!error && data.user) {
+          setEmail(data.user.email ?? '')
+          setVerificando(false)
+          return
+        }
+        setSemSessao(true)
+        setVerificando(false)
+        return
+      }
+
+      // Sem token na URL: só vale se já existe sessão (fluxo do convite que
+      // passou pelo /auth/callback).
+      const { data } = await supabase.auth.getUser()
       if (data.user) setEmail(data.user.email ?? '')
       else setSemSessao(true)
-    })
+      setVerificando(false)
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function salvar(e: React.FormEvent) {
@@ -66,7 +106,9 @@ export default function DefinirSenhaPage() {
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          {semSessao ? (
+          {verificando ? (
+            <p className="text-gray-400 text-sm py-4 text-center">Validando seu link de acesso...</p>
+          ) : semSessao ? (
             <>
               <h1 className="text-white font-semibold text-lg mb-2">Link expirado</h1>
               <p className="text-gray-400 text-sm mb-5">

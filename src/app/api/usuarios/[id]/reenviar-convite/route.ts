@@ -36,7 +36,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const email = authUser?.user?.email
   if (!email) return NextResponse.json({ ok: false, erro: 'E-mail do usuário não encontrado' }, { status: 400 })
 
-  const redirectTo = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/auth/callback?next=/auth/definir-senha`
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'
+  const redirectTo = `${appUrl}/auth/callback?next=/auth/definir-senha`
 
   // Conta já existe (é o caso de todo convite que já saiu uma vez): o que
   // vale é um link de recuperação. Só e-mail nunca visto aceita convite.
@@ -47,8 +48,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
 
-  const link = data?.properties?.action_link ?? null
-  if (!link) return NextResponse.json({ ok: false, erro: 'O Supabase não devolveu o link de acesso.' }, { status: 400 })
+  // Monta o link apontando pra NOSSA tela, levando o token pra ser validado
+  // lá com verifyOtp.
+  //
+  // O action_link do Supabase passa pelo /auth/v1/verify dele, que devolve a
+  // sessão no FRAGMENTO da URL (#access_token=...). Fragmento não é enviado
+  // ao servidor, e a tela abria antes do cliente terminar de processá-lo —
+  // resultado: "Link expirado" num link recém-gerado. Com token_hash o
+  // caminho é determinístico e funciona em qualquer navegador ou celular.
+  const tokenHash = data?.properties?.hashed_token
+  if (!tokenHash) return NextResponse.json({ ok: false, erro: 'O Supabase não devolveu o token de acesso.' }, { status: 400 })
+  const link = `${appUrl}/auth/definir-senha?token_hash=${encodeURIComponent(tokenHash)}&type=${jaExiste ? 'recovery' : 'invite'}`
 
   await registrarAuditoria(sb, {
     empresaId: guarda.empresaId, usuarioId: guarda.userId,
