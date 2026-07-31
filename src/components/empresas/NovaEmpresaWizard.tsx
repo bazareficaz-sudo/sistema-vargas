@@ -399,8 +399,11 @@ export default function NovaEmpresaWizard({ grupos, tenantId, empresaEditando, d
         updated_at: new Date().toISOString(),
       }
       if (!editando) {
-        const { data: configPadrao } = await sb.from('sistema_config_fiscal').select('provider_padrao').maybeSingle()
-        nfeConfigPayload.provider = configPadrao?.provider_padrao ?? 'focusnfe'
+        // Via funcao, e nao lendo a tabela: sistema_config_fiscal guarda o
+        // token da Brasil NFe e passou a ser visivel so pro administrador do
+        // sistema. A funcao devolve apenas o nome do provedor.
+        const { data: providerPadrao } = await sb.rpc('provider_fiscal_padrao')
+        nfeConfigPayload.provider = providerPadrao ?? 'focusnfe'
       }
       await sb.from('nfe_config').upsert(nfeConfigPayload, { onConflict: 'empresa_id' })
 
