@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { gerarProximoSku } from './sku'
+import { contarImagens, copiarImagensDeProduto } from '@/lib/produtos/imagens'
 
 type ProdutoBase = {
   id: string
@@ -30,9 +31,14 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
   const [checandoSku, setChecandoSku] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  // O kit nasce do produto, então herdar as fotos dele é o esperado — sem
+  // isso o kit ficava com a miniatura generica na listagem.
+  const [copiarImagens, setCopiarImagens] = useState(true)
+  const [qtdImagens, setQtdImagens] = useState(0)
 
   useEffect(() => {
     const sb = createClient()
+    contarImagens(sb, produto.id).then(setQtdImagens)
     gerarProximoSku(sb, empresaId).then(v => setSku(prev => prev === '' ? v : prev))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [empresaId])
@@ -104,6 +110,16 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
       return
     }
 
+    if (copiarImagens && qtdImagens > 0) {
+      const r = await copiarImagensDeProduto(sb, { empresaId, origemId: produto.id, destinoId: novoProduto.id })
+      if (r.erro) {
+        // Kit e vinculo ja existem: avisa sem descartar o que deu certo.
+        setErro('O kit foi criado, mas as imagens nao foram copiadas: ' + r.erro)
+        setSalvando(false)
+        return
+      }
+    }
+
     setSalvando(false)
     onCriado()
   }
@@ -144,6 +160,15 @@ export default function CriarKitModal({ produto, empresaId, onClose, onCriado }:
               <p className="text-xs text-red-600 mt-1">Já existe: "{skuDuplicado.nome}" — troque o SKU.</p>
             )}
           </div>
+
+          <label className={`flex items-start gap-2 ${qtdImagens === 0 ? 'opacity-50' : 'cursor-pointer'}`}>
+            <input type="checkbox" checked={copiarImagens && qtdImagens > 0} disabled={qtdImagens === 0}
+              onChange={e => setCopiarImagens(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-blue-600" />
+            <span className="text-sm text-gray-700">
+              Copiar as imagens {qtdImagens > 0 ? `(${qtdImagens})` : '(o produto não tem imagens)'}
+            </span>
+          </label>
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-700">
             1 kit = {quantidade}x "{produto.nome}". Preço de venda sugerido: {(produto.preco_venda * quantidade).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — pode ser ajustado depois editando o kit.

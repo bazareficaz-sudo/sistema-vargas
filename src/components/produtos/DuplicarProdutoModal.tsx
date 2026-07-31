@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { copiarImagensDeProduto } from '@/lib/produtos/imagens'
 import { gerarProximoSku } from './sku'
 
 type ProdutoResumo = { id: string; nome: string; tipo: string }
@@ -40,7 +41,6 @@ type ProdutoCompleto = {
   comprimento_cm: number | null
 }
 
-type ProdutoImagem = { url: string; ordem: number; principal: boolean }
 
 export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDuplicado }: {
   produto: ProdutoResumo
@@ -94,32 +94,6 @@ export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDu
     const { data } = await sb.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('sku', valor).maybeSingle()
     setSkuDuplicado(data ?? null)
     setChecandoSku(false)
-  }
-
-  async function copiarImagensParaNovoProduto(sb: ReturnType<typeof createClient>, produtoIdNovo: string) {
-    const { data: imagens } = await sb
-      .from('produto_imagens')
-      .select('url, ordem, principal')
-      .eq('produto_id', produto.id)
-      .order('ordem', { ascending: true })
-    if (!imagens || imagens.length === 0) return
-
-    const novasLinhas: { empresa_id: string; produto_id: string; url: string; ordem: number; principal: boolean }[] = []
-    for (const img of imagens as ProdutoImagem[]) {
-      let novaUrl = img.url
-      const path = img.url.split('/produto-imagens/')[1]
-      if (path) {
-        const ext = path.split('.').pop() || 'jpg'
-        const novoPath = `${empresaId}/${produtoIdNovo}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const { error: copyError } = await sb.storage.from('produto-imagens').copy(path, novoPath)
-        if (!copyError) {
-          const { data: { publicUrl } } = sb.storage.from('produto-imagens').getPublicUrl(novoPath)
-          novaUrl = publicUrl
-        }
-      }
-      novasLinhas.push({ empresa_id: empresaId, produto_id: produtoIdNovo, url: novaUrl, ordem: img.ordem, principal: img.principal })
-    }
-    await sb.from('produto_imagens').insert(novasLinhas)
   }
 
   async function salvar() {
@@ -180,7 +154,7 @@ export default function DuplicarProdutoModal({ produto, empresaId, onClose, onDu
     if (error) { setErro(error.message); setSalvando(false); return }
 
     if (copiarImagens && qtdImagens > 0) {
-      await copiarImagensParaNovoProduto(sb, novoProduto.id)
+      await copiarImagensDeProduto(sb, { empresaId, origemId: produto.id, destinoId: novoProduto.id })
     }
 
     setSalvando(false)
