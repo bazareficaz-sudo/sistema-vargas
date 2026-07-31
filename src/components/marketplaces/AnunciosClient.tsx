@@ -12,6 +12,26 @@ import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
 import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
+import { calcular as calcularPreco, saudeDaMargem, ROTULO_SAUDE } from '@/lib/precificacao/motor'
+
+// Saúde da precificação do anúncio: pega o preço que está no ar, desconta
+// tudo que o canal cobra (as taxas configuradas em Precificação) e mostra o
+// que realmente sobra. Usa o mesmo motor da tela de simulação — não existe
+// uma segunda conta que possa divergir dela.
+function SaudeDoAnuncio({ anuncio, cfg }: { anuncio: any; cfg: any }) {
+  if (!cfg) return null
+  const custo = Number(anuncio.produtos?.preco_custo ?? 0)
+  const preco = Number(anuncio.preco_promocional || anuncio.preco_venda || 0)
+  if (!(custo > 0) || !(preco > 0)) return null
+
+  const r = calcularPreco({ cfg, custoProduto: custo, objetivo: { tipo: 'preco', valor: preco } })
+  const s = ROTULO_SAUDE[saudeDaMargem(r.margemLiquida, cfg.faixasSaude)]
+  return (
+    <p className="text-xs text-gray-400 mt-0.5" title={`Lucro estimado ${r.lucro.toFixed(2)} · deduções ${r.totalDeducoes.toFixed(2)}`}>
+      {s.emoji} {r.margemLiquida.toFixed(0)}% de margem
+    </p>
+  )
+}
 
 function arredondar(valor: number, regra: string): number {
   if (regra === 'cima_inteiro') return Math.ceil(valor)
@@ -84,9 +104,10 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'divergente', label: 'Divergente' },
 ]
 
-export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [] }: {
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [], configPreco }: {
   canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
   regras?: any[]; depositos?: { id: string; nome: string }[]
+  configPreco?: any
 }) {
   const router = useRouter()
   const [anuncios, setAnuncios] = useState(anunciosIniciais)
@@ -959,7 +980,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   {a.produtos && <p className="text-xs text-gray-400">estoque: {a.produtos.estoque ?? 0}</p>}
                 </td>
                 <td className="px-4 py-3 text-right text-gray-600 font-mono text-sm">{a.vendas ?? '—'}</td>
-                <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(a.preco_venda)}</td>
+                <td className="px-4 py-3 text-right">
+                  <p className="font-semibold text-gray-900">{fmt(a.preco_venda)}</p>
+                  <SaudeDoAnuncio anuncio={a} cfg={configPreco} />
+                </td>
                 <td className="px-4 py-3 text-right">
                   {a.preco_promocional ? (
                     <div>

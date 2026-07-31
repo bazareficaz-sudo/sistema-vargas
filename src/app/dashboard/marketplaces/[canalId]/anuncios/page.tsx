@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import AnunciosClient from '@/components/marketplaces/AnunciosClient'
+import { buscarConfigDoCanal } from '@/lib/precificacao/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,9 +78,14 @@ export default async function AnunciosPage({ params, searchParams }: {
     .eq('empresa_id', empresaId)
     .order('nome')
 
+  // Taxas do canal: a listagem usa pra calcular a margem real de cada anúncio
+  // (o mesmo motor da tela de Precificação, sem refazer conta).
+  const { cfg: configPreco } = await buscarConfigDoCanal(supabase, empresaId, canal)
+
   return (
     <AnunciosClient
       canal={canal}
+      configPreco={configPreco}
       canais={canais ?? []}
       anuncios={anuncios ?? []}
       produtos={produtos ?? []}
