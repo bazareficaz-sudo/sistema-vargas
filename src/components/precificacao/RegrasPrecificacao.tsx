@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { NIVEIS, descreverObjetivo, type NivelRegra } from '@/lib/precificacao/regras'
+import CampoNumero from './CampoNumero'
 
 // CRUD das regras. A ordem da lista é a ordem em que elas disputam: produto
 // primeiro, regra geral por último — a mesma hierarquia que o motor aplica.
@@ -267,16 +268,16 @@ function FormRegra({ regra: inicial, dados, empresaId, onFechar, onSalvo }: {
               <select value={r.objetivo_tipo} onChange={e => set('objetivo_tipo', e.target.value)} className={`${inputCls} flex-1`}>
                 {OBJETIVOS.map(o => <option key={o.valor} value={o.valor}>{o.label}</option>)}
               </select>
-              <input value={r.objetivo_valor ?? ''} onChange={e => set('objetivo_valor', e.target.value)}
-                inputMode="decimal" className={`${inputCls} w-24`} />
+              <CampoNumero valor={r.objetivo_valor} onChange={v => set('objetivo_valor', v)}
+                className={`${inputCls} w-24`} />
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Margem mínima (opcional)</label>
             <div className="flex items-center gap-2">
-              <input value={r.margem_minima ?? ''} onChange={e => set('margem_minima', e.target.value)}
-                placeholder="sem piso" inputMode="decimal" className={`${inputCls} w-24`} />
+              <CampoNumero valor={r.margem_minima} onChange={v => set('margem_minima', v)}
+                placeholder="sem piso" className={`${inputCls} w-24`} />
               <span className="text-xs text-gray-400">
                 % — se o objetivo acima der menos que isso, o preço sobe até respeitar o piso (e o sistema avisa).
               </span>
@@ -295,8 +296,8 @@ function FormRegra({ regra: inicial, dados, empresaId, onFechar, onSalvo }: {
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Prioridade</label>
-              <input value={r.prioridade ?? 0} onChange={e => set('prioridade', e.target.value)}
-                inputMode="numeric" className={`${inputCls} w-full`} />
+              <CampoNumero valor={r.prioridade ?? 0} onChange={v => set('prioridade', v ?? 0)}
+                className={`${inputCls} w-full`} />
               <p className="text-[11px] text-gray-400 mt-0.5">Desempata entre regras do mesmo nível.</p>
             </div>
           </div>

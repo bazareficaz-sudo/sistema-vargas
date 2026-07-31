@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { ConfigTaxas, ItemCusto } from '@/lib/precificacao/tipos'
+import CampoNumero from './CampoNumero'
 
 // Editor das taxas de um canal. Tudo que o motor usa pra calcular está aqui —
 // nenhuma alíquota fica escrita em código, então uma mudança da Shopee ou do
@@ -85,12 +86,12 @@ export default function TaxasCanal({ canal, configInicial, origem, onSalvo }: {
             {cfg.comissaoModo === 'simples' ? (
               <div className="flex items-center gap-3">
                 <label className="text-xs text-gray-600">Percentual
-                  <input value={cfg.comissaoPercentual} onChange={e => set('comissaoPercentual', Number(e.target.value))}
-                    inputMode="decimal" className={`${inputCls} w-24 ml-2`} />
+                  <CampoNumero valor={cfg.comissaoPercentual} onChange={v => set('comissaoPercentual', v ?? 0)}
+                    className={`${inputCls} w-24 ml-2`} />
                 </label>
                 <label className="text-xs text-gray-600">+ valor fixo R$
-                  <input value={cfg.comissaoFixo} onChange={e => set('comissaoFixo', Number(e.target.value))}
-                    inputMode="decimal" className={`${inputCls} w-24 ml-2`} />
+                  <CampoNumero valor={cfg.comissaoFixo} onChange={v => set('comissaoFixo', v ?? 0)}
+                    className={`${inputCls} w-24 ml-2`} />
                 </label>
               </div>
             ) : (
@@ -117,19 +118,19 @@ export default function TaxasCanal({ canal, configInicial, origem, onSalvo }: {
             {cfg.freteModo === 'gratis_acima' && (
               <div className="flex flex-wrap items-center gap-3">
                 <label className="text-xs text-gray-600">Frete grátis a partir de R$
-                  <input value={cfg.freteLimiteGratis} onChange={e => set('freteLimiteGratis', Number(e.target.value))}
-                    inputMode="decimal" className={`${inputCls} w-24 ml-2`} />
+                  <CampoNumero valor={cfg.freteLimiteGratis} onChange={v => set('freteLimiteGratis', v ?? 0)}
+                    className={`${inputCls} w-24 ml-2`} />
                 </label>
                 <label className="text-xs text-gray-600">Custo médio que sobra pra mim R$
-                  <input value={cfg.freteCustoMedio} onChange={e => set('freteCustoMedio', Number(e.target.value))}
-                    inputMode="decimal" className={`${inputCls} w-24 ml-2`} />
+                  <CampoNumero valor={cfg.freteCustoMedio} onChange={v => set('freteCustoMedio', v ?? 0)}
+                    className={`${inputCls} w-24 ml-2`} />
                 </label>
               </div>
             )}
             {cfg.freteModo === 'fixo' && (
               <label className="text-xs text-gray-600">Valor por venda R$
-                <input value={cfg.freteValor} onChange={e => set('freteValor', Number(e.target.value))}
-                  inputMode="decimal" className={`${inputCls} w-24 ml-2`} />
+                <CampoNumero valor={cfg.freteValor} onChange={v => set('freteValor', v ?? 0)}
+                  className={`${inputCls} w-24 ml-2`} />
               </label>
             )}
             {cfg.freteModo === 'faixa_peso' && (
@@ -167,8 +168,8 @@ export default function TaxasCanal({ canal, configInicial, origem, onSalvo }: {
           <Secao titulo="Prazo e faixas de saúde">
             <div className="flex flex-wrap items-center gap-4">
               <label className="text-xs text-gray-600">Recebo em
-                <input value={cfg.diasRecebimento ?? ''} onChange={e => set('diasRecebimento', e.target.value === '' ? null : Number(e.target.value))}
-                  inputMode="numeric" className={`${inputCls} w-16 mx-2`} />dias
+                <CampoNumero valor={cfg.diasRecebimento} onChange={v => set('diasRecebimento', v)}
+                  className={`${inputCls} w-16 mx-2`} />dias
               </label>
             </div>
             <div className="flex flex-wrap items-center gap-3 mt-3">
@@ -179,9 +180,9 @@ export default function TaxasCanal({ canal, configInicial, origem, onSalvo }: {
                 ['saudavel', '🟢 saudável abaixo de'],
               ] as const).map(([k, label]) => (
                 <label key={k} className="text-xs text-gray-600">{label}
-                  <input value={(cfg.faixasSaude as any)?.[k] ?? ''}
-                    onChange={e => set('faixasSaude' as any, { ...(cfg.faixasSaude ?? { critica: 5, baixa: 10, saudavel: 20 }), [k]: Number(e.target.value) } as any)}
-                    inputMode="decimal" className={`${inputCls} w-16 mx-1.5`} />%
+                  <CampoNumero valor={(cfg.faixasSaude as any)?.[k]}
+                    onChange={v => set('faixasSaude' as any, { ...(cfg.faixasSaude ?? { critica: 5, baixa: 10, saudavel: 20 }), [k]: v ?? 0 } as any)}
+                    className={`${inputCls} w-16 mx-1.5`} />%
                 </label>
               ))}
               <span className="text-xs text-gray-400">acima disso, 💎</span>
@@ -224,12 +225,10 @@ function FaixasEditor({ faixas, onChange }: { faixas: any[]; onChange: (f: any[]
       </div>
       {faixas.map((f, i) => (
         <div key={i} className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 items-center">
-          <input value={f.min} onChange={e => editar(i, 'min', Number(e.target.value))} inputMode="decimal" className={inputCls} />
-          <input value={f.max ?? ''} placeholder="sem teto"
-            onChange={e => editar(i, 'max', e.target.value === '' ? null : Number(e.target.value))}
-            inputMode="decimal" className={inputCls} />
-          <input value={f.percentual} onChange={e => editar(i, 'percentual', Number(e.target.value))} inputMode="decimal" className={inputCls} />
-          <input value={f.fixo} onChange={e => editar(i, 'fixo', Number(e.target.value))} inputMode="decimal" className={inputCls} />
+          <CampoNumero valor={f.min} onChange={v => editar(i, 'min', v ?? 0)} className={inputCls} />
+          <CampoNumero valor={f.max} placeholder="sem teto" onChange={v => editar(i, 'max', v)} className={inputCls} />
+          <CampoNumero valor={f.percentual} onChange={v => editar(i, 'percentual', v ?? 0)} className={inputCls} />
+          <CampoNumero valor={f.fixo} onChange={v => editar(i, 'fixo', v ?? 0)} className={inputCls} />
           <button onClick={() => onChange(faixas.filter((_, idx) => idx !== i))}
             className="text-gray-300 hover:text-red-500 px-1">×</button>
         </div>
@@ -248,8 +247,8 @@ function PesoEditor({ faixas, onChange }: { faixas: any[]; onChange: (f: any[]) 
       </div>
       {faixas.map((f, i) => (
         <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
-          <input value={f.pesoAte} onChange={e => onChange(faixas.map((x, idx) => idx === i ? { ...x, pesoAte: Number(e.target.value) } : x))} inputMode="decimal" className={inputCls} />
-          <input value={f.valor} onChange={e => onChange(faixas.map((x, idx) => idx === i ? { ...x, valor: Number(e.target.value) } : x))} inputMode="decimal" className={inputCls} />
+          <CampoNumero valor={f.pesoAte} onChange={v => onChange(faixas.map((x, idx) => idx === i ? { ...x, pesoAte: v ?? 0 } : x))} className={inputCls} />
+          <CampoNumero valor={f.valor} onChange={v => onChange(faixas.map((x, idx) => idx === i ? { ...x, valor: v ?? 0 } : x))} className={inputCls} />
           <button onClick={() => onChange(faixas.filter((_, idx) => idx !== i))} className="text-gray-300 hover:text-red-500 px-1">×</button>
         </div>
       ))}
@@ -276,8 +275,8 @@ function ItemUnico({ rotulo, item, onChange, dica }: {
           <option value="fixo">R$ fixo</option>
           <option value="percentual">%</option>
         </select>
-        <input value={item.valor} onChange={e => onChange({ ...item, valor: Number(e.target.value) })}
-          inputMode="decimal" className={`${inputCls} w-24`} />
+        <CampoNumero valor={item.valor} onChange={v => onChange({ ...item, valor: v ?? 0 })}
+          className={`${inputCls} w-24`} />
         {item.tipo === 'percentual' && (
           <select value={item.base ?? 'preco'} onChange={e => onChange({ ...item, base: e.target.value as any })} className={inputCls}>
             <option value="preco">do preço</option>
@@ -307,8 +306,8 @@ function ListaItens({ itens, onChange, sugestoes }: {
             <option value="fixo">R$ fixo</option>
             <option value="percentual">%</option>
           </select>
-          <input value={item.valor} onChange={e => editar(i, 'valor', Number(e.target.value))}
-            inputMode="decimal" className={`${inputCls} w-24`} />
+          <CampoNumero valor={item.valor} onChange={v => editar(i, 'valor', v ?? 0)}
+            className={`${inputCls} w-24`} />
           {item.tipo === 'percentual' && (
             <select value={item.base ?? 'preco'} onChange={e => editar(i, 'base', e.target.value)} className={inputCls}>
               <option value="preco">do preço</option>
