@@ -6,6 +6,7 @@ import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { gerarEanInternoUnico } from '@/lib/produtos/ean'
+import { usePermissao } from '@/contexts/PlanContext'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 
 const TIPOS = [
@@ -95,6 +96,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [tituloSugerido, setTituloSugerido] = useState('')
   const [anunciosVinculados, setAnunciosVinculados] = useState<AnuncioVinculado[]>([])
   const [carregandoAnuncios, setCarregandoAnuncios] = useState(false)
+  // Quem nao tem permissao ve o campo travado com o motivo, em vez de
+  // digitar, salvar e tomar uma recusa do banco.
+  const podeEditarProdutos = usePermissao('editar_produtos')
+  const podeEditarPrecos = usePermissao('editar_precos')
   const [gerandoEan, setGerandoEan] = useState(false)
   const [eanGerado, setEanGerado] = useState(false)
 
@@ -876,16 +881,18 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Preço de venda (R$)
-                  <span className="text-gray-400 font-normal ml-1">— ou defina manualmente</span>
+                  {podeEditarPrecos
+                    ? <span className="text-gray-400 font-normal ml-1">— ou defina manualmente</span>
+                    : <span className="text-amber-700 font-normal ml-1">— você não tem permissão para alterar preço</span>}
                 </label>
-                <input type="number" step="0.01" value={form.preco_venda}
+                <input type="number" step="0.01" value={form.preco_venda} disabled={!podeEditarPrecos}
                   onChange={e => {
                     const venda = parseFloat(e.target.value) || 0
                     const custo = form.preco_custo ?? 0
                     const mk = custo > 0 ? ((venda - custo) / custo) * 100 : 0
                     setForm(prev => prev ? { ...prev, preco_venda: venda, markup: parseFloat(mk.toFixed(4)) } : prev)
                   }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 font-mono text-base" />
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 font-mono text-base disabled:bg-gray-100 disabled:text-gray-400" />
                 {form.preco_custo > 0 && form.preco_venda > 0 && (
                   <p className="text-xs text-gray-500 mt-1">
                     Margem: <span className={`font-medium ${form.preco_venda > form.preco_custo ? 'text-green-600' : 'text-red-600'}`}>
@@ -1388,7 +1395,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
               Cancelar
             </button>
-            <button onClick={salvar} disabled={salvando}
+            <button onClick={salvar} disabled={salvando || (!podeEditarProdutos && !podeEditarPrecos)}
+              title={!podeEditarProdutos && !podeEditarPrecos ? 'Você não tem permissão para editar produtos' : undefined}
               className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors font-medium">
               {salvando ? 'Salvando...' : 'Salvar alterações'}
             </button>

@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { usePermissao } from '@/contexts/PlanContext'
 import EditarProdutoModal from './EditarProdutoModal'
 import DuplicarProdutoModal from './DuplicarProdutoModal'
 import AcoesEmMassaModal from './AcoesEmMassaModal'
@@ -104,6 +105,11 @@ export default function ProdutosClient({
 }: Props) {
   const router = useRouter()
   const [produtos, setProdutos] = useState(inicial)
+  // O banco recusa a gravacao de quem nao tem permissao (trigger). Aqui a
+  // tela some com o botao antes disso, pra pessoa nao esbarrar num erro.
+  const podeEditarProdutos = usePermissao('editar_produtos')
+  const podeExcluir = usePermissao('excluir_cadastros')
+  const podeEditarPrecos = usePermissao('editar_precos')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [editando, setEditando] = useState<Produto | null>(null)
   const [duplicando, setDuplicando] = useState<Produto | null>(null)
@@ -378,15 +384,15 @@ export default function ProdutosClient({
           {selecionados.size > 0 && (
             <div className="flex items-center gap-2 mr-2">
               <span className="text-sm text-gray-600">{selecionados.size} selecionado(s)</span>
-              <button onClick={() => ativarSelecionados(true)} className="text-xs px-3 py-1.5 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 transition-colors">Ativar</button>
-              <button onClick={() => ativarSelecionados(false)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">Desativar</button>
-              <button onClick={() => setAcoesEmMassa(true)} className="text-xs px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">Ações em massa</button>
+              {podeExcluir && <button onClick={() => ativarSelecionados(true)} className="text-xs px-3 py-1.5 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 transition-colors">Ativar</button>}
+              {podeExcluir && <button onClick={() => ativarSelecionados(false)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">Desativar</button>}
+              {podeEditarProdutos && <button onClick={() => setAcoesEmMassa(true)} className="text-xs px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">Ações em massa</button>}
               <button onClick={() => setImagemEmMassa(true)} className="text-xs px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 transition-colors">🖼 Adicionar imagem</button>
               <button onClick={() => setGerenciandoTags(true)} className="text-xs px-3 py-1.5 border border-teal-300 text-teal-700 rounded-lg hover:bg-teal-50 transition-colors">🏷 Tags</button>
               <button onClick={() => setImprimindoEtiquetas(true)} className="text-xs px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition-colors">🏷️ Emitir Etiquetas</button>
-              <button onClick={abrirGestaoPrecos} disabled={enviandoPrecos} className="text-xs px-3 py-1.5 border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 transition-colors">
+              {podeEditarPrecos && <button onClick={abrirGestaoPrecos} disabled={enviandoPrecos} className="text-xs px-3 py-1.5 border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 transition-colors">
                 {enviandoPrecos ? 'Abrindo...' : '💲 Gestão de Preços'}
-              </button>
+              </button>}
               {selecionados.size >= 2 && selecionados.size <= 5 && (
                 <button onClick={() => setUnificando(true)} className="text-xs px-3 py-1.5 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors">🔀 Unificar cadastro</button>
               )}
@@ -395,9 +401,11 @@ export default function ProdutosClient({
           <button onClick={() => setImportandoUrl(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
             🔗 Importar de URL
           </button>
-          <button onClick={() => setCriandoNovo(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-            + Novo produto
-          </button>
+          {podeEditarProdutos && (
+            <button onClick={() => setCriandoNovo(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+              + Novo produto
+            </button>
+          )}
         </div>
       </div>
 
