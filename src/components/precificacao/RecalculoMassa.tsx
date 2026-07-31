@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ROTULO_SAUDE } from '@/lib/precificacao/motor'
 import type { SaudePreco } from '@/lib/precificacao/tipos'
+import CampoNumero from './CampoNumero'
 
 // Recálculo em massa: primeiro a prévia (não muda nada), depois a aplicação
 // só do que o usuário aprovou.
@@ -22,6 +23,11 @@ export default function RecalculoMassa() {
   const [resultado, setResultado] = useState<any | null>(null)
   const [erro, setErro] = useState('')
   const [verHistorico, setVerHistorico] = useState(false)
+  // Ajuste de margem linha a linha: a regra manda 20%, mas tem produto que
+  // so fecha com 15%. Aqui o operador muda so aquela linha, sem precisar
+  // criar regra nova pra conseguir publicar.
+  const [ajustes, setAjustes] = useState<Record<string, any>>({})
+  const timers = useRef<Record<string, any>>({})
 
   useEffect(() => {
     fetch('/api/precificacao/config').then(r => r.json()).then(d => {
@@ -51,6 +57,63 @@ export default function RecalculoMassa() {
     }
   }
 
+  const precoDe = (i: any) => ajustes[i.anuncioId]?.preco ?? i.precoNovo
+  const margemDe = (i: any) => ajustes[i.anuncioId]?.margem ?? i.margemNova
+  const saudeDe = (i: any) => ajustes[i.anuncioId]?.saude ?? i.saudeNova
+  const foiAjustado = (i: any) => ajustes[i.anuncioId]?.preco != null
+
+  function mudarMargem(i: any, valor: number | null) {
+    const id = i.anuncioId
+    setAjustes(a => ({ ...a, [id]: { ...a[id], margemAlvo: valor, erro: '', fixada: false } }))
+    clearTimeout(timers.current[id])
+    if (valor == null || !(valor > 0)) {
+      // Campo vazio volta ao preco da regra, em vez de travar num meio-termo.
+      setAjustes(a => ({ ...a, [id]: { ...a[id], preco: undefined, margem: undefined, saude: undefined } }))
+      return
+    }
+    setAjustes(a => ({ ...a, [id]: { ...a[id], carregando: true } }))
+    timers.current[id] = setTimeout(async () => {
+      try {
+        const d = await fetch('/api/precificacao/recalcular/ajustar-item', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ anuncioId: id, margem: valor }),
+        }).then(r => r.json())
+        setAjustes(a => ({
+          ...a,
+          [id]: d.ok
+            ? { ...a[id], carregando: false, preco: d.preco, margem: d.margem, saude: d.saude, erro: d.avisos?.[0] ?? '' }
+            : { ...a[id], carregando: false, erro: d.erro ?? 'Erro ao recalcular' },
+        }))
+      } catch (e: any) {
+        setAjustes(a => ({ ...a, [id]: { ...a[id], carregando: false, erro: e.message } }))
+      }
+    }, 500)
+  }
+
+  // Transforma o ajuste numa regra do proprio produto. Sem isso o anuncio
+  // volta a aparecer na proxima varredura, porque a regra da categoria
+  // continua pedindo a margem antiga.
+  async function fixarParaProduto(i: any) {
+    const margem = ajustes[i.anuncioId]?.margemAlvo
+    if (!(margem > 0)) return
+    setAjustes(a => ({ ...a, [i.anuncioId]: { ...a[i.anuncioId], fixando: true } }))
+    const d = await fetch('/api/precificacao/regras', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        regra: {
+          nome: `${i.produtoNome} — margem ${String(margem).replace('.', ',')}%`,
+          nivel: 'produto', alvo_id: i.produtoId,
+          objetivo_tipo: 'margem_liquida', objetivo_valor: margem,
+          arredondamento: 'nenhum', prioridade: 0, ativo: true,
+        },
+      }),
+    }).then(r => r.json())
+    setAjustes(a => ({
+      ...a,
+      [i.anuncioId]: { ...a[i.anuncioId], fixando: false, fixada: d.ok, erro: d.ok ? '' : (d.erro ?? 'Erro ao criar a regra') },
+    }))
+  }
+
   async function aplicar() {
     const escolhidos = previa.itens.filter((i: any) => selecionados.has(i.anuncioId))
     if (escolhidos.length === 0) return
@@ -66,9 +129,14 @@ export default function RecalculoMassa() {
         body: JSON.stringify({
           enviarAoMarketplace,
           itens: escolhidos.map((i: any) => ({
-            anuncioId: i.anuncioId, precoNovo: i.precoNovo, regraId: i.regraId,
-            regraNome: i.regraNome, regraObjetivo: i.regraObjetivo,
-            custo: i.custo, margemAtual: i.margemAtual, margemNova: i.margemNova,
+            anuncioId: i.anuncioId, precoNovo: precoDe(i), regraId: i.regraId,
+            regraNome: i.regraNome,
+            // O historico precisa dizer que o preco nao saiu puro da regra —
+            // senao, meses depois, ninguem entende a diferenca.
+            regraObjetivo: foiAjustado(i)
+              ? `${i.regraObjetivo} · margem ajustada para ${margemDe(i)}%`
+              : i.regraObjetivo,
+            custo: i.custo, margemAtual: i.margemAtual, margemNova: margemDe(i),
           })),
         }),
       }).then(r => r.json())
@@ -203,6 +271,12 @@ export default function RecalculoMassa() {
                       mostrando os {itens.length} de maior impacto
                     </span>
                   )}
+                  {Object.values(ajustes).some((a: any) => a?.preco != null) && (
+                    <span className="text-[11px] text-blue-700">
+                      margem ajustada em alguma linha — o anúncio volta a aparecer na próxima varredura,
+                      a não ser que você fixe a margem para o produto
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-2 text-xs text-gray-600">
@@ -227,12 +301,18 @@ export default function RecalculoMassa() {
                       <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">Novo</th>
                       <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">Diferença</th>
                       <th className="text-center px-3 py-2 text-xs font-medium text-gray-600">Margem</th>
+                      <th className="text-center px-3 py-2 text-xs font-medium text-gray-600" title="Deixe em branco para usar a margem da regra">
+                        Margem desejada
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {itens.map((i: any) => {
+                      const aj = ajustes[i.anuncioId]
+                      const ajustado = foiAjustado(i)
+                      const dif = Number((precoDe(i) - i.precoAtual).toFixed(2))
                       const sa = ROTULO_SAUDE[i.saudeAtual as SaudePreco]
-                      const sn = ROTULO_SAUDE[i.saudeNova as SaudePreco]
+                      const sn = ROTULO_SAUDE[saudeDe(i) as SaudePreco]
                       return (
                         <tr key={i.anuncioId} className="hover:bg-gray-50">
                           <td className="px-3 py-2">
@@ -250,16 +330,37 @@ export default function RecalculoMassa() {
                             {i.avisos?.length > 0 && (
                               <p className="text-[11px] text-amber-700 mt-0.5">{i.avisos[0]}</p>
                             )}
+                            {aj?.erro && <p className="text-[11px] text-red-600 mt-0.5">{aj.erro}</p>}
                           </td>
                           <td className="px-3 py-2 text-right text-gray-500 font-mono">{brl(i.precoAtual)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900 font-mono font-medium">{brl(i.precoNovo)}</td>
-                          <td className={`px-3 py-2 text-right font-mono ${i.diferenca > 0 ? 'text-green-700' : 'text-blue-700'}`}>
-                            {i.diferenca > 0 ? '+' : ''}{brl(i.diferenca)}
+                          <td className="px-3 py-2 text-right font-mono font-medium text-gray-900">
+                            {aj?.carregando ? <span className="text-gray-400 text-xs">calculando...</span> : brl(precoDe(i))}
+                            {ajustado && <span className="block text-[10px] text-blue-600 font-sans">ajustado</span>}
+                          </td>
+                          <td className={`px-3 py-2 text-right font-mono ${dif > 0 ? 'text-green-700' : dif < 0 ? 'text-blue-700' : 'text-gray-400'}`}>
+                            {dif > 0 ? '+' : ''}{brl(dif)}
                           </td>
                           <td className="px-3 py-2 text-center whitespace-nowrap text-xs">
                             <span title={sa.texto}>{sa.emoji} {i.margemAtual.toFixed(0)}%</span>
                             <span className="text-gray-300 mx-1">→</span>
-                            <span title={sn.texto}>{sn.emoji} {i.margemNova.toFixed(0)}%</span>
+                            <span title={sn.texto}>{sn.emoji} {margemDe(i).toFixed(0)}%</span>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <CampoNumero valor={aj?.margemAlvo ?? null}
+                                placeholder={String(i.margemNova.toFixed(0))}
+                                onChange={v => mudarMargem(i, v)}
+                                className="w-14 border border-gray-300 rounded px-1.5 py-1 text-xs text-center focus:outline-none focus:border-blue-500" />
+                              <span className="text-xs text-gray-400">%</span>
+                            </div>
+                            {ajustado && !aj?.fixada && (
+                              <button onClick={() => fixarParaProduto(i)} disabled={aj?.fixando}
+                                title="Cria uma regra só para este produto, para ele não voltar a aparecer aqui"
+                                className="text-[10px] text-blue-600 hover:text-blue-800 disabled:opacity-50 mt-0.5">
+                                {aj?.fixando ? 'fixando...' : 'fixar p/ este produto'}
+                              </button>
+                            )}
+                            {aj?.fixada && <span className="block text-[10px] text-green-700 mt-0.5">✓ regra criada</span>}
                           </td>
                         </tr>
                       )
