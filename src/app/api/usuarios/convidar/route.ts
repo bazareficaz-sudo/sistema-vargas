@@ -36,7 +36,10 @@ export async function POST(req: Request) {
     .select('empresa_id, tenant_id, grupo_id').eq('id', guarda.userId).single()
 
   const { data: convite, error: erroConvite } = await admin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/auth/callback`,
+    // O Supabase cria a conta do convidado SEM senha. Sem mandar ele pra
+    // tela de definir senha, ele entrava só naquela sessão e nunca mais
+    // conseguia logar de novo.
+    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/auth/callback?next=/auth/definir-senha`,
   })
   if (erroConvite || !convite?.user) {
     return NextResponse.json({ ok: false, erro: erroConvite?.message ?? 'Erro ao enviar convite' }, { status: 400 })

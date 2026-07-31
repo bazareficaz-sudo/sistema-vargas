@@ -19,6 +19,8 @@ function LoginForm() {
   const [senha, setSenha] = useState('')
   const [erro, setErro] = useState('')
   const [carregando, setCarregando] = useState(false)
+  const [avisoRecuperacao, setAvisoRecuperacao] = useState('')
+  const [enviandoRecuperacao, setEnviandoRecuperacao] = useState(false)
 
   useEffect(() => {
     if (searchParams.get('erro') === 'acesso_bloqueado') {
@@ -39,6 +41,21 @@ function LoginForm() {
     }
     router.push('/dashboard')
     router.refresh()
+  }
+
+  // Recuperação de senha — também é o caminho de saída pra quem aceitou um
+  // convite antes de existir a tela de definir senha e ficou sem senha nenhuma.
+  async function recuperarSenha() {
+    setErro(''); setAvisoRecuperacao('')
+    if (!email.trim()) { setErro('Digite seu e-mail acima primeiro.'); return }
+    setEnviandoRecuperacao(true)
+    const supabase = createClient()
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/auth/callback?next=/auth/definir-senha`,
+    })
+    setEnviandoRecuperacao(false)
+    if (error) { setErro('Não foi possível enviar o e-mail: ' + error.message); return }
+    setAvisoRecuperacao('Enviamos um link para ' + email.trim() + '. Abra o e-mail e crie sua nova senha.')
   }
 
   return (
@@ -90,12 +107,23 @@ function LoginForm() {
               </p>
             )}
 
+            {avisoRecuperacao && (
+              <p className="text-emerald-400 text-sm bg-emerald-400/10 border border-emerald-400/20 rounded-lg px-3 py-2">
+                {avisoRecuperacao}
+              </p>
+            )}
+
             <button
               type="submit"
               disabled={carregando}
               className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white font-medium rounded-lg py-2.5 text-sm transition-colors"
             >
               {carregando ? 'Entrando...' : 'Entrar'}
+            </button>
+
+            <button type="button" onClick={recuperarSenha} disabled={enviandoRecuperacao}
+              className="w-full text-center text-gray-400 hover:text-gray-200 text-xs disabled:opacity-50">
+              {enviandoRecuperacao ? 'Enviando...' : 'Esqueci minha senha'}
             </button>
           </form>
         </div>

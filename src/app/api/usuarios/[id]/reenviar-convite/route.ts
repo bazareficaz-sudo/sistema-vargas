@@ -20,7 +20,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!email) return NextResponse.json({ ok: false, erro: 'E-mail do usuário não encontrado' }, { status: 400 })
 
   const { error } = await admin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/auth/callback`,
+    // O Supabase cria a conta do convidado SEM senha. Sem mandar ele pra
+    // tela de definir senha, ele entrava só naquela sessão e nunca mais
+    // conseguia logar de novo.
+    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/auth/callback?next=/auth/definir-senha`,
   })
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
 
