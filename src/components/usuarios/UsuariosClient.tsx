@@ -53,6 +53,9 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
   const ativos = usuarios.filter(u => u.status !== 'inativo').length
   const noLimite = limiteUsuarios !== -1 && ativos >= limiteUsuarios
 
+  const [linkAcesso, setLinkAcesso] = useState<{ email: string; link: string } | null>(null)
+  const [copiado, setCopiado] = useState(false)
+
   function avisar(msg: string) {
     setMensagem(msg)
     setTimeout(() => setMensagem(''), 4000)
@@ -67,10 +70,26 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
     router.refresh()
   }
 
-  async function reenviarConvite(id: string) {
+  // Gera um link novo de acesso. O link vem pra tela de propósito: o gestor
+  // manda por WhatsApp e não fica dependendo do e-mail chegar (nem do
+  // template do Supabase, que ainda sai em inglês).
+  async function gerarLinkAcesso(id: string) {
+    setLinkAcesso(null)
     const res = await fetch(`/api/usuarios/${id}/reenviar-convite`, { method: 'POST' })
     const data = await res.json()
-    avisar(data.ok ? 'Convite reenviado.' : (data.erro ?? 'Erro ao reenviar'))
+    if (!data.ok) { avisar(data.erro ?? 'Erro ao gerar o link'); return }
+    setLinkAcesso({ email: data.email, link: data.link })
+  }
+
+  async function copiarLink() {
+    if (!linkAcesso) return
+    try {
+      await navigator.clipboard.writeText(linkAcesso.link)
+      setCopiado(true)
+      setTimeout(() => setCopiado(false), 2500)
+    } catch {
+      avisar('Não foi possível copiar automaticamente — selecione o link e copie à mão.')
+    }
   }
 
   return (
@@ -92,6 +111,26 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
 
       {mensagem && (
         <div className="mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg">{mensagem}</div>
+      )}
+
+      {linkAcesso && (
+        <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-900 font-medium">Link de acesso para {linkAcesso.email}</p>
+          <p className="text-xs text-blue-700 mt-1">
+            Mande este link para a pessoa (WhatsApp serve). Ao abrir, ela cria a senha e entra.
+            O link vale por tempo limitado e só pode ser usado uma vez — se expirar, é só gerar outro aqui.
+          </p>
+          <div className="flex gap-2 mt-2">
+            <input readOnly value={linkAcesso.link} onFocus={e => e.currentTarget.select()}
+              className="flex-1 border border-blue-300 rounded-lg px-3 py-2 text-xs font-mono bg-white text-gray-700" />
+            <button onClick={copiarLink}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg whitespace-nowrap">
+              {copiado ? '✓ Copiado' : 'Copiar link'}
+            </button>
+            <button onClick={() => setLinkAcesso(null)}
+              className="px-3 py-2 border border-blue-200 text-blue-700 text-xs rounded-lg hover:bg-blue-100">Fechar</button>
+          </div>
+        </div>
       )}
 
       <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
@@ -125,8 +164,8 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
                 <td className="px-4 py-2.5">
                   <div className="flex items-center justify-end gap-1.5 flex-wrap">
                     {u.status === 'convite_pendente' && (
-                      <button onClick={() => reenviarConvite(u.id)} className="text-xs px-2 py-1 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
-                        Reenviar convite
+                      <button onClick={() => gerarLinkAcesso(u.id)} className="text-xs px-2 py-1 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
+                        Gerar link de acesso
                       </button>
                     )}
                     {u.id !== usuarioAtualId && (
