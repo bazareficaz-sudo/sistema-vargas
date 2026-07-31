@@ -5,15 +5,17 @@ import { createClient } from '@/lib/supabase/client'
 import { ROTULO_SAUDE } from '@/lib/precificacao/motor'
 import type { SaudePreco } from '@/lib/precificacao/tipos'
 import TaxasCanal from './TaxasCanal'
+import RegrasPrecificacao from './RegrasPrecificacao'
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const pct = (v: number) => `${v.toFixed(1).replace('.', ',')}%`
 
-type Aba = 'simulador' | 'taxas'
+type Aba = 'simulador' | 'regras' | 'taxas'
 
-type TipoObjetivo = 'margem_liquida' | 'sobre_custo' | 'markup' | 'lucro_fixo' | 'preco'
+type TipoObjetivo = 'regra' | 'margem_liquida' | 'sobre_custo' | 'markup' | 'lucro_fixo' | 'preco'
 
 const OBJETIVOS: { valor: TipoObjetivo; label: string; unidade: string; ajuda: string; padrao: number }[] = [
+  { valor: 'regra', label: 'Usar as regras cadastradas', unidade: '', padrao: 0, ajuda: 'Aplica a regra que vale para este produto em cada canal — e explica qual venceu e por quê.' },
   { valor: 'margem_liquida', label: 'Margem líquida', unidade: '%', padrao: 20, ajuda: 'Quanto sobra de lucro sobre o preço final, já pagas todas as taxas.' },
   { valor: 'sobre_custo', label: 'Lucro sobre o custo', unidade: '%', padrao: 30, ajuda: 'Quanto quero ganhar em cima do que o produto me custou.' },
   { valor: 'markup', label: 'Markup', unidade: '×', padrao: 2.3, ajuda: 'Multiplicador do custo. Markup 2,3 quer dizer preço = custo × 2,3.' },
@@ -74,9 +76,12 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
   async function simular() {
     setCalculando(true); setErro(''); setSaida(null); setExpandido(null)
     try {
-      const resp = await fetch('/api/precificacao/simular', {
+      // Modo "regra" passa pela rota que resolve a hierarquia e devolve a
+      // explicação; os demais vão direto ao motor com o objetivo digitado.
+      const porRegra = tipoObjetivo === 'regra'
+      const resp = await fetch(porRegra ? '/api/precificacao/explicar' : '/api/precificacao/simular', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(porRegra ? { produtoId: produto?.id } : {
           produtoId: produto?.id,
           custoManual: produto ? undefined : Number(custoManual.replace(',', '.')),
           objetivo: { tipo: tipoObjetivo, valor: Number(valorObjetivo.replace(',', '.')) },
@@ -93,7 +98,10 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
   }
 
   const objetivoAtual = OBJETIVOS.find(o => o.valor === tipoObjetivo)!
-  const podeSimular = (!!produto || Number(custoManual.replace(',', '.')) > 0) && Number(valorObjetivo.replace(',', '.')) > 0
+  const porRegra = tipoObjetivo === 'regra'
+  const podeSimular = porRegra
+    ? !!produto  // a regra depende de categoria/marca do produto — custo avulso não serve
+    : (!!produto || Number(custoManual.replace(',', '.')) > 0) && Number(valorObjetivo.replace(',', '.')) > 0
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -105,7 +113,7 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
       </div>
 
       <div className="flex gap-1 border-b border-gray-200 mb-5">
-        {([['simulador', 'Simulador e comparador'], ['taxas', 'Taxas por canal']] as [Aba, string][]).map(([k, label]) => (
+        {([['simulador', 'Simulador e comparador'], ['regras', 'Regras'], ['taxas', 'Taxas por canal']] as [Aba, string][]).map(([k, label]) => (
           <button key={k} onClick={() => setAba(k)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${aba === k ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -172,10 +180,17 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
                 ))}
               </div>
               <div className="flex items-center gap-2 mt-2.5">
-                <span className="text-sm text-gray-500">{objetivoAtual.unidade}</span>
-                <input value={valorObjetivo} onChange={e => setValorObjetivo(e.target.value)} inputMode="decimal"
-                  className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-                <p className="text-xs text-gray-400 flex-1">{objetivoAtual.ajuda}</p>
+                {!porRegra && (
+                  <>
+                    <span className="text-sm text-gray-500">{objetivoAtual.unidade}</span>
+                    <input value={valorObjetivo} onChange={e => setValorObjetivo(e.target.value)} inputMode="decimal"
+                      className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                  </>
+                )}
+                <p className="text-xs text-gray-400 flex-1">
+                  {objetivoAtual.ajuda}
+                  {porRegra && !produto && <span className="text-amber-700"> Escolha um produto — a regra depende da categoria e da marca dele.</span>}
+                </p>
               </div>
             </div>
 
@@ -198,6 +213,16 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
 
               <div className="grid gap-3 md:grid-cols-2">
                 {saida.resultados.map((r: any) => {
+                  // Canal sem regra aplicável: mostra o buraco em vez de um
+                  // preço inventado.
+                  if (r.semRegra) {
+                    return (
+                      <div key={r.canal.id} className="bg-white border border-amber-200 rounded-xl px-4 py-3">
+                        <p className="text-sm font-medium text-gray-900">{r.canal.nome}</p>
+                        <p className="text-xs text-amber-800 mt-1.5">{r.explicacao}</p>
+                      </div>
+                    )
+                  }
                   const s = ROTULO_SAUDE[r.saude as SaudePreco]
                   const aberto = expandido === r.canal.id
                   return (
@@ -211,6 +236,8 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
                       </div>
 
                       <div className="px-4 py-3">
+                        {r.regra && <PorQueEstePreco r={r} />}
+
                         <div className="flex items-end justify-between mb-3">
                           <div>
                             <p className="text-xs text-gray-500">Preço de venda</p>
@@ -283,6 +310,8 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
         </div>
       )}
 
+      {aba === 'regras' && <RegrasPrecificacao empresaId={empresaId} />}
+
       {aba === 'taxas' && (
         <div className="space-y-4">
           {carregandoConfig && <p className="text-sm text-gray-400">Carregando...</p>}
@@ -294,6 +323,52 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
             <p className="text-sm text-gray-400">Nenhum canal de marketplace conectado ainda.</p>
           )}
         </div>
+      )}
+    </div>
+  )
+}
+
+// A resposta para "por que este anúncio está com esse preço?": qual regra
+// venceu, por que ela venceu, quais perderam — e quanto isso difere do preço
+// que está no ar hoje.
+function PorQueEstePreco({ r }: { r: any }) {
+  const [verPerdedoras, setVerPerdedoras] = useState(false)
+  const dif = r.diferenca
+
+  return (
+    <div className="mb-3 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5">
+      <p className="text-xs text-gray-700">
+        Regra <strong>{r.regra.nome}</strong> — {r.regra.descricao}
+        {r.regra.margemMinima != null && <> · piso de {r.regra.margemMinima}%</>}
+      </p>
+      <p className="text-[11px] text-gray-500 mt-0.5">Venceu porque {r.porQue}.</p>
+
+      {dif != null && (
+        <p className={`text-xs mt-1.5 ${Math.abs(dif) < 0.01 ? 'text-gray-500' : dif > 0 ? 'text-green-700' : 'text-red-700'}`}>
+          {Math.abs(dif) < 0.01
+            ? `O anúncio já está exatamente neste preço (${brl(r.precoAtual)}).`
+            : dif > 0
+              ? `O anúncio está por ${brl(r.precoAtual)} — ${brl(dif)} abaixo do que a regra manda.`
+              : `O anúncio está por ${brl(r.precoAtual)} — ${brl(-dif)} acima do que a regra manda.`}
+        </p>
+      )}
+
+      {r.perdedoras?.length > 0 && (
+        <>
+          <button onClick={() => setVerPerdedoras(v => !v)}
+            className="text-[11px] text-blue-600 hover:text-blue-800 mt-1.5">
+            {verPerdedoras ? 'ocultar' : `outras ${r.perdedoras.length} regra(s) também se aplicavam`}
+          </button>
+          {verPerdedoras && (
+            <div className="mt-1 space-y-0.5">
+              {r.perdedoras.map((p: any, i: number) => (
+                <p key={i} className="text-[11px] text-gray-400">
+                  {p.nome} ({p.nivel}) — {p.objetivo}. Perdeu por ser menos específica.
+                </p>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
