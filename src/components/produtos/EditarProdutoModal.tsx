@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { gerarEanInternoUnico } from '@/lib/produtos/ean'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 
 const TIPOS = [
@@ -94,6 +95,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [tituloSugerido, setTituloSugerido] = useState('')
   const [anunciosVinculados, setAnunciosVinculados] = useState<AnuncioVinculado[]>([])
   const [carregandoAnuncios, setCarregandoAnuncios] = useState(false)
+  const [gerandoEan, setGerandoEan] = useState(false)
+  const [eanGerado, setEanGerado] = useState(false)
 
   // Imagens
   const [imagens, setImagens] = useState<ProdutoImagem[]>([])
@@ -189,6 +192,19 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
   function campo<K extends keyof Produto>(field: K, value: Produto[K]) {
     setForm(prev => prev ? { ...prev, [field]: value } : prev)
+  }
+
+  // Produto sem código de barras do fabricante: gera um de uso interno em vez
+  // de deixar o campo vazio (sem ele, etiqueta e leitura no PDV não funcionam).
+  async function gerarEan() {
+    setGerandoEan(true)
+    try {
+      const codigo = await gerarEanInternoUnico(sb, empresaId)
+      campo('ean', codigo)
+      setEanGerado(true)
+    } finally {
+      setGerandoEan(false)
+    }
   }
 
   async function preencherComIA() {
@@ -652,8 +668,22 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">GTIN/EAN</label>
-                  <input value={form.ean ?? ''} onChange={e => campo('ean', e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                  <div className="relative">
+                    <input value={form.ean ?? ''} onChange={e => campo('ean', e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                    {!form.ean?.trim() && (
+                      <button type="button" onClick={gerarEan} disabled={gerandoEan}
+                        title="Gerar um código de uso interno (prefixo 2, válido para leitor e etiqueta)"
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 py-1 text-sm text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors disabled:opacity-50">
+                        {gerandoEan ? '…' : '⚄'}
+                      </button>
+                    )}
+                  </div>
+                  {eanGerado && (
+                    <p className="text-[11px] text-blue-700 mt-1">
+                      Código de uso interno gerado — serve para leitor e etiqueta, mas não é um GTIN registrado na GS1.
+                    </p>
+                  )}
                 </div>
               </div>
 

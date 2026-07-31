@@ -145,6 +145,20 @@ export async function POST(req: Request) {
         }
         if (!tipoAnuncioML) { falhar('Não foi possível descobrir o tipo de anúncio da conta de destino.'); continue }
 
+        // Peso e medidas são obrigatórios no ML desde a mudança da API. Usa o
+        // cadastro e, se faltar, o que veio no próprio anúncio de origem.
+        const dimensoes = {
+          pesoKg: Number(produto.peso_kg ?? brutos?.weight ?? 0),
+          comprimentoCm: Number(produto.comprimento_cm ?? brutos?.dimension?.package_length ?? 0),
+          larguraCm: Number(produto.largura_cm ?? brutos?.dimension?.package_width ?? 0),
+          alturaCm: Number(produto.altura_cm ?? brutos?.dimension?.package_height ?? 0),
+        }
+        const semDimensao = Object.entries({
+          peso: dimensoes.pesoKg, comprimento: dimensoes.comprimentoCm,
+          largura: dimensoes.larguraCm, altura: dimensoes.alturaCm,
+        }).filter(([, v]) => !(v > 0)).map(([k]) => k)
+        if (semDimensao.length > 0) { falhar(`Produto sem ${semDimensao.join('/')} cadastrado (o Mercado Livre exige).`); continue }
+
         // Atributos: só os que existem na categoria de destino e, em lista
         // fechada, só quando o valor bate com uma das opções. Mandar
         // atributo de outra categoria faz o ML recusar o anúncio inteiro.
@@ -171,7 +185,7 @@ export async function POST(req: Request) {
           titulo: (origem.titulo ?? '').slice(0, 60), descricao: origem.descricao ?? '',
           preco, estoque, condicao: 'new',
           listingTypeId: tipoAnuncioML,
-          atributos, fotoUrls,
+          atributos, fotoUrls, dimensoes,
         })
         if (r.ok) resultados.push({ anuncioId: origem.id, titulo: rotulo, ok: true, itemId: r.itemId })
         else falhar(r.erro)

@@ -74,6 +74,12 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [descricao, setDescricao] = useState('')
   const [preco, setPreco] = useState('')
   const [estoque, setEstoque] = useState('')
+  // Peso e medidas do pacote: o Mercado Livre passou a exigir os quatro em
+  // toda publicação. Vêm do cadastro do produto e podem ser ajustados aqui.
+  const [peso, setPeso] = useState('')
+  const [comprimento, setComprimento] = useState('')
+  const [largura, setLargura] = useState('')
+  const [altura, setAltura] = useState('')
 
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -250,6 +256,10 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
     setTitulosSugeridos([])
     setPreco(p.preco_venda ? String(p.preco_venda) : '')
     setEstoque(p.estoque != null ? String(p.estoque) : '0')
+    setPeso(p.peso_kg ? String(p.peso_kg) : '')
+    setComprimento(p.comprimento_cm ? String(p.comprimento_cm) : '')
+    setLargura(p.largura_cm ? String(p.largura_cm) : '')
+    setAltura(p.altura_cm ? String(p.altura_cm) : '')
     setDescricao(p.descricao_marketplace ?? '')
   }
 
@@ -533,8 +543,11 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
 
   const atributosObrigatoriosFaltando = atributos.filter(a => a.obrigatorio && !valoresAtributos[a.id]?.trim())
 
+  const dimensoesOk = Number(peso) > 0 && Number(comprimento) > 0 && Number(largura) > 0 && Number(altura) > 0
+
   const podeEnviar = !!canalAtivo && !!produto && !!categoriaFolha && titulo.trim() && Number(preco) > 0
     && estoque !== '' && !!listingTypeId && atributosObrigatoriosFaltando.length === 0 && imagens.length > 0
+    && dimensoesOk
 
   async function enviar() {
     if (!podeEnviar || !canalAtivo) return
@@ -547,6 +560,10 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
           titulo: titulo.trim(), descricao: descricao.trim(), preco: Number(preco), estoque: Number(estoque),
           condicao, listingTypeId,
           atributos: atributos.filter(a => valoresAtributos[a.id]?.trim()).map(a => ({ id: a.id, valueName: valoresAtributos[a.id] })),
+          dimensoes: {
+            pesoKg: Number(peso), comprimentoCm: Number(comprimento),
+            larguraCm: Number(largura), alturaCm: Number(altura),
+          },
         }),
       })
       const data = await resp.json()
@@ -729,7 +746,10 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                     <label className="block text-xs font-medium text-gray-500 mb-1">Título do anúncio *</label>
                     <input value={titulo} onChange={e => setTitulo(e.target.value)} maxLength={60}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-                    <p className="text-xs text-gray-400 mt-1">{titulo.length}/60 caracteres</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {titulo.length}/60 caracteres — o Mercado Livre pode complementar o título
+                      exibido com os atributos do anúncio (marca, modelo, cor).
+                    </p>
                     {titulosSugeridos.length > 0 && (
                       <div className="mt-2 space-y-1">
                         <p className="text-xs text-violet-700 font-medium">✨ Sugestões de título — clique pra usar:</p>
@@ -854,6 +874,38 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                       <input type="number" value={estoque} onChange={e => setEstoque(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                     </div>
+                  </div>
+
+                  {/* Peso e medidas: obrigatórios pelo Mercado Livre em toda
+                      publicação, e não aparecem na lista de atributos da
+                      categoria (a API os marca como campo interno). */}
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-medium text-gray-500 mb-2">Peso e medidas do pacote *</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Peso (kg)</label>
+                        <input type="number" step="0.01" value={peso} onChange={e => setPeso(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Compr. (cm)</label>
+                        <input type="number" step="0.1" value={comprimento} onChange={e => setComprimento(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Largura (cm)</label>
+                        <input type="number" step="0.1" value={largura} onChange={e => setLargura(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Altura (cm)</label>
+                        <input type="number" step="0.1" value={altura} onChange={e => setAltura(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-2">
+                      Vem do cadastro do produto. O que você digitar aqui vale só para este anúncio.
+                    </p>
                   </div>
                 </>
               )}

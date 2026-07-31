@@ -89,6 +89,13 @@ export async function getTiposAnuncio(ctx: CallCtx): Promise<TipoAnuncioML[]> {
 
 export type AtributoInputML = { id: string; valueName: string }
 
+export type DimensoesPacoteML = {
+  pesoKg: number
+  comprimentoCm: number
+  larguraCm: number
+  alturaCm: number
+}
+
 export type CriarAnuncioInputML = {
   produtoId: string
   empresaId: string
@@ -101,6 +108,23 @@ export type CriarAnuncioInputML = {
   listingTypeId: string
   atributos: AtributoInputML[]
   fotoUrls: string[]
+  dimensoes: DimensoesPacoteML
+}
+
+// Peso e medidas do pacote viraram obrigatórios em POST /items (confirmado
+// contra /items/validate: sem eles a resposta é
+// "item.attribute.missing.seller.package.dimensions"). Eles NÃO aparecem no
+// formulário de atributos da categoria — vêm marcados como `hidden`, então
+// getAtributos os filtra de propósito. Por isso são montados aqui, a partir do
+// cadastro do produto, e não escolhidos pelo operador na lista de atributos.
+// Unidades exigidas pela API: cm para medidas, g para peso.
+function atributosDePacote(d: DimensoesPacoteML): AtributoInputML[] {
+  return [
+    { id: 'SELLER_PACKAGE_HEIGHT', valueName: `${d.alturaCm} cm` },
+    { id: 'SELLER_PACKAGE_WIDTH', valueName: `${d.larguraCm} cm` },
+    { id: 'SELLER_PACKAGE_LENGTH', valueName: `${d.comprimentoCm} cm` },
+    { id: 'SELLER_PACKAGE_WEIGHT', valueName: `${Math.round(d.pesoKg * 1000)} g` },
+  ]
 }
 
 export type ResultadoCriarAnuncioML =
@@ -111,7 +135,14 @@ export async function criarAnuncio(sb: any, canalInicial: MLChannel, input: Cria
   try {
     const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
     const body: Record<string, any> = {
-      title: input.titulo,
+      // `family_name` no lugar de `title`: a API passou a exigir esse campo e a
+      // REJEITAR `title` quando ele está presente ("The fields [title] are
+      // invalid for requested call"). Medido contra /items/validate com a conta
+      // real — as duas coisas foram confirmadas na mesma bateria de testes.
+      // É o modelo novo de publicação do ML (família de anúncio): o nome da
+      // família é o que o vendedor escreve, e o título exibido é montado pelo
+      // próprio ML a partir dele mais os atributos.
+      family_name: input.titulo,
       category_id: input.categoryId,
       price: input.preco,
       currency_id: 'BRL',
@@ -123,9 +154,13 @@ export async function criarAnuncio(sb: any, canalInicial: MLChannel, input: Cria
       // sem exigir upload prévio como a Shopee (confirmado na doc).
       pictures: input.fotoUrls.slice(0, 10).map(url => ({ source: url })),
     }
-    if (input.atributos.length > 0) {
-      body.attributes = input.atributos.map(a => ({ id: a.id, value_name: a.valueName }))
-    }
+    // Nunca deixa o operador sobrescrever os atributos de pacote por engano:
+    // os do cadastro entram primeiro e os de pacote são anexados por último.
+    const todosAtributos = [
+      ...input.atributos.filter(a => !a.id.startsWith('SELLER_PACKAGE_')),
+      ...atributosDePacote(input.dimensoes),
+    ]
+    body.attributes = todosAtributos.map(a => ({ id: a.id, value_name: a.valueName }))
 
     const resposta = await mlPost('/items', body, canal.accessToken)
     const itemId = resposta?.id
