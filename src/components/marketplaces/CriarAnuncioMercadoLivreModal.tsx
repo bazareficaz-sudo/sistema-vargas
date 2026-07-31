@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatarTituloAnuncio } from '@/lib/texto/titulo'
+import PainelDimensoesImagens from './PainelDimensoesImagens'
 import { fmt } from './utils'
 
 type Categoria = { id: string; name: string }
@@ -694,6 +695,9 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                       <input type="file" accept="image/*" multiple className="hidden" disabled={uploadandoImg} onChange={handleUploadImagens} />
                     </label>
                   </div>
+                  <PainelDimensoesImagens
+                    imagens={imagens} plataforma="mercadolivre" produtoId={produto?.id ?? null}
+                    onImagemAjustada={(id, novaUrl) => setImagens(lista => lista.map(i => i.id === id ? { ...i, url: novaUrl } : i))} />
                   {!adicionandoUrlImg ? (
                     <button type="button" onClick={() => setAdicionandoUrlImg(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2">+ Adicionar por URL</button>
                   ) : (

@@ -4,6 +4,7 @@ import { useState, useEffect, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
 import { formatarTituloAnuncio } from '@/lib/texto/titulo'
+import PainelDimensoesImagens from './PainelDimensoesImagens'
 
 type Categoria = { category_id: number; original_category_name: string; has_children: boolean }
 type Atributo = {
@@ -648,6 +649,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                       </label>
                     )}
                   </div>
+                  <PainelDimensoesImagens
+                    imagens={imagens} plataforma="shopee" produtoId={produto?.id ?? null}
+                    onImagemAjustada={(id, novaUrl) => setImagens(lista => lista.map(i => i.id === id ? { ...i, url: novaUrl } : i))} />
                   {!adicionandoUrlImg ? (
                     <button type="button" onClick={() => setAdicionandoUrlImg(true)} className="text-xs text-blue-600 hover:text-blue-800 font-medium mt-2">+ Adicionar por URL</button>
                   ) : (
