@@ -44,6 +44,9 @@ export const NAV: NavGroup[] = [
     defaultOpen: true,
     items: [
       { href: '/pdv',                              label: 'PDV',                icon: '🖥',  modulo: 'pdv' },
+      // Centro de pedidos: reúne vendas do PDV e pedidos de marketplace numa
+      // lista só. Fica ANTES de Vendas de propósito — é a visão completa.
+      { href: '/dashboard/pedidos',                label: 'Pedidos',            icon: '📦',  modulo: 'vendas' },
       { href: '/dashboard/vendas',                 label: 'Vendas',             icon: '💳',  modulo: 'vendas' },
       { href: '/dashboard/orcamentos',             label: 'Orçamentos',         icon: '📋',  modulo: 'orcamentos' },
       { href: '/dashboard/incentivos',             label: 'Incentivos',         icon: '🏆',  modulo: 'incentivos' },
