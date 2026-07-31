@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import EditarOrcamentoModal from './EditarOrcamentoModal'
 
 type OrcItem = { id: string; produto_nome: string; quantidade: number; preco_unitario: number; desconto: number; total: number }
 type Orcamento = {
@@ -34,6 +35,7 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
   const [filtroBusca, setFiltroBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState('todos')
   const [atualizando, setAtualizando] = useState(false)
+  const [editando, setEditando] = useState<Orcamento | null>(null)
 
   const filtrado = lista.filter(o => {
     const matchStatus = filtroStatus === 'todos' || o.status === filtroStatus
@@ -209,6 +211,12 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
 
             {/* Ações */}
             <div className="flex gap-2 flex-wrap">
+              {selecionado.status !== 'convertido' && (
+                <button onClick={() => setEditando(selecionado)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
+                  ✏ Editar
+                </button>
+              )}
               {selecionado.status === 'aberto' && (
                 <>
                   <button onClick={() => alterarStatus(selecionado.id, 'aprovado')} disabled={atualizando}
@@ -240,6 +248,15 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
             </div>
           </div>
         </div>
+      )}
+
+      {editando && (
+        <EditarOrcamentoModal
+          empresaId={empresaId}
+          orcamento={editando}
+          onClose={() => setEditando(null)}
+          onSalvo={() => { setEditando(null); router.refresh() }}
+        />
       )}
     </div>
   )
