@@ -42,10 +42,26 @@ export async function PUT(req: Request) {
   }
 
   const linha = { ...configParaLinha(config, guarda.empresaId), criado_por: guarda.userId }
-  const { data, error } = await sb.from('precificacao_config')
-    .upsert(linha, { onConflict: config.canalId ? 'canal_id' : 'empresa_id,plataforma' })
-    .select('id').single()
 
+  // Procura antes de gravar, em vez de upsert com ON CONFLICT.
+  //
+  // Os índices únicos desta tabela são PARCIAIS (um vale só quando canal_id
+  // está preenchido, o outro só quando está nulo — é o que permite conviver
+  // a configuração de um canal e a padrão da plataforma). O Postgres só
+  // aceita ON CONFLICT em índice parcial se a instrução repetir a condição
+  // do índice, e a API do Supabase não tem como expressar isso: o resultado
+  // era "there is no unique or exclusion constraint matching the ON CONFLICT
+  // specification" ao salvar.
+  const busca = sb.from('precificacao_config').select('id').eq('plataforma', config.plataforma)
+  const { data: existente } = config.canalId
+    ? await busca.eq('canal_id', config.canalId).maybeSingle()
+    : await busca.eq('empresa_id', guarda.empresaId).is('canal_id', null).maybeSingle()
+
+  const resposta = existente
+    ? await sb.from('precificacao_config').update(linha).eq('id', existente.id).select('id').single()
+    : await sb.from('precificacao_config').insert(linha).select('id').single()
+
+  const { data, error } = resposta
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
 
   await registrarAuditoria(sb, {
