@@ -24,13 +24,13 @@ export default async function PedidosPage({ searchParams }: {
 
   const [{ data: vendas }, { data: pedidosMkt }, { data: canais }] = await Promise.all([
     supabase.from('vendas')
-      .select('id, numero, total, desconto, desconto_total, status, tipo_operacao, canal, cliente_nome, created_at, nfce_status, nfce_numero, clientes(nome)')
+      .select('id, numero, total, desconto, desconto_total, status, tipo_operacao, canal, cliente_nome, created_at, nfce_status, nfce_numero, etapa_operacional, etapa_operacional_em, clientes(nome)')
       .eq('empresa_id', empresaId)
       .gte('created_at', inicio).lte('created_at', fim)
       .order('created_at', { ascending: false })
       .limit(LIMITE_POR_FONTE),
     supabase.from('marketplace_pedidos')
-      .select('id, canal_id, numero_pedido, id_externo, cliente_nome, valor_total, valor_desconto, valor_frete, status, data_pedido, data_envio, transportadora, codigo_rastreio, nfe_numero, venda_id, created_at')
+      .select('id, canal_id, numero_pedido, id_externo, cliente_nome, valor_total, valor_desconto, valor_frete, status, data_pedido, data_envio, transportadora, codigo_rastreio, nfe_numero, venda_id, etapa_operacional, etapa_operacional_em, created_at')
       .eq('empresa_id', empresaId)
       .gte('data_pedido', inicio).lte('data_pedido', fim)
       .order('data_pedido', { ascending: false })

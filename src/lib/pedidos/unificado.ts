@@ -11,6 +11,8 @@
 // 1.200 registros e mexer em emissão fiscal e baixa de estoque no mesmo
 // movimento, o que é risco desnecessário para o ganho desta etapa.
 
+import type { Etapa } from './etapas'
+
 export type OrigemPedido = 'pdv' | 'app' | 'shopee' | 'mercadolivre' | 'manual' | 'outro'
 
 export type StatusFiscal = 'emitida' | 'rejeitada' | 'informada' | 'nao_emitida'
@@ -37,6 +39,9 @@ export type PedidoUnificado = {
   rastreio: string | null
   /** Marketplace: já foi enviado ao cliente? */
   enviado: boolean
+  /** O que o SEU galpão fez — separado do status que o canal informa. */
+  etapa: Etapa
+  etapaEm: string | null
 }
 
 export const ORIGEM_ROTULO: Record<OrigemPedido, string> = {
@@ -97,6 +102,9 @@ export function vendaParaPedido(v: any): PedidoUnificado {
     transportadora: null,
     rastreio: null,
     enviado: false,
+    // Venda de balcão nasce concluída: o cliente saiu com o produto na mão.
+    etapa: (v.etapa_operacional ?? (cancelado ? 'cancelado' : 'concluido')) as Etapa,
+    etapaEm: v.etapa_operacional_em ?? null,
   }
 }
 
@@ -126,6 +134,8 @@ export function marketplaceParaPedido(p: any, plataformaPorCanal: Map<string, st
     transportadora: p.transportadora ?? null,
     rastreio: p.codigo_rastreio ?? null,
     enviado: !!p.data_envio || p.status === 'enviado' || p.status === 'entregue',
+    etapa: (p.etapa_operacional ?? (cancelado ? 'cancelado' : 'novo')) as Etapa,
+    etapaEm: p.etapa_operacional_em ?? null,
   }
 }
 
@@ -136,6 +146,8 @@ export type IndicadoresPedidos = {
   aguardandoNota: number
   aguardandoEnvio: number
   cancelados: number
+  aSeparar: number
+  aDespachar: number
   semCliente: number
   marketplace: number
   pdv: number
@@ -153,6 +165,10 @@ export function calcularIndicadores(pedidos: PedidoUnificado[]): IndicadoresPedi
     aguardandoNota: validos.filter(p => p.fiscal === 'nao_emitida' || p.fiscal === 'rejeitada').length,
     aguardandoEnvio: validos.filter(p => p.fonte === 'marketplace' && !p.enviado).length,
     cancelados: pedidos.filter(p => p.cancelado).length,
+    // O que exige ação do galpão agora — a pergunta que a tela de histórico
+    // não respondia.
+    aSeparar: validos.filter(p => p.etapa === 'novo' || p.etapa === 'separando').length,
+    aDespachar: validos.filter(p => p.etapa === 'embalado').length,
     semCliente: validos.filter(p => !p.clienteNome?.trim()).length,
     marketplace: validos.filter(p => p.fonte === 'marketplace').length,
     pdv: validos.filter(p => p.fonte === 'venda').length,

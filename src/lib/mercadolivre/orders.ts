@@ -1,4 +1,5 @@
 import { mlGet, refreshAccessTokenIfNeeded } from './client'
+import { sincronizarEtapaComCanal } from '@/lib/pedidos/sincronizarEtapa'
 import { sleep, THROTTLE_MS } from './catalog'
 import { baixarEstoquePedidoItem } from '@/lib/produtos/estoque'
 import type { MLChannel, SyncFailure, SyncResult } from './types'
@@ -215,6 +216,12 @@ export async function processRawOrder(
 
   const row = mapOrderToPedidoRow(rawOrder, canal, algumItemPendente)
   const pedido = await upsertPedido(sb, row)
+
+  // Etapa operacional acompanha o canal — só para a frente, nunca apagando
+  // o que a operação já registrou.
+  await sincronizarEtapaComCanal(sb, {
+    pedidoId: pedido.id, empresaId: canal.empresaId, statusCanal: String(row.status ?? ''),
+  })
 
   // Baixa automática pros itens mapeados assim que o pagamento é confirmado
   // ('confirmado' = status.paid) — mesmo critério e mesma ausência de fase

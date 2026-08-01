@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePermissao } from '@/contexts/PlanContext'
+import { ETAPAS, ETAPA_INFO, proximaEtapa, type Etapa } from '@/lib/pedidos/etapas'
+import PainelEtapaPedido from './PainelEtapaPedido'
 import { PERIODO_OPCOES, PERIODO_LABELS, type PeriodoPreset } from '@/lib/estoque/periodo'
 import { ORIGEM_ROTULO, ORIGEM_COR, type PedidoUnificado, type IndicadoresPedidos, type OrigemPedido } from '@/lib/pedidos/unificado'
 
@@ -33,6 +35,11 @@ export default function PedidosClient({
   // some so o dinheiro: faturamento, ticket medio e o valor de cada linha.
   const podeVerTotais = usePermissao('ver_totais_vendas')
   const [busca, setBusca] = useState('')
+  // Filtro por etapa: a pergunta operacional ("o que falta separar hoje?")
+  // que a tela de historico nao respondia.
+  const [etapasFiltro, setEtapasFiltro] = useState<Set<Etapa>>(new Set())
+  const [detalhe, setDetalhe] = useState<PedidoUnificado | null>(null)
+  const [lista, setLista] = useState<PedidoUnificado[] | null>(null)
   const [origens, setOrigens] = useState<Set<OrigemPedido>>(new Set())
   const [situacao, setSituacao] = useState<FiltroSituacao>('todos')
 
@@ -57,9 +64,15 @@ export default function PedidosClient({
     return [...set]
   }, [pedidos])
 
+  // A lista local reflete a mudanca de etapa na hora; `pedidos` continua
+  // sendo a verdade vinda do servidor a cada recarga.
+  const base = lista ?? pedidos
+  useEffect(() => { setLista(null) }, [pedidos])
+
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase()
-    return pedidos.filter(p => {
+    return base.filter(p => {
+      if (etapasFiltro.size > 0 && !etapasFiltro.has(p.etapa)) return false
       if (origens.size > 0 && !origens.has(p.origem)) return false
       if (situacao === 'sem_nota' && !(!p.cancelado && (p.fiscal === 'nao_emitida' || p.fiscal === 'rejeitada'))) return false
       if (situacao === 'aguardando_envio' && !(!p.cancelado && p.fonte === 'marketplace' && !p.enviado)) return false
@@ -69,7 +82,7 @@ export default function PedidosClient({
       return [p.numero, p.clienteNome, p.fiscalNumero, p.rastreio, p.origemNome]
         .some(c => (c ?? '').toLowerCase().includes(termo))
     })
-  }, [pedidos, busca, origens, situacao])
+  }, [base, busca, origens, situacao, etapasFiltro])
 
   return (
     <div>
@@ -99,6 +112,14 @@ export default function PedidosClient({
         <Card label="Pedidos" valor={String(indicadores.quantidade)} />
         {podeVerTotais && <Card label="Valor vendido" valor={brl(indicadores.valor)} />}
         {podeVerTotais && <Card label="Ticket médio" valor={brl(indicadores.ticketMedio)} />}
+        <Card label="A separar" valor={String(indicadores.aSeparar)}
+          cls={indicadores.aSeparar > 0 ? 'text-amber-600' : undefined}
+          ativo={etapasFiltro.has('novo')}
+          onClick={() => setEtapasFiltro(new Set<Etapa>(['novo', 'separando']))} />
+        <Card label="A despachar" valor={String(indicadores.aDespachar)}
+          cls={indicadores.aDespachar > 0 ? 'text-amber-600' : undefined}
+          ativo={etapasFiltro.has('embalado')}
+          onClick={() => setEtapasFiltro(new Set<Etapa>(['embalado']))} />
         <Card label="Aguardando nota" valor={String(indicadores.aguardandoNota)}
           cls={indicadores.aguardandoNota > 0 ? 'text-amber-600' : undefined}
           onClick={() => setSituacao(situacao === 'sem_nota' ? 'todos' : 'sem_nota')} ativo={situacao === 'sem_nota'} />
@@ -138,10 +159,28 @@ export default function PedidosClient({
               {ORIGEM_ROTULO[o]}
             </button>
           ))}
-          {(origens.size > 0 || situacao !== 'todos' || busca) && (
-            <button onClick={() => { setOrigens(new Set()); setSituacao('todos'); setBusca('') }}
+          {(origens.size > 0 || situacao !== 'todos' || busca || etapasFiltro.size > 0) && (
+            <button onClick={() => { setOrigens(new Set()); setSituacao('todos'); setBusca(''); setEtapasFiltro(new Set()) }}
               className="text-xs text-gray-500 hover:text-gray-700 underline ml-2">limpar filtros</button>
           )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-gray-500 mr-1">Etapa:</span>
+          {ETAPAS.map(e => {
+            const on = etapasFiltro.has(e.valor)
+            const qtd = base.filter(p => p.etapa === e.valor).length
+            if (qtd === 0 && !on) return null
+            return (
+              <button key={e.valor} title={e.ajuda}
+                onClick={() => setEtapasFiltro(s2 => {
+                  const n = new Set(s2); n.has(e.valor) ? n.delete(e.valor) : n.add(e.valor); return n
+                })}
+                className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${on ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                {e.icone} {e.label} <span className="opacity-60">{qtd}</span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -162,7 +201,8 @@ export default function PedidosClient({
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Nº</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Origem</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Cliente</th>
-                <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Situação</th>
+                <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600" title="O que a sua operação já fez com o pedido">Etapa</th>
+                <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600" title="O que o canal informa">Situação</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Nota</th>
                 {podeVerTotais && <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-600">Total</th>}
                 <th className="px-3 py-2.5"></th>
@@ -170,7 +210,7 @@ export default function PedidosClient({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtrados.length === 0 && (
-                <tr><td colSpan={podeVerTotais ? 8 : 7} className="text-center py-10 text-gray-400 text-sm">Nenhum pedido com os filtros atuais.</td></tr>
+                <tr><td colSpan={podeVerTotais ? 9 : 8} className="text-center py-10 text-gray-400 text-sm">Nenhum pedido com os filtros atuais.</td></tr>
               )}
               {filtrados.map(p => {
                 const fb = FISCAL_BADGE[p.fiscal]
@@ -185,6 +225,12 @@ export default function PedidosClient({
                     </td>
                     <td className="px-3 py-2 text-gray-700 max-w-[220px] truncate">{p.clienteNome || <span className="text-gray-400">—</span>}</td>
                     <td className="px-3 py-2">
+                      <button onClick={() => setDetalhe(p)}
+                        className={`text-xs px-2 py-0.5 rounded-full border font-medium hover:opacity-80 ${ETAPA_INFO[p.etapa]?.cor ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                        {ETAPA_INFO[p.etapa]?.icone} {ETAPA_INFO[p.etapa]?.label ?? p.etapa}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2">
                       <span className={`text-xs ${p.cancelado ? 'text-red-600' : 'text-gray-600'}`}>{p.statusRotulo}</span>
                       {p.rastreio && <span className="block text-[11px] text-gray-400 font-mono">{p.rastreio}</span>}
                     </td>
@@ -194,6 +240,11 @@ export default function PedidosClient({
                     </td>
                     {podeVerTotais && <td className="px-3 py-2 text-right font-medium text-gray-900 whitespace-nowrap">{brl(p.total)}</td>}
                     <td className="px-3 py-2 text-right whitespace-nowrap">
+                      {proximaEtapa(p.etapa) && !p.cancelado && (
+                        <button onClick={() => setDetalhe(p)}
+                          title={`Avançar para ${ETAPA_INFO[proximaEtapa(p.etapa)!].label}`}
+                          className="text-xs text-gray-500 hover:text-blue-700 mr-3">avançar →</button>
+                      )}
                       <a href={p.fonte === 'venda' ? '/dashboard/vendas' : '/dashboard/pedidos-ecommerce'}
                         className="text-xs text-blue-600 hover:underline">abrir →</a>
                     </td>
@@ -204,6 +255,12 @@ export default function PedidosClient({
           </table>
         </div>
       </div>
+
+      {detalhe && (
+        <PainelEtapaPedido pedido={detalhe} onFechar={() => setDetalhe(null)}
+          onMudou={nova => setLista(l => (l ?? pedidos).map(x =>
+            x.id === detalhe.id && x.fonte === detalhe.fonte ? { ...x, etapa: nova } : x))} />
+      )}
 
       <p className="text-xs text-gray-400 mt-3">
         Esta tela reúne o que hoje vive em dois lugares: as vendas do PDV e os pedidos de marketplace.

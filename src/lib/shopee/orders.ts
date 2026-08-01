@@ -1,4 +1,5 @@
 import { getIntegracaoCredentials, refreshAccessTokenIfNeeded, shopeeGet } from './client'
+import { sincronizarEtapaComCanal } from '@/lib/pedidos/sincronizarEtapa'
 import { sleep, THROTTLE_MS } from './catalog'
 import { baixarEstoquePedidoItem } from '@/lib/produtos/estoque'
 import type { ShopeeChannel, SyncFailure, SyncResult } from './types'
@@ -257,6 +258,12 @@ export async function processRawOrder(
 
   const row = mapOrderToPedidoRow(rawOrder, canal, algumItemPendente)
   const pedido = await upsertPedido(sb, row)
+
+  // Etapa operacional acompanha o canal — só para a frente, nunca apagando
+  // o que a operação já registrou.
+  await sincronizarEtapaComCanal(sb, {
+    pedidoId: pedido.id, empresaId: canal.empresaId, statusCanal: String(row.status ?? ''),
+  })
 
   // Pedido "pago/confirmado ou além" (qualquer status comercial que não seja
   // 'novo' = ainda não pago) já dispara baixa automática pros itens mapeados
