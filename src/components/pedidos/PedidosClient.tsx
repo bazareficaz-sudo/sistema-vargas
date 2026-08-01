@@ -245,7 +245,7 @@ export default function PedidosClient({
                           title={`Avançar para ${ETAPA_INFO[proximaEtapa(p.etapa)!].label}`}
                           className="text-xs text-gray-500 hover:text-blue-700 mr-3">avançar →</button>
                       )}
-                      <a href={p.fonte === 'venda' ? '/dashboard/vendas' : '/dashboard/pedidos-ecommerce'}
+                      <a href={`/dashboard/pedidos/${p.fonte}/${p.id}`}
                         className="text-xs text-blue-600 hover:underline">abrir →</a>
                     </td>
                   </tr>
@@ -264,7 +264,7 @@ export default function PedidosClient({
 
       <p className="text-xs text-gray-400 mt-3">
         Esta tela reúne o que hoje vive em dois lugares: as vendas do PDV e os pedidos de marketplace.
-        O botão &quot;abrir&quot; leva à tela específica de cada um — a ficha completa do pedido, com edição, vem na próxima etapa.
+        O botão &quot;abrir&quot; leva à ficha do pedido — itens, cliente, pagamento, nota e linha do tempo, no mesmo layout para as duas origens.
       </p>
     </div>
   )
