@@ -1,4 +1,5 @@
 import { MLApiError, type MLChannel, type MLCredentials } from './types'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 const API_BASE = 'https://api.mercadolibre.com'
 
@@ -6,8 +7,15 @@ const API_BASE = 'https://api.mercadolibre.com'
 // Access token do ML dura 6h (expires_in ~21600s).
 const REFRESH_MARGIN_MS = 30 * 60 * 1000
 
-export async function getIntegracaoCredentials(sb: any): Promise<MLCredentials> {
-  const { data: integracao } = await sb
+// O app_secret do Mercado Livre é credencial DA PLATAFORMA, não do cliente:
+// vale para todas as lojas conectadas. Por isso a leitura é sempre feita com
+// a chave de serviço, e a tabela fica fechada para qualquer sessão de
+// usuário — nem o dono da loja precisa (ou deve) enxergar esse valor.
+//
+// O parâmetro `sb` continua na assinatura só para não mexer nas dezenas de
+// chamadas existentes; ele é deliberadamente ignorado aqui.
+export async function getIntegracaoCredentials(_sb?: any): Promise<MLCredentials> {
+  const { data: integracao } = await createAdminClient()
     .from('sistema_integracoes')
     .select('app_id, app_secret')
     .eq('plataforma', 'mercadolivre')
