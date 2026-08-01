@@ -7,10 +7,15 @@ import { formatarTituloAnuncio } from '@/lib/texto/titulo'
 import PainelDimensoesImagens from './PainelDimensoesImagens'
 
 type Categoria = { category_id: number; original_category_name: string; has_children: boolean }
+// Espelha o tipo devolvido por src/lib/shopee/listing.ts. `input_type`:
+// 1 lista fechada · 2 lista ou texto · 3 texto livre · 4/5 múltipla escolha.
+type ValorAtributo = { value_id: number; original_value_name: string; filhos: Atributo[] }
 type Atributo = {
-  attribute_id: number; attribute_name: string; is_mandatory: boolean; attribute_type: string
-  attribute_value_list: { value_id: number; original_value_name: string }[]
+  attribute_id: number; attribute_name: string; is_mandatory: boolean
+  input_type: number; quantitativo: boolean; unidades: string[]
+  attribute_value_list: ValorAtributo[]
 }
+type ValorEscolhido = { valueId?: number; valueIds?: number[]; texto?: string; unidade?: string }
 type Marca = { brand_id: number; original_brand_name: string }
 type CanalLogistica = { logistic_id: number; logistic_name: string; enabled: boolean }
 
@@ -47,7 +52,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
 
   const [atributos, setAtributos] = useState<Atributo[]>([])
   const [atributosCarregados, setAtributosCarregados] = useState(false)
-  const [valoresAtributos, setValoresAtributos] = useState<Record<number, { valueId?: number; texto?: string }>>({})
+  const [valoresAtributos, setValoresAtributos] = useState<Record<number, ValorEscolhido>>({})
   const [marcas, setMarcas] = useState<Marca[]>([])
   const [brandId, setBrandId] = useState('')
   const [carregandoAtributos, setCarregandoAtributos] = useState(false)
@@ -493,11 +498,30 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     })
   }
 
-  const atributosObrigatoriosFaltando = atributos.filter(a => {
-    if (!a.is_mandatory) return false
+  // Atributos que estão de fato em jogo. Um atributo-filho ("número do
+  // INMETRO") só entra na conta quando o valor do pai que o revela está
+  // escolhido — antes disso ele nem aparece na tela e cobrar seria absurdo.
+  function atributosVisiveis(lista: Atributo[]): Atributo[] {
+    const saida: Atributo[] = []
+    for (const a of lista) {
+      saida.push(a)
+      const escolhido = valoresAtributos[a.attribute_id]
+      const marcados = escolhido?.valueIds ?? (escolhido?.valueId != null ? [escolhido.valueId] : [])
+      for (const v of a.attribute_value_list) {
+        if (v.filhos.length > 0 && marcados.includes(v.value_id)) saida.push(...atributosVisiveis(v.filhos))
+      }
+    }
+    return saida
+  }
+  const atributosEmJogo = atributosVisiveis(atributos)
+
+  function atributoPreenchido(a: Atributo): boolean {
     const v = valoresAtributos[a.attribute_id]
-    return !v || (v.valueId == null && !v.texto?.trim())
-  })
+    if (!v) return false
+    return v.valueId != null || (v.valueIds?.length ?? 0) > 0 || !!v.texto?.trim()
+  }
+
+  const atributosObrigatoriosFaltando = atributosEmJogo.filter(a => a.is_mandatory && !atributoPreenchido(a))
 
   const podeEnviar = !!canalAtivo && !!produto && !!categoriaFolha && titulo.trim() && Number(preco) > 0
     && estoque !== '' && Number(peso) > 0 && atributosObrigatoriosFaltando.length === 0
@@ -515,9 +539,14 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
           titulo: titulo.trim(), descricao: descricao.trim(), preco: Number(preco), estoque: Number(estoque),
           peso: Number(peso), comprimento: comprimento || undefined, largura: largura || undefined, altura: altura || undefined,
           brandId: brandId || undefined, brandNome: brandId ? marcas.find(m => String(m.brand_id) === brandId)?.original_brand_name : undefined,
-          atributos: atributos
-            .filter(a => valoresAtributos[a.attribute_id])
-            .map(a => ({ attribute_id: a.attribute_id, value_id: valoresAtributos[a.attribute_id].valueId, texto: valoresAtributos[a.attribute_id].texto })),
+          // Só os que estão em jogo: se o pai mudou de valor, o filho que
+          // ficou escondido não pode viajar junto com o anúncio.
+          atributos: atributosEmJogo
+            .filter(atributoPreenchido)
+            .map(a => {
+              const v = valoresAtributos[a.attribute_id]
+              return { attribute_id: a.attribute_id, value_id: v.valueId, valueIds: v.valueIds, texto: v.texto, unidade: v.unidade }
+            }),
           canaisLogisticaHabilitados: Array.from(logisticaSelecionada),
         }),
       })
@@ -717,28 +746,18 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                   )}
                   {atributos.length > 0 && (
                     <div>
-                      <p className="text-xs font-medium text-gray-500 mb-2">Atributos da categoria</p>
+                      <div className="flex items-baseline justify-between mb-2">
+                        <p className="text-xs font-medium text-gray-500">Atributos da categoria</p>
+                        {atributosObrigatoriosFaltando.length > 0 && (
+                          <p className="text-xs text-red-600">
+                            {atributosObrigatoriosFaltando.length} obrigatório(s) em falta
+                          </p>
+                        )}
+                      </div>
                       <div className="space-y-3">
                         {atributos.map(a => (
-                          <div key={a.attribute_id}>
-                            <label className="block text-xs text-gray-600 mb-1">
-                              {a.attribute_name} {a.is_mandatory && <span className="text-red-500">*</span>}
-                            </label>
-                            {a.attribute_value_list.length > 0 ? (
-                              <select
-                                value={valoresAtributos[a.attribute_id]?.valueId ?? ''}
-                                onChange={e => setValoresAtributos(prev => ({ ...prev, [a.attribute_id]: { valueId: Number(e.target.value) || undefined } }))}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
-                                <option value="">Selecione...</option>
-                                {a.attribute_value_list.map(v => <option key={v.value_id} value={v.value_id}>{v.original_value_name}</option>)}
-                              </select>
-                            ) : (
-                              <input
-                                value={valoresAtributos[a.attribute_id]?.texto ?? ''}
-                                onChange={e => setValoresAtributos(prev => ({ ...prev, [a.attribute_id]: { texto: e.target.value } }))}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-                            )}
-                          </div>
+                          <CampoAtributo key={a.attribute_id} atributo={a}
+                            valores={valoresAtributos} setValores={setValoresAtributos} />
                         ))}
                       </div>
                     </div>
@@ -850,12 +869,108 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
           <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2 flex-shrink-0">
             <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
             <button onClick={enviar} disabled={!podeEnviar || salvando}
+              title={atributosObrigatoriosFaltando.length > 0
+                ? `Falta preencher: ${atributosObrigatoriosFaltando.map(a => a.attribute_name).join(', ')}`
+                : undefined}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg">
               {salvando ? 'Publicando...' : 'Publicar na Shopee'}
             </button>
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// Um atributo da categoria. O tipo de campo vem da Shopee (input_type), e
+// não de um palpite nosso: lista fechada, lista com opção de digitar, texto
+// livre (às vezes com unidade) ou múltipla escolha.
+//
+// Alguns valores abrem atributos-filho — "Cabos Elétricos = Sim" revela o
+// número de registro do INMETRO, também obrigatório. Por isso o componente
+// se chama a si mesmo.
+function CampoAtributo({ atributo: a, valores, setValores, nivel = 0 }: {
+  atributo: Atributo
+  valores: Record<number, ValorEscolhido>
+  setValores: React.Dispatch<React.SetStateAction<Record<number, ValorEscolhido>>>
+  nivel?: number
+}) {
+  const v = valores[a.attribute_id] ?? {}
+  const temLista = a.attribute_value_list.length > 0
+  const multi = a.input_type === 4 || a.input_type === 5
+  const aceitaTexto = a.input_type === 2 || a.input_type === 3 || a.input_type === 5
+  const marcados = v.valueIds ?? (v.valueId != null ? [v.valueId] : [])
+
+  function set(patch: ValorEscolhido) {
+    setValores(prev => ({ ...prev, [a.attribute_id]: patch }))
+  }
+
+  const filhos = a.attribute_value_list
+    .filter(x => x.filhos.length > 0 && marcados.includes(x.value_id))
+    .flatMap(x => x.filhos)
+
+  return (
+    <div className={nivel > 0 ? 'ml-4 pl-3 border-l-2 border-blue-200' : ''}>
+      <label className="block text-xs text-gray-600 mb-1">
+        {a.attribute_name} {a.is_mandatory && <span className="text-red-500">*</span>}
+        {a.quantitativo && a.unidades.length > 0 && <span className="text-gray-400"> (com unidade)</span>}
+      </label>
+
+      {temLista && !multi && (
+        <select
+          value={v.valueId != null ? String(v.valueId) : (v.texto ? '__outro' : '')}
+          onChange={e => {
+            const val = e.target.value
+            if (val === '__outro') set({ texto: v.texto ?? '' })
+            else set({ valueId: Number(val) || undefined })
+          }}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Selecione...</option>
+          {a.attribute_value_list.map(x => <option key={x.value_id} value={x.value_id}>{x.original_value_name}</option>)}
+          {aceitaTexto && <option value="__outro">Outro — digitar</option>}
+        </select>
+      )}
+
+      {temLista && multi && (
+        <div className="flex flex-wrap gap-1.5">
+          {a.attribute_value_list.map(x => {
+            const on = marcados.includes(x.value_id)
+            return (
+              <button key={x.value_id} type="button"
+                onClick={() => set({ ...v, valueIds: on ? marcados.filter(i => i !== x.value_id) : [...marcados, x.value_id], valueId: undefined })}
+                className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${on ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                {x.original_value_name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Texto: quando não há lista, ou quando a pessoa escolheu "Outro". */}
+      {(!temLista || (aceitaTexto && v.texto != null && v.valueId == null)) && (
+        <div className="flex gap-2 mt-1">
+          <input
+            value={v.texto ?? ''}
+            onChange={e => set({ ...v, texto: e.target.value, valueId: undefined })}
+            placeholder={a.quantitativo ? 'Valor' : ''}
+            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+          {a.unidades.length > 0 && (
+            <select value={v.unidade ?? a.unidades[0]}
+              onChange={e => set({ ...v, unidade: e.target.value })}
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white">
+              {a.unidades.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+
+      {filhos.length > 0 && (
+        <div className="mt-2 space-y-3">
+          {filhos.map(f => (
+            <CampoAtributo key={f.attribute_id} atributo={f} valores={valores} setValores={setValores} nivel={nivel + 1} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

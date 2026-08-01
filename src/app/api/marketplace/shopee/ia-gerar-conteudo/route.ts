@@ -7,8 +7,8 @@ import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
 const MAX_TITULO_SHOPEE = 120
 
 type AtributoInput = {
-  attribute_id: number; attribute_name: string; is_mandatory: boolean; attribute_type: string
-  attribute_value_list: { value_id: number; original_value_name: string }[]
+  attribute_id: number; attribute_name: string; is_mandatory: boolean
+  attribute_value_list: { value_id: number; original_value_name: string; filhos?: AtributoInput[] }[]
 }
 type MarcaInput = { brand_id: number; original_brand_name: string }
 
@@ -26,12 +26,22 @@ export async function POST(req: Request) {
   const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
   const padrao = profile?.empresa_id ? await buscarPadraoAnuncio(sb, profile.empresa_id) : null
 
-  const atributosTexto = (atributos ?? []).map(a => {
-    const valores = a.attribute_value_list.length > 0
-      ? ` — opções: ${a.attribute_value_list.map(v => `${v.value_id}=${v.original_value_name}`).join(', ')}`
-      : ' — campo de texto livre'
-    return `- id ${a.attribute_id}: "${a.attribute_name}" (${a.is_mandatory ? 'OBRIGATÓRIO' : 'opcional'})${valores}`
-  }).join('\n')
+  // Atributos-filho entram na lista com recuo: são obrigatórios só quando o
+  // valor do pai que os revela for escolhido, e a IA precisa enxergar essa
+  // dependência para não sugerir um sem o outro.
+  function listarAtributos(lista: AtributoInput[], recuo = ''): string {
+    return lista.map(a => {
+      const valores = a.attribute_value_list.length > 0
+        ? ` — opções: ${a.attribute_value_list.map(v => `${v.value_id}=${v.original_value_name}`).join(', ')}`
+        : ' — campo de texto livre'
+      const linha = `${recuo}- id ${a.attribute_id}: "${a.attribute_name}" (${a.is_mandatory ? 'OBRIGATÓRIO' : 'opcional'})${valores}`
+      const filhos = a.attribute_value_list
+        .filter(v => v.filhos?.length)
+        .map(v => `${recuo}  se escolher "${v.original_value_name}", também pede:\n${listarAtributos(v.filhos!, `${recuo}    `)}`)
+      return [linha, ...filhos].join('\n')
+    }).join('\n')
+  }
+  const atributosTexto = listarAtributos(atributos ?? [])
 
   const marcasTexto = (marcas ?? []).map(m => `${m.brand_id}=${m.original_brand_name}`).join(', ')
 

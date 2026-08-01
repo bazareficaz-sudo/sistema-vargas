@@ -111,15 +111,22 @@ export async function resolverCaminhoPorCategoria(ctx: CallCtx, categoryId: numb
 export async function recomendarCategoria(ctx: CallCtx, itemName: string): Promise<CaminhoCategoriaResolvido | null> {
   const callOptions = await callOpts(ctx)
   const data = await shopeeGet('/api/v2/product/category_recommend', { item_name: itemName }, callOptions)
-  const ids: number[] = data?.response?.category_id_list ?? []
+  // A resposta traz `category_id` (um array, apesar do nome no singular),
+  // ordenado da melhor sugestão para a pior. Lia-se `category_id_list`, que
+  // não existe — a sugestão oficial nunca chegava a ser usada, e a tela caía
+  // sempre na dedução por palavra-chave sem dizer nada.
+  const ids: number[] = data?.response?.category_id ?? data?.response?.category_id_list ?? []
   if (ids.length === 0) return null
 
   const arvore = await buscarArvoreCompleta(ctx)
-  const porId = new Set(arvore.map(c => c.category_id))
-  const primeiraValida = ids.find(id => porId.has(id))
-  if (primeiraValida == null) return null
+  const porId = new Map(arvore.map(c => [c.category_id, c]))
+  // Só folha serve: a Shopee mistura categorias-pai na lista, e pedir os
+  // atributos de uma categoria-pai é recusado ("should use leaf category").
+  const escolhida = ids.find(id => porId.get(id) && !porId.get(id)!.has_children)
+    ?? ids.find(id => porId.has(id))
+  if (escolhida == null) return null
 
-  return montarResolucao(arvore, primeiraValida)
+  return montarResolucao(arvore, escolhida)
 }
 
 // Pré-seleção de categoria por dedução (sem IA): pontua cada categoria-folha
@@ -159,12 +166,56 @@ export async function deduzirCategoriaPorPalavras(ctx: CallCtx, produtoNome: str
   return montarResolucao(arvore, melhor.folha.category_id)
 }
 
+// Tipos de entrada da Shopee (campo attribute_info.input_type), confirmados
+// contra a resposta real da categoria 100719:
+//   1 → escolha única, só valores da lista
+//   2 → lista com opção de digitar um valor próprio
+//   3 → texto/número livre (pode exigir unidade, ver `quantitativo`)
+//   4 → múltipla escolha, só valores da lista
+//   5 → múltipla escolha com opção de digitar
+export const ENTRADA = { LISTA: 1, LISTA_OU_TEXTO: 2, TEXTO: 3, MULTI: 4, MULTI_OU_TEXTO: 5 } as const
+
+export type ValorAtributoShopee = {
+  value_id: number
+  original_value_name: string
+  // Atributos que só passam a existir quando ESTE valor é escolhido. Em
+  // "Cabos Elétricos = Sim", por exemplo, aparece o número de registro do
+  // INMETRO, também obrigatório. Ignorar isso é o que fazia a publicação
+  // ser recusada sem que houvesse campo na tela para corrigir.
+  filhos: AtributoShopee[]
+}
+
 export type AtributoShopee = {
   attribute_id: number
   attribute_name: string
   is_mandatory: boolean
-  attribute_type: string // TEXT | DROP_DOWN | COMBO_BOX | MULTIPLE_SELECT_COMBO_BOX ...
-  attribute_value_list: { value_id: number; original_value_name: string }[]
+  input_type: number
+  quantitativo: boolean // format_type 2 — o valor vai acompanhado de unidade
+  unidades: string[]
+  attribute_value_list: ValorAtributoShopee[]
+}
+
+// Nome em português quando a Shopee manda a tradução; senão o nome original.
+function nomeTraduzido(no: any, fallback: string): string {
+  const pt = (no?.multi_lang ?? []).find((m: any) => m.language === 'pt-BR' || m.language === 'pt-br')
+  return pt?.value ?? no?.display_attribute_name ?? no?.display_value_name ?? fallback
+}
+
+function mapearAtributo(a: any): AtributoShopee {
+  const info = a.attribute_info ?? {}
+  return {
+    attribute_id: a.attribute_id,
+    attribute_name: nomeTraduzido(a, a.name ?? a.original_attribute_name ?? `Atributo ${a.attribute_id}`),
+    is_mandatory: !!(a.mandatory ?? a.is_mandatory ?? a.mandatory_attribute),
+    input_type: Number(info.input_type ?? a.input_type ?? ENTRADA.TEXTO),
+    quantitativo: Number(info.format_type ?? 1) === 2,
+    unidades: info.attribute_unit_list ?? info.unit_list ?? [],
+    attribute_value_list: (a.attribute_value_list ?? []).map((v: any) => ({
+      value_id: v.value_id,
+      original_value_name: nomeTraduzido(v, v.name ?? v.original_value_name ?? String(v.value_id)),
+      filhos: (v.child_attribute_list ?? []).map(mapearAtributo),
+    })),
+  }
 }
 
 export async function getAttributeTree(ctx: CallCtx, categoryId: number): Promise<AtributoShopee[]> {
@@ -173,17 +224,20 @@ export async function getAttributeTree(ctx: CallCtx, categoryId: number): Promis
   // era enviado como category_id — o nome real esperado pela API atual é
   // category_id_list (aceita uma lista, mas um id só já funciona como valor único).
   const data = await shopeeGet('/api/v2/product/get_attribute_tree', { category_id_list: categoryId, language: 'pt-br' }, callOptions)
-  const lista: any[] = data?.response?.attribute_list ?? []
-  return lista.map((a: any) => ({
-    attribute_id: a.attribute_id,
-    attribute_name: a.display_attribute_name ?? a.attribute_name ?? a.original_attribute_name ?? `Atributo ${a.attribute_id}`,
-    is_mandatory: !!(a.is_mandatory ?? a.mandatory_attribute),
-    attribute_type: a.attribute_type ?? a.input_type ?? 'TEXT',
-    attribute_value_list: (a.attribute_value_list ?? []).map((v: any) => ({
-      value_id: v.value_id,
-      original_value_name: v.display_value_name ?? v.original_value_name ?? String(v.value_id),
-    })),
-  }))
+
+  // A resposta vem como response.list[].attribute_tree — um nó por categoria
+  // pedida. O caminho antigo (response.attribute_list) não existe, e por isso
+  // a lista chegava SEMPRE vazia: nenhuma categoria mostrava atributo nenhum
+  // na tela, e só se descobria isso quando a Shopee recusava a publicação por
+  // faltar um obrigatório.
+  const no = (data?.response?.list ?? [])[0]
+  if (no?.warning) {
+    // Acontece quando a categoria escolhida não é folha — a Shopee não
+    // devolve atributos e explica o porquê. Repassar em vez de engolir.
+    throw new ShopeeApiError(`Shopee: ${no.warning}`, undefined, data)
+  }
+  const lista: any[] = no?.attribute_tree ?? data?.response?.attribute_list ?? []
+  return lista.map(mapearAtributo)
 }
 
 export type MarcaShopee = { brand_id: number; original_brand_name: string }
@@ -227,7 +281,13 @@ export async function uploadImageFromUrl(ctx: CallCtx, imageUrl: string): Promis
   return imageId
 }
 
-export type AtributoInput = { attribute_id: number; value_id?: number; texto?: string }
+export type AtributoInput = {
+  attribute_id: number
+  value_id?: number
+  valueIds?: number[]  // múltipla escolha
+  texto?: string
+  unidade?: string     // atributos quantitativos (ex.: Tensão em V)
+}
 
 // Formato do value_id (DROP_DOWN) está confirmado. Já o de atributo TEXT
 // (texto livre) não apareceu documentado em nenhuma fonte consultada —
@@ -235,12 +295,18 @@ export type AtributoInput = { attribute_id: number; value_id?: number; texto?: s
 // API, mas não foi validado contra uma chamada real. Se a Shopee rejeitar,
 // o erro dela (guardado sem reformular) vai indicar isso.
 function montarAtributo(a: AtributoInput) {
-  return {
-    attribute_id: a.attribute_id,
-    attribute_value_list: a.value_id != null
-      ? [{ value_id: a.value_id }]
-      : [{ original_value_name: a.texto ?? '' }],
+  const valores: any[] = []
+  if (a.valueIds?.length) {
+    for (const id of a.valueIds) valores.push({ value_id: id })
+  } else if (a.value_id != null) {
+    valores.push({ value_id: a.value_id })
   }
+  if (a.texto?.trim()) {
+    const v: any = { original_value_name: a.texto.trim() }
+    if (a.unidade) v.value_unit = a.unidade
+    valores.push(v)
+  }
+  return { attribute_id: a.attribute_id, attribute_value_list: valores }
 }
 
 export type CriarAnuncioInput = {
