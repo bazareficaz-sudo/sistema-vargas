@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { usePermissao } from '@/contexts/PlanContext'
 import { ETAPAS, ETAPA_INFO, proximaEtapa, type Etapa } from '@/lib/pedidos/etapas'
 import PainelEtapaPedido from './PainelEtapaPedido'
+import MudarEtapaMassaModal from './MudarEtapaMassaModal'
+import RomaneioModal from './RomaneioModal'
 import { PERIODO_OPCOES, PERIODO_LABELS, type PeriodoPreset } from '@/lib/estoque/periodo'
 import { ORIGEM_ROTULO, ORIGEM_COR, type PedidoUnificado, type IndicadoresPedidos, type OrigemPedido } from '@/lib/pedidos/unificado'
 
@@ -42,6 +44,11 @@ export default function PedidosClient({
   const [lista, setLista] = useState<PedidoUnificado[] | null>(null)
   const [origens, setOrigens] = useState<Set<OrigemPedido>>(new Set())
   const [situacao, setSituacao] = useState<FiltroSituacao>('todos')
+  // Chave composta: o mesmo id pode existir nas duas origens.
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [acaoMassa, setAcaoMassa] = useState<'etapa' | 'romaneio' | null>(null)
+
+  const chave = (p: PedidoUnificado) => `${p.fonte}-${p.id}`
 
   function navegar(params: Record<string, string>) {
     const sp = new URLSearchParams({ periodo: periodoInicial, de: deInicial, ate: ateInicial, ...params })
@@ -67,7 +74,7 @@ export default function PedidosClient({
   // A lista local reflete a mudanca de etapa na hora; `pedidos` continua
   // sendo a verdade vinda do servidor a cada recarga.
   const base = lista ?? pedidos
-  useEffect(() => { setLista(null) }, [pedidos])
+  useEffect(() => { setLista(null); setSelecionados(new Set()) }, [pedidos])
 
   const filtrados = useMemo(() => {
     const termo = busca.trim().toLowerCase()
@@ -83,6 +90,20 @@ export default function PedidosClient({
         .some(c => (c ?? '').toLowerCase().includes(termo))
     })
   }, [base, busca, origens, situacao, etapasFiltro])
+
+  // Só o que está visível conta: seleção que sobrevive a um filtro novo
+  // faria a pessoa agir sobre pedido que ela não está vendo.
+  const escolhidos = useMemo(
+    () => filtrados.filter(p => selecionados.has(chave(p))), [filtrados, selecionados])
+  const todosVisiveisMarcados = filtrados.length > 0 && escolhidos.length === filtrados.length
+
+  function alternarSelecao(p: PedidoUnificado) {
+    setSelecionados(s => {
+      const n = new Set(s); const k = chave(p)
+      n.has(k) ? n.delete(k) : n.add(k)
+      return n
+    })
+  }
 
   return (
     <div>
@@ -186,17 +207,47 @@ export default function PedidosClient({
 
       {/* Lista */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
-          <p className="text-xs text-gray-500">
-            {filtrados.length === pedidos.length
-              ? `${pedidos.length} pedido(s)`
-              : `${filtrados.length} de ${pedidos.length} pedido(s)`}
-          </p>
+        <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+          {escolhidos.length > 0 ? (
+            <>
+              <p className="text-xs text-blue-700 font-medium">{escolhidos.length} selecionado(s)</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setAcaoMassa('etapa')}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+                  Mudar etapa
+                </button>
+                <button onClick={() => setAcaoMassa('romaneio')}
+                  title="Lista de separação somada por produto + conferência por pedido"
+                  className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+                  🖨 Romaneio
+                </button>
+                <button onClick={() => setSelecionados(new Set())}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline">limpar seleção</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-gray-500">
+                {filtrados.length === pedidos.length
+                  ? `${pedidos.length} pedido(s)`
+                  : `${filtrados.length} de ${pedidos.length} pedido(s)`}
+              </p>
+              <a href="/dashboard/pedidos/auditoria" className="text-xs text-gray-500 hover:text-blue-700">
+                histórico de alterações →
+              </a>
+            </>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-3 py-2.5 w-8">
+                  <input type="checkbox" checked={todosVisiveisMarcados}
+                    title={todosVisiveisMarcados ? 'Desmarcar os visíveis' : 'Marcar todos os visíveis'}
+                    onChange={() => setSelecionados(todosVisiveisMarcados ? new Set() : new Set(filtrados.map(chave)))}
+                    className="cursor-pointer" />
+                </th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 whitespace-nowrap">Data</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Nº</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-600">Origem</th>
@@ -210,12 +261,16 @@ export default function PedidosClient({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtrados.length === 0 && (
-                <tr><td colSpan={podeVerTotais ? 9 : 8} className="text-center py-10 text-gray-400 text-sm">Nenhum pedido com os filtros atuais.</td></tr>
+                <tr><td colSpan={podeVerTotais ? 10 : 9} className="text-center py-10 text-gray-400 text-sm">Nenhum pedido com os filtros atuais.</td></tr>
               )}
               {filtrados.map(p => {
                 const fb = FISCAL_BADGE[p.fiscal]
+                const marcado = selecionados.has(chave(p))
                 return (
-                  <tr key={`${p.fonte}-${p.id}`} className={`hover:bg-gray-50 ${p.cancelado ? 'opacity-60' : ''}`}>
+                  <tr key={`${p.fonte}-${p.id}`} className={`hover:bg-gray-50 ${p.cancelado ? 'opacity-60' : ''} ${marcado ? 'bg-blue-50/60' : ''}`}>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" checked={marcado} onChange={() => alternarSelecao(p)} className="cursor-pointer" />
+                    </td>
                     <td className="px-3 py-2 text-gray-600 text-xs whitespace-nowrap">
                       {p.criadoEm ? new Date(p.criadoEm).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                     </td>
@@ -260,6 +315,21 @@ export default function PedidosClient({
         <PainelEtapaPedido pedido={detalhe} onFechar={() => setDetalhe(null)}
           onMudou={nova => setLista(l => (l ?? pedidos).map(x =>
             x.id === detalhe.id && x.fonte === detalhe.fonte ? { ...x, etapa: nova } : x))} />
+      )}
+
+      {acaoMassa === 'etapa' && (
+        <MudarEtapaMassaModal
+          alvos={escolhidos.map(p => ({ fonte: p.fonte as 'venda' | 'marketplace', id: p.id, numero: p.numero, etapa: p.etapa }))}
+          onFechar={() => setAcaoMassa(null)}
+          onAplicado={(nova, aplicados) => {
+            const chaves = new Set(aplicados.map(a => `${a.fonte}-${a.id}`))
+            setLista(l => (l ?? pedidos).map(x => chaves.has(`${x.fonte}-${x.id}`) ? { ...x, etapa: nova } : x))
+          }} />
+      )}
+
+      {acaoMassa === 'romaneio' && (
+        <RomaneioModal itens={escolhidos.map(p => ({ fonte: p.fonte, id: p.id }))}
+          onFechar={() => setAcaoMassa(null)} />
       )}
 
       <p className="text-xs text-gray-400 mt-3">
