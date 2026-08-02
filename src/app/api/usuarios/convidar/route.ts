@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao, registrarAuditoria, PAPEIS, type Papel } from '@/lib/auth/permissoes'
 import { verificarLimite } from '@/lib/plans/access'
+import { urlDoApp } from '@/lib/appUrl'
 
 export async function POST(req: Request) {
   const sb = await createClient()
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
     // O Supabase cria a conta do convidado SEM senha. Sem mandar ele pra
     // tela de definir senha, ele entrava só naquela sessão e nunca mais
     // conseguia logar de novo.
-    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/auth/callback?next=/auth/definir-senha`,
+    redirectTo: urlDoApp('/auth/callback?next=/auth/definir-senha'),
   })
   if (erroConvite || !convite?.user) {
     return NextResponse.json({ ok: false, erro: erroConvite?.message ?? 'Erro ao enviar convite' }, { status: 400 })

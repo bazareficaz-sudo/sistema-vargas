@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
+import { APP_URL } from '@/lib/appUrl'
 
 // Gera um novo link de acesso para um usuário que ainda não definiu senha.
 //
@@ -36,7 +37,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const email = authUser?.user?.email
   if (!email) return NextResponse.json({ ok: false, erro: 'E-mail do usuário não encontrado' }, { status: 400 })
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'
+  const appUrl = APP_URL
   const redirectTo = `${appUrl}/auth/callback?next=/auth/definir-senha`
 
   // Conta já existe (é o caso de todo convite que já saiu uma vez): o que

@@ -16,19 +16,19 @@ verify it without our help**.
 
 ## A. How to verify the technical controls yourself
 
-These require no cooperation from us. Run them against `https://vargasnexus.com.br`.
+These require no cooperation from us. Run them against `https://www.sistemavargas.com.br`.
 
 | # | Claim | How to verify | Expected result |
 |---|---|---|---|
-| A1 | All traffic is HTTPS with HSTS | `curl -sI https://vargasnexus.com.br` | `strict-transport-security: max-age=31536000; includeSubDomains` |
+| A1 | All traffic is HTTPS with HSTS | `curl -sI https://www.sistemavargas.com.br` | `strict-transport-security: max-age=31536000; includeSubDomains` |
 | A2 | MIME-type sniffing disabled | same response | `x-content-type-options: nosniff` |
 | A3 | Clickjacking protection | same response | `x-frame-options: SAMEORIGIN` and `content-security-policy: frame-ancestors 'self'` |
 | A4 | Internal URLs not leaked to third parties | same response | `referrer-policy: strict-origin-when-cross-origin` |
 | A5 | Device APIs denied by default | same response | `permissions-policy: camera=(), microphone=(), geolocation=(), payment=()` |
 | A6 | Server technology not advertised | same response | no `x-powered-by` header |
-| A7 | Plaintext HTTP is not served | `curl -sI http://vargasnexus.com.br` | 307/308 redirect to `https://` |
+| A7 | Plaintext HTTP is not served | `curl -sI http://www.sistemavargas.com.br` | 307/308 redirect to `https://` |
 | A8 | TLS version and cipher suite | SSL Labs test on the domain | TLS 1.2 minimum; TLS 1.0/1.1 not offered |
-| A9 | Authenticated areas are not publicly reachable | `curl -sI https://vargasnexus.com.br/dashboard` | redirect to `/login` — no data returned |
+| A9 | Authenticated areas are not publicly reachable | `curl -sI https://www.sistemavargas.com.br/dashboard` | redirect to `/login` — no data returned |
 
 ## B. Answers to the questionnaire domains
 
@@ -185,7 +185,7 @@ place and, where marked, independently verifiable today.
 ## D. Attachments
 
 1. `Information Security Policy v1.0` — signed and dated (PDF).
-2. Screenshot: HTTP response headers from `https://vargasnexus.com.br` (matches section A).
+2. Screenshot: HTTP response headers from `https://www.sistemavargas.com.br` (matches section A).
 3. Screenshot: permission matrix source file (six roles × permissions).
 4. Screenshot: audit log table with sample entries, sensitive values redacted.
 5. Screenshot: MFA enabled on hosting, database, and repository accounts.

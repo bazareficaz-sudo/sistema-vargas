@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { criarPreapprovalPlan } from '@/lib/mercadopago/preapproval'
+import { urlDoApp } from '@/lib/appUrl'
 
 export async function POST(request: NextRequest) {
   const sb = await createClient()
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
   if (!plano) return NextResponse.json({ ok: false, error: 'Plano não encontrado.' }, { status: 404 })
   if (plano.mercadopago_plan_id) return NextResponse.json({ ok: true, mercadopago_plan_id: plano.mercadopago_plan_id })
 
-  const backUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.vargasnexus.com.br'}/assinatura/confirmacao`
+  const backUrl = urlDoApp('/assinatura/confirmacao')
 
   try {
     const mercadopagoPlanId = await criarPreapprovalPlan({ nome: plano.nome, preco_mensal: plano.preco_mensal }, backUrl)

@@ -1,7 +1,7 @@
 # Information Security Policy
 
 **Organization:** [LEGAL ENTITY NAME] — CNPJ [XX.XXX.XXX/0001-XX]
-**Product:** Sistema Vargas — multi-tenant ERP and point-of-sale platform (vargasnexus.com.br)
+**Product:** Sistema Vargas — multi-tenant ERP and point-of-sale platform (www.sistemavargas.com.br)
 **Document owner:** [NAME], [TITLE] — acting Information Security Officer
 **Version:** 1.0
 **Effective date:** [DATE OF ADOPTION]

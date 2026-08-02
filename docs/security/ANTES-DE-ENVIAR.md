@@ -10,20 +10,26 @@ de coisa que, se o revisor descobrir depois, encerra a conversa de vez.
 
 Ordem pensada para o risco cair primeiro.
 
+> **Domínio:** em 02/08/2026 o sistema passou de `vargasnexus.com.br` para
+> `www.sistemavargas.com.br`. Toda URL citada nos outros dois documentos já está
+> no domínio novo. Antes de enviar, confirme que os painéis de desenvolvedor da
+> Shopee, do Mercado Livre e da TikTok Shop têm a URL de retorno no domínio novo
+> — OAuth registrado no domínio antigo falha na hora de conectar.
+
 ---
 
-## 1. Rodar `supabase-fechar-escrita-anonima.sql` ⛔ BLOQUEIA O ENVIO
+## 1. Rodar `supabase-fechar-escrita-anonima.sql` ✅ FEITO EM 02/08/2026
 
-**Hoje:** conferido na produção nesta data — qualquer pessoa com a chave pública
-do site, sem login, pode **apagar as 504 vendas**, alterar preço dos 14.423
-produtos e editar os 44 clientes.
+O anônimo tinha SELECT, UPDATE e DELETE em 14 tabelas — dava para apagar as 504
+vendas, alterar os 14.423 produtos e editar os 44 clientes sem login.
 
-Enquanto isso for verdade, não dá para responder "sim" a nenhuma pergunta de
-controle de acesso. Some no Supabase Dashboard → SQL Editor.
+Aplicado e reconferido na produção: a consulta de verificação devolveu as 9
+linhas esperadas. Nenhum DELETE em lugar nenhum, `vendas` e `venda_itens` só
+aceitam INSERT, e `usuarios_pdv`/`vendedores`/`depositos` não aceitam escrita.
 
-Depois de rodar, confira que quebrou nada no balcão: faça uma venda de teste no
-PDV externo (produto, pagamento, fecha). Se algo travar, o rollback está no
-rodapé do próprio arquivo.
+**Falta ainda:** a venda de teste no PDV externo (produto, pagamento, fecha), para
+confirmar que nada travou no balcão. Se travar, o rollback está no rodapé do
+próprio arquivo.
 
 ## 2. Rotar as credenciais que ficaram expostas ⛔ BLOQUEIA O ENVIO
 
@@ -86,7 +92,7 @@ compromisso escrito é pior do que não ter prometido.
 
 ## 7. Tirar os prints dos anexos
 
-1. Cabeçalhos HTTP (rode `curl -sI https://vargasnexus.com.br` — o resultado tem
+1. Cabeçalhos HTTP (rode `curl -sI https://www.sistemavargas.com.br` — o resultado tem
    que bater com a tabela da seção A).
 2. Arquivo da matriz de permissões (6 papéis).
 3. Tabela de auditoria com registros reais, com dado sensível tapado.
