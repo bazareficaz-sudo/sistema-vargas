@@ -136,6 +136,44 @@ export default async function ProdutosPage({
     for (const img of imgs ?? []) imagensMap[img.produto_id] = img.url
   }
 
+  // Onde cada produto desta página está anunciado.
+  //
+  // Conta os anúncios diretos e também as variações — uma variação é um
+  // anúncio de verdade do ponto de vista de quem vende, e ignorá-la faria o
+  // selo dizer "sem anúncio" para produto que está à venda.
+  //
+  // Anúncio encerrado não entra: ele não está mais à venda, e contá-lo
+  // faria o selo prometer presença num canal onde o produto já saiu.
+  const anunciosMap: Record<string, Record<string, { total: number; ativos: number }>> = {}
+  if (produtoIds.length > 0) {
+    const [{ data: diretos }, { data: variacoes }] = await Promise.all([
+      supabase.from('marketplace_anuncios')
+        .select('produto_id, status, marketplace_canais(plataforma)')
+        .in('produto_id', produtoIds).neq('status', 'encerrado'),
+      supabase.from('marketplace_anuncio_variacoes')
+        .select('produto_id, marketplace_anuncios!inner(status, marketplace_canais(plataforma))')
+        .in('produto_id', produtoIds),
+    ])
+
+    const somar = (produtoId: string, plataforma: string, status: string) => {
+      if (!produtoId || !plataforma) return
+      const porProduto = anunciosMap[produtoId] ??= {}
+      const alvo = porProduto[plataforma] ??= { total: 0, ativos: 0 }
+      alvo.total++
+      if (status === 'ativo') alvo.ativos++
+    }
+    for (const a of (diretos ?? []) as any[]) {
+      const canal = Array.isArray(a.marketplace_canais) ? a.marketplace_canais[0] : a.marketplace_canais
+      somar(a.produto_id, canal?.plataforma, a.status)
+    }
+    for (const v of (variacoes ?? []) as any[]) {
+      const anuncio = Array.isArray(v.marketplace_anuncios) ? v.marketplace_anuncios[0] : v.marketplace_anuncios
+      if (!anuncio || anuncio.status === 'encerrado') continue
+      const canal = Array.isArray(anuncio.marketplace_canais) ? anuncio.marketplace_canais[0] : anuncio.marketplace_canais
+      somar(v.produto_id, canal?.plataforma, anuncio.status)
+    }
+  }
+
   // Contagens para as abas — aplicam os mesmos filtros (busca, promoção e os
   // novos filtros de marca/categoria/estoque/imagem/ncm), exceto a aba em si.
   function baseCount() {
@@ -175,6 +213,7 @@ export default async function ProdutosPage({
       promoFiltro={promoFiltro}
       apenasAtivos={apenasAtivos}
       empresaId={empresaId}
+      anunciosMap={anunciosMap}
       abrirProdutoId={editar}
       abrirProdutoAba={abaProduto}
       categoriasRaiz={categoriasRaiz}

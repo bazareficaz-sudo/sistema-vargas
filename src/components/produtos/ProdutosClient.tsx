@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissao } from '@/contexts/PlanContext'
 import EditarProdutoModal from './EditarProdutoModal'
+import SeloCanais, { type ContagemCanais } from '@/components/marketplaces/SeloCanais'
 import DuplicarProdutoModal from './DuplicarProdutoModal'
 import AcoesEmMassaModal from './AcoesEmMassaModal'
 import AdicionarImagemMassaModal from './AdicionarImagemMassaModal'
@@ -66,6 +67,9 @@ type Props = {
   promoFiltro: boolean
   apenasAtivos: boolean
   empresaId: string
+  // Anúncios por produto, agrupados por plataforma — alimenta o selo de
+  // canais na linha.
+  anunciosMap?: Record<string, ContagemCanais>
   // Produto a abrir já no cadastro, vindo por link de outra tela.
   abrirProdutoId?: string
   abrirProdutoAba?: string
@@ -101,7 +105,7 @@ const ABAS = [
 export default function ProdutosClient({
   produtos: inicial, imagensMap = {}, total, totalTodos, totalSimples, totalKits, totalEmPromocao,
   pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, apenasAtivos: apenasAtivosInicial, empresaId,
-  abrirProdutoId, abrirProdutoAba,
+  anunciosMap, abrirProdutoId, abrirProdutoAba,
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
@@ -116,6 +120,9 @@ export default function ProdutosClient({
   const podeEditarPrecos = usePermissao('editar_precos')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [editando, setEditando] = useState<Produto | null>(null)
+  // Aba em que o cadastro abre — o selo de canais leva direto para Anúncios,
+  // o link vindo de Vendas leva para Fiscal.
+  const [abaModal, setAbaModal] = useState<'fiscal' | 'anuncios' | undefined>(undefined)
 
   // Chegou por link com ?editar=<id>: abre o cadastro daquele produto na
   // hora. Busca por id em vez de procurar na página atual — o produto pode
@@ -290,8 +297,10 @@ export default function ProdutosClient({
 
   return (
     <>
-      <EditarProdutoModal produto={editando} onClose={() => setEditando(null)} onSaved={onSaved} empresaId={empresaId}
-        abaInicial={abrirProdutoAba === 'fiscal' ? 'fiscal' : undefined} />
+      <EditarProdutoModal produto={editando}
+        onClose={() => { setEditando(null); setAbaModal(undefined) }}
+        onSaved={onSaved} empresaId={empresaId}
+        abaInicial={abaModal ?? (abrirProdutoAba === 'fiscal' ? 'fiscal' : abrirProdutoAba === 'anuncios' ? 'anuncios' : undefined)} />
       {duplicando && (
         <DuplicarProdutoModal
           produto={duplicando}
@@ -690,6 +699,10 @@ export default function ProdutosClient({
                           className="text-gray-300 hover:text-blue-600 transition-colors leading-none shrink-0">
                           {copiado === `${p.id}-nome` ? '✓' : '⧉'}
                         </button>
+                        {/* Em quais canais o produto está anunciado. Clicar
+                            abre a lista de anúncios, onde dá para pausar. */}
+                        <SeloCanais contagem={anunciosMap?.[p.id]}
+                          onAbrir={() => { setAbaModal('anuncios'); setEditando(p) }} />
                       </>
                     )}
                     {p.promocao_ativa && (

@@ -60,6 +60,11 @@ type ProdutoImagem = { id: string; url: string; ordem: number; principal: boolea
 type AnuncioVinculado = {
   id: string; canalNome: string; plataforma: string; titulo: string
   variacaoNome?: string | null; preco: number; status: string; urlAnuncio: string | null
+  // Canal e anúncio-pai são o que a API precisa para pausar. Numa variação,
+  // quem pausa é o anúncio dono dela — o marketplace não pausa variação
+  // isolada, e mandar o id da variação daria erro sem explicação.
+  canalId: string | null
+  anuncioId: string
 }
 
 type Props = {
@@ -135,10 +140,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     setCarregandoAnuncios(true)
     const [{ data: diretos }, { data: variacoes }] = await Promise.all([
       sb.from('marketplace_anuncios')
-        .select('id, titulo, preco_venda, status, url_anuncio, marketplace_canais(nome, plataforma)')
+        .select('id, canal_id, titulo, preco_venda, status, url_anuncio, marketplace_canais(nome, plataforma)')
         .eq('produto_id', produtoId).eq('tem_variacao', false),
       sb.from('marketplace_anuncio_variacoes')
-        .select('id, nome_variacao, preco, marketplace_anuncios!inner(titulo, status, url_anuncio, marketplace_canais(nome, plataforma))')
+        .select('id, nome_variacao, preco, anuncio_id, marketplace_anuncios!inner(id, canal_id, titulo, status, url_anuncio, marketplace_canais(nome, plataforma))')
         .eq('produto_id', produtoId),
     ])
 
@@ -148,6 +153,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       lista.push({
         id: a.id, canalNome: canal?.nome ?? '—', plataforma: canal?.plataforma ?? '',
         titulo: a.titulo, preco: a.preco_venda ?? 0, status: a.status, urlAnuncio: a.url_anuncio,
+        canalId: a.canal_id ?? null, anuncioId: a.id,
       })
     }
     for (const v of (variacoes ?? []) as any[]) {
@@ -157,10 +163,63 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         id: v.id, canalNome: canal?.nome ?? '—', plataforma: canal?.plataforma ?? '',
         titulo: anuncio?.titulo ?? '—', variacaoNome: v.nome_variacao,
         preco: v.preco ?? 0, status: anuncio?.status ?? 'rascunho', urlAnuncio: anuncio?.url_anuncio ?? null,
+        canalId: anuncio?.canal_id ?? null, anuncioId: anuncio?.id ?? v.anuncio_id,
       })
     }
     setAnunciosVinculados(lista)
     setCarregandoAnuncios(false)
+  }
+
+  const [mexendoAnuncios, setMexendoAnuncios] = useState(false)
+  const [resumoAnuncios, setResumoAnuncios] = useState('')
+
+  // Pausar ou reativar anúncios deste produto em TODOS os canais de uma vez.
+  //
+  // Antes era preciso entrar canal por canal. Como cada plataforma tem sua
+  // própria rota e cada loja seu próprio token, o trabalho aqui é agrupar
+  // por canal e disparar uma chamada por grupo — a tela junta o que a API
+  // obriga a separar.
+  //
+  // Variações de um mesmo anúncio viram um id só: o marketplace pausa o
+  // anúncio inteiro, não a variação.
+  async function mudarStatusAnuncios(acao: 'pausar' | 'ativar', alvos: AnuncioVinculado[]) {
+    const comCanal = alvos.filter(a => a.canalId)
+    if (comCanal.length === 0) return
+    setMexendoAnuncios(true); setResumoAnuncios('')
+
+    const porCanal = new Map<string, { plataforma: string; ids: Set<string> }>()
+    for (const a of comCanal) {
+      const grupo = porCanal.get(a.canalId!) ?? { plataforma: a.plataforma, ids: new Set<string>() }
+      grupo.ids.add(a.anuncioId)
+      porCanal.set(a.canalId!, grupo)
+    }
+
+    let ok = 0
+    const falhas: string[] = []
+    for (const [canalId, grupo] of porCanal) {
+      const rota = grupo.plataforma === 'shopee'
+        ? '/api/marketplace/shopee/pausar-ativar'
+        : grupo.plataforma === 'mercadolivre'
+          ? '/api/marketplace/mercadolivre/pausar-ativar'
+          : null
+      if (!rota) { falhas.push(`${grupo.plataforma || 'canal desconhecido'}: sem integração para pausar`); continue }
+      try {
+        const d = await fetch(rota, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId, anuncioIds: [...grupo.ids], acao }),
+        }).then(r => r.json())
+        if (d.ok) ok += grupo.ids.size
+        else falhas.push(d.erro ?? 'falha desconhecida')
+      } catch (e: any) {
+        falhas.push(e.message)
+      }
+    }
+
+    const verbo = acao === 'pausar' ? 'pausado(s)' : 'reativado(s)'
+    setResumoAnuncios(
+      `${ok} anúncio(s) ${verbo}.` + (falhas.length > 0 ? ` Falhas: ${falhas.join('; ')}` : ''))
+    setMexendoAnuncios(false)
+    if (produto) carregarAnunciosVinculados(produto.id)
   }
 
   useEffect(() => {
@@ -1344,6 +1403,37 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   <p className="text-xs mt-1">Vincule em Marketplaces → Anúncios, usando o botão "Mapear".</p>
                 </div>
               ) : (
+                <>
+                {/* Pausar em todos os canais de uma vez — antes era preciso
+                    entrar canal por canal para tirar um produto do ar. */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-sm font-medium text-blue-900">
+                      {anunciosVinculados.length} anúncio(s) em {new Set(anunciosVinculados.map(a => a.canalNome)).size} canal(is)
+                    </p>
+                    <p className="text-xs text-blue-700 mt-0.5">
+                      {anunciosVinculados.filter(a => a.status === 'ativo').length} ativo(s) ·{' '}
+                      {anunciosVinculados.filter(a => a.status === 'pausado').length} pausado(s)
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button type="button" disabled={mexendoAnuncios}
+                      onClick={() => mudarStatusAnuncios('pausar', anunciosVinculados.filter(a => a.status === 'ativo'))}
+                      title="Tira o produto do ar em todos os canais de uma vez"
+                      className="px-3 py-1.5 text-xs rounded-lg bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-40">
+                      {mexendoAnuncios ? 'Aguarde...' : '⏸ Pausar em todos os canais'}
+                    </button>
+                    <button type="button" disabled={mexendoAnuncios}
+                      onClick={() => mudarStatusAnuncios('ativar', anunciosVinculados.filter(a => a.status === 'pausado'))}
+                      className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40">
+                      ▶ Reativar todos
+                    </button>
+                  </div>
+                </div>
+                {resumoAnuncios && (
+                  <p className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700">{resumoAnuncios}</p>
+                )}
+
                 <div className="border border-gray-200 rounded-xl overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
@@ -1352,6 +1442,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                         <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-600">Anúncio</th>
                         <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-600">Preço no canal</th>
                         <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-600">Situação</th>
+                        <th className="px-4 py-2.5"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -1375,12 +1466,22 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                             <td className="px-4 py-2.5 text-center">
                               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.cls}`}>{st.label}</span>
                             </td>
+                            <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                              {a.canalId && (a.status === 'ativo' || a.status === 'pausado') && (
+                                <button type="button" disabled={mexendoAnuncios}
+                                  onClick={() => mudarStatusAnuncios(a.status === 'ativo' ? 'pausar' : 'ativar', [a])}
+                                  className="text-xs text-gray-500 hover:text-blue-700 disabled:opacity-40">
+                                  {a.status === 'ativo' ? 'pausar' : 'reativar'}
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </div>
           )}
