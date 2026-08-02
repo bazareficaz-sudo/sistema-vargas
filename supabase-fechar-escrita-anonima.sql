@@ -58,6 +58,12 @@ REVOKE INSERT, UPDATE ON usuarios_pdv, vendedores, depositos FROM anon;
 
 REVOKE INSERT ON produtos, produto_imagens, kit_itens FROM anon;
 
+-- Composição de kit e imagem do produto o terminal só LÊ. Editar os dois é
+-- operação do painel. Trocar a URL de uma imagem sem login seria porta aberta
+-- para desfigurar a vitrine; mudar a quantidade de um componente de kit
+-- bagunçaria a baixa de estoque de toda venda de kit.
+REVOKE UPDATE ON kit_itens, produto_imagens FROM anon;
+
 -- ── 6. Fechar a porta dos fundos: privilégio herdado ────────
 -- REVOKE do `anon` não adianta se a permissão tiver sido concedida a PUBLIC
 -- (todo mundo) em vez de ao papel. Nesse caso o anônimo continua apagando e o
@@ -73,6 +79,7 @@ REVOKE DELETE ON produtos, produto_estoque, produto_imagens, kit_itens,
 REVOKE UPDATE ON vendas, venda_itens, estoque_movimentacoes FROM PUBLIC;
 REVOKE INSERT, UPDATE ON usuarios_pdv, vendedores, depositos FROM PUBLIC;
 REVOKE INSERT ON produtos, produto_imagens, kit_itens FROM PUBLIC;
+REVOKE UPDATE ON kit_itens, produto_imagens FROM PUBLIC;
 
 -- ── 7. Conferência — rode junto e leia o resultado ──────────
 -- Não confie em "rodou sem erro". REVOKE em permissão que não existia também
@@ -90,7 +97,8 @@ SELECT table_name AS tabela,
  GROUP BY table_name
  ORDER BY table_name;
 
--- RESULTADO ESPERADO — só estas linhas devem aparecer:
+-- RESULTADO ESPERADO — exatamente estas 9 linhas, nem mais nem menos.
+-- (Conferido na produção em 02/08/2026: bateu.)
 --
 --   clientes               INSERT, UPDATE
 --   contas_receber         INSERT, UPDATE
@@ -149,6 +157,7 @@ SELECT table_name AS tabela,
 --                   depositos, estoque_movimentacoes, contas_receber,
 --                   orcamentos, orcamento_itens TO anon;
 --   GRANT UPDATE ON vendas, venda_itens, estoque_movimentacoes TO anon;
+--   GRANT UPDATE ON kit_itens, produto_imagens TO anon;
 --   GRANT INSERT, UPDATE ON usuarios_pdv, vendedores, depositos TO anon;
 --   GRANT INSERT ON produtos, produto_imagens, kit_itens TO anon;
 --
