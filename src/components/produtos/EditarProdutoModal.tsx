@@ -62,7 +62,13 @@ type AnuncioVinculado = {
   variacaoNome?: string | null; preco: number; status: string; urlAnuncio: string | null
 }
 
-type Props = { produto: Produto | null; onClose: () => void; onSaved: () => void; empresaId: string }
+type Props = {
+  produto: Produto | null; onClose: () => void; onSaved: () => void; empresaId: string
+  // Aba em que o modal abre. Existe para quem chega de fora com um problema
+  // específico — a nota recusada por falta de NCM cai direto no fiscal, em
+  // vez de obrigar a procurar a aba certa.
+  abaInicial?: Aba
+}
 
 type Aba = 'geral' | 'preco' | 'promocao' | 'imagens' | 'kit' | 'fiscal' | 'anuncios'
 
@@ -78,7 +84,7 @@ const STATUS_ANUNCIO: Record<string, { label: string; cls: string }> = {
   erro:      { label: 'Erro',      cls: 'bg-red-100 text-red-600' },
 }
 
-export default function EditarProdutoModal({ produto, onClose, onSaved, empresaId }: Props) {
+export default function EditarProdutoModal({ produto, onClose, onSaved, empresaId, abaInicial }: Props) {
   const [form, setForm] = useState<Produto | null>(null)
   const [aba, setAba] = useState<Aba>('geral')
   const [salvando, setSalvando] = useState(false)
@@ -117,7 +123,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   useEffect(() => {
     if (produto) {
       setForm({ ...produto })
-      setAba('geral')
+      setAba(abaInicial ?? 'geral')
       setPromocaoInfinita(!produto.promocao_fim)
       if (produto.tipo === 'kit') carregarKitItens(produto.id)
       carregarImagens(produto.id)

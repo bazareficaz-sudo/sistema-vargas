@@ -210,7 +210,19 @@ export default function EditarItensVendaModal({ venda, empresaId, onFechar, onSa
                   {itens.map(i => (
                     <tr key={i.chave}>
                       <td className="px-3 py-2">
-                        <p className="text-gray-900">{i.produtoNome}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-gray-900">{i.produtoNome}</p>
+                          {/* Falta de NCM/CEST só aparece na hora de emitir a
+                              nota. Daqui se resolve sem fechar a correção. */}
+                          {i.produtoId && (
+                            <a href={`/dashboard/produtos?editar=${i.produtoId}&abaProduto=fiscal`}
+                              target="_blank" rel="noreferrer"
+                              title="Abrir o cadastro deste produto na aba Fiscal (nova aba)"
+                              className="text-[11px] text-blue-600 hover:underline whitespace-nowrap">
+                              cadastro ↗
+                            </a>
+                          )}
+                        </div>
                         <p className="text-[11px] text-gray-400">
                           {i.produtoSku ? `SKU ${i.produtoSku}` : 'sem SKU'}
                           {i.quantidadeOriginal > 0 && Number(i.quantidade) !== i.quantidadeOriginal &&

@@ -7,6 +7,9 @@ import type { Venda } from './VendasClient'
 
 type Item = {
   id: string; produto_nome: string; produto_sku: string | null
+  // Nulo quando o item foi digitado à mão no PDV, sem produto do cadastro —
+  // nesse caso não há ficha para abrir.
+  produto_id: string | null
   quantidade: number; preco_unitario: number; desconto: number | null; total: number; tipo: string
 }
 
@@ -225,12 +228,26 @@ export default function DetalheVendaModal({
               </div>
               <div className="border border-gray-200 rounded-xl overflow-hidden">
                 {itensVenda.map(i => (
-                  <div key={i.id} className="px-3 py-2 border-b border-gray-100 last:border-0 flex items-center justify-between text-sm">
+                  <div key={i.id} className="px-3 py-2 border-b border-gray-100 last:border-0 flex items-center justify-between gap-2 text-sm">
                     <div className="min-w-0">
                       <p className="text-gray-800 truncate">{i.produto_nome}</p>
                       <p className="text-xs text-gray-400">{i.quantidade}x {fmt(i.preco_unitario)}{i.produto_sku ? ` · ${i.produto_sku}` : ''}</p>
                     </div>
-                    <p className="text-gray-900 font-medium flex-shrink-0">{fmt(i.total)}</p>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Nota recusada por falta de NCM/CEST manda o operador
+                          ao cadastro do produto. Este atalho abre a ficha
+                          direto na aba Fiscal, em outra aba do navegador,
+                          para a venda não se perder no caminho. */}
+                      {i.produto_id && (
+                        <a href={`/dashboard/produtos?editar=${i.produto_id}&abaProduto=fiscal`}
+                          target="_blank" rel="noreferrer"
+                          title="Abrir o cadastro deste produto na aba Fiscal (nova aba)"
+                          className="text-xs text-blue-600 hover:underline whitespace-nowrap">
+                          cadastro ↗
+                        </a>
+                      )}
+                      <p className="text-gray-900 font-medium">{fmt(i.total)}</p>
+                    </div>
                   </div>
                 ))}
               </div>

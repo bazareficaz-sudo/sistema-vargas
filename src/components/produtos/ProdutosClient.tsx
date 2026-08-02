@@ -66,6 +66,9 @@ type Props = {
   promoFiltro: boolean
   apenasAtivos: boolean
   empresaId: string
+  // Produto a abrir já no cadastro, vindo por link de outra tela.
+  abrirProdutoId?: string
+  abrirProdutoAba?: string
   categoriasRaiz: Categoria[]
   categoriasTodas: Categoria[]
   marcas: Marca[]
@@ -98,6 +101,7 @@ const ABAS = [
 export default function ProdutosClient({
   produtos: inicial, imagensMap = {}, total, totalTodos, totalSimples, totalKits, totalEmPromocao,
   pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, apenasAtivos: apenasAtivosInicial, empresaId,
+  abrirProdutoId, abrirProdutoAba,
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
@@ -112,6 +116,24 @@ export default function ProdutosClient({
   const podeEditarPrecos = usePermissao('editar_precos')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [editando, setEditando] = useState<Produto | null>(null)
+
+  // Chegou por link com ?editar=<id>: abre o cadastro daquele produto na
+  // hora. Busca por id em vez de procurar na página atual — o produto pode
+  // estar em qualquer página, ou nem passar pelos filtros vigentes.
+  useEffect(() => {
+    if (!abrirProdutoId) return
+    let cancelado = false
+    ;(async () => {
+      const naPagina = produtos.find(p => p.id === abrirProdutoId)
+      if (naPagina) { setEditando(naPagina); return }
+      const sb = createClient()
+      const { data } = await sb.from('produtos').select('*')
+        .eq('id', abrirProdutoId).eq('empresa_id', empresaId).maybeSingle()
+      if (!cancelado && data) setEditando(data as Produto)
+    })()
+    return () => { cancelado = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirProdutoId])
   const [duplicando, setDuplicando] = useState<Produto | null>(null)
   const [criandoKit, setCriandoKit] = useState<Produto | null>(null)
   const [criandoAnuncioShopee, setCriandoAnuncioShopee] = useState<Produto | null>(null)
@@ -268,7 +290,8 @@ export default function ProdutosClient({
 
   return (
     <>
-      <EditarProdutoModal produto={editando} onClose={() => setEditando(null)} onSaved={onSaved} empresaId={empresaId} />
+      <EditarProdutoModal produto={editando} onClose={() => setEditando(null)} onSaved={onSaved} empresaId={empresaId}
+        abaInicial={abrirProdutoAba === 'fiscal' ? 'fiscal' : undefined} />
       {duplicando && (
         <DuplicarProdutoModal
           produto={duplicando}

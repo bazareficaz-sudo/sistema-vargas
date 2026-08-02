@@ -10,12 +10,16 @@ export default async function ProdutosPage({
     q?: string; pagina?: string; aba?: string; promo?: string; ativos?: string
     marca?: string; categoria?: string; subcategoria?: string
     estoque?: string; imagem?: string; ncm?: string; tag?: string; entrada?: string
+    // Abre o cadastro de um produto direto, sem obrigar a procurá-lo na
+    // lista. Usado por quem chega de outra tela com um problema apontado —
+    // a venda cuja nota foi recusada por falta de dado fiscal, por exemplo.
+    editar?: string; abaProduto?: string
   }>
 }) {
   const {
     q = '', pagina = '1', aba = 'todos', promo = '', ativos = '1',
     marca = '', categoria = '', subcategoria = '', estoque = '', imagem = '', ncm = '',
-    tag = '', entrada = '',
+    tag = '', entrada = '', editar = '', abaProduto = '',
   } = await searchParams
   const promoFiltro = promo === '1'
   const apenasAtivos = ativos !== '0'
@@ -171,6 +175,8 @@ export default async function ProdutosPage({
       promoFiltro={promoFiltro}
       apenasAtivos={apenasAtivos}
       empresaId={empresaId}
+      abrirProdutoId={editar}
+      abrirProdutoAba={abaProduto}
       categoriasRaiz={categoriasRaiz}
       categoriasTodas={categoriasTodas}
       marcas={marcasTodas}
