@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import DetalheVendaModal from './DetalheVendaModal'
+import EditarItensVendaModal from './EditarItensVendaModal'
 import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integracoes/EnviarWhatsAppModal'
 import { calcSaude, CONFIG_PADRAO, FAIXAS_PADRAO, type SaudeConfig, type FaixaSaude, type ResultadoSaude } from '@/lib/saude-venda'
 import { abrirDanfe, type FormatoPapel } from '@/lib/fiscal/danfe'
@@ -91,6 +92,9 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
 
   const [detalheAberto, setDetalheAberto] = useState<Venda | null>(null)
   const [modoEdicaoInicial, setModoEdicaoInicial] = useState(false)
+  // Correção de itens da venda — modal próprio, separado do detalhe, porque
+  // mexe em estoque e não é edição de cadastro.
+  const [corrigindo, setCorrigindo] = useState<Venda | null>(null)
   const [gerandoPdfId, setGerandoPdfId] = useState<string | null>(null)
   const [wppAberto, setWppAberto] = useState(false)
   const [wppPayload, setWppPayload] = useState<EnviarWppPayload | null>(null)
@@ -682,6 +686,16 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             setVendas(prev => prev.map(v => v.id === detalheAberto.id ? { ...v, ...patch } : v))
             setDetalheAberto(prev => prev ? { ...prev, ...patch } : prev)
           }}
+          onCorrigirItens={() => setCorrigindo(detalheAberto)}
+        />
+      )}
+
+      {corrigindo && (
+        <EditarItensVendaModal
+          venda={corrigindo}
+          empresaId={empresaId}
+          onFechar={() => setCorrigindo(null)}
+          onSalvo={() => { setDetalheAberto(null); window.location.reload() }}
         />
       )}
 

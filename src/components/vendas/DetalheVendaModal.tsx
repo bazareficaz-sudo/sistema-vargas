@@ -21,6 +21,7 @@ function fmt(v: number) { return (v ?? 0).toLocaleString('pt-BR', { style: 'curr
 
 export default function DetalheVendaModal({
   venda, empresaId, modoEdicaoInicial, onClose, onImprimir, onWhatsapp, gerandoPdf, formatoImpressao, onAtualizado,
+  onCorrigirItens,
 }: {
   venda: Venda
   empresaId: string
@@ -31,6 +32,7 @@ export default function DetalheVendaModal({
   gerandoPdf: boolean
   formatoImpressao?: FormatoPapel
   onAtualizado: (patch: Partial<Venda>) => void
+  onCorrigirItens?: () => void
 }) {
   const [carregando, setCarregando] = useState(true)
   const [itens, setItens] = useState<Item[]>([])
@@ -209,7 +211,18 @@ export default function DetalheVendaModal({
 
             {/* Itens */}
             <div>
-              <p className="text-xs font-semibold text-gray-700 mb-1.5">Itens</p>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-xs font-semibold text-gray-700">Itens</p>
+                {onCorrigirItens && venda.status !== 'cancelada' && (
+                  <button onClick={onCorrigirItens}
+                    title={detalhe?.nfce_status === 'autorizada'
+                      ? 'Venda com NFC-e autorizada — é preciso cancelar a nota antes'
+                      : 'Trocar produto, mudar quantidade, tirar item ou ajustar desconto'}
+                    className="text-xs text-blue-600 hover:underline">
+                    ✏ corrigir itens
+                  </button>
+                )}
+              </div>
               <div className="border border-gray-200 rounded-xl overflow-hidden">
                 {itensVenda.map(i => (
                   <div key={i.id} className="px-3 py-2 border-b border-gray-100 last:border-0 flex items-center justify-between text-sm">
