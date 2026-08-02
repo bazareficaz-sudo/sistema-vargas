@@ -43,6 +43,9 @@ type Periodo = 'hoje' | 'ontem' | '7dias' | 'mes' | 'custom'
 const FORMA_LABEL: Record<string, string> = {
   dinheiro: 'Dinheiro', debito: 'Débito', credito: 'Crédito', pix: 'Pix',
   carteira: 'Carteira', fiado: 'Fiado', troca: 'Troca', multiplo: 'Múltiplo',
+  // O PDV grava 'misto' quando a venda foi paga em mais de uma forma —
+  // faltava aqui, e por isso essas vendas apareciam com o código cru.
+  misto: 'Misto',
 }
 
 function fmt(v: number) { return (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
@@ -161,7 +164,35 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     setCarregando(false)
   }
 
-  const totalFaturado = vendas.filter(v => v.status === 'concluida').reduce((s, v) => s + (v.total ?? 0), 0)
+  // Filtro por forma de pagamento.
+  //
+  // As opções saem do que existe no período carregado, não de uma lista
+  // fixa: a produção usa códigos que a lista fixa não previa ('misto'), e
+  // uma forma sem opção é uma venda inalcançável.
+  //
+  // Uma venda paga em mais de uma forma entra em TODAS as formas que ela
+  // usou — quem filtra por Pix quer ver também a venda que foi metade Pix,
+  // metade dinheiro.
+  const [formasFiltro, setFormasFiltro] = useState<Set<string>>(new Set())
+
+  const formasDaVenda = (v: Venda): string[] => {
+    const formas = new Set<string>()
+    if (v.forma_pagamento) formas.add(v.forma_pagamento)
+    for (const p of v.pagamentos ?? []) if (p?.forma) formas.add(p.forma)
+    return [...formas]
+  }
+
+  const formasPresentes = (() => {
+    const contagem = new Map<string, number>()
+    for (const v of vendas) for (const f of formasDaVenda(v)) contagem.set(f, (contagem.get(f) ?? 0) + 1)
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1])
+  })()
+
+  const vendasFiltradas = formasFiltro.size === 0
+    ? vendas
+    : vendas.filter(v => formasDaVenda(v).some(f => formasFiltro.has(f)))
+
+  const totalFaturado = vendasFiltradas.filter(v => v.status === 'concluida').reduce((s, v) => s + (v.total ?? 0), 0)
 
   // Saúde retroativa por venda — reaproveita o mesmo calcSaude usado ao vivo
   // no PDV. Vendas antigas não têm custo_unitario salvo (coluna nova), então
@@ -255,7 +286,9 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   }
 
   function toggleTodos(checked: boolean) {
-    setSelecionados(checked ? new Set(vendas.map(v => v.id)) : new Set())
+    // Só o que está visível — marcar tudo com filtro ativo não pode pegar
+    // venda que a pessoa não está vendo.
+    setSelecionados(checked ? new Set(vendasFiltradas.map(v => v.id)) : new Set())
   }
   function toggleUm(id: string) {
     setSelecionados(prev => {
@@ -370,22 +403,21 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   }
 
   // NFC-e só faz sentido pra venda pura (tipo_operacao 'venda') — mesma
-  // regra já usada pro botão individual em DetalheVendaModal.tsx. Emite
-  // documento fiscal de verdade, por isso pede confirmação antes.
+  // regra já usada pro botão individual em DetalheVendaModal.tsx.
+  //
+  // Sem confirmação: emitir nota é o trabalho normal de quem opera esta
+  // tela, e o aviso a cada clique só atrasava. O resumo depois da emissão
+  // continua dizendo quantas foram autorizadas e quantas falharam.
   async function emitirNfceSelecionados() {
     const todasSelecionadas = vendas.filter(v => selecionados.has(v.id))
     const elegiveis = todasSelecionadas.filter(v => v.tipo_operacao === 'venda')
+    // Continua contando as puladas — sai no resumo DEPOIS da emissão, que é
+    // relatório do que aconteceu, não aviso pedindo permissão.
     const inelegiveis = todasSelecionadas.length - elegiveis.length
     if (elegiveis.length === 0) {
       alert('Nenhuma venda selecionada é elegível pra NFC-e (só venda pura, sem troca/devolução).')
       return
     }
-    const confirmar = confirm(
-      `Emitir NFC-e pra ${elegiveis.length} venda(s)` +
-      (inelegiveis > 0 ? ` (${inelegiveis} pulada(s) por não ser venda pura)` : '') +
-      '?\n\nIsso emite documentos fiscais de verdade junto à SEFAZ — não é uma simulação.'
-    )
-    if (!confirmar) return
 
     setAplicandoMassa(true); setResumoMassa('')
     let autorizadas = 0, jaEmitidas = 0
@@ -451,7 +483,9 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Vendas</h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            {total} transações · {fmt(totalFaturado)} faturados
+            {formasFiltro.size > 0
+              ? `${vendasFiltradas.length} de ${vendas.length} transações`
+              : `${total} transações`} · {fmt(totalFaturado)} faturados
           </p>
           <p className="text-xs text-gray-400 mt-1">
             📦 Estoque debitado de: <strong className="text-gray-500">{empresaEstoqueNome}</strong>
@@ -497,6 +531,32 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
         )}
         {carregando && <span className="text-xs text-gray-400">Carregando...</span>}
       </div>
+
+      {formasPresentes.length > 1 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs text-gray-500">Pagamento:</span>
+          {formasPresentes.map(([forma, qtd]) => {
+            const on = formasFiltro.has(forma)
+            return (
+              <button key={forma}
+                onClick={() => setFormasFiltro(prev => {
+                  const novo = new Set(prev)
+                  novo.has(forma) ? novo.delete(forma) : novo.add(forma)
+                  return novo
+                })}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                  on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}>
+                {FORMA_LABEL[forma] ?? forma} <span className="opacity-60">{qtd}</span>
+              </button>
+            )
+          })}
+          {formasFiltro.size > 0 && (
+            <button onClick={() => setFormasFiltro(new Set())}
+              className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
+          )}
+        </div>
+      )}
 
       {selecionados.size > 0 && (
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 flex-wrap">
@@ -572,7 +632,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {vendas.map(v => {
+            {vendasFiltradas.map(v => {
               const itensV = (itensPorVenda[v.id] ?? []).filter(i => i.tipo !== 'devolucao')
               const saude = saudePorVenda[v.id]
               return (
@@ -661,7 +721,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                 </td>
               </tr>
             )})}
-            {vendas.length === 0 && !carregando && (
+            {vendasFiltradas.length === 0 && !carregando && (
               <tr>
                 <td colSpan={14} className="px-4 py-8 text-center text-gray-400">
                   Nenhuma venda encontrada neste período.
