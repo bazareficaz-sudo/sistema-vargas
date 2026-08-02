@@ -655,10 +655,19 @@ export default function ProdutosClient({
                         className="text-sm text-gray-900 font-medium border border-blue-400 rounded-md px-1.5 py-0.5 focus:outline-none flex-1 min-w-[260px]"
                       />
                     ) : (
-                      <button onClick={() => iniciarEdicaoNome(p)} title="Clique para editar o nome"
-                        className="text-left text-gray-900 hover:text-blue-600 font-medium block transition-colors break-words">
-                        {p.nome}
-                      </button>
+                      <>
+                        <button onClick={() => iniciarEdicaoNome(p)} title="Clique para editar o nome"
+                          className="text-left text-gray-900 hover:text-blue-600 font-medium block transition-colors break-words">
+                          {p.nome}
+                        </button>
+                        {/* Mesmo atalho que já existe no SKU e no EAN — o nome
+                            é o que mais se copia, para colar em anúncio,
+                            pesquisa de fornecedor e conversa com cliente. */}
+                        <button onClick={() => copiar(p.id, 'nome', p.nome)} title="Copiar nome"
+                          className="text-gray-300 hover:text-blue-600 transition-colors leading-none shrink-0">
+                          {copiado === `${p.id}-nome` ? '✓' : '⧉'}
+                        </button>
+                      </>
                     )}
                     {p.promocao_ativa && (
                       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-orange-100 text-orange-600 border border-orange-200 shrink-0">
