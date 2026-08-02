@@ -201,8 +201,18 @@ report that turns out to be a false alarm; there is one for staying silent.**
 | 6. Recover | Restore service from a known-good state | As fast as safely possible |
 | 7. Review | Written post-incident record: what happened, root cause, what changed so it cannot recur | Within 10 business days |
 
-Credential compromise is always treated as confirmed compromise. A key that may
-have leaked is rotated; it is not monitored and hoped about.
+Credential handling on suspected exposure follows a risk assessment, not a blanket
+rule. The assessment weighs the harm an attacker could do with the specific
+credential against the operational cost of rotating it. Credentials capable of
+producing legally binding documents in the organization's name — the fiscal
+issuance token above all — are rotated without further deliberation. For
+credentials whose worst case is commercial rather than legal, the Information
+Security Officer records the decision, the reasoning, and the compensating
+control.
+
+The organization states plainly that this is weaker than unconditional rotation.
+It is written this way because it is what the organization actually does, and a
+policy that describes an aspiration is worth nothing to the partner relying on it.
 
 ## 12. Backup and continuity
 

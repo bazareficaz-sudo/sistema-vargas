@@ -31,19 +31,29 @@ aceitam INSERT, e `usuarios_pdv`/`vendedores`/`depositos` não aceitam escrita.
 confirmar que nada travou no balcão. Se travar, o rollback está no rodapé do
 próprio arquivo.
 
-## 2. Rotar as credenciais que ficaram expostas ⛔ BLOQUEIA O ENVIO
+## 2. Credenciais expostas — decidido em 02/08/2026
 
-A tabela `sistema_integracoes` esteve legível sem login. O que estava lá dentro
-precisa ser considerado vazado — não "provavelmente ok":
+A tabela `sistema_integracoes` esteve legível sem login. O acesso foi fechado e
+conferido no mesmo dia.
 
-- [ ] Shopee `partner_key`
-- [ ] Mercado Livre `app_secret`
-- [ ] WhatsApp Z-API (token e instância)
-- [ ] Brasil NFe UserToken
+- [x] **Brasil NFe UserToken** — trocado. Era o de maior dano: permite emitir
+      documento fiscal no CNPJ da empresa.
+- [ ] Shopee `partner_key` — **mantida, por decisão sua**
+- [ ] Mercado Livre `app_secret` — **mantida, por decisão sua**
+- [ ] WhatsApp Z-API — **mantida, por decisão sua**
 
-Rotacionar é gerar credencial nova no painel de cada serviço e substituir no
-Supabase. A política (§11) diz que credencial possivelmente vazada é rotacionada,
-não monitorada — precisa ser verdade antes de a gente afirmar isso.
+O motivo de manter foi o custo de reconectar canal no meio da operação. A
+decisão é legítima e está documentada como tal — a §11 da política foi reescrita
+para descrever avaliação por risco em vez de rotação incondicional, e o pacote de
+evidências declara o episódio abertamente na B4.
+
+**Isso não fica em aberto para sempre.** Marque uma data para revisitar as três.
+Enquanto elas estiverem em uso, quem porventura as tenha copiado continua com
+elas — fechar a porta não recolhe o que já saiu.
+
+Se um dia trocar: gera credencial nova no painel do serviço, substitui no
+Supabase e reconecta o canal. Depois marque o item aqui e reverta a §11 para
+rotação incondicional, que é a redação mais forte.
 
 ## 3. Ligar MFA em todas as contas administrativas ⛔ BLOQUEIA O ENVIO
 

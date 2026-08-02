@@ -80,8 +80,22 @@ database and object storage, including backups.
 variables in the hosting provider's encrypted configuration store, never in source
 control (the repository ignores `.env*` by configuration), and never written to
 logs. Access tokens are stored in a database table that is unreadable without a
-privileged server-side key and is protected by Row Level Security. Credential
-rotation on suspected compromise is mandatory, not discretionary (Policy §11).
+privileged server-side key and is protected by Row Level Security.
+
+On suspected exposure, credentials are assessed by the harm an attacker could
+cause with that specific key (Policy §11). Credentials able to produce legally
+binding documents in our name are rotated unconditionally. For the rest, the
+decision and its reasoning are recorded by the Information Security Officer.
+
+*Disclosed in full: an internal review on 2 August 2026 found that a
+configuration table holding integration credentials had been readable without
+authentication. Access to that table was closed the same day and verified. The
+fiscal issuance token was rotated. Three marketplace and messaging credentials
+were retained after assessment, on the basis that their worst case is commercial
+and that the exposure path is now closed. **No TikTok Shop credential was
+involved — this integration does not yet exist.** We report this because a
+partner is entitled to know how we behaved when it was inconvenient, and because
+the alternative was to claim a control we had not applied.*
 
 ### B5. Do you log and monitor access to data?
 
