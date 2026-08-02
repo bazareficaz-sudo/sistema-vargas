@@ -632,15 +632,29 @@ export default function LandingPage() {
               <div key={col.titulo}>
                 <p className="font-bold text-white text-sm mb-4">{col.titulo}</p>
                 <ul className="space-y-2">
-                  {col.links.map(l => (
-                    <li key={l}>
-                      {l === 'Blog' ? (
-                        <Link href="/blog" className="text-slate-400 text-xs hover:text-white transition-colors">{l}</Link>
-                      ) : (
-                        <a href="#" className="text-slate-400 text-xs hover:text-white transition-colors">{l}</a>
-                      )}
-                    </li>
-                  ))}
+                  {col.links.map(l => {
+                    // Os itens legais apontam para a página de Privacidade, cada um
+                    // na seção que responde a pergunta que o nome do link faz.
+                    // "Termos de Uso" continua sem destino: é outro documento, e
+                    // apontá-lo para a Privacidade seria repetir o erro que fez o
+                    // questionário de segurança da TikTok ser recusado.
+                    const destino: Record<string, string> = {
+                      Blog: '/blog',
+                      Privacidade: '/privacidade',
+                      LGPD: '/privacidade#direitos',
+                      Cookies: '/privacidade#cookies',
+                    }
+                    const href = destino[l]
+                    return (
+                      <li key={l}>
+                        {href ? (
+                          <Link href={href} className="text-slate-400 text-xs hover:text-white transition-colors">{l}</Link>
+                        ) : (
+                          <span className="text-slate-500 text-xs">{l}</span>
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             ))}
