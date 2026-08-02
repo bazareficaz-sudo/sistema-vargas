@@ -430,35 +430,72 @@ export default function EntradaXmlDetalheClient({
     })
     .filter(c => c.diffs.length > 0)
 
+  // A escolha é por CAMPO, não por item: dá para aceitar o NCM que veio na
+  // nota e recusar o EAN do mesmo produto. Marcar o item inteiro obrigava a
+  // engolir junto um código de barras que o fornecedor mandou errado.
+  const chaveFiscal = (itemId: string, campo: CampoFiscal) => `${itemId}|${campo}`
   const [selecaoFiscal, setSelecaoFiscal] = useState<Record<string, boolean>>({})
   const [aplicandoFiscal, setAplicandoFiscal] = useState(false)
 
   useEffect(() => {
-    // Marca por padrão os itens que têm alguma diferença — o usuário
-    // desmarca o que quiser ignorar.
+    // Marca por padrão toda diferença encontrada — o usuário desmarca o que
+    // não quiser. Só entra chave nova; o que ele já desmarcou fica assim.
     setSelecaoFiscal(prev => {
       const novo = { ...prev }
       for (const c of candidatosFiscais) {
-        if (!(c.item.id in novo)) novo[c.item.id] = true
+        for (const { campo } of c.diffs) {
+          const k = chaveFiscal(c.item.id, campo)
+          if (!(k in novo)) novo[k] = true
+        }
       }
       return novo
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itens, produtosAtuais])
 
+  const totalDiffsFiscais = candidatosFiscais.reduce((s, c) => s + c.diffs.length, 0)
+  const marcadosFiscais = candidatosFiscais.reduce(
+    (s, c) => s + c.diffs.filter(d => selecaoFiscal[chaveFiscal(c.item.id, d.campo)]).length, 0)
+
+  // Marca/desmarca uma coluna inteira — é o atalho para "não quero atualizar
+  // EAN nenhum", que é justamente o caso mais comum.
+  function alternarColunaFiscal(campo: CampoFiscal, marcar: boolean) {
+    setSelecaoFiscal(prev => {
+      const novo = { ...prev }
+      for (const c of candidatosFiscais) {
+        if (c.diffs.some(d => d.campo === campo)) novo[chaveFiscal(c.item.id, campo)] = marcar
+      }
+      return novo
+    })
+  }
+  function alternarLinhaFiscal(itemId: string, diffs: { campo: CampoFiscal }[], marcar: boolean) {
+    setSelecaoFiscal(prev => {
+      const novo = { ...prev }
+      for (const d of diffs) novo[chaveFiscal(itemId, d.campo)] = marcar
+      return novo
+    })
+  }
+
   async function aplicarAtualizacoesFiscais() {
-    const selecionados = candidatosFiscais.filter(c => selecaoFiscal[c.item.id])
-    if (selecionados.length === 0) return
+    if (marcadosFiscais === 0) return
     setAplicandoFiscal(true)
     try {
-      for (const { item, produto, diffs } of selecionados) {
+      let produtosTocados = 0
+      let camposAplicados = 0
+      for (const { item, produto, diffs } of candidatosFiscais) {
         const patch: Record<string, string> = {}
-        for (const { campo } of diffs) patch[campo] = (item[campo] ?? '').toString().trim()
+        for (const { campo } of diffs) {
+          if (!selecaoFiscal[chaveFiscal(item.id, campo)]) continue
+          patch[campo] = (item[campo] ?? '').toString().trim()
+        }
+        if (Object.keys(patch).length === 0) continue
         const { error } = await sb.from('produtos').update(patch).eq('id', produto.id).eq('empresa_id', empresaId)
         if (error) throw error
         setProdutosAtuais(p => ({ ...p, [produto.id]: { ...p[produto.id], ...patch } }))
+        produtosTocados++
+        camposAplicados += Object.keys(patch).length
       }
-      alert(`Dados fiscais atualizados em ${selecionados.length} produto(s).`)
+      alert(`${camposAplicados} campo(s) atualizado(s) em ${produtosTocados} produto(s).`)
     } catch (e: any) {
       alert('Erro ao atualizar dados fiscais: ' + e.message)
     } finally {
@@ -1021,7 +1058,11 @@ export default function EntradaXmlDetalheClient({
         <div className="space-y-3">
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-700 text-sm">
             Compara NCM, CEST, EAN e Código do Fornecedor do XML com o que já está cadastrado no produto vinculado.
-            Só aparece aqui quando há diferença de verdade — desmarque o que não quiser atualizar.
+            Só aparece aqui quando há diferença de verdade.
+            <span className="block mt-1 text-blue-600 text-xs">
+              A escolha é campo a campo: dá para aceitar o NCM da nota e recusar o EAN do mesmo produto.
+              Use o checkbox no título da coluna para tratar um campo inteiro de uma vez.
+            </span>
           </div>
           {candidatosFiscais.length === 0 ? (
             <p className="text-slate-400 text-center py-8 text-sm">Nenhuma diferença encontrada entre o XML e o cadastro dos produtos mapeados.</p>
@@ -1030,52 +1071,93 @@ export default function EntradaXmlDetalheClient({
               <table className="w-full text-sm">
                 <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                   <th className="px-3 py-2 text-center">
-                    <input type="checkbox"
-                      checked={candidatosFiscais.length > 0 && candidatosFiscais.every(c => selecaoFiscal[c.item.id])}
-                      onChange={e => setSelecaoFiscal(Object.fromEntries(candidatosFiscais.map(c => [c.item.id, e.target.checked])))}
-                    />
+                    <input type="checkbox" disabled={readonly}
+                      title="Marcar ou desmarcar tudo"
+                      checked={totalDiffsFiscais > 0 && marcadosFiscais === totalDiffsFiscais}
+                      onChange={e => {
+                        const marcar = e.target.checked
+                        setSelecaoFiscal(Object.fromEntries(candidatosFiscais.flatMap(c =>
+                          c.diffs.map(d => [chaveFiscal(c.item.id, d.campo), marcar]))))
+                      }} />
                   </th>
                   <th className="px-3 py-2 text-left">Produto</th>
-                  {CAMPOS_FISCAIS.map(({ campo, label }) => (
-                    <th key={campo} className="px-3 py-2 text-left">{label}</th>
-                  ))}
+                  {CAMPOS_FISCAIS.map(({ campo, label }) => {
+                    // Quantos itens desta coluna têm diferença — a coluna só
+                    // ganha checkbox quando há algo nela para decidir.
+                    const naColuna = candidatosFiscais.filter(c => c.diffs.some(d => d.campo === campo))
+                    const marcadosNaColuna = naColuna.filter(c => selecaoFiscal[chaveFiscal(c.item.id, campo)]).length
+                    return (
+                      <th key={campo} className="px-3 py-2 text-left">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          {naColuna.length > 0 && (
+                            <input type="checkbox" disabled={readonly}
+                              title={`Marcar ou desmarcar ${label} em todos os ${naColuna.length} item(ns)`}
+                              checked={marcadosNaColuna === naColuna.length}
+                              ref={el => { if (el) el.indeterminate = marcadosNaColuna > 0 && marcadosNaColuna < naColuna.length }}
+                              onChange={e => alternarColunaFiscal(campo, e.target.checked)} />
+                          )}
+                          <span>{label}</span>
+                          {naColuna.length > 0 && (
+                            <span className="text-slate-400 font-normal">({marcadosNaColuna}/{naColuna.length})</span>
+                          )}
+                        </label>
+                      </th>
+                    )
+                  })}
                 </tr></thead>
                 <tbody className="divide-y divide-slate-50">
-                  {candidatosFiscais.map(({ item, produto, diffs }) => (
-                    <tr key={item.id} className={readonly ? 'opacity-60' : ''}>
-                      <td className="px-3 py-2 text-center">
-                        <input type="checkbox" disabled={readonly}
-                          checked={!!selecaoFiscal[item.id]}
-                          onChange={e => setSelecaoFiscal(p => ({ ...p, [item.id]: e.target.checked }))} />
-                      </td>
-                      <td className="px-3 py-2 text-slate-800 text-xs max-w-[180px] truncate">{produto.nome}</td>
-                      {CAMPOS_FISCAIS.map(({ campo }) => {
-                        const mudou = diffs.some(d => d.campo === campo)
-                        return (
-                          <td key={campo} className="px-3 py-2 text-xs">
-                            {mudou ? (
-                              <span>
-                                <span className="text-slate-400 line-through">{produto[campo] || '—'}</span>
-                                {' → '}
-                                <span className="text-emerald-600 font-medium">{item[campo]}</span>
-                              </span>
-                            ) : (
-                              <span className="text-slate-400">{produto[campo] || '—'}</span>
-                            )}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
+                  {candidatosFiscais.map(({ item, produto, diffs }) => {
+                    const marcadosNaLinha = diffs.filter(d => selecaoFiscal[chaveFiscal(item.id, d.campo)]).length
+                    return (
+                      <tr key={item.id} className={readonly ? 'opacity-60' : ''}>
+                        <td className="px-3 py-2 text-center">
+                          <input type="checkbox" disabled={readonly}
+                            title="Marcar ou desmarcar todos os campos deste produto"
+                            checked={marcadosNaLinha === diffs.length}
+                            ref={el => { if (el) el.indeterminate = marcadosNaLinha > 0 && marcadosNaLinha < diffs.length }}
+                            onChange={e => alternarLinhaFiscal(item.id, diffs, e.target.checked)} />
+                        </td>
+                        <td className="px-3 py-2 text-slate-800 text-xs max-w-[180px] truncate">{produto.nome}</td>
+                        {CAMPOS_FISCAIS.map(({ campo }) => {
+                          const mudou = diffs.some(d => d.campo === campo)
+                          if (!mudou) {
+                            return (
+                              <td key={campo} className="px-3 py-2 text-xs">
+                                <span className="text-slate-400">{produto[campo] || '—'}</span>
+                              </td>
+                            )
+                          }
+                          const marcado = !!selecaoFiscal[chaveFiscal(item.id, campo)]
+                          return (
+                            <td key={campo} className="px-3 py-2 text-xs">
+                              <label className="flex items-start gap-1.5 cursor-pointer">
+                                <input type="checkbox" disabled={readonly} className="mt-0.5"
+                                  checked={marcado}
+                                  onChange={e => setSelecaoFiscal(p => ({ ...p, [chaveFiscal(item.id, campo)]: e.target.checked }))} />
+                                <span className={marcado ? '' : 'opacity-40'}>
+                                  <span className="text-slate-400 line-through">{produto[campo] || '—'}</span>
+                                  {' → '}
+                                  <span className="text-emerald-600 font-medium">{item[campo]}</span>
+                                </span>
+                              </label>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           )}
           {!readonly && candidatosFiscais.length > 0 && (
-            <div className="flex justify-end">
-              <button onClick={aplicarAtualizacoesFiscais} disabled={aplicandoFiscal || candidatosFiscais.every(c => !selecaoFiscal[c.item.id])}
+            <div className="flex justify-end items-center gap-3">
+              <span className="text-xs text-slate-500">
+                {marcadosFiscais} de {totalDiffsFiscais} campo(s) marcado(s)
+              </span>
+              <button onClick={aplicarAtualizacoesFiscais} disabled={aplicandoFiscal || marcadosFiscais === 0}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50">
-                {aplicandoFiscal ? 'Aplicando...' : `Aplicar atualizações selecionadas`}
+                {aplicandoFiscal ? 'Aplicando...' : `Aplicar ${marcadosFiscais} campo(s)`}
               </button>
             </div>
           )}
