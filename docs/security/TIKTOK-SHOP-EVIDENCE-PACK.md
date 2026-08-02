@@ -1,9 +1,9 @@
 # Security Questionnaire — Evidence Pack
 
-**Applicant:** [LEGAL ENTITY NAME]
+**Applicant:** Ouro e Prata Elétrica
 **Application:** Sistema Vargas — ERP / point-of-sale integration for TikTok Shop sellers
-**Contact:** [NAME], [EMAIL], [PHONE]
-**Date:** [DATE]
+**Contact:** Silvano Nunes Vargas, security@sistemavargas.com.br, [PHONE]
+**Date:** 2 August 2026
 
 The previous submission was declined for *"lack of evidence of policy
 documentation."* This pack answers that directly: for every control claimed, it
@@ -38,7 +38,7 @@ Information Security Policy.
 ### B1. Do you have a documented information security policy?
 
 **Yes.** Information Security Policy v1.0, attached, adopted and signed by
-[NAME], [TITLE], on [DATE]. It is reviewed annually and after any Severity 1
+Silvano Nunes Vargas, Owner, on 2 August 2026. It is reviewed annually and after any Severity 1
 incident (Policy §17).
 
 *Note on the previous submission: the URL supplied was our privacy notice, which
@@ -115,8 +115,8 @@ confirming that platform data or credentials are involved, ANPD/data-subject
 notification within the statutory LGPD deadline, and a written post-incident
 review within 10 business days.
 
-**Security contact for TikTok Shop:** [NAME] — [security@DOMAIN] — [PHONE],
-monitored during business hours [TIMEZONE], with out-of-hours escalation to the
+**Security contact for TikTok Shop:** Silvano Nunes Vargas — [security@DOMAIN] — [PHONE],
+monitored during business hours UTC-3, Brazil, with out-of-hours escalation to the
 same number.
 
 ### B7. Secure development practices?
@@ -186,9 +186,9 @@ We would rather state this than have it found.
 
 | Item | Current state | Committed by |
 |---|---|---|
-| Server-side permission guard on every API route | Enforced on the privileged routes; the remainder are being retrofitted route by route | [DATE — suggest 90 days] |
-| Content-Security-Policy beyond `frame-ancestors` | Not yet set; will be deployed in report-only mode first so it is measured before it blocks | [DATE — suggest 90 days] |
-| Formal penetration test by an external firm | Not yet performed | [DATE, or "on request as a condition of approval"] |
+| Server-side permission guard on every API route | Enforced on the privileged routes; the remainder are being retrofitted route by route | 31 October 2026 |
+| Content-Security-Policy beyond `frame-ancestors` | Not yet set; will be deployed in report-only mode first so it is measured before it blocks | 31 October 2026 |
+| Formal penetration test by an external firm | Not yet performed | On request, as a condition of approval |
 | SOC 2 / ISO 27001 certification | Not held; we are a small Brazilian company and this is not currently proportionate | — |
 
 We are not claiming certifications we do not hold. Everything in section B is in

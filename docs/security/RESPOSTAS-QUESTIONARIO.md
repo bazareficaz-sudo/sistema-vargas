@@ -10,9 +10,9 @@ caiu.
 
 Os campos entre colchetes são sempre os mesmos quatro:
 
-- `[LEGAL ENTITY NAME]` — razão social
-- `[NAME]` / `[TITLE]` — quem assina como responsável pela segurança
-- `[DATE]` — data de adoção da política (a mesma que estiver assinada)
+- `Ouro e Prata Elétrica` — razão social
+- `Silvano Nunes Vargas` / `Owner` — quem assina como responsável pela segurança
+- `2 August 2026` — data de adoção da política (a mesma que estiver assinada)
 - `[PHONE]` — telefone do contato de segurança
 
 O e-mail já está preenchido: `security@sistemavargas.com.br`. Crie a caixa antes
@@ -23,8 +23,8 @@ de enviar — se o revisor escrever e voltar, o efeito é pior do que não ter p
 ## 1. Do you have a documented information security policy?
 
 ```
-Yes. [LEGAL ENTITY NAME] maintains a documented Information Security Policy
-(version 1.0), adopted and signed by [NAME], [TITLE], on [DATE]. The policy is
+Yes. Ouro e Prata Elétrica maintains a documented Information Security Policy
+(version 1.0), adopted and signed by Silvano Nunes Vargas, Owner, on 2 August 2026. The policy is
 attached to this submission. It is reviewed annually and after any Severity 1
 incident.
 
@@ -142,7 +142,7 @@ Yes, with committed timelines:
 - Written post-incident review within 10 business days
 
 Security contact for TikTok Shop:
-[NAME] — security@sistemavargas.com.br — [PHONE]
+Silvano Nunes Vargas — security@sistemavargas.com.br — [PHONE]
 Monitored during business hours (UTC-3), with out-of-hours escalation to the
 same number.
 ```

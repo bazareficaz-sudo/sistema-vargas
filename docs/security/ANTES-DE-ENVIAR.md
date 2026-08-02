@@ -81,13 +81,25 @@ provedor e:
 
 ## 5. Preencher e assinar a política
 
-Todo campo entre colchetes em `INFORMATION-SECURITY-POLICY.md`:
+Preenchido em 02/08/2026 nos três documentos e na página pública:
 
-- [ ] Razão social e CNPJ
-- [ ] Nome e cargo de quem assume como responsável pela segurança
-- [ ] E-mail e telefone de contato de segurança (crie `security@` no domínio —
-      o revisor espera um canal dedicado, não um e-mail pessoal)
-- [ ] Data de adoção e assinatura
+- [x] Razão social **Ouro e Prata Elétrica**, CNPJ **43.103.402/0001-24**
+- [x] Responsável pela segurança: **Silvano Nunes Vargas**, Owner
+- [x] Data de adoção: **2 de agosto de 2026**
+- [x] Prazos da seção C: 31/10/2026 para guarda de permissão e CSP
+- [ ] **Telefone** de contato de segurança — único campo ainda em aberto
+- [ ] Criar `security@sistemavargas.com.br` e `privacidade@sistemavargas.com.br`
+- [ ] Assinar e datar
+
+**Confira duas coisas antes de assinar:**
+
+1. **A razão social está completa?** No cartão CNPJ ela costuma vir com sufixo
+   (LTDA, ME, EIRELI). Se o seu tiver, acrescente — documento jurídico com razão
+   social pela metade dá margem a questionamento.
+2. **É este o CNPJ da conta de desenvolvedor da TikTok Shop?** Se a conta lá
+   estiver em outro CNPJ, o avaliador vê divergência entre quem assina a política
+   e quem pede a integração. É exatamente o tipo de inconsistência que derrubou
+   a primeira tentativa.
 
 Depois exporte para PDF. Política sem data e sem assinatura é lida como modelo
 baixado da internet — foi exatamente por falta de evidência que a primeira

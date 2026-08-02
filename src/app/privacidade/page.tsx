@@ -366,7 +366,7 @@ export default function PrivacidadePage() {
               você, a empresa e a Autoridade Nacional de Proteção de Dados.
             </p>
             <div className="space-y-2 text-sm">
-              <p className="text-gray-900"><strong>Encarregado:</strong> [NOME DO ENCARREGADO]</p>
+              <p className="text-gray-900"><strong>Encarregado:</strong> Silvano Nunes Vargas</p>
               <p className="text-gray-900">
                 <strong>E-mail:</strong>{' '}
                 <a href="mailto:privacidade@sistemavargas.com.br" className="text-blue-600 hover:underline">
@@ -379,7 +379,7 @@ export default function PrivacidadePage() {
                   security@sistemavargas.com.br
                 </a>
               </p>
-              <p className="text-gray-900"><strong>Razão social:</strong> [RAZÃO SOCIAL] — CNPJ [XX.XXX.XXX/0001-XX]</p>
+              <p className="text-gray-900"><strong>Razão social:</strong> Ouro e Prata Elétrica — CNPJ 43.103.402/0001-24</p>
             </div>
             <p className="text-xs text-gray-500 mt-5 leading-relaxed">
               Você também pode apresentar reclamação diretamente à Autoridade Nacional de Proteção

@@ -1,10 +1,10 @@
 # Information Security Policy
 
-**Organization:** [LEGAL ENTITY NAME] — CNPJ [XX.XXX.XXX/0001-XX]
+**Organization:** Ouro e Prata Elétrica — CNPJ 43.103.402/0001-24
 **Product:** Sistema Vargas — multi-tenant ERP and point-of-sale platform (www.sistemavargas.com.br)
-**Document owner:** [NAME], [TITLE] — acting Information Security Officer
+**Document owner:** Silvano Nunes Vargas, Owner — acting Information Security Officer
 **Version:** 1.0
-**Effective date:** [DATE OF ADOPTION]
+**Effective date:** 2 August 2026
 **Next review:** 12 months from the effective date, or after any Severity 1 incident
 
 > **Before this document is submitted to any partner, the person named above must
@@ -15,7 +15,7 @@
 
 ## 1. Purpose and scope
 
-This policy defines how [LEGAL ENTITY NAME] protects the information entrusted to
+This policy defines how Ouro e Prata Elétrica protects the information entrusted to
 it — its own business data, the data of the merchants who use Sistema Vargas, and
 the data received from commerce platforms that the product integrates with
 (TikTok Shop, Shopee, Mercado Livre, and the Brazilian tax authority through
@@ -188,7 +188,7 @@ An **incident** is any suspected or confirmed unauthorized access to, disclosure
 of, alteration of, or loss of data, or any compromise of a credential.
 
 **Anyone who suspects an incident reports it immediately to
-[SECURITY CONTACT NAME] at [security@DOMAIN] / [PHONE]. There is no penalty for a
+Silvano Nunes Vargas at [security@DOMAIN] / [PHONE]. There is no penalty for a
 report that turns out to be a false alarm; there is one for staying silent.**
 
 | Phase | Action | Target |
