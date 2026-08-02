@@ -4,8 +4,15 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import EditarOrcamentoModal from './EditarOrcamentoModal'
+import CondicoesOrcamentoModal from './CondicoesOrcamentoModal'
+import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integracoes/EnviarWhatsAppModal'
+import { calcSaude, CONFIG_PADRAO, FAIXAS_PADRAO, type SaudeConfig, type FaixaSaude } from '@/lib/saude-venda'
+import { linhasCondicoes, montarMensagemOrcamento, temCondicoes, totalAvista, type CondicoesOrcamento } from '@/lib/orcamentos/condicoes'
 
-type OrcItem = { id: string; produto_nome: string; quantidade: number; preco_unitario: number; desconto: number; total: number }
+type OrcItem = {
+  id: string; produto_id: string | null; produto_nome: string
+  quantidade: number; preco_unitario: number; desconto: number; total: number
+}
 type Orcamento = {
   id: string; numero: number; status: string
   cliente_nome: string | null; operador_nome: string | null
@@ -14,6 +21,22 @@ type Orcamento = {
   created_at: string
   clientes: { nome: string; telefone: string | null } | null
   orcamento_itens: OrcItem[]
+  desconto_avista_pct?: number | null
+  avista_formas?: string[] | null
+  parcelas_max?: number | null
+  parcelas_sem_juros?: boolean | null
+  condicoes_observacao?: string | null
+  enviado_em?: string | null
+}
+
+function condicoesDe(o: Orcamento): CondicoesOrcamento {
+  return {
+    descontoAvistaPct: Number(o.desconto_avista_pct ?? 0),
+    avistaFormas: o.avista_formas ?? [],
+    parcelasMax: o.parcelas_max ?? null,
+    parcelasSemJuros: o.parcelas_sem_juros ?? true,
+    observacao: o.condicoes_observacao ?? null,
+  }
 }
 
 const STATUS_LABEL: Record<string, { label: string; cor: string }> = {
@@ -27,7 +50,16 @@ function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', 
 function fmtDate(s: string) { return new Date(s).toLocaleDateString('pt-BR') }
 function fmtDateTime(s: string) { return new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }
 
-export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { empresaId: string; orcamentos: Orcamento[] }) {
+export default function OrcamentosClient({
+  empresaId, empresaNome, orcamentos: inicial, custoPorProduto, saudeConfig, saudeFaixas,
+}: {
+  empresaId: string
+  empresaNome?: string | null
+  orcamentos: Orcamento[]
+  custoPorProduto?: Record<string, number>
+  saudeConfig?: SaudeConfig | null
+  saudeFaixas?: FaixaSaude[] | null
+}) {
   const sb = createClient()
   const router = useRouter()
   const [lista, setLista] = useState<Orcamento[]>(inicial)
@@ -36,6 +68,71 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
   const [filtroStatus, setFiltroStatus] = useState('todos')
   const [atualizando, setAtualizando] = useState(false)
   const [editando, setEditando] = useState<Orcamento | null>(null)
+  const [condicionando, setCondicionando] = useState<Orcamento | null>(null)
+  const [wppAberto, setWppAberto] = useState(false)
+  const [wppPayload, setWppPayload] = useState<EnviarWppPayload | null>(null)
+
+  const cfgSaude = saudeConfig ?? CONFIG_PADRAO
+  const faixasSaude = (saudeFaixas && saudeFaixas.length > 0) ? saudeFaixas : FAIXAS_PADRAO
+
+  // Saúde do orçamento: sobra quanto depois de custo, taxa, imposto e
+  // comissão. Mesma régua da tela de Vendas — orçamento é uma venda que
+  // ainda não aconteceu, e medir diferente daria dois números para a mesma
+  // pergunta.
+  //
+  // A forma de pagamento assumida é a MAIS CARA que o orçamento oferece: se
+  // tem parcelamento, calcula no crédito parcelado. Um orçamento que só
+  // fecha se o cliente pagar no Pix não é um orçamento saudável.
+  function saudeDo(o: Orcamento) {
+    const cond = condicoesDe(o)
+    const itens = (o.orcamento_itens ?? []).map(i => ({
+      custo: i.produto_id ? (custoPorProduto?.[i.produto_id] ?? 0) : 0,
+      preco_unitario: i.preco_unitario,
+      quantidade: i.quantidade,
+      tipo: 'venda' as const,
+    }))
+    const semCusto = (o.orcamento_itens ?? []).some(
+      i => !i.produto_id || !(Number(custoPorProduto?.[i.produto_id] ?? 0) > 0))
+    const parcelas = (cond.parcelasMax ?? 1) > 1 ? cond.parcelasMax! : 1
+    const forma = parcelas > 1 ? 'credito' : 'pix'
+    return {
+      resultado: calcSaude(itens, o.desconto ?? 0, forma, parcelas, cfgSaude, faixasSaude),
+      semCusto,
+      forma, parcelas,
+    }
+  }
+
+  function abrirWhatsapp(o: Orcamento) {
+    const mensagem = montarMensagemOrcamento({
+      numero: o.numero,
+      empresaNome,
+      clienteNome: o.cliente_nome ?? o.clientes?.nome ?? null,
+      itens: o.orcamento_itens ?? [],
+      total: o.total,
+      validade: o.validade,
+      condicoes: condicoesDe(o),
+    })
+    setWppPayload({
+      telefone: o.clientes?.telefone ?? '',
+      mensagem,
+      tipo: 'orcamento',
+      cliente_nome: o.cliente_nome ?? o.clientes?.nome ?? null,
+      referencia_tipo: 'orcamento',
+      referencia_id: o.id,
+    })
+    setWppAberto(true)
+  }
+
+  // Marca o envio — separa "montei um orçamento" de "mandei para o cliente",
+  // que é a diferença entre papel na gaveta e proposta viva.
+  async function marcarEnviado(id: string) {
+    const agora = new Date().toISOString()
+    await sb.from('orcamentos').update({ enviado_em: agora }).eq('id', id)
+    setLista(p => p.map(o => o.id === id ? { ...o, enviado_em: agora } : o))
+    setSelecionado(p => p && p.id === id ? { ...p, enviado_em: agora } : p)
+  }
+
+  function imprimir() { window.print() }
 
   const filtrado = lista.filter(o => {
     const matchStatus = filtroStatus === 'todos' || o.status === filtroStatus
@@ -129,7 +226,7 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
       {/* ── DETALHE ─────────────────────────────────────────────── */}
       {selecionado && (
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-2xl mx-auto p-6 space-y-5">
+          <div className="max-w-2xl mx-auto p-6 space-y-5 print-orcamento">
             {/* Header detalhe */}
             <div className="flex items-start justify-between">
               <div>
@@ -202,6 +299,80 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
               </div>
             </div>
 
+            {/* Condições de pagamento — o que o cliente vê */}
+            <div className="bg-green-50 border border-green-200 rounded-xl px-5 py-4 print:break-inside-avoid">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-semibold text-green-900">Condições de pagamento</p>
+                <button onClick={() => setCondicionando(selecionado)}
+                  className="text-xs text-green-700 hover:text-green-900 underline print:hidden">
+                  {temCondicoes(condicoesDe(selecionado)) ? 'alterar' : 'definir'}
+                </button>
+              </div>
+              {temCondicoes(condicoesDe(selecionado)) ? (
+                <ul className="mt-2 space-y-1">
+                  {linhasCondicoes(selecionado.total, condicoesDe(selecionado)).map((l, i) => (
+                    <li key={i} className="text-sm text-green-900">✅ {l}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-green-700 mt-1">
+                  Nenhuma ainda. Desconto à vista e parcelamento são o que fazem o cliente fechar —
+                  vale definir antes de enviar.
+                </p>
+              )}
+            </div>
+
+            {/* Saúde do orçamento — só para dentro de casa */}
+            {(() => {
+              const s = saudeDo(selecionado)
+              const r = s.resultado
+              // Sem faixa configurada que case com a margem, mostra em
+              // cinza em vez de inventar uma cor que sugira aprovação.
+              const cor = r.faixa?.cor ?? '#9ca3af'
+              return (
+                <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 print:hidden">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-gray-900">Saúde do orçamento</p>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{ background: `${cor}22`, color: cor }}>
+                        {r.faixa ? `${r.faixa.emoji} ${r.faixa.nome}` : 'sem faixa definida'}
+                      </span>
+                    </div>
+                    <p className="text-sm">
+                      <span className="text-gray-500">Sobra </span>
+                      <span className="font-semibold" style={{ color: cor }}>
+                        {fmt(r.lucroLiquido)} ({r.margem.toFixed(1)}%)
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs">
+                    <Bloco rotulo="Custo dos produtos" valor={fmt(r.custoTotal)} />
+                    <Bloco rotulo={`Taxa (${s.parcelas > 1 ? `crédito ${s.parcelas}x` : 'Pix/dinheiro'})`} valor={fmt(r.custoTaxaPag)} />
+                    <Bloco rotulo="Imposto + operacional" valor={fmt(r.custoImposto + r.custoOperacional)} />
+                    <Bloco rotulo="Comissão" valor={fmt(r.custoComissao)} />
+                  </div>
+
+                  {condicoesDe(selecionado).descontoAvistaPct > 0 && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      Se o cliente pagar à vista, entra {fmt(totalAvista(selecionado.total, condicoesDe(selecionado)))} —
+                      {' '}{fmt(selecionado.total - totalAvista(selecionado.total, condicoesDe(selecionado)))} a menos,
+                      compensado por não ter taxa de cartão.
+                    </p>
+                  )}
+                  {s.semCusto && (
+                    <p className="text-xs text-amber-700 mt-2">
+                      ⚠ Algum item está sem custo cadastrado — o lucro mostrado está otimista.
+                    </p>
+                  )}
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Usa o custo de hoje dos produtos, não o do dia em que o orçamento foi montado.
+                  </p>
+                </div>
+              )
+            })()}
+
             {selecionado.observacao && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                 <p className="text-xs text-amber-700 font-medium mb-1">Observação</p>
@@ -210,7 +381,19 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
             )}
 
             {/* Ações */}
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-2 flex-wrap print:hidden">
+              <button onClick={() => abrirWhatsapp(selecionado)}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg">
+                💬 Enviar por WhatsApp
+              </button>
+              <button onClick={() => setCondicionando(selecionado)}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium rounded-lg">
+                💰 Condições de pagamento
+              </button>
+              <button onClick={imprimir}
+                className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-lg">
+                🖨 Imprimir
+              </button>
               {selecionado.status !== 'convertido' && (
                 <button onClick={() => setEditando(selecionado)}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
@@ -258,6 +441,58 @@ export default function OrcamentosClient({ empresaId, orcamentos: inicial }: { e
           onSalvo={() => { setEditando(null); router.refresh() }}
         />
       )}
+
+      {condicionando && (
+        <CondicoesOrcamentoModal
+          orcamentoId={condicionando.id}
+          total={condicionando.total}
+          inicial={condicoesDe(condicionando)}
+          onFechar={() => setCondicionando(null)}
+          onSalvo={c => {
+            const patch = {
+              desconto_avista_pct: c.descontoAvistaPct,
+              avista_formas: c.avistaFormas,
+              parcelas_max: c.parcelasMax,
+              parcelas_sem_juros: c.parcelasSemJuros,
+              condicoes_observacao: c.observacao,
+            }
+            setLista(p => p.map(o => o.id === condicionando.id ? { ...o, ...patch } : o))
+            setSelecionado(p => p && p.id === condicionando.id ? { ...p, ...patch } : p)
+          }}
+        />
+      )}
+
+      {wppAberto && wppPayload && (
+        <EnviarWhatsAppModal
+          aberto={wppAberto}
+          titulo="Enviar orçamento por WhatsApp"
+          payload={wppPayload}
+          onChange={setWppPayload}
+          onClose={() => setWppAberto(false)}
+          onEnviado={() => { if (selecionado) marcarEnviado(selecionado.id) }}
+        />
+      )}
+
+      {/* Na impressão sai só a ficha do orçamento — lista lateral, filtros e
+          painel de saúde ficam de fora. Saúde é número de dentro de casa e
+          jamais pode sair numa folha entregue ao cliente. */}
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden; }
+          .print-orcamento, .print-orcamento * { visibility: visible; }
+          .print-orcamento { position: absolute; left: 0; top: 0; width: 100%; }
+          .print\\:hidden { display: none !important; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+function Bloco({ rotulo, valor }: { rotulo: string; valor: string }) {
+  return (
+    <div className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+      <p className="text-[11px] text-gray-500">{rotulo}</p>
+      <p className="text-sm font-medium text-gray-800 mt-0.5">{valor}</p>
     </div>
   )
 }
