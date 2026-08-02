@@ -54,6 +54,52 @@ export function linhasCondicoes(total: number, c: CondicoesOrcamento): string[] 
   return linhas
 }
 
+// ── Promoção virando desconto à vista ───────────────────────
+//
+// Estratégia ligada em Saúde da venda: o item em promoção sai no orçamento
+// pelo preço cheio, e a promoção reaparece como desconto à vista.
+//
+// Com vários itens, o percentual é a média PONDERADA — quanto a soma
+// promocional representa de desconto sobre a soma cheia. Média simples dos
+// percentuais mentiria: 10% num item de R$ 1.000 e 50% num de R$ 10 não é
+// um desconto de 30%.
+
+export type ItemComPromo = {
+  quantidade: number
+  precoCheio: number     // produtos.preco_venda
+  precoPraticado: number // o que está no orçamento (promocional, se houver)
+}
+
+export type VitrinePromo = {
+  totalCheio: number
+  totalPraticado: number
+  descontoPct: number
+  temPromo: boolean
+}
+
+export function calcularVitrinePromo(itens: ItemComPromo[]): VitrinePromo {
+  let totalCheio = 0
+  let totalPraticado = 0
+  for (const i of itens) {
+    const q = Number(i.quantidade ?? 0)
+    // Preço cheio menor que o praticado não é promoção — é preço de tabela
+    // desatualizado ou negociação para cima. Nesse caso o cheio vira o
+    // praticado, senão apareceria um "desconto negativo" na tela.
+    const cheio = Math.max(Number(i.precoCheio ?? 0), Number(i.precoPraticado ?? 0))
+    totalCheio += cheio * q
+    totalPraticado += Number(i.precoPraticado ?? 0) * q
+  }
+  const bruto = totalCheio > 0 ? (1 - totalPraticado / totalCheio) * 100 : 0
+  return {
+    totalCheio: Math.round(totalCheio * 100) / 100,
+    totalPraticado: Math.round(totalPraticado * 100) / 100,
+    // Duas casas: com centavos, arredondar para inteiro faria o valor à
+    // vista não bater com o total praticado.
+    descontoPct: Math.round(bruto * 100) / 100,
+    temPromo: bruto > 0.005,
+  }
+}
+
 export type DadosMensagem = {
   numero: number | string
   empresaNome?: string | null

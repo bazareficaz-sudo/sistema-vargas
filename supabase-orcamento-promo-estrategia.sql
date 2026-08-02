@@ -1,0 +1,51 @@
+-- ============================================================
+-- Estratégia comercial: promoção vira desconto à vista no orçamento
+--
+-- A ideia, na palavra do dono: o produto que está em promoção aparece no
+-- orçamento pelo preço CHEIO, e o que seria a promoção vira o desconto à
+-- vista nas condições de pagamento.
+--
+-- Um produto de R$ 100 em promoção por R$ 90 sai assim no orçamento:
+--
+--   Produto ............ R$ 100,00
+--   Total .............. R$ 100,00
+--   À vista em Pix ou dinheiro: R$ 90,00 (10% de desconto)
+--
+-- Por que isso muda o jogo: promoção embutida no preço o cliente nem
+-- percebe — ele só vê "R$ 90" e acha que é o preço. Como desconto à vista,
+-- vira uma vantagem que ELE ganhou ao escolher pagar hoje, no Pix. É a
+-- mesma margem, contada de um jeito que fecha venda.
+--
+-- Com vários itens, uns em promoção e outros não, o percentual é a média
+-- ponderada real: quanto a soma promocional representa de desconto sobre a
+-- soma cheia. Não é a média dos percentuais — item caro pesa mais.
+--
+-- Fica em `saude_config` porque é decisão de estratégia da empresa, do
+-- mesmo tipo das taxas e das metas de margem que já moram lá.
+--
+-- Execute no Supabase Dashboard → SQL Editor
+-- ============================================================
+
+ALTER TABLE saude_config
+  ADD COLUMN IF NOT EXISTS orcamento_promo_vira_desconto BOOLEAN NOT NULL DEFAULT false,
+  -- Formas de pagamento que dão direito ao desconto. Padrão Pix e dinheiro:
+  -- são as que não têm taxa de cartão, então o desconto sai mais barato.
+  ADD COLUMN IF NOT EXISTS orcamento_promo_formas TEXT[] NOT NULL DEFAULT '{pix,dinheiro}';
+
+-- ============================================================
+-- ATENÇÃO ao efeito comercial, que é real e proposital:
+--
+-- Com a estratégia LIGADA, o cliente que parcelar paga o preço cheio
+-- (R$ 100), e não o promocional. A promoção deixa de ser incondicional e
+-- passa a ser o prêmio de quem paga à vista. É exatamente esse o objetivo,
+-- mas é uma mudança de política de preço — vale avisar a equipe de balcão
+-- antes de ligar, para ninguém prometer os R$ 90 no cartão.
+--
+-- COMO DESFAZER:
+--   ALTER TABLE saude_config
+--     DROP COLUMN IF EXISTS orcamento_promo_vira_desconto,
+--     DROP COLUMN IF EXISTS orcamento_promo_formas;
+--
+-- Desligar o campo (deixar false) já devolve o comportamento atual, sem
+-- precisar remover coluna nenhuma.
+-- ============================================================

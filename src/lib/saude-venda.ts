@@ -18,6 +18,11 @@ export interface SaudeConfig {
   exibir_custo_vendedor: boolean
   exibir_lucro_vendedor: boolean
   exibir_margem_vendedor: boolean
+  // Estratégia comercial: no orçamento, produto em promoção sai pelo preço
+  // cheio e a promoção reaparece como desconto à vista. Ver
+  // supabase-orcamento-promo-estrategia.sql.
+  orcamento_promo_vira_desconto: boolean
+  orcamento_promo_formas: string[]
 }
 
 export interface FaixaSaude {
@@ -94,6 +99,10 @@ export const CONFIG_PADRAO: SaudeConfig = {
   exibir_custo_vendedor: false,
   exibir_lucro_vendedor: false,
   exibir_margem_vendedor: false,
+  // Desligada por padrão: mudar a política de preço de quem já usa o
+  // sistema sem que ninguém tenha pedido seria uma surpresa no balcão.
+  orcamento_promo_vira_desconto: false,
+  orcamento_promo_formas: ['pix', 'dinheiro'],
 }
 
 export const FAIXAS_PADRAO: FaixaSaude[] = [

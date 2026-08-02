@@ -21,10 +21,13 @@ function num(t: string): number {
   return Number.isFinite(n) ? n : 0
 }
 
-export default function CondicoesOrcamentoModal({ orcamentoId, total, inicial, onFechar, onSalvo }: {
+export default function CondicoesOrcamentoModal({ orcamentoId, total, inicial, dicaPromo, onFechar, onSalvo }: {
   orcamentoId: string
   total: number
   inicial: CondicoesOrcamento
+  // De onde veio o percentual já preenchido, quando veio da estratégia de
+  // promoção. Sem isso o operador vê um número no campo sem saber por quê.
+  dicaPromo?: string
   onFechar: () => void
   onSalvo: (c: CondicoesOrcamento) => void
 }) {
@@ -100,6 +103,11 @@ export default function CondicoesOrcamentoModal({ orcamentoId, total, inicial, o
                 )
               })}
             </div>
+            {dicaPromo && (
+              <p className="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1.5 mt-2">
+                {dicaPromo}
+              </p>
+            )}
             <p className="text-[11px] text-gray-400 mt-1">
               Pix e dinheiro não têm taxa de cartão — é neles que o desconto sai do seu bolso por menos.
             </p>

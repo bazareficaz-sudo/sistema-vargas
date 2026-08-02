@@ -185,6 +185,71 @@ export default function SaudeVendaConfig({ empresaId, configInicial, faixasInici
             </div>
           </div>
 
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6">
+            <h3 className="font-semibold text-slate-700 mb-1">Estratégia no orçamento</h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Como a promoção do produto é apresentada ao cliente numa proposta.
+            </p>
+
+            <div className="flex items-start gap-3">
+              <button type="button"
+                onClick={() => setCfgField('orcamento_promo_vira_desconto', !cfg.orcamento_promo_vira_desconto)}
+                className={`w-10 h-6 rounded-full transition-colors relative flex-shrink-0 mt-0.5 ${cfg.orcamento_promo_vira_desconto ? 'bg-blue-500' : 'bg-slate-300'}`}>
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${cfg.orcamento_promo_vira_desconto ? 'left-5' : 'left-1'}`} />
+              </button>
+              <div>
+                <p className="text-sm text-slate-700 font-medium">
+                  Promoção vira desconto à vista
+                </p>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  O produto em promoção aparece no orçamento pelo <strong>preço cheio</strong>, e a
+                  promoção reaparece como desconto nas condições de pagamento. Um produto de
+                  R$ 100 em promoção por R$ 90 sai como <strong>R$ 100</strong> com
+                  <strong> 10% de desconto à vista</strong>.
+                </p>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  Com vários itens, o percentual é a média ponderada real — quanto a soma
+                  promocional representa de desconto sobre a soma cheia.
+                </p>
+              </div>
+            </div>
+
+            {cfg.orcamento_promo_vira_desconto && (
+              <>
+                <div className="mt-4 pl-13">
+                  <p className="text-xs font-medium text-slate-500 mb-1.5">
+                    Formas que dão direito ao desconto
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['pix', 'dinheiro', 'debito', 'transferencia'].map(f => {
+                      const atuais = cfg.orcamento_promo_formas ?? []
+                      const on = atuais.includes(f)
+                      return (
+                        <button key={f} type="button"
+                          onClick={() => setCfgField('orcamento_promo_formas',
+                            on ? atuais.filter(x => x !== f) : [...atuais, f])}
+                          className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
+                            on ? 'border-green-400 bg-green-50 text-green-800' : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                          }`}>
+                          {FORMAS_LABEL[f] ?? f}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    <strong>Mudança de política de preço:</strong> com isso ligado, o cliente que
+                    parcelar paga o preço cheio, e não o promocional. A promoção deixa de ser
+                    incondicional e vira o prêmio de quem paga à vista. Avise a equipe de balcão
+                    antes de ligar, para ninguém prometer o preço promocional no cartão.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
           <button onClick={salvarTaxas} disabled={salvando}
             className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition-colors">
             {salvando ? 'Salvando…' : 'Salvar taxas'}

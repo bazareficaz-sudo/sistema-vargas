@@ -7,7 +7,7 @@ import EditarOrcamentoModal from './EditarOrcamentoModal'
 import CondicoesOrcamentoModal from './CondicoesOrcamentoModal'
 import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integracoes/EnviarWhatsAppModal'
 import { calcSaude, CONFIG_PADRAO, FAIXAS_PADRAO, type SaudeConfig, type FaixaSaude } from '@/lib/saude-venda'
-import { linhasCondicoes, montarMensagemOrcamento, temCondicoes, totalAvista, type CondicoesOrcamento } from '@/lib/orcamentos/condicoes'
+import { calcularVitrinePromo, linhasCondicoes, montarMensagemOrcamento, temCondicoes, totalAvista, type CondicoesOrcamento } from '@/lib/orcamentos/condicoes'
 
 type OrcItem = {
   id: string; produto_id: string | null; produto_nome: string
@@ -51,12 +51,14 @@ function fmtDate(s: string) { return new Date(s).toLocaleDateString('pt-BR') }
 function fmtDateTime(s: string) { return new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }
 
 export default function OrcamentosClient({
-  empresaId, empresaNome, orcamentos: inicial, custoPorProduto, saudeConfig, saudeFaixas,
+  empresaId, empresaNome, orcamentos: inicial, custoPorProduto, precoCheioPorProduto,
+  saudeConfig, saudeFaixas,
 }: {
   empresaId: string
   empresaNome?: string | null
   orcamentos: Orcamento[]
   custoPorProduto?: Record<string, number>
+  precoCheioPorProduto?: Record<string, number>
   saudeConfig?: SaudeConfig | null
   saudeFaixas?: FaixaSaude[] | null
 }) {
@@ -102,15 +104,57 @@ export default function OrcamentosClient({
     }
   }
 
+  // ── Estratégia: promoção vira desconto à vista ──────────────
+  const estrategiaLigada = !!cfgSaude.orcamento_promo_vira_desconto
+  const formasDaEstrategia = cfgSaude.orcamento_promo_formas ?? ['pix', 'dinheiro']
+
+  function vitrineDe(o: Orcamento) {
+    return calcularVitrinePromo((o.orcamento_itens ?? []).map(i => ({
+      quantidade: i.quantidade,
+      precoCheio: i.produto_id ? (precoCheioPorProduto?.[i.produto_id] ?? i.preco_unitario) : i.preco_unitario,
+      precoPraticado: i.preco_unitario,
+    })))
+  }
+  // A estratégia só entra em cena quando há promoção de verdade — sem
+  // diferença entre cheio e praticado, mostrar "desconto de 0%" seria ruído.
+  const aplicaEstrategia = (o: Orcamento) => estrategiaLigada && vitrineDe(o).temPromo
+
+  // Condições que valem de fato. Se a estratégia está ligada e ninguém abriu
+  // o modal ainda, o desconto da promoção já vale — senão o orçamento sairia
+  // com preço cheio e sem o desconto correspondente, que é pior que não ter
+  // a estratégia.
+  function condicoesEfetivas(o: Orcamento): CondicoesOrcamento {
+    const salvas = condicoesDe(o)
+    if (!aplicaEstrategia(o) || salvas.descontoAvistaPct > 0) return salvas
+    return {
+      ...salvas,
+      descontoAvistaPct: vitrineDe(o).descontoPct,
+      avistaFormas: salvas.avistaFormas.length > 0 ? salvas.avistaFormas : formasDaEstrategia,
+    }
+  }
+
+  // Preço e total que o cliente enxerga.
+  const precoExibido = (o: Orcamento, i: OrcItem) =>
+    aplicaEstrategia(o) && i.produto_id
+      ? Math.max(precoCheioPorProduto?.[i.produto_id] ?? i.preco_unitario, i.preco_unitario)
+      : i.preco_unitario
+  const totalItemExibido = (o: Orcamento, i: OrcItem) => precoExibido(o, i) * i.quantidade
+  const totalExibido = (o: Orcamento) => aplicaEstrategia(o) ? vitrineDe(o).totalCheio : o.total
+
   function abrirWhatsapp(o: Orcamento) {
     const mensagem = montarMensagemOrcamento({
       numero: o.numero,
       empresaNome,
       clienteNome: o.cliente_nome ?? o.clientes?.nome ?? null,
-      itens: o.orcamento_itens ?? [],
-      total: o.total,
+      itens: (o.orcamento_itens ?? []).map(i => ({
+        produto_nome: i.produto_nome,
+        quantidade: i.quantidade,
+        preco_unitario: precoExibido(o, i),
+        total: totalItemExibido(o, i),
+      })),
+      total: totalExibido(o),
       validade: o.validade,
-      condicoes: condicoesDe(o),
+      condicoes: condicoesEfetivas(o),
     })
     setWppPayload({
       telefone: o.clientes?.telefone ?? '',
@@ -271,15 +315,25 @@ export default function OrcamentosClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {selecionado.orcamento_itens.map((item, i) => (
-                    <tr key={item.id} className="border-b border-gray-50 last:border-0">
-                      <td className="px-4 py-2 font-medium text-gray-900">{item.produto_nome}</td>
-                      <td className="px-2 py-2 text-center text-gray-600">{item.quantidade}</td>
-                      <td className="px-2 py-2 text-right text-gray-600">{fmt(item.preco_unitario)}</td>
-                      <td className="px-2 py-2 text-center text-gray-500">{item.desconto > 0 ? `${item.desconto}%` : '—'}</td>
-                      <td className="px-4 py-2 text-right font-semibold text-gray-900">{fmt(item.total)}</td>
-                    </tr>
-                  ))}
+                  {selecionado.orcamento_itens.map(item => {
+                    const emPromo = aplicaEstrategia(selecionado) && precoExibido(selecionado, item) > item.preco_unitario
+                    return (
+                      <tr key={item.id} className="border-b border-gray-50 last:border-0">
+                        <td className="px-4 py-2 font-medium text-gray-900">
+                          {item.produto_nome}
+                          {emPromo && (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-semibold print:hidden">
+                              promoção no desconto à vista
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-center text-gray-600">{item.quantidade}</td>
+                        <td className="px-2 py-2 text-right text-gray-600">{fmt(precoExibido(selecionado, item))}</td>
+                        <td className="px-2 py-2 text-center text-gray-500">{item.desconto > 0 ? `${item.desconto}%` : '—'}</td>
+                        <td className="px-4 py-2 text-right font-semibold text-gray-900">{fmt(totalItemExibido(selecionado, item))}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -287,16 +341,23 @@ export default function OrcamentosClient({
             {/* Totais */}
             <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 space-y-2">
               <div className="flex justify-between text-sm text-gray-600">
-                <span>Subtotal</span><span>{fmt(selecionado.subtotal)}</span>
+                <span>Subtotal</span>
+                <span>{fmt(aplicaEstrategia(selecionado) ? vitrineDe(selecionado).totalCheio : selecionado.subtotal)}</span>
               </div>
-              {selecionado.desconto > 0 && (
+              {selecionado.desconto > 0 && !aplicaEstrategia(selecionado) && (
                 <div className="flex justify-between text-sm text-orange-600">
                   <span>Desconto</span><span>−{fmt(selecionado.desconto)}</span>
                 </div>
               )}
               <div className="flex justify-between font-bold text-lg border-t border-gray-100 pt-2 mt-2">
-                <span>Total</span><span className="text-blue-700">{fmt(selecionado.total)}</span>
+                <span>Total</span><span className="text-blue-700">{fmt(totalExibido(selecionado))}</span>
               </div>
+              {aplicaEstrategia(selecionado) && (
+                <p className="text-xs text-gray-500 pt-1 print:hidden">
+                  Preço cheio de tabela. A promoção ({vitrineDe(selecionado).descontoPct}%) aparece abaixo,
+                  nas condições de pagamento — o cliente paga {fmt(vitrineDe(selecionado).totalPraticado)} à vista.
+                </p>
+              )}
             </div>
 
             {/* Condições de pagamento — o que o cliente vê */}
@@ -305,15 +366,23 @@ export default function OrcamentosClient({
                 <p className="text-sm font-semibold text-green-900">Condições de pagamento</p>
                 <button onClick={() => setCondicionando(selecionado)}
                   className="text-xs text-green-700 hover:text-green-900 underline print:hidden">
-                  {temCondicoes(condicoesDe(selecionado)) ? 'alterar' : 'definir'}
+                  {temCondicoes(condicoesEfetivas(selecionado)) ? 'alterar' : 'definir'}
                 </button>
               </div>
-              {temCondicoes(condicoesDe(selecionado)) ? (
-                <ul className="mt-2 space-y-1">
-                  {linhasCondicoes(selecionado.total, condicoesDe(selecionado)).map((l, i) => (
-                    <li key={i} className="text-sm text-green-900">✅ {l}</li>
-                  ))}
-                </ul>
+              {temCondicoes(condicoesEfetivas(selecionado)) ? (
+                <>
+                  <ul className="mt-2 space-y-1">
+                    {linhasCondicoes(totalExibido(selecionado), condicoesEfetivas(selecionado)).map((l, i) => (
+                      <li key={i} className="text-sm text-green-900">✅ {l}</li>
+                    ))}
+                  </ul>
+                  {aplicaEstrategia(selecionado) && condicoesDe(selecionado).descontoAvistaPct === 0 && (
+                    <p className="text-[11px] text-green-700 mt-2 print:hidden">
+                      Desconto calculado da promoção dos produtos. Abra "alterar" para ajustar ou
+                      acrescentar parcelamento.
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="text-xs text-green-700 mt-1">
                   Nenhuma ainda. Desconto à vista e parcelamento são o que fazem o cliente fechar —
@@ -445,8 +514,13 @@ export default function OrcamentosClient({
       {condicionando && (
         <CondicoesOrcamentoModal
           orcamentoId={condicionando.id}
-          total={condicionando.total}
-          inicial={condicoesDe(condicionando)}
+          total={totalExibido(condicionando)}
+          // Já chega com o desconto da promoção preenchido quando a
+          // estratégia está ligada — é exatamente o que ela promete.
+          inicial={condicoesEfetivas(condicionando)}
+          dicaPromo={aplicaEstrategia(condicionando)
+            ? `${vitrineDe(condicionando).descontoPct}% vem da promoção dos produtos (de ${fmt(vitrineDe(condicionando).totalCheio)} para ${fmt(vitrineDe(condicionando).totalPraticado)}).`
+            : undefined}
           onFechar={() => setCondicionando(null)}
           onSalvo={c => {
             const patch = {

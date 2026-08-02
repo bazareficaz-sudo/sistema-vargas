@@ -27,10 +27,25 @@ export default async function OrcamentosPage() {
   const produtoIds = [...new Set(
     (orcamentos ?? []).flatMap((o: any) => (o.orcamento_itens ?? []).map((i: any) => i.produto_id).filter(Boolean)))]
   const custoPorProduto: Record<string, number> = {}
+  // Preço cheio de tabela — base da estratégia "promoção vira desconto à
+  // vista". Só entra aqui o produto que está REALMENTE em promoção.
+  //
+  // Isso importa: conferido na produção, existe item de orçamento abaixo do
+  // preço de tabela sem promoção nenhuma — é desconto que o vendedor deu na
+  // negociação. Tratar essa diferença como promoção transformaria um
+  // desconto já concedido em "desconto à vista", mudando o combinado com o
+  // cliente pelas costas de quem negociou.
+  const precoCheioPorProduto: Record<string, number> = {}
   if (produtoIds.length > 0) {
     const { data: prods } = await sb.from('produtos')
-      .select('id, preco_custo').in('id', produtoIds as string[])
-    for (const p of prods ?? []) custoPorProduto[p.id] = Number(p.preco_custo ?? 0)
+      .select('id, preco_custo, preco_venda, preco_promocional, promocao_ativa')
+      .in('id', produtoIds as string[])
+    for (const p of prods ?? []) {
+      custoPorProduto[p.id] = Number(p.preco_custo ?? 0)
+      if (p.promocao_ativa && Number(p.preco_promocional ?? 0) > 0) {
+        precoCheioPorProduto[p.id] = Number(p.preco_venda ?? 0)
+      }
+    }
   }
 
   // Mesma configuração de saúde usada na tela de Vendas — o orçamento é uma
@@ -48,6 +63,7 @@ export default async function OrcamentosPage() {
       empresaNome={empresa?.nome ?? null}
       orcamentos={orcamentos ?? []}
       custoPorProduto={custoPorProduto}
+      precoCheioPorProduto={precoCheioPorProduto}
       saudeConfig={cfg ?? null}
       saudeFaixas={faixas ?? null}
     />
