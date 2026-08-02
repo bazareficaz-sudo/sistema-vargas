@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { recalcularKitsQueUsam, reprecificarKitsQueUsam, type KitReprecificado } from '@/lib/produtos/kit'
 
 type Produto = {
   id: string
@@ -157,6 +158,47 @@ export default function PrecosClient({
     setTimeout(() => setMsg(''), 3000)
   }
 
+  // Kits afetados pela última alteração de preço — ficam num painel próprio
+  // até o operador fechar, porque mexer no preço de um kit sem avisar é o
+  // tipo de coisa que só se descobre pela reclamação do cliente.
+  const [kitsAfetados, setKitsAfetados] = useState<KitReprecificado[]>([])
+
+  // Propaga a mudança para os kits que usam estes produtos como componente.
+  //
+  // Duas coisas diferentes acontecem aqui, e por motivos diferentes:
+  //   custo   → o custo do kit é a soma dos custos das peças; é objetivo,
+  //             recalcula direto (mesma função já usada nas entradas e no PDV).
+  //   preço   → o kit costuma ter desconto sobre a soma das peças; preserva
+  //             a proporção em vez de sobrescrever pela soma.
+  async function propagarParaKits(
+    sb: any,
+    mudancas: { id: string; precoAntes: number; custoMudou: boolean }[],
+  ) {
+    const afetados: KitReprecificado[] = []
+    for (const m of mudancas) {
+      if (m.custoMudou) await recalcularKitsQueUsam(sb, m.id)
+      afetados.push(...await reprecificarKitsQueUsam(sb, m.id, m.precoAntes))
+    }
+    if (afetados.length === 0) return []
+
+    // Um mesmo kit pode ter sido tocado por vários componentes na mesma
+    // rodada — vale o primeiro preço de antes e o último de depois.
+    const porKit = new Map<string, KitReprecificado>()
+    for (const a of afetados) {
+      const ja = porKit.get(a.kitId)
+      porKit.set(a.kitId, ja ? { ...a, precoAntes: ja.precoAntes } : a)
+    }
+    const lista = [...porKit.values()].filter(k => k.precoAntes !== k.precoDepois)
+    setKitsAfetados(lista)
+
+    // O kit pode estar na página aberta — reflete o novo preço na hora.
+    setProdutos(prev => prev.map(p => {
+      const k = porKit.get(p.id)
+      return k ? { ...p, preco_venda: k.precoDepois, markup: p.preco_custo > 0 ? calcMarkup(p.preco_custo, k.precoDepois) : p.markup } : p
+    }))
+    return lista
+  }
+
   // Edição inline: { id, campo }
   const [editando, setEditando] = useState<{ id: string; campo: 'custo' | 'markup' | 'venda' } | null>(null)
   const [editValor, setEditValor] = useState('')
@@ -202,7 +244,13 @@ export default function PrecosClient({
       ? { ...p, preco_custo: novoCusto, preco_venda: novoPreco, markup: novoMarkup }
       : p))
     setEditando(null)
-    showMsg('Preço atualizado.')
+
+    const kits = await propagarParaKits(sb, [{
+      id: produto.id, precoAntes: produto.preco_venda, custoMudou: novoCusto !== produto.preco_custo,
+    }])
+    showMsg(kits.length > 0
+      ? `Preço atualizado. ${kits.length} kit(s) reprecificado(s).`
+      : 'Preço atualizado.')
   }
 
   function CelulaEditavel({ produto, campo, valor, prefix = '' }: {
@@ -260,11 +308,15 @@ export default function PrecosClient({
       const u = updates.find(x => x.id === p.id)
       return u ? { ...p, preco_venda: u.preco_venda, markup: u.markup } : p
     }))
+    const kits = await propagarParaKits(sb, updates.map(u => ({
+      id: u.id, precoAntes: produtos.find(p => p.id === u.id)?.preco_venda ?? 0, custoMudou: false,
+    })))
     setSalvando(false)
     setPainelMassa(null)
     setMarkupMassa('')
     setSelecionados(new Set())
-    showMsg(`Markup de ${mk}% aplicado em ${updates.length} produto(s).`)
+    showMsg(`Markup de ${mk}% aplicado em ${updates.length} produto(s).`
+      + (kits.length > 0 ? ` ${kits.length} kit(s) reprecificado(s).` : ''))
   }
 
   // Reajuste percentual/fixo em massa
@@ -292,15 +344,20 @@ export default function PrecosClient({
     for (const u of updates) {
       await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() }).eq('id', u.id)
     }
+    const precosAntes = new Map(produtos.map(p => [p.id, p.preco_venda]))
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
       return u ? { ...p, preco_venda: u.preco_venda, markup: u.markup ?? p.markup } : p
     }))
+    const kits = await propagarParaKits(sb, updates.map(u => ({
+      id: u.id, precoAntes: precosAntes.get(u.id) ?? 0, custoMudou: false,
+    })))
     setSalvando(false)
     setPainelMassa(null)
     setReajusteValor('')
     setSelecionados(new Set())
-    showMsg(`Reajuste aplicado em ${updates.length} produto(s).`)
+    showMsg(`Reajuste aplicado em ${updates.length} produto(s).`
+      + (kits.length > 0 ? ` ${kits.length} kit(s) reprecificado(s).` : ''))
   }
 
   // Aplicar promoção em massa
@@ -381,6 +438,36 @@ export default function PrecosClient({
           <span className="text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">{msg}</span>
         )}
       </div>
+
+      {kitsAfetados.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-amber-900">
+                {kitsAfetados.length} kit(s) tiveram o preço ajustado junto
+              </p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                O desconto que cada kit tinha sobre a soma das peças foi mantido.
+              </p>
+            </div>
+            <button onClick={() => setKitsAfetados([])}
+              className="text-xs text-amber-700 hover:text-amber-900 underline whitespace-nowrap">fechar</button>
+          </div>
+          <ul className="mt-2 space-y-0.5">
+            {kitsAfetados.map(k => (
+              <li key={k.kitId} className="text-xs text-amber-800 flex flex-wrap gap-x-2">
+                <span className="font-medium">{k.nome}</span>
+                <span className="font-mono">
+                  {fmt(k.precoAntes)} → {fmt(k.precoDepois)}
+                  <span className={k.precoDepois > k.precoAntes ? ' text-emerald-700' : ' text-red-700'}>
+                    {' '}({k.precoDepois > k.precoAntes ? '+' : ''}{fmt(k.precoDepois - k.precoAntes)})
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {filtroPorIds && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-center justify-between">
