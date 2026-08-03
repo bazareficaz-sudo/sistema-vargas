@@ -1,5 +1,6 @@
 import { getFiscalProvider } from './factory'
 import { FiscalProviderError, type EmissaoNFCeInput } from './types'
+import { conferirCoerenciaFiscal } from './coerencia'
 
 // Mapeamento das formas de pagamento do PDV pro código da tabela nacional
 // SEFAZ de formas de pagamento (Nota Técnica 2020.006, válida pra qualquer
@@ -127,6 +128,23 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
       cofinsCst: produto.cofins_cst || '49',
     }
   })
+
+  // Confere o par CFOP × situação tributária antes de gastar uma ida à SEFAZ.
+  // Ela valida os dois juntos, não separados: uma venda real foi recusada com
+  // "Rejeição 725: CFOP inválido" tendo CFOP 5403 (com substituição tributária)
+  // e CSOSN 102 (sem). A recusa não diz qual produto nem o que trocar — quem
+  // está no balcão fica só com o número da rejeição. Aqui a mensagem sai com o
+  // nome do produto e o par correto, antes de a nota sair.
+  const coerencia = conferirCoerenciaFiscal(
+    itens.map(i => {
+      const p = produtoPorId.get(i.produtoId) as any
+      return { nome: i.descricao, sku: p?.sku, cfop: i.cfop, situacao: i.icmsSituacaoTributaria }
+    }),
+    simplesNacional,
+  )
+  if (coerencia.erros.length > 0) {
+    return { ok: false, erro: `Dados fiscais incoerentes — emissão bloqueada:\n${coerencia.erros.join('\n')}` }
+  }
 
   const pagamentosBrutos: { forma: string; valor: number }[] =
     Array.isArray(venda.pagamentos) && venda.pagamentos.length > 0
