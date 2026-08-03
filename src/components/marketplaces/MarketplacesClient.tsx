@@ -34,6 +34,19 @@ function ShopeeIcon({ className }: { className?: string }) {
   )
 }
 
+function NuvemshopIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="46" height="46" rx="12" fill="#2C3E92" />
+      {/* Nuvem — a marca é literalmente uma nuvem de loja */}
+      <path
+        d="M17 31.5h14a5.2 5.2 0 0 0 .6-10.3 7.6 7.6 0 0 0-14.4-1.7A5.4 5.4 0 0 0 17 31.5z"
+        fill="#fff"
+      />
+    </svg>
+  )
+}
+
 function AmazonIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
@@ -67,6 +80,17 @@ const PLATAFORMAS = [
     badge: 'bg-orange-400',
     labelSeller: 'Shop ID (ID da sua loja na Shopee)',
     linkLoja: 'https://seller.shopee.com.br',
+  },
+  {
+    id: 'nuvemshop',
+    label: 'Nuvemshop',
+    emoji: '🛍️',
+    Icone: NuvemshopIcon,
+    cor: 'border-sky-400 bg-sky-50',
+    corAtivo: 'border-sky-500 bg-sky-100 ring-2 ring-sky-400',
+    badge: 'bg-sky-400',
+    labelSeller: 'ID da loja na Nuvemshop',
+    linkLoja: 'https://www.nuvemshop.com.br',
   },
   {
     id: 'amazon',
@@ -136,7 +160,10 @@ export default function MarketplacesClient({
     const sucesso = searchParams.get('sucesso')
     const erro = searchParams.get('erro')
     if (sucesso) {
-      const nomes: Record<string, string> = { shopee: 'Shopee', mercadolivre: 'Mercado Livre' }
+      const nomes: Record<string, string> = {
+        shopee: 'Shopee', mercadolivre: 'Mercado Livre',
+        nuvemshop: 'Nuvemshop', 'nuvemshop-reconectado': 'Nuvemshop (reconectada)',
+      }
       setToast({ tipo: 'ok', msg: `✓ ${nomes[sucesso] ?? sucesso} conectado com sucesso!` })
       router.replace('/dashboard/marketplaces')
       setTimeout(() => setToast(null), 5000)
@@ -145,6 +172,7 @@ export default function MarketplacesClient({
         cancelado: 'Conexão cancelada.',
         'token-invalido': 'Não foi possível obter o token de acesso. Tente novamente.',
         'sem-credenciais': 'Configure as credenciais do sistema em Configurações → Integrações primeiro.',
+        'sem-empresa': 'Usuário sem empresa vinculada.',
       }
       setToast({ tipo: 'erro', msg: msgs[erro] ?? 'Erro ao conectar.' })
       router.replace('/dashboard/marketplaces')
@@ -166,7 +194,7 @@ export default function MarketplacesClient({
   })
 
   // Plataformas que suportam OAuth automático
-  const OAUTH_PLATAFORMAS = ['shopee', 'mercadolivre']
+  const OAUTH_PLATAFORMAS = ['shopee', 'mercadolivre', 'nuvemshop']
 
   function f(k: string, v: any) { setForm(p => ({ ...p, [k]: v })) }
 
@@ -475,7 +503,9 @@ export default function MarketplacesClient({
                         </div>
                         <button onClick={conectarOAuth} disabled={conectando}
                           className={`w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-                            form.plataforma === 'shopee' ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-yellow-400 hover:bg-yellow-500 text-gray-900'
+                            form.plataforma === 'shopee' ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                            : form.plataforma === 'nuvemshop' ? 'bg-sky-600 hover:bg-sky-700 text-white'
+                            : 'bg-yellow-400 hover:bg-yellow-500 text-gray-900'
                           } disabled:opacity-60`}>
                           {conectando ? '⏳ Abrindo...' : <><PlatIcon p={plat} className="w-6 h-6 rounded-md flex-shrink-0" /> Entrar com {plat.label}</>}
                         </button>

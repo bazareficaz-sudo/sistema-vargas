@@ -31,6 +31,19 @@ const PLATAFORMAS_CONFIG = [
     linkLabel: 'Abrir ML Developers',
   },
   {
+    id: 'nuvemshop',
+    label: 'Nuvemshop',
+    emoji: '🛍️',
+    cor: 'border-sky-200 bg-sky-50',
+    descricao: 'Credenciais do aplicativo criado no Portal de Parceiros da Nuvemshop. Únicas para o sistema.',
+    campos: [
+      { key: 'app_id', label: 'ID do aplicativo (Client ID)', placeholder: 'Ex: 12345', tipo: 'text', dica: 'Encontre em: partners.nuvemshop.com.br → Seus aplicativos' },
+      { key: 'app_secret', label: 'Client Secret', placeholder: 'Cole a chave secreta aqui', tipo: 'password', dica: 'Gerado junto com o ID do aplicativo. Também é a chave que assina os webhooks.' },
+    ],
+    link: 'https://partners.nuvemshop.com.br',
+    linkLabel: 'Abrir Portal de Parceiros',
+  },
+  {
     id: 'amazon',
     label: 'Amazon',
     emoji: '📦',
