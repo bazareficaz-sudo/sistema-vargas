@@ -44,14 +44,16 @@ type ItemHistorico = {
   quantidade: number; custoAnterior: number; custo: number; subtotal: number
 }
 type EntradaHistorico = {
-  id: string; numero: string | null; numeroNf: string | null; serie: string | null
+  id: string; origem: 'manual' | 'xml'
+  numero: string | null; numeroNf: string | null; serie: string | null
   data: string | null; valorProdutos: number; valorFrete: number; valorDesconto: number
   valorOutros: number; valorTotal: number; status: string; observacoes: string | null
   itens: ItemHistorico[]
 }
 type HistoricoFornecedor = {
   resumo: {
-    totalCompras: number; canceladas: number; valorTotal: number
+    totalCompras: number; canceladas: number; manuais: number; porXml: number
+    valorTotal: number
     primeiraCompra: string | null; ultimaCompra: string | null; produtosDistintos: number
   }
   entradas: EntradaHistorico[]
@@ -535,7 +537,15 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
                 {/* Resumo */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-slate-200 border-b border-slate-200">
                   {[
-                    { label: 'Compras', valor: String(historico.resumo.totalCompras) },
+                    {
+                      label: 'Compras',
+                      valor: String(historico.resumo.totalCompras),
+                      // Mostrar a divisão evita a dúvida de "por que a conta
+                      // não bate com a tela de Entradas": são duas origens.
+                      nota: historico.resumo.manuais > 0 && historico.resumo.porXml > 0
+                        ? `${historico.resumo.manuais} manual · ${historico.resumo.porXml} XML`
+                        : historico.resumo.porXml > 0 ? 'todas por XML' : 'todas manuais',
+                    },
                     { label: 'Total comprado', valor: brl(historico.resumo.valorTotal) },
                     { label: 'Produtos distintos', valor: String(historico.resumo.produtosDistintos) },
                     { label: 'Primeira compra', valor: dataBr(historico.resumo.primeiraCompra) },
@@ -544,6 +554,7 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
                     <div key={c.label} className="bg-white px-3 py-2.5">
                       <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{c.label}</p>
                       <p className="text-sm font-bold text-slate-800 mt-0.5">{c.valor}</p>
+                      {'nota' in c && c.nota && <p className="text-[10px] text-slate-400 mt-0.5">{c.nota}</p>}
                     </div>
                   ))}
                 </div>
@@ -568,12 +579,20 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
                           className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 text-left transition-colors">
                           <span className={`text-slate-400 text-xs transition-transform ${aberta ? 'rotate-90' : ''}`}>▶</span>
                           <div className="min-w-0 flex-1">
-                            <p className={`text-sm font-semibold truncate ${cancelada ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
-                              {e.numeroNf ? `NF ${e.numeroNf}${e.serie ? `-${e.serie}` : ''}` : (e.numero ?? 'Entrada')}
-                            </p>
+                            <div className="flex items-center gap-1.5">
+                              <p className={`text-sm font-semibold truncate ${cancelada ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                                {e.numeroNf ? `NF ${e.numeroNf}${e.serie ? `-${e.serie}` : ''}` : (e.numero ?? 'Entrada')}
+                              </p>
+                              <span
+                                title={e.origem === 'xml' ? 'Importada do XML da nota' : 'Lançada manualmente'}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${e.origem === 'xml' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
+                                {e.origem === 'xml' ? 'XML' : 'manual'}
+                              </span>
+                            </div>
                             <p className="text-[11px] text-slate-400">
                               {dataBr(e.data)} · {e.itens.length} {e.itens.length === 1 ? 'item' : 'itens'}
                               {cancelada && ' · cancelada'}
+                              {e.status === 'aguardando_precos' && ' · preços não fechados'}
                             </p>
                           </div>
                           <span className={`text-sm font-bold shrink-0 ${cancelada ? 'text-slate-400' : 'text-slate-800'}`}>

@@ -45,17 +45,11 @@ export async function GET(req: NextRequest) {
   if (!empresaId) return NextResponse.json({ error: 'Usuário sem empresa vinculada' }, { status: 400 })
 
   // ── Histórico de compra deste fornecedor ──────────────────────────────────
-
-  const { data: itensCompra, error: erroItens } = await supabase
-    .from('entrada_itens')
-    .select('produto_id, quantidade, preco_custo_novo, entradas!inner(data_entrada, fornecedor_id, empresa_id, status)')
-    .eq('entradas.fornecedor_id', fornecedorId)
-    .eq('entradas.empresa_id', empresaId)
-    .eq('entradas.status', 'confirmada')
-
-  if (erroItens) {
-    return NextResponse.json({ error: `Histórico de compras: ${erroItens.message}` }, { status: 500 })
-  }
+  //
+  // São DUAS origens de compra, e ler só uma esconde metade do histórico:
+  // lançamento manual (entradas) e importação de XML (nfe_entradas). Há
+  // fornecedor que só aparece numa delas — a DIME, por exemplo, tem 7 notas
+  // por XML e nenhuma entrada manual.
 
   const aggMap: Record<string, {
     custos: number[]
@@ -64,20 +58,59 @@ export async function GET(req: NextRequest) {
     ultimaQtd: number
   }> = {}
 
-  for (const item of (itensCompra ?? [])) {
-    if (!item.produto_id) continue
-    const entrada = Array.isArray(item.entradas) ? item.entradas[0] : item.entradas as { data_entrada: string }
-    const data = entrada?.data_entrada ?? ''
-    const custo = Number(item.preco_custo_novo ?? 0)
-    const qtd = Number(item.quantidade ?? 0)
-
-    const agg = (aggMap[item.produto_id] ??= { custos: [], ultimoCusto: 0, ultimaCompra: '', ultimaQtd: 0 })
+  function registrar(produtoId: string | null, data: string, custo: number, qtd: number) {
+    if (!produtoId) return
+    const agg = (aggMap[produtoId] ??= { custos: [], ultimoCusto: 0, ultimaCompra: '', ultimaQtd: 0 })
     agg.custos.push(custo)
     if (!agg.ultimaCompra || data > agg.ultimaCompra) {
       agg.ultimaCompra = data
       agg.ultimoCusto = custo
       agg.ultimaQtd = qtd
     }
+  }
+
+  const { data: itensManuais, error: erroManuais } = await supabase
+    .from('entrada_itens')
+    .select('produto_id, quantidade, preco_custo_novo, entradas!inner(data_entrada, fornecedor_id, empresa_id, status)')
+    .eq('entradas.fornecedor_id', fornecedorId)
+    .eq('entradas.empresa_id', empresaId)
+    .eq('entradas.status', 'confirmada')
+
+  if (erroManuais) {
+    return NextResponse.json({ error: `Histórico (entradas manuais): ${erroManuais.message}` }, { status: 500 })
+  }
+
+  for (const item of (itensManuais ?? [])) {
+    const entrada = Array.isArray(item.entradas) ? item.entradas[0] : item.entradas as { data_entrada: string }
+    registrar(
+      item.produto_id,
+      entrada?.data_entrada ?? '',
+      Number(item.preco_custo_novo ?? 0),
+      Number(item.quantidade ?? 0),
+    )
+  }
+
+  // Nota importada: 'cancelada' fica de fora; 'aguardando_precos' entra,
+  // porque a mercadoria chegou — só o preço ainda não foi fechado.
+  const { data: itensNfe, error: erroNfe } = await supabase
+    .from('nfe_itens')
+    .select('produto_id, quantidade_entrada, custo_unitario, nfe_entradas!inner(data_emissao, data_entrada, fornecedor_id, empresa_id, status)')
+    .eq('nfe_entradas.fornecedor_id', fornecedorId)
+    .eq('nfe_entradas.empresa_id', empresaId)
+    .neq('nfe_entradas.status', 'cancelada')
+
+  if (erroNfe) {
+    return NextResponse.json({ error: `Histórico (notas importadas): ${erroNfe.message}` }, { status: 500 })
+  }
+
+  for (const item of (itensNfe ?? [])) {
+    const nota = Array.isArray(item.nfe_entradas) ? item.nfe_entradas[0] : item.nfe_entradas as { data_emissao: string; data_entrada: string }
+    registrar(
+      item.produto_id,
+      nota?.data_emissao || nota?.data_entrada || '',
+      Number(item.custo_unitario ?? 0),
+      Number(item.quantidade_entrada ?? 0),
+    )
   }
 
   const idsDoFornecedor = Object.keys(aggMap)
