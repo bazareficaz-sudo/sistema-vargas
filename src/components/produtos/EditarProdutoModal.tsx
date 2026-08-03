@@ -283,7 +283,18 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     try {
       const res = await fetch('/api/produtos/ia-enriquecer', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ produtoNome: form.nome, produtoEan: form.ean }),
+        // Manda também o que já está preenchido na aba Fiscal. O CEST sai da
+        // tabela oficial a partir do NCM, e CFOP/CSOSN/CST de ST já gravados
+        // dizem que o produto tem substituição tributária — sem isso, a IA só
+        // tem o nome e responde null, que era o que acontecia.
+        body: JSON.stringify({
+          produtoNome: form.nome,
+          produtoEan: form.ean,
+          produtoNcm: form.ncm,
+          produtoCfop: form.cfop,
+          produtoCsosn: form.csosn,
+          produtoIcmsCst: form.icms_cst,
+        }),
       })
       const data = await res.json()
       if (!data.ok) { setErro(data.erro ?? 'Erro ao consultar a IA'); return }

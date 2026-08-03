@@ -59,7 +59,12 @@ function fiscalDoRegime(crt: string, regime: string | null, cfopPadrao: string |
 }
 
 export async function POST(req: Request) {
-  const { produtoNome, produtoEan } = await req.json()
+  // O que o produto JÁ tem entra como contexto, não só o nome. Faz diferença
+  // real no CEST: ele é derivado do NCM na tabela do Convênio ICMS 142/2018,
+  // e os campos de ST já preenchidos (CFOP 5405, CSOSN 500, CST 60/70) são
+  // evidência de que aquele item tem substituição tributária — muito mais
+  // forte do que deduzir isso de um nome como "BUCHA TRIFIX 6".
+  const { produtoNome, produtoEan, produtoNcm, produtoCfop, produtoCsosn, produtoIcmsCst } = await req.json()
   if (!produtoNome?.trim()) return NextResponse.json({ ok: false, erro: 'Nome do produto é obrigatório' }, { status: 400 })
 
   const sb = await createClient()
@@ -105,6 +110,12 @@ Com base SÓ no nome do produto e (se houver) no código de barras EAN/GTIN abai
 Nome do produto: "${produtoNome}"
 EAN/GTIN: ${produtoEan?.trim() || 'não informado'}
 
+Já cadastrado neste produto (use como âncora — NÃO contradiga o que já está aqui):
+- NCM: ${String(produtoNcm ?? '').trim() || 'não informado'}
+- CFOP: ${String(produtoCfop ?? '').trim() || 'não informado'}
+- CSOSN: ${String(produtoCsosn ?? '').trim() || 'não informado'}
+- CST ICMS: ${String(produtoIcmsCst ?? '').trim() || 'não informado'}
+
 Contexto fiscal da empresa que emite a nota (use só pra ajustar os campos fiscais abaixo):
 - Estado (UF): ${uf ?? 'não informado'}
 - Regime: ${regime.simples ? 'Simples Nacional' : 'Regime normal'}
@@ -122,7 +133,7 @@ Responda SOMENTE com um JSON neste formato exato:
   "categoria": "<nome exato de uma categoria da lista acima, ou null>",
   "marca": "<nome exato de uma marca da lista acima, ou null>",
   "ncm": "<código NCM de 8 dígitos mais provável, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver, ou null se não tiver certeza>",
-  "cest": "<código CEST de 7 dígitos, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver, APENAS se esse tipo de produto costuma ter substituição tributária — senão null>",
+  "cest": "<código CEST de 7 dígitos, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver. O CEST é derivado do NCM na tabela do Convênio ICMS 142/2018: se o NCM já estiver informado acima, procure o CEST correspondente a esse NCM e à descrição do produto. Se os campos fiscais acima já indicam substituição tributária (CFOP 5405, CSOSN 500, ou CST 60/70), então este produto TEM ST e o CEST existe — devolva o mais provável em vez de null. Use null apenas quando não houver NCM informado E o produto claramente não for de segmento com ST.>",
   "icms_origem": <origem da mercadoria segundo a tabela oficial da SEFAZ: 0 nacional, 1 estrangeira importação direta, 2 estrangeira adquirida no mercado interno, 3 nacional com mais de 40% de conteúdo importado, 4 nacional produzida conforme processos produtivos básicos, 5 nacional com menos de 40% de conteúdo importado, 6 estrangeira importação direta sem similar nacional, 7 estrangeira adquirida no mercado interno sem similar nacional, 8 nacional com mais de 70% de conteúdo importado. Use 0 quando o produto claramente é de fabricação nacional; use 2 quando é um item tipicamente importado revendido no mercado interno brasileiro (utilidades/bazar de origem asiática, por exemplo); se não der pra deduzir com segurança, use null>,
   "icms_aliquota_interna": <alíquota interna de ICMS que costuma incidir sobre esse NCM no estado ${uf ?? 'do vendedor'}, em porcentagem (ex: 20 para 20%). Use null se não souber com segurança pra esse estado>,
   "ibs_cst": "<CST do IBS/CBS da reforma tributária, 3 dígitos, SEMPRE string (ex: \\"000\\" para tributação integral), ou null se não souber>",
