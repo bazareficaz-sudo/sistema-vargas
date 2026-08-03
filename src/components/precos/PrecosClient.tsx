@@ -200,21 +200,86 @@ export default function PrecosClient({
   }
 
   // Edição inline: { id, campo }
-  const [editando, setEditando] = useState<{ id: string; campo: 'custo' | 'markup' | 'venda' } | null>(null)
+  type CampoEdit = 'custo' | 'markup' | 'venda' | 'markup_promo' | 'promo'
+  const [editando, setEditando] = useState<{ id: string; campo: CampoEdit } | null>(null)
   const [editValor, setEditValor] = useState('')
 
-  function iniciarEdicao(produto: Produto, campo: 'custo' | 'markup' | 'venda') {
+  function iniciarEdicao(produto: Produto, campo: CampoEdit) {
+    const markupAtual = produto.markup ?? calcMarkup(produto.preco_custo, produto.preco_venda)
     const val = campo === 'custo' ? produto.preco_custo
-      : campo === 'markup' ? (produto.markup ?? calcMarkup(produto.preco_custo, produto.preco_venda))
-      : produto.preco_venda
+      : campo === 'markup' ? markupAtual
+      : campo === 'venda' ? produto.preco_venda
+      : campo === 'markup_promo'
+        ? (produto.preco_promocional && produto.preco_custo > 0
+            ? calcMarkup(produto.preco_custo, produto.preco_promocional)
+            // Sem promoção ainda: parte do markup normal, que é o ponto de
+            // referência de quem vai baixar a margem para promover.
+            : markupAtual)
+        : (produto.preco_promocional ?? produto.preco_venda)
     setEditando({ id: produto.id, campo })
-    setEditValor(val.toFixed(campo === 'markup' ? 2 : 2))
+    setEditValor(Number(val).toFixed(2))
   }
 
   async function salvarEdicaoInline(produto: Produto) {
     if (!editando) return
     const val = parseFloat(editValor.replace(',', '.'))
     if (isNaN(val) || val < 0) { setEditando(null); return }
+
+    // ── Promoção: caminho próprio ─────────────────────────────────────────
+    //
+    // Não passa pelo cálculo de custo/markup/venda abaixo porque mexe em
+    // outras colunas e, principalmente, porque pode mudar o preço COBRADO do
+    // cliente — a tela de Orçamentos usa preco_promocional quando
+    // promocao_ativa está ligada.
+    if (editando.campo === 'markup_promo' || editando.campo === 'promo') {
+      const sbP = createClient()
+
+      const novoPrecoPromo = editando.campo === 'promo'
+        ? val
+        : (produto.preco_custo > 0 ? parseFloat((produto.preco_custo * (1 + val / 100)).toFixed(2)) : 0)
+
+      // Zerar é a forma de encerrar a promoção — sem isso não haveria como
+      // desfazer sem sair da tela.
+      const limpando = novoPrecoPromo <= 0
+
+      // Regra de ativação, deliberadamente conservadora: só liga sozinha
+      // quando o produto NÃO tinha promoção nenhuma (aí digitar um preço só
+      // pode significar "quero promover"). Se já existia um preço com a
+      // promoção desligada, foi alguém que desligou de propósito — respeitar
+      // essa escolha e não religar pelas costas.
+      const tinhaPreco = (produto.preco_promocional ?? 0) > 0
+      const ativa = limpando ? false : (tinhaPreco ? produto.promocao_ativa : true)
+
+      const { error } = await sbP.from('produtos').update({
+        preco_promocional: limpando ? null : novoPrecoPromo,
+        promocao_ativa: ativa,
+        ...(limpando ? { promocao_inicio: null, promocao_fim: null } : {}),
+        updated_at: new Date().toISOString(),
+      }).eq('id', produto.id)
+
+      if (error) { showMsg(`Erro ao salvar promoção: ${error.message}`); setEditando(null); return }
+
+      setProdutos(prev => prev.map(x => x.id === produto.id
+        ? {
+            ...x,
+            preco_promocional: limpando ? null : novoPrecoPromo,
+            promocao_ativa: ativa,
+            ...(limpando ? { promocao_inicio: null, promocao_fim: null } : {}),
+          }
+        : x))
+      setEditando(null)
+
+      // A mensagem diz o efeito real, não só "salvo": ligar promoção muda o
+      // que o cliente paga, e isso não pode acontecer em silêncio.
+      showMsg(limpando
+        ? 'Promoção removida.'
+        : ativa && !tinhaPreco
+          ? `Promoção ativada: passa a vender por ${fmt(novoPrecoPromo)}.`
+          : ativa
+            ? `Preço promocional atualizado para ${fmt(novoPrecoPromo)}.`
+            : `Preço promocional salvo (${fmt(novoPrecoPromo)}), mas a promoção segue desligada.`)
+      return
+    }
 
     let novoCusto = produto.preco_custo
     let novoMarkup = produto.markup ?? calcMarkup(produto.preco_custo, produto.preco_venda)
@@ -255,7 +320,7 @@ export default function PrecosClient({
 
   function CelulaEditavel({ produto, campo, valor, prefix = '' }: {
     produto: Produto
-    campo: 'custo' | 'markup' | 'venda'
+    campo: CampoEdit
     valor: string
     prefix?: string
   }) {
@@ -799,17 +864,39 @@ export default function PrecosClient({
                         valor={p.preco_venda > 0 ? fmt(p.preco_venda) : '—'} />
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      <span className={`text-xs font-medium ${markupPromo >= 30 ? 'text-green-600' : markupPromo > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>
-                        {markupPromo > 0 ? `${markupPromo.toFixed(1)}%` : '—'}
-                      </span>
+                      {editando?.id === p.id && editando?.campo === 'markup_promo' ? (
+                        <CelulaEditavel produto={p} campo="markup_promo" valor={`${markupPromo.toFixed(1)}%`} />
+                      ) : (
+                        <button
+                          onClick={() => iniciarEdicao(p, 'markup_promo')}
+                          disabled={p.preco_custo <= 0}
+                          className={`text-xs font-medium px-1.5 py-0.5 rounded cursor-pointer hover:ring-2 hover:ring-orange-300 transition-all disabled:cursor-not-allowed disabled:hover:ring-0 ${markupPromo >= 30 ? 'bg-green-50 text-green-700' : markupPromo > 0 ? 'bg-yellow-50 text-yellow-700' : 'bg-gray-100 text-gray-400'}`}
+                          title={p.preco_custo > 0
+                            ? 'Clique para definir a margem da promoção — o preço promocional é calculado a partir do custo'
+                            : 'Sem preço de custo não dá para calcular margem'}>
+                          {markupPromo > 0 ? `${markupPromo.toFixed(1)}%` : '—'}
+                        </button>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      {p.preco_promocional ? (
-                        <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
-                          {fmt(p.preco_promocional)}
-                        </span>
+                      {editando?.id === p.id && editando?.campo === 'promo' ? (
+                        <CelulaEditavel produto={p} campo="promo"
+                          valor={p.preco_promocional ? fmt(p.preco_promocional) : '—'} />
                       ) : (
-                        <span className="text-gray-300 text-xs">—</span>
+                        <button
+                          onClick={() => iniciarEdicao(p, 'promo')}
+                          className="cursor-pointer hover:ring-2 hover:ring-orange-300 rounded-full transition-all"
+                          title={p.preco_promocional
+                            ? 'Clique para alterar o preço promocional (zero remove a promoção)'
+                            : 'Clique para criar uma promoção'}>
+                          {p.preco_promocional ? (
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${p.promocao_ativa ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {fmt(p.preco_promocional)}{!p.promocao_ativa && ' (desligada)'}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300 text-xs hover:text-orange-500">+ promo</span>
+                          )}
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -884,7 +971,8 @@ export default function PrecosClient({
                       {fmt(p.preco_venda)}
                     </td>
                     <td className="px-3 py-2.5 text-right font-semibold text-orange-600">
-                      {p.preco_promocional ? fmt(p.preco_promocional) : '—'}
+                      <CelulaEditavel produto={p} campo="promo"
+                        valor={p.preco_promocional ? fmt(p.preco_promocional) : '—'} />
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
