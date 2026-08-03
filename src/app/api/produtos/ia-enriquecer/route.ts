@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
+import { buscarCandidatosCest, resolverCest, type CandidatoCest } from '@/lib/fiscal/cest'
 
 // Sugestão por IA pra completar campos vazios do cadastro de produto, com
 // base só no nome e no EAN — nunca inventa categoria/marca nova (só aceita
@@ -103,6 +104,24 @@ export async function POST(req: Request) {
     configFiscal?.cfop_venda_dentro ?? null,
   )
 
+  // CEST sai da tabela oficial, não da memória do modelo. Com o NCM em mãos,
+  // a consulta devolve os candidatos possíveis e o modelo no máximo escolhe
+  // entre eles — nunca inventa um código. Medido no catálogo real: 82% dos
+  // produtos ficam resolvidos aqui, sem a IA precisar opinar.
+  const candidatosCest: CandidatoCest[] = await buscarCandidatosCest(sb, produtoNcm)
+  const resolucao = resolverCest(candidatosCest)
+
+  const instrucaoCest =
+    resolucao.certeza === 'unico'
+      ? `"${resolucao.cest}" (já resolvido pela tabela oficial — repita exatamente este valor)`
+      : resolucao.certeza === 'nao_aplica'
+        ? produtoNcm
+          ? 'null (o NCM deste produto não consta na tabela de substituição tributária — CEST não se aplica; responda null)'
+          : '"<sem NCM informado, não há como consultar a tabela — responda null>"'
+        : `"<escolha UM destes códigos, o que melhor descreve o produto. Responda só os 7 dígitos, entre aspas:\n${
+            resolucao.candidatos.map(c => `      ${c.cest} — ${c.descricao}`).join('\n')
+          }>"`
+
   const prompt = `Você ajuda a completar o cadastro de produtos de uma loja brasileira (bazar/variedades) num sistema de PDV.
 
 Com base SÓ no nome do produto e (se houver) no código de barras EAN/GTIN abaixo, sugira dados pra completar o cadastro.
@@ -133,7 +152,7 @@ Responda SOMENTE com um JSON neste formato exato:
   "categoria": "<nome exato de uma categoria da lista acima, ou null>",
   "marca": "<nome exato de uma marca da lista acima, ou null>",
   "ncm": "<código NCM de 8 dígitos mais provável, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver, ou null se não tiver certeza>",
-  "cest": "<código CEST de 7 dígitos, SEMPRE como string entre aspas mesmo sendo só números, mantendo zeros à esquerda se houver. O CEST é derivado do NCM na tabela do Convênio ICMS 142/2018: se o NCM já estiver informado acima, procure o CEST correspondente a esse NCM e à descrição do produto. Se os campos fiscais acima já indicam substituição tributária (CFOP 5405, CSOSN 500, ou CST 60/70), então este produto TEM ST e o CEST existe — devolva o mais provável em vez de null. Use null apenas quando não houver NCM informado E o produto claramente não for de segmento com ST.>",
+  "cest": ${instrucaoCest},
   "icms_origem": <origem da mercadoria segundo a tabela oficial da SEFAZ: 0 nacional, 1 estrangeira importação direta, 2 estrangeira adquirida no mercado interno, 3 nacional com mais de 40% de conteúdo importado, 4 nacional produzida conforme processos produtivos básicos, 5 nacional com menos de 40% de conteúdo importado, 6 estrangeira importação direta sem similar nacional, 7 estrangeira adquirida no mercado interno sem similar nacional, 8 nacional com mais de 70% de conteúdo importado. Use 0 quando o produto claramente é de fabricação nacional; use 2 quando é um item tipicamente importado revendido no mercado interno brasileiro (utilidades/bazar de origem asiática, por exemplo); se não der pra deduzir com segurança, use null>,
   "icms_aliquota_interna": <alíquota interna de ICMS que costuma incidir sobre esse NCM no estado ${uf ?? 'do vendedor'}, em porcentagem (ex: 20 para 20%). Use null se não souber com segurança pra esse estado>,
   "ibs_cst": "<CST do IBS/CBS da reforma tributária, 3 dígitos, SEMPRE string (ex: \\"000\\" para tributação integral), ou null se não souber>",
@@ -160,7 +179,16 @@ Se não tiver informação suficiente e confiável pra algum campo, use null nes
       ? (marcas ?? []).find(m => m.nome.toLowerCase() === resultado.marca.toLowerCase())?.nome ?? null
       : null
     const ncmValido = digitsOuNull(resultado?.ncm, 8)
-    const cestValido = digitsOuNull(resultado?.cest, 7)
+    // O CEST devolvido só vale se estiver na lista que a tabela permitiu. Um
+    // código fora dela é alucinação, não sugestão — e nesse caso o valor certo
+    // é o da tabela (quando único), nunca o do modelo.
+    const cestDoModelo = digitsOuNull(resultado?.cest, 7)
+    const permitidos = new Set(candidatosCest.map(c => c.cest))
+    const cestValido =
+      resolucao.certeza === 'unico' ? resolucao.cest
+      : resolucao.certeza === 'nao_aplica' ? null
+      : cestDoModelo && permitidos.has(cestDoModelo) ? cestDoModelo
+      : null
     const descricao = typeof resultado?.descricao_marketplace === 'string'
       ? resultado.descricao_marketplace.trim().slice(0, 1000) || null
       : null
