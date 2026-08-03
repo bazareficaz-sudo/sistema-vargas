@@ -2,7 +2,15 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
 
-type ItemAplicar = { tipo: 'anuncio' | 'variacao'; id: string; produtoId: string }
+// `metodo` é opcional e serve à honestidade do histórico: um produto escolhido
+// à mão pelo operador não deve ficar gravado como se tivesse vindo de um
+// casamento automático de SKU. Sem ele, mantém o valor antigo.
+type ItemAplicar = {
+  tipo: 'anuncio' | 'variacao'
+  id: string
+  produtoId: string
+  metodo?: string
+}
 
 export async function POST(req: Request) {
   const sb = await createClient()
@@ -60,7 +68,7 @@ export async function POST(req: Request) {
         nivel: item.tipo === 'anuncio' ? 'anuncio' : 'variacao', chave,
         anuncio_id: anuncioId, variacao_id: variacaoId, produto_id: produto.id,
         produto_nome_snapshot: produto.nome, produto_sku_snapshot: produto.sku,
-        metodo: 'automatico_sku_revisado', operador, updated_at: new Date().toISOString(),
+        metodo: item.metodo ?? 'automatico_sku_revisado', operador, updated_at: new Date().toISOString(),
       }, { onConflict: 'empresa_id,canal_id,nivel,chave' })
     }
 

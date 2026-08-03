@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AnuncioDetalheModal from './AnuncioDetalheModal'
 import MapearAnuncioModal from './MapearAnuncioModal'
+import MapeamentoRapidoModal from './MapeamentoRapidoModal'
 import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
@@ -135,6 +136,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [criarAnuncioShopeeAberto, setCriarAnuncioShopeeAberto] = useState(false)
   const [criarAnuncioMLAberto, setCriarAnuncioMLAberto] = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [mapeamentoRapido, setMapeamentoRapido] = useState<string[] | null>(null)
   // Replicação em massa pra outra conta do MESMO marketplace.
   const [replicarAberto, setReplicarAberto] = useState(false)
   const [replicarDestino, setReplicarDestino] = useState('')
@@ -839,9 +841,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               {enviandoSelecionados ? 'Enviando...' : '⇡ Enviar p/ Shopee'}
             </button>
           )}
-          <button onClick={prepararMapeamentoMassa}
+          <button onClick={() => setMapeamentoRapido(filtrados.filter(a => selecionados.has(a.id)).map(a => a.id))}
+            title="Sugere um produto para cada anúncio e deixa você conferir linha a linha antes de aplicar"
             className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg">
-            Mapear selecionados por SKU
+            ⚡ Mapeamento rápido
+          </button>
+          <button onClick={prepararMapeamentoMassa}
+            title="Casa apenas SKU idêntico, tudo de uma vez, sem conferência linha a linha"
+            className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 text-xs font-medium rounded-lg">
+            Mapear por SKU exato
           </button>
           {canaisDestino.length > 0 && (
             <button onClick={() => { setReplicarAberto(true); setReplicarResultado(null); setReplicarDestino(canaisDestino[0].id) }}
@@ -1196,6 +1204,22 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           onAtualizado={(anuncioAtualizado) => {
             setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
             setMapeandoAberto(anuncioAtualizado)
+          }}
+        />
+      )}
+
+      {mapeamentoRapido && (
+        <MapeamentoRapidoModal
+          anuncioIds={mapeamentoRapido}
+          empresaId={empresaId}
+          onFechar={() => setMapeamentoRapido(null)}
+          onAplicado={(mapa) => {
+            // Reflete na listagem sem recarregar a página — mesma abordagem
+            // do mapeamento individual logo acima.
+            setAnuncios(prev => prev.map(a => mapa[a.id]
+              ? { ...a, produto_id: mapa[a.id].id, produtos: { ...(a.produtos ?? {}), ...mapa[a.id], preco_venda: mapa[a.id].precoVenda, estoque: mapa[a.id].estoque } }
+              : a))
+            setSelecionados(new Set())
           }}
         />
       )}
