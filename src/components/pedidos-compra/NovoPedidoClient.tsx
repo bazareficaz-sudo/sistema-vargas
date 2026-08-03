@@ -39,10 +39,29 @@ interface Props {
   itensExistentes: unknown[]
 }
 
+type ItemHistorico = {
+  produtoId: string | null; nome: string; sku: string | null
+  quantidade: number; custoAnterior: number; custo: number; subtotal: number
+}
+type EntradaHistorico = {
+  id: string; numero: string | null; numeroNf: string | null; serie: string | null
+  data: string | null; valorProdutos: number; valorFrete: number; valorDesconto: number
+  valorOutros: number; valorTotal: number; status: string; observacoes: string | null
+  itens: ItemHistorico[]
+}
+type HistoricoFornecedor = {
+  resumo: {
+    totalCompras: number; canceladas: number; valorTotal: number
+    primeiraCompra: string | null; ultimaCompra: string | null; produtosDistintos: number
+  }
+  entradas: EntradaHistorico[]
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const brl = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const today = new Date().toISOString().slice(0, 10)
+const dataBr = (d: string | null) => d ? new Date(d).toLocaleDateString('pt-BR') : '—'
 
 const FILTROS: { key: Filtro; label: string }[] = [
   { key: 'fornecedor', label: '📦 Deste fornecedor' },
@@ -119,6 +138,12 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [histTab, setHistTab] = useState<'produtos' | 'historico'>('produtos')
 
+  // Histórico de compras do fornecedor (aba "Histórico do fornecedor")
+  const [historico, setHistorico] = useState<HistoricoFornecedor | null>(null)
+  const [histLoading, setHistLoading] = useState(false)
+  const [histErro, setHistErro] = useState('')
+  const [entradasAbertas, setEntradasAbertas] = useState<Set<string>>(new Set())
+
   const buscaRef = useRef<HTMLInputElement>(null)
   const modalQtdRef = useRef<HTMLInputElement>(null)
   const modalCustoRef = useRef<HTMLInputElement>(null)
@@ -183,6 +208,33 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
 
     return () => { cancelado = true; clearTimeout(t) }
   }, [fornecedorId, busca])
+
+  // Só busca o histórico quando a aba é aberta — quem está montando o pedido
+  // pelo caminho normal nunca paga por essa consulta.
+  useEffect(() => {
+    if (histTab !== 'historico' || !fornecedorId) return
+    let cancelado = false
+    setHistLoading(true)
+    setHistErro('')
+    fetch(`/api/pedidos-compra/historico-fornecedor?fornecedor_id=${fornecedorId}`)
+      .then(async r => {
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(d.error || `Erro ${r.status} ao carregar o histórico`)
+        return d
+      })
+      .then(d => { if (!cancelado) { setHistorico(d); setEntradasAbertas(new Set()) } })
+      .catch(e => { if (!cancelado) { setHistorico(null); setHistErro(e?.message ?? 'Erro ao carregar o histórico') } })
+      .finally(() => { if (!cancelado) setHistLoading(false) })
+    return () => { cancelado = true }
+  }, [histTab, fornecedorId])
+
+  function alternarEntrada(id: string) {
+    setEntradasAbertas(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
 
   // ── Auto-focus search ───────────────────────────────────────────────────────
 
@@ -454,10 +506,141 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
           </div>
 
           {histTab === 'historico' ? (
-            <div className="flex-1 flex items-center justify-center text-slate-300 flex-col">
-              <span className="text-4xl mb-2">📜</span>
-              <p className="text-sm">Histórico de compras em desenvolvimento</p>
-            </div>
+            !fornecedorId ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
+                <span className="text-5xl mb-3">📜</span>
+                <p className="text-sm">Selecione um fornecedor para ver o histórico de compras</p>
+              </div>
+            ) : histErro ? (
+              <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+                <span className="text-4xl mb-2">⚠️</span>
+                <p className="text-sm font-semibold text-red-600">Não foi possível carregar o histórico</p>
+                <p className="text-xs text-slate-500 mt-1 max-w-md">{histErro}</p>
+              </div>
+            ) : histLoading ? (
+              <div className="flex-1 flex items-center justify-center text-slate-400">
+                <div className="text-center">
+                  <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                  <p className="text-sm">Carregando histórico...</p>
+                </div>
+              </div>
+            ) : !historico || historico.entradas.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
+                <span className="text-4xl mb-2">📭</span>
+                <p className="text-sm">Nenhuma compra registrada deste fornecedor</p>
+                <p className="text-xs mt-1 text-slate-400">O histórico aparece a partir das entradas de mercadoria lançadas</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-auto">
+                {/* Resumo */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-slate-200 border-b border-slate-200">
+                  {[
+                    { label: 'Compras', valor: String(historico.resumo.totalCompras) },
+                    { label: 'Total comprado', valor: brl(historico.resumo.valorTotal) },
+                    { label: 'Produtos distintos', valor: String(historico.resumo.produtosDistintos) },
+                    { label: 'Primeira compra', valor: dataBr(historico.resumo.primeiraCompra) },
+                    { label: 'Última compra', valor: dataBr(historico.resumo.ultimaCompra) },
+                  ].map(c => (
+                    <div key={c.label} className="bg-white px-3 py-2.5">
+                      <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{c.label}</p>
+                      <p className="text-sm font-bold text-slate-800 mt-0.5">{c.valor}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {historico.resumo.canceladas > 0 && (
+                  <div className="bg-slate-50 border-b border-slate-200 px-4 py-1.5 text-[11px] text-slate-500">
+                    {historico.resumo.canceladas === 1
+                      ? '1 entrada cancelada aparece na lista, mas não entra nos totais acima.'
+                      : `${historico.resumo.canceladas} entradas canceladas aparecem na lista, mas não entram nos totais acima.`}
+                  </div>
+                )}
+
+                {/* Compras */}
+                <div className="divide-y divide-slate-100">
+                  {historico.entradas.map(e => {
+                    const aberta = entradasAbertas.has(e.id)
+                    const cancelada = e.status === 'cancelada'
+                    return (
+                      <div key={e.id} className={cancelada ? 'bg-slate-50/60' : ''}>
+                        <button
+                          onClick={() => alternarEntrada(e.id)}
+                          className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 text-left transition-colors">
+                          <span className={`text-slate-400 text-xs transition-transform ${aberta ? 'rotate-90' : ''}`}>▶</span>
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-sm font-semibold truncate ${cancelada ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                              {e.numeroNf ? `NF ${e.numeroNf}${e.serie ? `-${e.serie}` : ''}` : (e.numero ?? 'Entrada')}
+                            </p>
+                            <p className="text-[11px] text-slate-400">
+                              {dataBr(e.data)} · {e.itens.length} {e.itens.length === 1 ? 'item' : 'itens'}
+                              {cancelada && ' · cancelada'}
+                            </p>
+                          </div>
+                          <span className={`text-sm font-bold shrink-0 ${cancelada ? 'text-slate-400' : 'text-slate-800'}`}>
+                            {brl(e.valorTotal)}
+                          </span>
+                        </button>
+
+                        {aberta && (
+                          <div className="px-4 pb-3">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-slate-400">
+                                  <th className="text-left font-semibold py-1">SKU</th>
+                                  <th className="text-left font-semibold py-1">Produto</th>
+                                  <th className="text-right font-semibold py-1">Qtd</th>
+                                  <th className="text-right font-semibold py-1">Custo unit.</th>
+                                  <th className="text-right font-semibold py-1">Variação</th>
+                                  <th className="text-right font-semibold py-1">Subtotal</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                {e.itens.map((i, idx) => {
+                                  // Só há variação para comparar quando existia custo antes.
+                                  const varPct = i.custoAnterior > 0
+                                    ? ((i.custo - i.custoAnterior) / i.custoAnterior) * 100
+                                    : null
+                                  return (
+                                    <tr key={`${e.id}-${idx}`}>
+                                      <td className="py-1 text-slate-400 font-mono text-[11px]">{i.sku || '—'}</td>
+                                      <td className="py-1 text-slate-700">{i.nome}</td>
+                                      <td className="py-1 text-right text-slate-600">{i.quantidade}</td>
+                                      <td className="py-1 text-right text-slate-700 font-medium">{brl(i.custo)}</td>
+                                      <td className={`py-1 text-right font-medium ${
+                                        varPct === null ? 'text-slate-300'
+                                        : varPct > 0.5 ? 'text-red-600'
+                                        : varPct < -0.5 ? 'text-emerald-600'
+                                        : 'text-slate-400'
+                                      }`}>
+                                        {varPct === null ? '—'
+                                          : `${varPct > 0 ? '▲' : varPct < 0 ? '▼' : ''} ${Math.abs(varPct).toFixed(1)}%`}
+                                      </td>
+                                      <td className="py-1 text-right text-slate-700">{brl(i.subtotal)}</td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+
+                            {(e.valorFrete > 0 || e.valorDesconto > 0 || e.valorOutros > 0) && (
+                              <p className="text-[11px] text-slate-400 mt-1.5">
+                                Produtos {brl(e.valorProdutos)}
+                                {e.valorFrete > 0 && ` · frete ${brl(e.valorFrete)}`}
+                                {e.valorOutros > 0 && ` · outras despesas ${brl(e.valorOutros)}`}
+                                {e.valorDesconto > 0 && ` · desconto ${brl(e.valorDesconto)}`}
+                              </p>
+                            )}
+                            {e.observacoes && (
+                              <p className="text-[11px] text-slate-500 mt-1 italic">{e.observacoes}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
           ) : (
             <>
               {/* Search + filters bar */}
