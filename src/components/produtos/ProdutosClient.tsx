@@ -84,6 +84,7 @@ type Props = {
   ncmFiltro: string
   tagFiltro: string
   entradaFiltro: string
+  entradasCasadas?: { rotulo: string; origem: 'manual' | 'xml' }[]
   tagsDisponiveis: string[]
   canaisShopee?: { id: string; nome: string }[]
 }
@@ -109,7 +110,7 @@ export default function ProdutosClient({
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
-  tagFiltro: tagInicial, entradaFiltro: entradaInicial, tagsDisponiveis, canaisShopee = [],
+  tagFiltro: tagInicial, entradaFiltro: entradaInicial, entradasCasadas = [], tagsDisponiveis, canaisShopee = [],
 }: Props) {
   const router = useRouter()
   const [produtos, setProdutos] = useState(inicial)
@@ -607,9 +608,24 @@ export default function ProdutosClient({
               onChange={e => setEntradaF(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') navegar({ entrada: entradaF.trim(), pagina: '1' }) }}
               onBlur={() => navegar({ entrada: entradaF.trim(), pagina: '1' })}
-              placeholder="Ex: 1234"
-              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[140px]"
+              placeholder="Ex: ENT-000001 ou 1875614"
+              className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[160px]"
             />
+            {/* Quando mais de uma entrada casa com o termo, os produtos "a
+                mais" precisam de explicação — senão parecem produto errado
+                na lista. */}
+            {entradaInicial && entradasCasadas.length > 0 && (
+              <p className={`text-[10px] mt-1 max-w-[220px] ${entradasCasadas.length > 1 ? 'text-amber-700' : 'text-gray-400'}`}>
+                {entradasCasadas.length === 1
+                  ? `Entrada ${entradasCasadas[0].rotulo}${entradasCasadas[0].origem === 'xml' ? ' (XML)' : ''}`
+                  : `${entradasCasadas.length} entradas casaram: ${entradasCasadas.map(e => e.rotulo).join(', ')}. Digite o número completo para filtrar só uma.`}
+              </p>
+            )}
+            {entradaInicial && entradasCasadas.length === 0 && (
+              <p className="text-[10px] mt-1 text-amber-700 max-w-[220px]">
+                Nenhuma entrada encontrada com “{entradaInicial}”.
+              </p>
+            )}
           </div>
         </div>
       )}

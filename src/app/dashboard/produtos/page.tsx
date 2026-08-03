@@ -70,21 +70,87 @@ export default async function ProdutosPage({
   const { data: tagsRows } = await supabase.from('produtos').select('tags').eq('empresa_id', empresaId).not('tags', 'eq', '{}')
   const tagsDisponiveis = Array.from(new Set<string>((tagsRows ?? []).flatMap((r: any) => (r.tags ?? []) as string[]))).sort()
 
-  // Filtro por entrada de mercadoria — busca por número da entrada ou da NF,
-  // resolve para os produtos que aparecem nos itens dessas entradas.
+  // Filtro por entrada de mercadoria.
+  //
+  // Dois problemas corrigidos aqui:
+  //
+  // 1. A busca era sempre `ilike %termo%`, então um número curto arrastava
+  //    entradas que nada tinham a ver. Medido na base real: digitar "1"
+  //    casava com 12 entradas (ENT-000001, 000010, 000011, 000012...) e
+  //    listava 87 produtos. Agora tenta o número EXATO primeiro; só cai para
+  //    a busca parcial quando o exato não acha nada.
+  //
+  // 2. Só olhava `entradas` (lançamento manual). Nota importada por XML vive
+  //    em `nfe_entradas` + `nfe_itens` — 12 notas invisíveis para o filtro.
+  //
+  // `entradasCasadas` volta para a tela: quando mais de uma entrada casa, o
+  // operador precisa saber quais, senão os produtos "a mais" continuam sem
+  // explicação.
   let idsDaEntrada: string[] | null = null
+  let entradasCasadas: { rotulo: string; origem: 'manual' | 'xml' }[] = []
+
   if (entrada) {
-    const { data: entradasRows } = await supabase
-      .from('entradas')
-      .select('id')
-      .eq('empresa_id', empresaId)
-      .or(`numero_entrada.ilike.%${entrada}%,numero_nf.ilike.%${entrada}%`)
-      .limit(50)
-    const entradaIds = (entradasRows ?? []).map(e => e.id)
-    const { data: itensRows } = entradaIds.length
-      ? await supabase.from('entrada_itens').select('produto_id').in('entrada_id', entradaIds)
-      : { data: [] as { produto_id: string | null }[] }
-    idsDaEntrada = Array.from(new Set<string>((itensRows ?? []).map(r => r.produto_id).filter(Boolean) as string[]))
+    const termo = entrada.trim()
+    // Vírgula e parênteses são separadores da sintaxe `or` do PostgREST.
+    const seguro = termo.replace(/[,()%]/g, ' ').trim()
+
+    type Achado = { id: string; rotulo: string; origem: 'manual' | 'xml' }
+    const achados: Achado[] = []
+
+    if (seguro) {
+      const [exatoManual, exatoXml] = await Promise.all([
+        supabase.from('entradas').select('id, numero_entrada, numero_nf')
+          .eq('empresa_id', empresaId)
+          .or(`numero_entrada.eq.${seguro},numero_nf.eq.${seguro}`).limit(50),
+        supabase.from('nfe_entradas').select('id, numero, serie')
+          .eq('empresa_id', empresaId)
+          .eq('numero', seguro).limit(50),
+      ])
+
+      for (const e of exatoManual.data ?? []) {
+        achados.push({ id: e.id, rotulo: e.numero_entrada ?? `NF ${e.numero_nf}`, origem: 'manual' })
+      }
+      for (const e of exatoXml.data ?? []) {
+        achados.push({ id: e.id, rotulo: `NF ${e.numero}${e.serie ? '-' + e.serie : ''}`, origem: 'xml' })
+      }
+
+      // Nada exato: aí sim vale a busca parcial, que é o que permite achar
+      // uma entrada lembrando só um pedaço do número.
+      if (achados.length === 0) {
+        const [parcialManual, parcialXml] = await Promise.all([
+          supabase.from('entradas').select('id, numero_entrada, numero_nf')
+            .eq('empresa_id', empresaId)
+            .or(`numero_entrada.ilike.%${seguro}%,numero_nf.ilike.%${seguro}%`).limit(50),
+          supabase.from('nfe_entradas').select('id, numero, serie')
+            .eq('empresa_id', empresaId)
+            .ilike('numero', `%${seguro}%`).limit(50),
+        ])
+        for (const e of parcialManual.data ?? []) {
+          achados.push({ id: e.id, rotulo: e.numero_entrada ?? `NF ${e.numero_nf}`, origem: 'manual' })
+        }
+        for (const e of parcialXml.data ?? []) {
+          achados.push({ id: e.id, rotulo: `NF ${e.numero}${e.serie ? '-' + e.serie : ''}`, origem: 'xml' })
+        }
+      }
+    }
+
+    const idsManuais = achados.filter(a => a.origem === 'manual').map(a => a.id)
+    const idsXml = achados.filter(a => a.origem === 'xml').map(a => a.id)
+
+    const [itensManuais, itensXml] = await Promise.all([
+      idsManuais.length
+        ? supabase.from('entrada_itens').select('produto_id').in('entrada_id', idsManuais)
+        : Promise.resolve({ data: [] as { produto_id: string | null }[] }),
+      idsXml.length
+        ? supabase.from('nfe_itens').select('produto_id').in('entrada_id', idsXml)
+        : Promise.resolve({ data: [] as { produto_id: string | null }[] }),
+    ])
+
+    idsDaEntrada = Array.from(new Set<string>(
+      [...(itensManuais.data ?? []), ...(itensXml.data ?? [])]
+        .map(r => r.produto_id).filter(Boolean) as string[],
+    ))
+    entradasCasadas = achados.map(a => ({ rotulo: a.rotulo, origem: a.origem }))
   }
 
   function aplicarFiltros(qb: any): any {
@@ -227,6 +293,7 @@ export default async function ProdutosPage({
       ncmFiltro={ncm}
       tagFiltro={tag}
       entradaFiltro={entrada}
+      entradasCasadas={entradasCasadas}
       tagsDisponiveis={tagsDisponiveis}
       canaisShopee={canaisShopee}
     />
