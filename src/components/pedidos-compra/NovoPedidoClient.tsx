@@ -10,7 +10,7 @@ type Filtro = 'fornecedor' | 'abaixo_min' | 'zerado' | 'todos'
 
 interface ProdutoForn {
   id: string; nome: string; sku: string; ean: string; categoria: string; marca: string
-  estoque: number; estoque_minimo: number; estoque_maximo: number
+  estoque: number; estoque_minimo: number
   preco_venda: number; preco_custo: number; unidade: string; ativo: boolean
   compradoDoFornecedor: boolean; ultimoCusto: number; ultimaCompra: string | null
   ultimaQtd: number; custoMedio: number; menorCusto: number; maiorCusto: number
@@ -81,6 +81,8 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
   // Products list
   const [produtos, setProdutos] = useState<ProdutoForn[]>([])
   const [loadingProdutos, setLoadingProdutos] = useState(false)
+  const [erroProdutos, setErroProdutos] = useState('')
+  const [limiteExtras, setLimiteExtras] = useState(false)
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<Filtro>('fornecedor')
   const [navIdx, setNavIdx] = useState(0)
@@ -140,17 +142,47 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
 
   // ── Load products when supplier changes ─────────────────────────────────────
 
+  // Limpa a busca ao trocar de fornecedor — sem isso o termo antigo continuaria
+  // valendo e a lista viria filtrada por algo que o operador não vê mais.
+  useEffect(() => { setBusca('') }, [fornecedorId])
+
+  // A busca vai ao banco, não filtra só o que já está na tela: o catálogo tem
+  // mais de 14 mil produtos e a rota devolve no máximo 300 por vez. Filtrar
+  // localmente fazia produto existente parecer inexistente.
   useEffect(() => {
-    if (!fornecedorId) { setProdutos([]); return }
-    setLoadingProdutos(true)
-    setBusca('')
-    setNavIdx(0)
-    fetch(`/api/pedidos-compra/produtos-fornecedor?fornecedor_id=${fornecedorId}&empresa_id=${empresaId}`)
-      .then(r => r.json())
-      .then(d => setProdutos(d.produtos ?? []))
-      .catch(() => setProdutos([]))
-      .finally(() => setLoadingProdutos(false))
-  }, [fornecedorId, empresaId])
+    if (!fornecedorId) { setProdutos([]); setErroProdutos(''); return }
+
+    const termo = busca.trim()
+    const atrasar = termo ? 350 : 0   // deixa de disparar a cada tecla
+    let cancelado = false
+
+    const t = setTimeout(() => {
+      setLoadingProdutos(true)
+      setNavIdx(0)
+      const url = `/api/pedidos-compra/produtos-fornecedor?fornecedor_id=${fornecedorId}`
+        + (termo ? `&busca=${encodeURIComponent(termo)}` : '')
+      fetch(url)
+        .then(async r => {
+          const d = await r.json().catch(() => ({}))
+          if (!r.ok) throw new Error(d.error || `Erro ${r.status} ao carregar produtos`)
+          return d
+        })
+        .then(d => {
+          if (cancelado) return
+          setProdutos(d.produtos ?? [])
+          setLimiteExtras(Boolean(d.limiteExtras))
+          setErroProdutos('')
+        })
+        .catch(e => {
+          if (cancelado) return
+          setProdutos([])
+          setErroProdutos(e?.message ?? 'Erro ao carregar produtos')
+        })
+        .finally(() => { if (!cancelado) setLoadingProdutos(false) })
+    }, atrasar)
+
+    return () => { cancelado = true; clearTimeout(t) }
+  }, [fornecedorId, busca])
 
   // ── Auto-focus search ───────────────────────────────────────────────────────
 
@@ -230,7 +262,20 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
     const jaNoCarrinho = new Set(itens.map(i => i.produto_id))
     const sugestoes = produtos
       .filter(p => p.compradoDoFornecedor && p.qtdSugerida > 0 && !jaNoCarrinho.has(p.id))
-    if (sugestoes.length === 0) { alert('Nenhuma sugestão disponível. Todos os produtos já estão no carrinho ou não precisam de reposição.'); return }
+    if (sugestoes.length === 0) {
+      // A sugestão só existe onde há sinal: produto abaixo do estoque mínimo,
+      // ou produto zerado que já foi comprado deste fornecedor antes. Sem isso
+      // não há o que sugerir — e vale dizer por quê, porque a causa mais comum
+      // é estoque mínimo não cadastrado.
+      alert(
+        'Nenhuma sugestão para este fornecedor.\n\n'
+        + 'A sugestão vem de duas fontes: produto abaixo do estoque mínimo, ou produto '
+        + 'zerado que você já comprou deste fornecedor antes.\n\n'
+        + 'Se a lista veio vazia, provavelmente os produtos ainda não têm estoque mínimo '
+        + 'cadastrado e não há compra anterior registrada deste fornecedor.',
+      )
+      return
+    }
     const custo_ = (p: ProdutoForn) => p.ultimoCusto || p.preco_custo || 0
     setItens(prev => [
       ...prev,
@@ -315,7 +360,9 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 bg-slate-100 flex flex-col" style={{ zIndex: 30 }}>
+    // Acima do menu lateral e da barra do topo, que ficam em z-40 — em 30 a
+    // tela nascia por baixo deles.
+    <div className="fixed inset-0 bg-slate-100 flex flex-col" style={{ zIndex: 50 }}>
 
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200 px-4 py-2.5 flex items-center gap-3 shrink-0 shadow-sm">
@@ -446,6 +493,15 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
                 )}
               </div>
 
+              {/* Catálogo grande demais para caber de uma vez — diz isso em vez
+                  de deixar o operador concluir que o produto não existe. */}
+              {limiteExtras && !erroProdutos && (
+                <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-[11px] text-amber-800 shrink-0">
+                  Mostrando os primeiros 300 produtos do catálogo{busca ? ' que combinam com a busca' : ''}.
+                  {busca ? ' Refine a busca para chegar ao item certo.' : ' Digite na busca para procurar em todo o catálogo.'}
+                </div>
+              )}
+
               {/* Product table */}
               <div className="flex-1 overflow-auto">
                 {!fornecedorId ? (
@@ -453,6 +509,17 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
                     <span className="text-5xl mb-3">🏪</span>
                     <p className="text-sm">Selecione um fornecedor para ver os produtos</p>
                     <p className="text-xs mt-1">Os produtos comprados anteriormente aparecerão com histórico de preços</p>
+                  </div>
+                ) : erroProdutos ? (
+                  // Antes uma falha de consulta virava lista vazia sem aviso, e a
+                  // tela parecia dizer "este fornecedor não tem produto".
+                  <div className="flex flex-col items-center justify-center h-full px-6 text-center">
+                    <span className="text-4xl mb-2">⚠️</span>
+                    <p className="text-sm font-semibold text-red-600">Não foi possível carregar os produtos</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md">{erroProdutos}</p>
+                    <button onClick={() => setBusca(b => b)} className="mt-3 text-xs text-blue-600 hover:underline">
+                      Tentar de novo
+                    </button>
                   </div>
                 ) : loadingProdutos ? (
                   <div className="flex items-center justify-center h-full text-slate-400">

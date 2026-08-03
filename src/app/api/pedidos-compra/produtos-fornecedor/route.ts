@@ -3,44 +3,76 @@ import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
+// Produtos disponíveis para montar um pedido de compra, com o histórico de
+// compra deste fornecedor anexado a cada um.
+//
+// Duas colunas estavam erradas e deixavam a tela inteira vazia — as consultas
+// falhavam e o resultado virava lista vazia em silêncio, sem nada na tela que
+// indicasse erro:
+//   entrada_itens.custo_unitario  -> não existe; o custo unitário é preco_custo_novo
+//   produtos.estoque_maximo       -> não existe; só há estoque e estoque_minimo
+//
+// Por isso agora todo erro de consulta vira resposta 500 com a mensagem do
+// banco, em vez de lista vazia.
+
+const CAMPOS_PRODUTO =
+  'id, nome, sku, ean, categoria, marca, estoque, estoque_minimo, preco_venda, preco_custo, unidade, ativo'
+
+// Teto de produtos "sem histórico com este fornecedor" devolvidos de uma vez.
+// O catálogo passa de 14 mil itens — mandar tudo trava o navegador. Quem
+// procura algo fora dessa fatia usa a busca, que agora vai ao banco (ver
+// `busca` abaixo) em vez de filtrar só o que já veio.
+const LIMITE_EXTRAS = 300
+
 export async function GET(req: NextRequest) {
   const fornecedorId = req.nextUrl.searchParams.get('fornecedor_id')
-  const empresaId = req.nextUrl.searchParams.get('empresa_id')
+  const busca = (req.nextUrl.searchParams.get('busca') ?? '').trim()
 
-  if (!fornecedorId || !empresaId)
-    return NextResponse.json({ error: 'Parâmetros inválidos' }, { status: 400 })
+  if (!fornecedorId) {
+    return NextResponse.json({ error: 'Fornecedor não informado' }, { status: 400 })
+  }
 
   const supabase = await createClient()
 
-  // Busca todos os itens de entradas deste fornecedor
-  const { data: itensCompra } = await supabase
+  // A empresa vem da sessão, não da query. Antes vinha do parâmetro
+  // `empresa_id` mandado pelo navegador — qualquer usuário logado podia trocar
+  // esse valor e ler o catálogo de outra empresa.
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
+
+  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const empresaId = profile?.empresa_id
+  if (!empresaId) return NextResponse.json({ error: 'Usuário sem empresa vinculada' }, { status: 400 })
+
+  // ── Histórico de compra deste fornecedor ──────────────────────────────────
+
+  const { data: itensCompra, error: erroItens } = await supabase
     .from('entrada_itens')
-    .select('produto_id, quantidade, custo_unitario, entradas!inner(data_entrada, fornecedor_id, empresa_id, status)')
+    .select('produto_id, quantidade, preco_custo_novo, entradas!inner(data_entrada, fornecedor_id, empresa_id, status)')
     .eq('entradas.fornecedor_id', fornecedorId)
     .eq('entradas.empresa_id', empresaId)
     .eq('entradas.status', 'confirmada')
 
-  // Agrega estatísticas por produto
+  if (erroItens) {
+    return NextResponse.json({ error: `Histórico de compras: ${erroItens.message}` }, { status: 500 })
+  }
+
   const aggMap: Record<string, {
     custos: number[]
-    datas: string[]
     ultimoCusto: number
     ultimaCompra: string
     ultimaQtd: number
   }> = {}
 
   for (const item of (itensCompra ?? [])) {
+    if (!item.produto_id) continue
     const entrada = Array.isArray(item.entradas) ? item.entradas[0] : item.entradas as { data_entrada: string }
     const data = entrada?.data_entrada ?? ''
-    const custo = Number(item.custo_unitario ?? 0)
+    const custo = Number(item.preco_custo_novo ?? 0)
     const qtd = Number(item.quantidade ?? 0)
 
-    if (!aggMap[item.produto_id]) {
-      aggMap[item.produto_id] = { custos: [], datas: [], ultimoCusto: 0, ultimaCompra: '', ultimaQtd: 0 }
-    }
-    const agg = aggMap[item.produto_id]
+    const agg = (aggMap[item.produto_id] ??= { custos: [], ultimoCusto: 0, ultimaCompra: '', ultimaQtd: 0 })
     agg.custos.push(custo)
-    agg.datas.push(data)
     if (!agg.ultimaCompra || data > agg.ultimaCompra) {
       agg.ultimaCompra = data
       agg.ultimoCusto = custo
@@ -48,65 +80,101 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const produtoIdsDoFornecedor = Object.keys(aggMap)
+  const idsDoFornecedor = Object.keys(aggMap)
 
-  // Busca produtos do fornecedor
-  const { data: prodsForn } = produtoIdsDoFornecedor.length > 0
+  // ── Produtos já comprados deste fornecedor ────────────────────────────────
+
+  const { data: prodsForn, error: erroForn } = idsDoFornecedor.length > 0
     ? await supabase
         .from('produtos')
-        .select('id, nome, sku, ean, categoria, marca, estoque, estoque_minimo, estoque_maximo, preco_venda, preco_custo, unidade, ativo')
+        .select(CAMPOS_PRODUTO)
         .eq('empresa_id', empresaId)
-        .in('id', produtoIdsDoFornecedor)
+        .in('id', idsDoFornecedor)
         .eq('ativo', true)
         .order('nome')
-    : { data: [] }
+    : { data: [] as Record<string, unknown>[], error: null }
 
-  // Busca demais produtos ativos (sem histórico com este fornecedor)
-  const { data: prodsExtras } = await supabase
+  if (erroForn) {
+    return NextResponse.json({ error: `Produtos do fornecedor: ${erroForn.message}` }, { status: 500 })
+  }
+
+  // ── Demais produtos do catálogo ───────────────────────────────────────────
+  //
+  // A exclusão dos já listados acima é feita aqui em JavaScript, e não com um
+  // `not.in` no banco: aquela lista vai inteira na URL da consulta, e um
+  // fornecedor com centenas de produtos gerava uma URL grande o bastante para
+  // a requisição falhar.
+
+  let consultaExtras = supabase
     .from('produtos')
-    .select('id, nome, sku, ean, categoria, marca, estoque, estoque_minimo, estoque_maximo, preco_venda, preco_custo, unidade, ativo')
+    .select(CAMPOS_PRODUTO)
     .eq('empresa_id', empresaId)
     .eq('ativo', true)
-    .not('id', 'in', produtoIdsDoFornecedor.length > 0 ? `(${produtoIdsDoFornecedor.map(id => `"${id}"`).join(',')})` : '("")')
-    .order('nome')
-    .limit(300)
 
-  function buildProduto(p: Record<string, unknown>, fromForn: boolean) {
+  if (busca) {
+    // Vírgula e parênteses são separadores da sintaxe do `or` do PostgREST —
+    // deixá-los passar quebraria a consulta.
+    const termo = busca.replace(/[,()%]/g, ' ').trim()
+    if (termo) {
+      consultaExtras = consultaExtras.or(`nome.ilike.%${termo}%,sku.ilike.%${termo}%,ean.ilike.%${termo}%`)
+    }
+  }
+
+  const { data: extrasBrutos, error: erroExtras } = await consultaExtras
+    .order('nome')
+    .limit(LIMITE_EXTRAS + idsDoFornecedor.length)
+
+  if (erroExtras) {
+    return NextResponse.json({ error: `Catálogo: ${erroExtras.message}` }, { status: 500 })
+  }
+
+  const jaListados = new Set(idsDoFornecedor)
+  const brutos = (extrasBrutos ?? []) as Record<string, unknown>[]
+  const prodsExtras = brutos.filter(p => !jaListados.has(p.id as string)).slice(0, LIMITE_EXTRAS)
+
+  function montar(p: Record<string, unknown>, doFornecedor: boolean) {
     const agg = aggMap[p.id as string]
-    const custoMedio = agg ? agg.custos.reduce((a, b) => a + b, 0) / agg.custos.length : 0
-    const menorCusto = agg ? Math.min(...agg.custos) : 0
-    const maiorCusto = agg ? Math.max(...agg.custos) : 0
+    const custoMedio = agg && agg.custos.length > 0
+      ? agg.custos.reduce((a, b) => a + b, 0) / agg.custos.length
+      : 0
     const estAtual = Number(p.estoque ?? 0)
     const estMin = Number(p.estoque_minimo ?? 0)
-    const estMax = Number(p.estoque_maximo ?? 0)
-    const qtdSugerida = estMax > 0
-      ? Math.max(0, estMax - estAtual)
-      : estMin > 0
-        ? Math.max(0, estMin * 2 - estAtual)
-        : 0
+
+    // Quantidade sugerida. Só 2 dos 14.298 produtos ativos têm estoque mínimo
+    // cadastrado, então a regra do mínimo sozinha praticamente nunca dispara —
+    // por isso a segunda regra, que usa o que de fato existe: o que se comprou
+    // da última vez deste mesmo fornecedor.
+    const qtdSugerida =
+      estMin > 0 && estAtual < estMin ? Math.max(0, estMin * 2 - estAtual)
+      : doFornecedor && estAtual <= 0 ? (agg?.ultimaQtd ?? 0)
+      : 0
 
     return {
       ...p,
       estoque: estAtual,
       estoque_minimo: estMin,
-      estoque_maximo: estMax,
       preco_venda: Number(p.preco_venda ?? 0),
       preco_custo: Number(p.preco_custo ?? 0),
-      compradoDoFornecedor: fromForn,
+      compradoDoFornecedor: doFornecedor,
       ultimoCusto: agg?.ultimoCusto ?? 0,
-      ultimaCompra: agg?.ultimaCompra ?? null,
+      ultimaCompra: agg?.ultimaCompra || null,
       ultimaQtd: agg?.ultimaQtd ?? 0,
       custoMedio: Math.round(custoMedio * 100) / 100,
-      menorCusto,
-      maiorCusto,
+      menorCusto: agg && agg.custos.length > 0 ? Math.min(...agg.custos) : 0,
+      maiorCusto: agg && agg.custos.length > 0 ? Math.max(...agg.custos) : 0,
       qtdSugerida: Math.ceil(qtdSugerida),
     }
   }
 
   const produtos = [
-    ...(prodsForn ?? []).map(p => buildProduto(p as Record<string, unknown>, true)),
-    ...(prodsExtras ?? []).map(p => buildProduto(p as Record<string, unknown>, false)),
+    ...((prodsForn ?? []) as Record<string, unknown>[]).map(p => montar(p, true)),
+    ...prodsExtras.map(p => montar(p, false)),
   ]
 
-  return NextResponse.json({ produtos })
+  return NextResponse.json({
+    produtos,
+    // Avisa a tela que o catálogo foi cortado, para ela pedir uma busca mais
+    // específica em vez de deixar o operador achar que o produto não existe.
+    limiteExtras: prodsExtras.length >= LIMITE_EXTRAS,
+  })
 }
