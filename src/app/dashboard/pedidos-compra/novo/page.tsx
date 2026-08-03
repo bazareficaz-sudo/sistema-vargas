@@ -33,11 +33,26 @@ export default async function NovoPedidoPage({
       .single()
     pedidoExistente = ped
 
+    // Sem o embed `produtos(...)`: nao existe chave estrangeira de
+    // pedidos_compra_itens.produto_id para produtos.id, entao o PostgREST
+    // recusava a consulta e o rascunho reabria com o carrinho vazio — os
+    // itens estavam salvos, so nao chegavam na tela. Nome e SKU vem de uma
+    // segunda consulta, casada por Map.
     const { data: itens } = await supabase
       .from('pedidos_compra_itens')
-      .select('*, produtos(nome, sku, unidade, preco_venda)')
+      .select('*')
       .eq('pedido_id', id)
-    itensExistentes = itens ?? []
+
+    const produtoIds = [...new Set((itens ?? []).map(i => i.produto_id).filter(Boolean))]
+    const { data: prods } = produtoIds.length > 0
+      ? await supabase.from('produtos').select('id, nome, sku, unidade, preco_venda').in('id', produtoIds)
+      : { data: [] as { id: string; nome: string; sku: string; unidade: string; preco_venda: number }[] }
+    const produtoPorId = new Map((prods ?? []).map(p => [p.id, p]))
+
+    itensExistentes = (itens ?? []).map(i => ({
+      ...i,
+      produtos: i.produto_id ? (produtoPorId.get(i.produto_id) ?? null) : null,
+    }))
   }
 
   return (

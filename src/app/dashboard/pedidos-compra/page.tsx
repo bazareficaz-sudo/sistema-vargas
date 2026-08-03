@@ -9,9 +9,14 @@ export default async function PedidosCompraPage() {
   const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
   const empresaId = profile?.empresa_id ?? ''
 
-  const { data: pedidos } = await supabase
+  // Sem o embed `fornecedores(...)`: nao existe chave estrangeira de
+  // pedidos_compra.fornecedor_id para fornecedores.id, entao o PostgREST
+  // recusava a consulta inteira ("Could not find a relationship") e a
+  // listagem aparecia vazia mesmo com pedido salvo. O nome do fornecedor
+  // e resolvido por um Map, mesmo padrao usado em outras telas desta base.
+  const { data: pedidos, error: erroPedidos } = await supabase
     .from('pedidos_compra')
-    .select('id, numero, status, data_pedido, previsao_entrega, total, subtotal, observacoes, created_at, fornecedor_id, fornecedores(nome_fantasia, razao_social)')
+    .select('id, numero, status, data_pedido, previsao_entrega, total, subtotal, observacoes, created_at, fornecedor_id')
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: false })
     .limit(200)
@@ -22,6 +27,14 @@ export default async function PedidosCompraPage() {
     .eq('empresa_id', empresaId)
     .eq('ativo', true)
     .order('nome_fantasia')
+
+  // Inclui inativos: um pedido antigo pode apontar para fornecedor ja
+  // desativado, e o nome dele ainda precisa aparecer na listagem.
+  const fornecedorIds = [...new Set((pedidos ?? []).map(p => p.fornecedor_id).filter(Boolean))]
+  const { data: fornsDosPedidos } = fornecedorIds.length > 0
+    ? await supabase.from('fornecedores').select('id, nome_fantasia, razao_social').in('id', fornecedorIds)
+    : { data: [] as { id: string; nome_fantasia: string | null; razao_social: string | null }[] }
+  const nomePorFornecedor = new Map((fornsDosPedidos ?? []).map(f => [f.id, f]))
 
   // Conta itens por pedido
   const pedidoIds = (pedidos ?? []).map(p => p.id)
@@ -37,7 +50,7 @@ export default async function PedidosCompraPage() {
   }
 
   const pedidosMapped = (pedidos ?? []).map(p => {
-    const forn = Array.isArray(p.fornecedores) ? p.fornecedores[0] : p.fornecedores
+    const forn = p.fornecedor_id ? nomePorFornecedor.get(p.fornecedor_id) : null
     return {
       ...p,
       fornecedores: forn ? { nome_fantasia: forn.nome_fantasia ?? '', razao_social: forn.razao_social ?? '' } : null,
@@ -50,6 +63,7 @@ export default async function PedidosCompraPage() {
       pedidos={pedidosMapped}
       fornecedores={fornecedores ?? []}
       empresaId={empresaId}
+      erro={erroPedidos?.message ?? null}
     />
   )
 }

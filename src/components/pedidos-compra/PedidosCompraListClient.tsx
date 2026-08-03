@@ -25,6 +25,8 @@ interface Props {
   pedidos: Pedido[]
   fornecedores: Fornecedor[]
   empresaId: string
+  /** Falha ao buscar os pedidos. Sem isso, erro de consulta virava lista vazia. */
+  erro?: string | null
 }
 
 const STATUS: Record<Status, { label: string; color: string }> = {
@@ -39,7 +41,7 @@ const STATUS: Record<Status, { label: string; color: string }> = {
 
 const brl = (v: number) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
-export default function PedidosCompraListClient({ pedidos, empresaId }: Props) {
+export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Props) {
   const router = useRouter()
   const [busca, setBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<Status | ''>('')
@@ -91,6 +93,13 @@ export default function PedidosCompraListClient({ pedidos, empresaId }: Props) {
           + Novo Pedido
         </Link>
       </div>
+
+      {erro && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm font-semibold text-red-700">Não foi possível carregar os pedidos</p>
+          <p className="text-xs text-red-600 mt-0.5">{erro}</p>
+        </div>
+      )}
 
       {/* Status chips */}
       <div className="flex gap-2 flex-wrap">
