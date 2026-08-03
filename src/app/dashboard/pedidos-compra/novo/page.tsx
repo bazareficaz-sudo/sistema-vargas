@@ -14,6 +14,12 @@ export default async function NovoPedidoPage({
   const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
   const empresaId = profile?.empresa_id ?? ''
 
+  // Nome e CNPJ entram no cabeçalho do pedido impresso — documento que sai da
+  // empresa precisa dizer de quem é.
+  const { data: empresa } = empresaId
+    ? await supabase.from('empresas').select('nome, cnpj, telefone').eq('id', empresaId).single()
+    : { data: null }
+
   const { data: fornecedores } = await supabase
     .from('fornecedores')
     .select('id, nome_fantasia, razao_social, email, telefone')
@@ -58,6 +64,7 @@ export default async function NovoPedidoPage({
   return (
     <NovoPedidoClient
       fornecedores={fornecedores ?? []}
+      empresa={empresa ?? null}
       empresaId={empresaId}
       userId={user!.id}
       pedidoExistente={pedidoExistente}

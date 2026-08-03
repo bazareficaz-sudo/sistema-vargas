@@ -31,8 +31,11 @@ interface PedidoDB {
   frete: number; outras_despesas: number; desconto_geral: number
 }
 
+interface Empresa { nome: string | null; cnpj: string | null; telefone: string | null }
+
 interface Props {
   fornecedores: Fornecedor[]
+  empresa: Empresa | null
   empresaId: string
   userId: string
   pedidoExistente: PedidoDB | null
@@ -84,7 +87,7 @@ const STATUS_OPTS: { value: Status; label: string }[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedidoExistente, itensExistentes }: Props) {
+export default function NovoPedidoClient({ fornecedores, empresa, empresaId, userId, pedidoExistente, itensExistentes }: Props) {
   const router = useRouter()
 
   // Pedido header
@@ -139,6 +142,15 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
   // UI
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [histTab, setHistTab] = useState<'produtos' | 'historico'>('produtos')
+
+  // Envio por WhatsApp (Z-API) e impressão
+  const [waAberto, setWaAberto] = useState(false)
+  const [waTelefone, setWaTelefone] = useState('')
+  const [waIncluirPrecos, setWaIncluirPrecos] = useState(true)
+  const [waEnviando, setWaEnviando] = useState(false)
+  const [waResultado, setWaResultado] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [impressaoAberta, setImpressaoAberta] = useState(false)
+  const [imprimirComCusto, setImprimirComCusto] = useState(true)
 
   // Histórico de compras do fornecedor (aba "Histórico do fornecedor")
   const [historico, setHistorico] = useState<HistoricoFornecedor | null>(null)
@@ -390,16 +402,165 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
     router.push('/dashboard/pedidos-compra')
   }
 
-  // ── WhatsApp ────────────────────────────────────────────────────────────────
+  // ── WhatsApp (Z-API) ────────────────────────────────────────────────────────
+  //
+  // Antes isto abria o WhatsApp Web num link wa.me: saía do sistema, dependia
+  // de o navegador ter sessão aberta, e a mensagem não ficava registrada em
+  // lugar nenhum. Agora passa pela mesma rota que o resto do sistema usa
+  // (/api/whatsapp/enviar), que envia pela Z-API e grava em
+  // whatsapp_mensagens — o envio fica com histórico e status como qualquer
+  // outro do sistema.
 
-  function enviarWhatsApp() {
-    const forn = fornecedores.find(f => f.id === fornecedorId)
-    if (!forn) { alert('Selecione um fornecedor.'); return }
-    const lista = itens.map(i => `• ${i.nome} — ${i.quantidade} ${i.unidade} × ${brl(i.custo_unitario)}`).join('\n')
-    const msg = `Olá, *${forn.nome_fantasia || forn.razao_social}*! 👋\n\nSegue nosso pedido de compra no valor total de *${brl(totalGeral)}*.\n\n*Produtos:*\n${lista}\n\nPor favor, confirme disponibilidade, valores e prazo de entrega.\n\n_${observacoes || ''}_`
-    const phone = forn.telefone?.replace(/\D/g, '')
-    const url = `https://wa.me/${phone ? '55' + phone : ''}?text=${encodeURIComponent(msg)}`
-    window.open(url, '_blank')
+  const fornecedorAtual = fornecedores.find(f => f.id === fornecedorId) ?? null
+  const nomeFornecedor = fornecedorAtual
+    ? (fornecedorAtual.nome_fantasia || fornecedorAtual.razao_social)
+    : ''
+
+  function montarMensagem(incluirPrecos: boolean): string {
+    const lista = itens.map(i => incluirPrecos
+      ? `• ${i.nome} — ${i.quantidade} ${i.unidade} x ${brl(i.custo_unitario)} = ${brl(i.total)}`
+      : `• ${i.nome} — ${i.quantidade} ${i.unidade}`,
+    ).join('\n')
+
+    const cabecalho = `Olá, *${nomeFornecedor}*!\n\n`
+      + (empresa?.nome ? `Aqui é da *${empresa.nome}*.\n\n` : '')
+
+    // Sem preço a mensagem vira pedido de cotação; com preço, é pedido firme.
+    // Trocar só a lista e manter o mesmo fecho deixaria o texto sem sentido.
+    const corpo = incluirPrecos
+      ? `Segue nosso pedido de compra no valor total de *${brl(totalGeral)}*.\n\n*Itens:*\n${lista}\n\nPor favor, confirme disponibilidade e prazo de entrega.`
+      : `Gostaríamos de cotar os itens abaixo.\n\n*Itens:*\n${lista}\n\nPor favor, envie preço unitário, disponibilidade e prazo de entrega.`
+
+    const rodape = [
+      previsaoEntrega ? `\n\nPrevisão de entrega desejada: ${dataBr(previsaoEntrega)}` : '',
+      condicaoPagamento ? `\nCondição de pagamento: ${condicaoPagamento}` : '',
+      observacoes ? `\n\n_${observacoes}_` : '',
+    ].join('')
+
+    return cabecalho + corpo + rodape
+  }
+
+  function abrirWhatsApp() {
+    if (!fornecedorId) { setWaResultado({ ok: false, msg: 'Selecione um fornecedor antes.' }); setWaAberto(true); return }
+    if (itens.length === 0) { setWaResultado({ ok: false, msg: 'O pedido não tem itens.' }); setWaAberto(true); return }
+    // O telefone do cadastro é só o ponto de partida: boa parte dos
+    // fornecedores está sem telefone preenchido, então o campo é editável.
+    setWaTelefone(fornecedorAtual?.telefone ?? '')
+    setWaResultado(null)
+    setWaAberto(true)
+  }
+
+  async function enviarWhatsApp() {
+    const telefone = waTelefone.replace(/\D/g, '')
+    if (telefone.length < 10) {
+      setWaResultado({ ok: false, msg: 'Telefone incompleto. Informe DDD + número.' })
+      return
+    }
+    setWaEnviando(true); setWaResultado(null)
+    try {
+      const res = await fetch('/api/whatsapp/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telefone,
+          mensagem: montarMensagem(waIncluirPrecos),
+          tipo: waIncluirPrecos ? 'pedido_compra' : 'cotacao_compra',
+          referencia_tipo: 'pedido_compra',
+          referencia_id: pedidoId,
+        }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || d.error) throw new Error(d.error || `Erro ${res.status} ao enviar`)
+      setWaResultado({ ok: true, msg: 'Mensagem enviada ao fornecedor.' })
+    } catch (e: any) {
+      setWaResultado({ ok: false, msg: e?.message ?? 'Erro ao enviar' })
+    } finally {
+      setWaEnviando(false)
+    }
+  }
+
+  // ── Impressão ───────────────────────────────────────────────────────────────
+  //
+  // O documento é montado numa janela separada em vez de imprimir a tela: esta
+  // é um painel de trabalho em tela cheia, com barras e botões que não fazem
+  // sentido no papel.
+
+  function escapar(t: unknown) {
+    return String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+
+  function imprimir(comCusto: boolean) {
+    const linhas = itens.map((i, n) => comCusto
+      ? `<tr><td>${n + 1}</td><td>${escapar(i.sku)}</td><td>${escapar(i.nome)}</td><td class="c">${i.quantidade} ${escapar(i.unidade)}</td><td class="r">${brl(i.custo_unitario)}</td><td class="r">${i.desconto > 0 ? i.desconto + '%' : '—'}</td><td class="r">${brl(i.total)}</td></tr>`
+      : `<tr><td>${n + 1}</td><td>${escapar(i.sku)}</td><td>${escapar(i.nome)}</td><td class="c">${i.quantidade} ${escapar(i.unidade)}</td></tr>`,
+    ).join('')
+
+    const cabecalhoTabela = comCusto
+      ? '<tr><th>#</th><th>SKU</th><th>Produto</th><th class="c">Qtd</th><th class="r">Custo un.</th><th class="r">Desc.</th><th class="r">Total</th></tr>'
+      : '<tr><th>#</th><th>SKU</th><th>Produto</th><th class="c">Qtd</th></tr>'
+
+    const blocoTotais = comCusto
+      ? `<table class="totais">
+           <tr><td>Subtotal dos itens</td><td class="r">${brl(subtotal)}</td></tr>
+           ${descontoGeral > 0 ? `<tr><td>Desconto geral</td><td class="r">- ${brl(descontoGeral)}</td></tr>` : ''}
+           ${frete > 0 ? `<tr><td>Frete</td><td class="r">${brl(frete)}</td></tr>` : ''}
+           ${outrasDespesas > 0 ? `<tr><td>Outras despesas</td><td class="r">${brl(outrasDespesas)}</td></tr>` : ''}
+           <tr class="tot"><td>TOTAL</td><td class="r">${brl(totalGeral)}</td></tr>
+         </table>`
+      : `<p class="aviso">Documento sem valores — serve para conferência de recebimento ou para pedir cotação.</p>`
+
+    const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Pedido de compra${pedidoId ? ' ' + pedidoId.slice(-6).toUpperCase() : ''}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Arial, sans-serif; color: #111; margin: 24px; font-size: 12px; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: #666; font-size: 11px; margin: 0; }
+  .caixa { border: 1px solid #ddd; border-radius: 6px; padding: 10px 12px; margin: 14px 0; }
+  .grade { display: flex; gap: 24px; flex-wrap: wrap; }
+  .grade > div { min-width: 150px; }
+  .rot { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { padding: 5px 6px; border-bottom: 1px solid #eee; text-align: left; }
+  th { background: #f6f6f6; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  .r { text-align: right; } .c { text-align: center; }
+  .totais { width: 280px; margin-left: auto; margin-top: 10px; }
+  .totais td { border: none; padding: 3px 6px; }
+  .tot td { border-top: 2px solid #111; font-weight: 700; font-size: 14px; padding-top: 6px; }
+  .aviso { margin-top: 12px; color: #666; font-style: italic; }
+  .assin { margin-top: 44px; display: flex; gap: 40px; }
+  .assin > div { flex: 1; border-top: 1px solid #999; padding-top: 4px; text-align: center; color: #666; font-size: 10px; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+  <h1>PEDIDO DE COMPRA${pedidoId ? ' &middot; ' + pedidoId.slice(-6).toUpperCase() : ''}</h1>
+  <p class="sub">${escapar(empresa?.nome)}${empresa?.cnpj ? ' &middot; CNPJ ' + escapar(empresa.cnpj) : ''}${empresa?.telefone ? ' &middot; ' + escapar(empresa.telefone) : ''}</p>
+
+  <div class="caixa grade">
+    <div><div class="rot">Fornecedor</div>${escapar(nomeFornecedor) || '—'}</div>
+    <div><div class="rot">Data do pedido</div>${dataBr(dataPedido)}</div>
+    <div><div class="rot">Previsão de entrega</div>${previsaoEntrega ? dataBr(previsaoEntrega) : '—'}</div>
+    <div><div class="rot">Condição de pagamento</div>${escapar(condicaoPagamento) || '—'}</div>
+    <div><div class="rot">Situação</div>${escapar(STATUS_OPTS.find(o => o.value === status)?.label ?? status)}</div>
+  </div>
+
+  <table><thead>${cabecalhoTabela}</thead><tbody>${linhas}</tbody></table>
+  ${blocoTotais}
+  ${observacoes ? `<div class="caixa"><div class="rot">Observações</div>${escapar(observacoes)}</div>` : ''}
+
+  <div class="assin"><div>Responsável pelo pedido</div><div>Recebido por / data</div></div>
+</body></html>`
+
+    const janela = window.open('', '_blank', 'width=900,height=700')
+    if (!janela) {
+      setWaResultado({ ok: false, msg: 'O navegador bloqueou a janela de impressão. Libere pop-ups para este site.' })
+      return
+    }
+    janela.document.write(html)
+    janela.document.close()
+    // Sem esperar o conteúdo assentar, o Chrome às vezes abre o diálogo de
+    // impressão com a página ainda em branco.
+    setTimeout(() => { try { janela.focus(); janela.print() } catch { /* janela fechada antes */ } }, 350)
+    setImpressaoAberta(false)
   }
 
   // ── Save indicator ──────────────────────────────────────────────────────────
@@ -438,7 +599,11 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
               {savingLabel}
             </span>
           )}
-          <button onClick={enviarWhatsApp}
+          <button onClick={() => setImpressaoAberta(true)} disabled={itens.length === 0}
+            className="px-3 py-1.5 text-xs bg-white hover:bg-slate-100 disabled:opacity-40 text-slate-600 border border-slate-300 rounded-lg font-medium">
+            🖨 Imprimir
+          </button>
+          <button onClick={abrirWhatsApp}
             className="px-3 py-1.5 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg font-medium">
             💬 WhatsApp
           </button>
@@ -933,7 +1098,7 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
               className="w-full py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl font-semibold">
               ✓ Finalizar pedido
             </button>
-            <button onClick={enviarWhatsApp} disabled={!fornecedorId}
+            <button onClick={abrirWhatsApp} disabled={!fornecedorId}
               className="w-full py-2 text-sm bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl font-medium">
               💬 Enviar por WhatsApp
             </button>
@@ -1060,6 +1225,127 @@ export default function NovoPedidoClient({ fornecedores, empresaId, userId, pedi
               </button>
             </div>
             <p className="text-center text-[10px] text-slate-400 mt-2">Pressione ↵ para avançar entre campos · ESC para fechar</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Enviar por WhatsApp (Z-API) ──────────────────────────────────── */}
+      {waAberto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Enviar pedido por WhatsApp</h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Enviado pelo número da empresa, com registro no histórico de mensagens.
+                </p>
+              </div>
+              <button onClick={() => setWaAberto(false)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+            </div>
+
+            <div className="p-5 space-y-3 overflow-auto">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Fornecedor</label>
+                <p className="text-sm text-slate-800">{nomeFornecedor || '—'}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Telefone (com DDD)
+                </label>
+                <input
+                  value={waTelefone}
+                  onChange={e => setWaTelefone(e.target.value)}
+                  placeholder="21 99999-9999"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+                {!fornecedorAtual?.telefone && (
+                  <p className="text-[11px] text-amber-700 mt-1">
+                    Este fornecedor não tem telefone no cadastro — digite acima.
+                  </p>
+                )}
+              </div>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={waIncluirPrecos}
+                  onChange={e => setWaIncluirPrecos(e.target.checked)} className="mt-0.5 rounded" />
+                <span className="text-sm text-slate-700">
+                  Incluir preços
+                  <span className="block text-[11px] text-slate-500">
+                    {waIncluirPrecos
+                      ? 'Pedido firme: vai com valor unitário e total.'
+                      : 'Pedido de cotação: só os itens e quantidades, pedindo preço ao fornecedor.'}
+                  </span>
+                </span>
+              </label>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Mensagem</label>
+                <pre className="text-[11px] text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 whitespace-pre-wrap font-sans max-h-52 overflow-auto">
+{montarMensagem(waIncluirPrecos)}
+                </pre>
+              </div>
+
+              {waResultado && (
+                <p className={`text-xs ${waResultado.ok ? 'text-emerald-700' : 'text-red-600'}`}>
+                  {waResultado.ok ? '✓ ' : '⚠ '}{waResultado.msg}
+                </p>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-2 shrink-0">
+              <p className="text-[11px] text-slate-500 flex-1">
+                Precisa do WhatsApp conectado em Integrações.
+              </p>
+              <button onClick={() => setWaAberto(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
+                Fechar
+              </button>
+              <button onClick={enviarWhatsApp} disabled={waEnviando || itens.length === 0}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-semibold rounded-lg">
+                {waEnviando ? 'Enviando...' : 'Enviar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Imprimir ─────────────────────────────────────────────────────── */}
+      {impressaoAberta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-slate-900">Imprimir pedido</h3>
+              <button onClick={() => setImpressaoAberta(false)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={imprimirComCusto}
+                  onChange={e => setImprimirComCusto(e.target.checked)} className="mt-0.5 rounded" />
+                <span className="text-sm text-slate-700">
+                  Incluir preço de custo
+                  <span className="block text-[11px] text-slate-500">
+                    {imprimirComCusto
+                      ? 'Sai com custo unitário, desconto e totais — via interna.'
+                      : 'Sai só com produto e quantidade — bom para conferir recebimento ou pedir cotação sem mostrar quanto você paga.'}
+                  </span>
+                </span>
+              </label>
+
+              <p className="text-[11px] text-slate-500">
+                Abre numa janela nova com a caixa de impressão. Se nada aparecer, libere pop-ups para este site.
+              </p>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button onClick={() => setImpressaoAberta(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
+                Cancelar
+              </button>
+              <button onClick={() => imprimir(imprimirComCusto)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-lg">
+                🖨 Imprimir
+              </button>
+            </div>
           </div>
         </div>
       )}
