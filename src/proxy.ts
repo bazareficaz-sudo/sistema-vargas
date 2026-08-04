@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { telaDoPathname } from '@/lib/auth/telas'
 
 // Antigo `middleware.ts`. A convenção `middleware` foi deprecada e renomeada
 // para `proxy` nesta versão do Next — só mudam o nome do arquivo e o da
@@ -69,12 +70,15 @@ export async function proxy(request: NextRequest) {
         .like('codigo', 'tela:%')
 
       if (bloqueios && bloqueios.length > 0) {
-        const hrefsBloqueados = bloqueios.map(b => b.codigo.slice('tela:'.length))
-        // Casa pelo prefixo: bloquear a listagem bloqueia o detalhe junto.
-        const barrado = hrefsBloqueados.some(
-          href => pathname === href || pathname.startsWith(`${href}/`),
-        )
-        if (barrado) {
+        const hrefsBloqueados = new Set(bloqueios.map(b => b.codigo.slice('tela:'.length)))
+        // Resolve primeiro QUAL tela é este endereço, e só então pergunta se
+        // ela está bloqueada — mesma função que o layout usa.
+        //
+        // O caminho inverso ("algum href bloqueado é prefixo deste endereço?")
+        // parecia equivalente e não é: /dashboard é prefixo de todas as telas,
+        // então bloquear a Visão Geral bloqueava o sistema inteiro.
+        const tela = telaDoPathname(pathname)
+        if (tela && hrefsBloqueados.has(tela.href)) {
           const destino = new URL('/dashboard/sem-acesso', request.url)
           destino.searchParams.set('de', pathname)
           return NextResponse.redirect(destino)

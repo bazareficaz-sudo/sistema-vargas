@@ -21,10 +21,28 @@ export type TelaDoMenu = NavItem & { group: string }
 export function telaDoPathname(pathname: string): TelaDoMenu | null {
   let melhor: TelaDoMenu | null = null
   for (const item of allItems()) {
-    if (pathname !== item.href && !pathname.startsWith(`${item.href}/`)) continue
+    if (pathname === item.href) {
+      if (!melhor || item.href.length > melhor.href.length) melhor = item
+      continue
+    }
+    // Casamento por prefixo só vale para tela que tem detalhe embaixo dela
+    // (/dashboard/entradas-xml → /dashboard/entradas-xml/<id>).
+    //
+    // A raiz /dashboard fica de fora, e isso não é detalhe: TODA tela do
+    // sistema mora embaixo de /dashboard/. Tratá-la como pai fazia bloquear a
+    // Visão Geral derrubar o sistema inteiro para o usuário — e fazia
+    // qualquer endereço não listado no menu (a própria /dashboard/sem-acesso,
+    // por exemplo) ser lido como se fosse a Visão Geral.
+    if (ehRaizDoPainel(item.href)) continue
+    if (!pathname.startsWith(`${item.href}/`)) continue
     if (!melhor || item.href.length > melhor.href.length) melhor = item
   }
   return melhor
+}
+
+/** `/dashboard` — a home do painel, não um guarda-chuva das outras telas. */
+function ehRaizDoPainel(href: string): boolean {
+  return href.replace(/\/+$/, '').split('/').filter(Boolean).length <= 1
 }
 
 /**
