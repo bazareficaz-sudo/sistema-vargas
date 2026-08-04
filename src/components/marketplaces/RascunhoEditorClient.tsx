@@ -121,6 +121,28 @@ export default function RascunhoEditorClient({
   // ── Base a partir do original ─────────────────────────────────────────────
   const [mudancasLimpeza, setMudancasLimpeza] = useState<string[] | null>(null)
 
+  // ── Reescrita com IA ──────────────────────────────────────────────────────
+  const [reescrevendo, setReescrevendo] = useState(false)
+  const [erroReescrita, setErroReescrita] = useState('')
+  const [vazouNaReescrita, setVazouNaReescrita] = useState<string[]>([])
+
+  async function reescreverComIA() {
+    setReescrevendo(true); setErroReescrita(''); setVazouNaReescrita([])
+    try {
+      const res = await fetch(`/api/marketplaces/rascunhos/${rascunho.id}/reescrever`, { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok || !d.ok) throw new Error(d.erro || `Erro ${res.status}`)
+      setTitulo(d.titulo)
+      setDescricao(d.descricao)
+      setVazouNaReescrita(d.vazou ?? [])
+      setMudancasLimpeza(null)
+    } catch (e: any) {
+      setErroReescrita(String(e?.message ?? e))
+    } finally {
+      setReescrevendo(false)
+    }
+  }
+
   function gerarBaseDoOriginal() {
     const opcoes = {
       vendedor: rascunho.origem_vendedor,
@@ -329,6 +351,59 @@ export default function RascunhoEditorClient({
               <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
                 O texto ao lado de cada campo é o <b>do anúncio de origem</b>, guardado só como referência.
                 Anúncio duplicado é penalizado no ranking dos marketplaces — reescreva com suas palavras.
+              </div>
+
+              {/* Reescrever com IA — texto novo, não texto limpo */}
+              <div className="px-3 py-3 rounded-lg border border-violet-200 bg-violet-50">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button type="button" onClick={reescreverComIA} disabled={reescrevendo}
+                    className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium disabled:opacity-50">
+                    {reescrevendo ? 'Escrevendo...' : '🪄 Reescrever com IA'}
+                  </button>
+                  <span className="text-xs text-slate-600">
+                    Escreve um texto <b>novo</b>, a partir da ficha técnica — não é o texto do
+                    vendedor limpo, é outro texto.
+                  </span>
+                </div>
+                {(titulo.trim() || descricao.trim()) && !reescrevendo && (
+                  <p className="text-[11px] text-amber-700 mt-2">
+                    Isso vai substituir o que já está escrito. Nada é salvo até você clicar em Salvar.
+                  </p>
+                )}
+                {erroReescrita && (
+                  <p className="text-[11px] text-red-700 mt-2">{erroReescrita}</p>
+                )}
+                {vazouNaReescrita.length > 0 && (
+                  <p className="text-[11px] text-red-700 mt-2">
+                    ⚠ O texto gerado ainda cita: {vazouNaReescrita.join(', ')}. Tire antes de publicar.
+                  </p>
+                )}
+                {/* A ficha técnica fica à vista aqui, e não só na aba Origem,
+                    por um motivo concreto: no primeiro teste real, a ficha
+                    capturada de uma luminária de dobradiça trazia "Com Wi-Fi:
+                    Sim" — erro de quem preencheu o anúncio de origem. A IA
+                    usou o dado corretamente e o texto saiu com Wi-Fi. Quem
+                    pega isso é o olho de quem conhece o produto, e para isso
+                    a ficha precisa estar na mesma tela do texto. */}
+                {Array.isArray(origem.atributos) && origem.atributos.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="text-[11px] text-violet-800 cursor-pointer">
+                      Ficha técnica que a IA usou ({origem.atributos.length} itens) — confira antes de salvar
+                    </summary>
+                    <div className="mt-2 max-h-48 overflow-y-auto rounded border border-violet-200 bg-white divide-y divide-violet-50">
+                      {origem.atributos.map((a: any, i: number) => (
+                        <div key={i} className="flex gap-2 px-2 py-1 text-[11px]">
+                          <span className="text-slate-500 w-44 shrink-0">{a.nome}</span>
+                          <span className="text-slate-800">{a.valor}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Esta ficha é do anúncio de origem e pode estar errada — quem preencheu foi
+                      o outro vendedor. Medida, material, quantidade e voltagem merecem conferência.
+                    </p>
+                  </details>
+                )}
               </div>
 
               {/* Base a partir do original */}
