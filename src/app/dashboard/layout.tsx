@@ -1,8 +1,11 @@
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadPlanData } from '@/lib/plans/access'
-import { permissoesEfetivas, buscarExcecoes, type Papel } from '@/lib/auth/permissoes'
+import { permissoesEfetivas, buscarExcecoes, telasBloqueadas, type Papel } from '@/lib/auth/permissoes'
+import { podeAbrirTela, telaDoPathname } from '@/lib/auth/telas'
 import type { PlanData } from '@/lib/plans/types'
 import { provisionarEmpresaEUsuario } from '@/lib/signup/provisionar'
 import PlanProvider from '@/components/plan/PlanProvider'
@@ -90,7 +93,45 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // usuario mais as excecoes configuradas em Usuarios -> Permissoes.
   const excecoes = await buscarExcecoes(supabase, user.id)
   const permissoes = permissoesEfetivas((profile?.role ?? null) as Papel | null, excecoes)
-  const planData = { ...(await loadPlanData(empresaId, user.id)), role: profile?.role ?? null, permissoes, suporte }
+  const bloqueadas = telasBloqueadas(excecoes)
+  const planData = {
+    ...(await loadPlanData(empresaId, user.id)),
+    role: profile?.role ?? null, permissoes, suporte, telasBloqueadas: bloqueadas,
+  }
+
+  // Controle de acesso por tela. Este layout é por onde toda página do
+  // dashboard passa, e o proxy manda o endereço no cabeçalho — é o único
+  // ponto onde dá para checar as 71 telas sem editar as 71.
+  //
+  // Esconder o item do menu não basta: o endereço digitado na barra continua
+  // abrindo a tela. Por isso a decisão acontece aqui, no servidor, e não no
+  // componente que desenha o menu.
+  const pathname = (await headers()).get('x-pathname') ?? ''
+  if (pathname && !podeAbrirTela(pathname, excecoes)) {
+    const tela = telaDoPathname(pathname)
+    return (
+      <PlanProvider data={planData}>
+        <DashboardShell empresa={empresaNome}>
+          <div className="p-6 max-w-lg">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6">
+              <span className="text-3xl block mb-2">🔒</span>
+              <h1 className="text-lg font-semibold text-slate-900">Sem acesso a esta tela</h1>
+              <p className="text-sm text-slate-600 mt-1">
+                {tela ? <>A tela <b>{tela.label}</b> não está liberada para o seu usuário.</> : 'Esta tela não está liberada para o seu usuário.'}
+              </p>
+              <p className="text-xs text-slate-500 mt-3">
+                Quem libera é um administrador, em Configurações → Usuários → Permissões.
+              </p>
+              <Link href="/dashboard"
+                className="inline-block mt-4 px-4 py-2 rounded-lg bg-slate-800 text-white text-sm hover:bg-slate-700">
+                Voltar para a Visão Geral
+              </Link>
+            </div>
+          </div>
+        </DashboardShell>
+      </PlanProvider>
+    )
+  }
 
   return (
     <PlanProvider data={planData}>

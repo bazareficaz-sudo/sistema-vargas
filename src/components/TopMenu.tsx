@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePlan } from '@/contexts/PlanContext'
-import { NAV, ALL_ITEMS, temModulo as temModuloBase, filtrarItens as filtrarItensBase, isActive as isActiveBase } from '@/components/nav-config'
+import { NAV, ALL_ITEMS, temModulo as temModuloBase, filtrarItens as filtrarItensBase, isActive as isActiveBase, telaBloqueada } from '@/components/nav-config'
 
 export default function TopMenu({ empresa }: { empresa: string }) {
   const pathname = usePathname()
@@ -73,9 +73,10 @@ export default function TopMenu({ empresa }: { empresa: string }) {
     if (!busca.trim()) return []
     const q = busca.toLowerCase()
     return ALL_ITEMS.filter(it =>
-      it.label.toLowerCase().includes(q) || it.href.toLowerCase().includes(q)
+      temModuloBase(plan, it.modulo) && !telaBloqueada(plan, it.href) &&
+      (it.label.toLowerCase().includes(q) || it.href.toLowerCase().includes(q))
     ).slice(0, 8)
-  }, [busca])
+  }, [busca, plan])
 
   async function logout() {
     const sb = createClient()

@@ -44,6 +44,9 @@ export interface PlanData {
   // Permissoes efetivas (papel + excecoes do usuario). Calculado no
   // layout do dashboard pra tela nao precisar consultar de novo.
   permissoes?: string[]
+  // Endereços de tela que este usuário não pode abrir (bloqueio explícito em
+  // Usuários → Permissões). Vazio para quase todo mundo: o padrão é liberado.
+  telasBloqueadas?: string[]
   // Acesso de suporte (impersonação temporária) — também mesclado por quem
   // chama loadPlanData, a partir de suporte_acessos.
   suporte: {

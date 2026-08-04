@@ -1,7 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { GRUPOS_PERMISSAO, PAPEIS, type PermissaoCodigo } from '@/lib/auth/permissoes'
+import { GRUPOS_PERMISSAO, PAPEIS, codigoDaTela, ehPermissaoDeTela, type PermissaoCodigo } from '@/lib/auth/permissoes'
+import { telasPorGrupo } from '@/lib/auth/telas'
+
+// Calculado uma vez: a lista de telas é estática (vem do menu).
+const TELAS = telasPorGrupo()
 
 export default function PermissoesUsuarioModal({ usuarioId, usuarioNome, onClose, onSalvo }: {
   usuarioId: string
@@ -27,6 +31,9 @@ export default function PermissoesUsuarioModal({ usuarioId, usuarioNome, onClose
       // Valor efetivo = padrão do papel com as exceções já aplicadas.
       const efetivo: Record<string, boolean> = {}
       for (const g of GRUPOS_PERMISSAO) for (const i of g.itens) efetivo[i.codigo] = base.has(i.codigo)
+      // Tela começa liberada para qualquer papel — bloquear é sempre uma
+      // escolha explícita de quem está nesta tela agora.
+      for (const g of TELAS) for (const t of g.telas) efetivo[codigoDaTela(t.href)] = true
       for (const [codigo, permitido] of Object.entries(data.excecoes ?? {})) efetivo[codigo] = permitido as boolean
       setValores(efetivo)
       setCarregando(false)
@@ -46,7 +53,10 @@ export default function PermissoesUsuarioModal({ usuarioId, usuarioNome, onClose
   }
 
   const papelLabel = PAPEIS.find(p => p.valor === papel)?.label ?? papel
-  const alteradas = Object.entries(valores).filter(([c, v]) => v !== padrao.has(c)).length
+  // O "padrão" de uma tela é sempre liberado; o de uma ação vem do papel.
+  const ehPadraoDe = (codigo: string) => ehPermissaoDeTela(codigo) ? true : padrao.has(codigo)
+  const alteradas = Object.entries(valores).filter(([c, v]) => v !== ehPadraoDe(c)).length
+  const telasBloqueadasCount = Object.entries(valores).filter(([c, v]) => ehPermissaoDeTela(c) && !v).length
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => !salvando && onClose()}>
@@ -95,6 +105,64 @@ export default function PermissoesUsuarioModal({ usuarioId, usuarioNome, onClose
                 </div>
               </div>
             ))}
+
+            {/* ── Telas ─────────────────────────────────────────────────
+                Aqui a lógica é invertida em relação às permissões acima:
+                toda tela começa liberada, e o gestor desmarca o que a pessoa
+                não deve abrir. Foi a decisão ao ligar este controle — ninguém
+                podia perder de um dia pro outro uma tela que já usava. */}
+            <div className="pt-2 border-t border-gray-200">
+              <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Telas do sistema</p>
+              <p className="text-xs text-gray-500 mb-3">
+                Todas liberadas por padrão. <strong>Desmarque</strong> o que este usuário não deve abrir —
+                a tela some do menu e o endereço digitado direto também é recusado.
+                {telasBloqueadasCount > 0 && (
+                  <span className="text-amber-700"> {telasBloqueadasCount} tela(s) bloqueada(s) hoje.</span>
+                )}
+              </p>
+
+              <div className="space-y-4">
+                {TELAS.map(g => {
+                  const bloqueadasNoGrupo = g.telas.filter(t => valores[codigoDaTela(t.href)] === false).length
+                  return (
+                    <div key={g.grupo}>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <p className="text-[11px] font-semibold text-gray-600">{g.grupo}</p>
+                        <button type="button"
+                          onClick={() => setValores(v => {
+                            // Se já tem alguma bloqueada, o atalho libera tudo;
+                            // senão bloqueia o grupo inteiro.
+                            const liberar = bloqueadasNoGrupo > 0
+                            const novo = { ...v }
+                            for (const t of g.telas) novo[codigoDaTela(t.href)] = liberar
+                            return novo
+                          })}
+                          className="text-[11px] text-blue-600 hover:underline">
+                          {bloqueadasNoGrupo > 0 ? 'liberar todas' : 'bloquear todas'}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        {g.telas.map(t => {
+                          const codigo = codigoDaTela(t.href)
+                          const ligado = valores[codigo] !== false
+                          return (
+                            <label key={t.href}
+                              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer text-sm ${ligado ? 'border-gray-200 hover:bg-gray-50' : 'border-amber-300 bg-amber-50'}`}>
+                              <input type="checkbox" checked={ligado}
+                                onChange={e => setValores(v => ({ ...v, [codigo]: e.target.checked }))}
+                                className="w-4 h-4 accent-blue-600 flex-shrink-0" />
+                              <span className={ligado ? 'text-gray-900' : 'text-amber-900 line-through'}>
+                                {t.icon ? `${t.icon} ` : ''}{t.label}
+                              </span>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
 
             <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
               <p className="text-xs text-gray-600">

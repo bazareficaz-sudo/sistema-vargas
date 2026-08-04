@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { exigirPermissao, registrarAuditoria, permissoesDoPapel, type Papel, type PermissaoCodigo } from '@/lib/auth/permissoes'
+import { exigirPermissao, registrarAuditoria, permissoesDoPapel, padraoDaPermissao, type Papel } from '@/lib/auth/permissoes'
 
 // Lê e grava as exceções de permissão de um usuário.
 //
@@ -56,15 +56,16 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ ok: false, erro: 'Você não pode remover a sua própria permissão de gerenciar usuários.' }, { status: 400 })
   }
 
-  const padrao = new Set(permissoesDoPapel(alvo.role as Papel))
   const admin = createAdminClient()
 
   const paraGravar: { empresa_id: string; usuario_id: string; codigo: string; permitido: boolean; atualizado_por: string; updated_at: string }[] = []
   const paraApagar: string[] = []
 
   for (const [codigo, permitido] of Object.entries(permissoes)) {
-    const ehPadrao = padrao.has(codigo as PermissaoCodigo)
-    if (permitido === ehPadrao) paraApagar.push(codigo)   // voltou ao padrão do papel
+    // Ação: o padrão vem do papel. Tela: o padrão é sempre liberada, então só
+    // vira linha no banco quando o gestor bloqueia de propósito.
+    const ehPadrao = padraoDaPermissao(alvo.role as Papel, codigo)
+    if (permitido === ehPadrao) paraApagar.push(codigo)   // voltou ao padrão
     else paraGravar.push({
       empresa_id: guarda.empresaId, usuario_id: id, codigo, permitido,
       atualizado_por: guarda.userId, updated_at: new Date().toISOString(),

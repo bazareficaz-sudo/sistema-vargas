@@ -272,8 +272,19 @@ export function temModulo(plan: PlanData, modulo?: string) {
   return plan.modulos.includes(modulo)
 }
 
+/**
+ * Tela bloqueada para este usuário em Usuários → Permissões.
+ *
+ * Esconder do menu é só conforto: quem digitar o endereço na barra é barrado
+ * no layout do dashboard, no servidor. Sem os dois, ou a pessoa vê um item
+ * que não abre, ou abre uma tela que não deveria.
+ */
+export function telaBloqueada(plan: PlanData, href: string) {
+  return (plan.telasBloqueadas ?? []).includes(href)
+}
+
 export function filtrarItens(plan: PlanData, items: NavItem[]) {
-  return items.filter(it => temModulo(plan, it.modulo))
+  return items.filter(it => temModulo(plan, it.modulo) && !telaBloqueada(plan, it.href))
 }
 
 export function isActive(pathname: string, href: string) {

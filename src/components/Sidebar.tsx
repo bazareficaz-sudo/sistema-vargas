@@ -10,7 +10,7 @@ import { useLS } from '@/hooks/useLS'
 import { GROUP_ICONS, IconClock, IconLogout, IconNews, IconSearch, IconStar } from '@/components/nav-icons'
 import {
   NAV, ALL_ITEMS, temModulo as temModuloBase, filtrarItens as filtrarItensBase, isActive as isActiveBase,
-  type NavItem,
+  telaBloqueada, type NavItem,
 } from '@/components/nav-config'
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -101,14 +101,21 @@ export default function Sidebar({ empresa }: { empresa: string }) {
     router.refresh()
   }
 
+  // Busca, favoritos e recentes partem da lista completa — sem este filtro,
+  // uma tela bloqueada some do menu mas reaparece por qualquer um dos três.
+  const itensPermitidos = useMemo(
+    () => ALL_ITEMS.filter(it => temModuloBase(plan, it.modulo) && !telaBloqueada(plan, it.href)),
+    [plan],
+  )
+
   const resultadosBusca = useMemo(() => {
     if (!busca.trim()) return []
     const q = busca.toLowerCase()
-    return ALL_ITEMS.filter(it => it.label.toLowerCase().includes(q) || it.href.toLowerCase().includes(q)).slice(0, 10)
-  }, [busca])
+    return itensPermitidos.filter(it => it.label.toLowerCase().includes(q) || it.href.toLowerCase().includes(q)).slice(0, 10)
+  }, [busca, itensPermitidos])
 
-  const favItems = ALL_ITEMS.filter(it => favorites.includes(it.href))
-  const recentItems = recentes.map(r => ALL_ITEMS.find(it => it.href === r.href)).filter((it): it is NavItem & { group: string } => !!it)
+  const favItems = itensPermitidos.filter(it => favorites.includes(it.href))
+  const recentItems = recentes.map(r => itensPermitidos.find(it => it.href === r.href)).filter((it): it is NavItem & { group: string } => !!it)
 
   // Metadados de cada grupo visível — usado tanto pro rail quanto pro conteúdo do flyout.
   const groupsData = useMemo(() => {

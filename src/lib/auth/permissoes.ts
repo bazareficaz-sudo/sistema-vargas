@@ -117,6 +117,43 @@ export function temPermissao(papel: Papel | null | undefined, codigo: PermissaoC
 
 export type Excecoes = Record<string, boolean>
 
+// ── Permissao de TELA ────────────────────────────────────────────────────────
+//
+// Diferente das permissoes de acao acima, que sao um conjunto fixo de codigos
+// por papel, a permissao de tela e identificada pelo proprio endereco da tela
+// (`tela:/dashboard/contas-pagar`). Nao ha lista paralela pra manter: a lista
+// de telas do sistema ja e o menu.
+//
+// E ela e LIBERADA POR PADRAO, para qualquer papel. Isso e uma decisao, nao um
+// descuido: quando este controle entrou, ninguem podia perder de um dia pro
+// outro uma tela que ja usava. Bloquear e sempre uma excecao explicita que o
+// gestor marca na tela de Usuarios.
+export const PREFIXO_TELA = 'tela:'
+
+export function codigoDaTela(href: string): string {
+  return `${PREFIXO_TELA}${href}`
+}
+
+export function ehPermissaoDeTela(codigo: string): boolean {
+  return codigo.startsWith(PREFIXO_TELA)
+}
+
+/**
+ * O valor padrao de uma permissao, antes das excecoes do usuario.
+ * Tela: sempre liberada. Acao: depende do papel.
+ */
+export function padraoDaPermissao(papel: Papel | null | undefined, codigo: string): boolean {
+  if (ehPermissaoDeTela(codigo)) return true
+  return permissoesDoPapel(papel).includes(codigo as PermissaoCodigo)
+}
+
+/** Telas que este usuario NAO pode abrir (so as bloqueadas de propósito). */
+export function telasBloqueadas(excecoes: Excecoes = {}): string[] {
+  return Object.entries(excecoes)
+    .filter(([codigo, permitido]) => ehPermissaoDeTela(codigo) && permitido === false)
+    .map(([codigo]) => codigo.slice(PREFIXO_TELA.length))
+}
+
 /** O que o papel da por padrao — usado pra mostrar o "padrao do papel" na tela. */
 export function permissoesDoPapel(papel: Papel | null | undefined): PermissaoCodigo[] {
   if (!papel) return []
