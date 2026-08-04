@@ -19,6 +19,8 @@ type Produto = {
   id: string; nome: string; sku: string; ean: string | null; estoque: number; unidade: string
   preco_venda: number; preco_custo: number; marca: string | null; categoria: string | null
   ncm?: string | null; cest?: string | null; codigo_fornecedor?: string | null
+  preco_promocional?: number | null; promocao_ativa?: boolean | null
+  promocao_inicio?: string | null; promocao_fim?: string | null
 }
 type Fornecedor = { id: string; nome: string; cnpj: string }
 
@@ -40,11 +42,13 @@ const MAP_STATUS_COR: Record<string, string> = {
 // ── Componente principal ─────────────────────────────────────────────────────
 export default function EntradaXmlDetalheClient({
   entrada: entradaInicial, itensIniciais, duplicatasIniciais,
-  depositos, produtos, fornecedores, empresaId, operador, somenteLeitura = false
+  depositos, produtos, fornecedores, empresaId, operador, somenteLeitura = false,
+  alertaCustoAtivo = true, alertaCustoPct = 5,
 }: {
   entrada: Entrada; itensIniciais: Item[]; duplicatasIniciais: Duplicata[]
   depositos: Deposito[]; produtos: Produto[]; fornecedores: Fornecedor[]
   empresaId: string; operador: string; somenteLeitura?: boolean
+  alertaCustoAtivo?: boolean; alertaCustoPct?: number
 }) {
   const sb = createClient()
   const router = useRouter()
@@ -180,6 +184,17 @@ export default function EntradaXmlDetalheClient({
   const [modoPreco, setModoPreco] = useState<'margem' | 'preco'>('margem')
   const [produtosAtuais, setProdutosAtuais] = useState<Record<string, Produto>>({})
 
+  // Promoção — o preço promocional é por item, mas a janela de datas é uma só
+  // para toda a nota (foi assim que o gestor pediu: um lote de produtos entra
+  // na mesma promoção, com o mesmo início e o mesmo fim).
+  const [precosPromo, setPrecosPromo] = useState<Record<string, number>>({})
+  const [markupPromoInputs, setMarkupPromoInputs] = useState<Record<string, string>>({})
+  const [modoPromo, setModoPromo] = useState<'markup' | 'desconto'>('markup')
+  const [promoValor, setPromoValor] = useState(20)
+  const [promoInicio, setPromoInicio] = useState('')
+  const [promoFim, setPromoFim] = useState('')
+  const [promoCarregada, setPromoCarregada] = useState(false)
+
   // Finalizar
   const [depositoId, setDepositoId] = useState(entrada.deposito_id ?? depositos.find(d => d.principal)?.id ?? '')
   const [gerarContaPagar, setGerarContaPagar] = useState(true)
@@ -200,7 +215,7 @@ export default function EntradaXmlDetalheClient({
     if (ids.length === 0) { setProdutosAtuais({}); return }
     let ativo = true
     sb.from('produtos')
-      .select('id, nome, sku, ean, estoque, unidade, preco_venda, preco_custo, marca, categoria, ncm, cest, codigo_fornecedor')
+      .select('id, nome, sku, ean, estoque, unidade, preco_venda, preco_custo, marca, categoria, ncm, cest, codigo_fornecedor, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim')
       .in('id', ids)
       .then(({ data, error }) => {
         if (!ativo) return
@@ -387,16 +402,115 @@ export default function EntradaXmlDetalheClient({
     setPrecosNovos(novos)
   }
 
+  // ── Promoção ─────────────────────────────────────────────────────────────
+  // "Já estava em promoção" exige o interruptor ligado, não só um preço
+  // promocional gravado: quem desligou a promoção de propósito e deixou o
+  // preço lá não deve ver esse preço voltar sozinho ao passar por esta tela.
+  function jaEstavaEmPromocao(produtoId: string) {
+    const p = produtosAtuais[produtoId]
+    return !!p?.promocao_ativa && Number(p?.preco_promocional ?? 0) > 0
+  }
+
+  // Traz o que o produto já tem cadastrado de promoção, uma vez só, quando os
+  // dados atuais chegam. Sem isso, abrir a aba e salvar apagaria promoções que
+  // já existiam — o campo em branco seria lido como "tirar da promoção".
+  useEffect(() => {
+    if (promoCarregada) return
+    const produtosCarregados = Object.values(produtosAtuais)
+    if (produtosCarregados.length === 0) return
+
+    const iniciais: Record<string, number> = {}
+    for (const item of itens) {
+      if (!item.produto_id) continue
+      if (!jaEstavaEmPromocao(item.produto_id)) continue
+      iniciais[item.id] = Number(produtosAtuais[item.produto_id]?.preco_promocional ?? 0)
+    }
+    setPrecosPromo(iniciais)
+
+    // Datas: pega a primeira janela encontrada como sugestão para o lote.
+    const comData = produtosCarregados.find(p => p.promocao_inicio || p.promocao_fim)
+    if (comData) {
+      if (comData.promocao_inicio) setPromoInicio(comData.promocao_inicio.slice(0, 10))
+      if (comData.promocao_fim) setPromoFim(comData.promocao_fim.slice(0, 10))
+    }
+    setPromoCarregada(true)
+  }, [produtosAtuais, itens, promoCarregada])
+
+  function aplicarPromocao() {
+    const novos: Record<string, number> = {}
+    for (const item of itens) {
+      if (!item.produto_id || item.status_mapeamento === 'ignorado') continue
+      const custo = custoComAdic(item)
+      if (modoPromo === 'markup') {
+        // Markup sobre o custo novo — é o mesmo raciocínio da margem padrão,
+        // só que com um número menor, que é o que define a promoção.
+        if (custo > 0) novos[item.id] = Math.ceil(custo * (1 + promoValor / 100) * 100) / 100
+      } else {
+        // Desconto sobre o preço de venda que vai ficar valendo.
+        const base = precosNovos[item.id] ?? produtosAtuais[item.produto_id]?.preco_venda ?? 0
+        if (base > 0) novos[item.id] = Math.ceil(base * (1 - promoValor / 100) * 100) / 100
+      }
+    }
+    setPrecosPromo(novos)
+    setMarkupPromoInputs({})
+  }
+
+  function limparPromocao() {
+    setPrecosPromo({})
+    setMarkupPromoInputs({})
+  }
+
+  // Quantos itens vão entrar/sair da promoção — mostrado antes de salvar, para
+  // o gestor não descobrir depois quantos produtos ele mexeu.
+  const itensPrecificados = itens.filter(i => i.produto_id && i.status_mapeamento !== 'ignorado')
+  const itensEmPromocao = itensPrecificados.filter(i => (precosPromo[i.id] ?? 0) > 0)
+  const itensSaindoDaPromocao = itensPrecificados.filter(
+    i => !((precosPromo[i.id] ?? 0) > 0) && jaEstavaEmPromocao(i.produto_id))
+  const promoDatasInvalidas = !!(promoInicio && promoFim && promoFim < promoInicio)
+
   async function salvarPrecos() {
+    if (promoDatasInvalidas) { alert('A data final da promoção é anterior à data inicial.'); return }
     setSalvando(true)
     try {
-      for (const [itemId, preco] of Object.entries(precosNovos)) {
-        const item = itens.find(i => i.id === itemId)
-        if (!item?.produto_id) continue
+      // Fim do dia: quem digita 31/08 espera vender em promoção o dia 31
+      // inteiro, não até a meia-noite que abre o dia.
+      const inicioISO = promoInicio ? new Date(`${promoInicio}T00:00:00`).toISOString() : null
+      const fimISO = promoFim ? new Date(`${promoFim}T23:59:59`).toISOString() : null
+
+      for (const item of itensPrecificados) {
+        const preco = precosNovos[item.id]
+        const promo = precosPromo[item.id] ?? 0
+        const jaTinhaPromo = jaEstavaEmPromocao(item.produto_id)
+
+        // Item que o usuário não tocou (sem preço novo e sem promoção, nem
+        // agora nem antes) segue intocado, como já era antes desta tela ganhar
+        // promoção — não é papel deste botão mexer em quem ficou de fora.
+        if (preco === undefined && promo <= 0 && !jaTinhaPromo) continue
+
         const custo = custoComAdic(item)
-        const { error } = await sb.from('produtos').update({ preco_custo: custo, preco_venda: preco }).eq('id', item.produto_id).eq('empresa_id', empresaId)
+        const patch: Record<string, any> = { preco_custo: custo }
+        if (preco !== undefined) patch.preco_venda = preco
+
+        if (promo > 0) {
+          patch.preco_promocional = promo
+          patch.promocao_ativa = true
+          patch.promocao_inicio = inicioISO
+          patch.promocao_fim = fimISO
+        } else if (jaTinhaPromo) {
+          // Deixar o campo em branco num produto que ESTAVA em promoção é a
+          // forma de encerrar a promoção dele. Produto que nunca teve promoção
+          // não é tocado — não faria sentido gravar "nada" em cima de nada.
+          patch.preco_promocional = null
+          patch.promocao_ativa = false
+          patch.promocao_inicio = null
+          patch.promocao_fim = null
+        }
+
+        const { error } = await sb.from('produtos').update(patch)
+          .eq('id', item.produto_id).eq('empresa_id', empresaId)
         if (error) throw error
       }
+
       const { error: erroEntrada } = await sb.from('nfe_entradas').update({ status: 'aguardando_financeiro' }).eq('id', entrada.id)
       if (erroEntrada) throw erroEntrada
       setEntrada(p => ({ ...p, status: 'aguardando_financeiro' }))
@@ -974,8 +1088,69 @@ export default function EntradaXmlDetalheClient({
               Aplicar a todos
             </button>
           </div>
-          <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
+
+          {/* ── Barra de promoção ─────────────────────────────────────
+              O preço promocional é por produto, mas a janela de datas vale
+              para o lote inteiro — foi assim que o gestor pediu. */}
+          <div className="bg-white border border-orange-100 rounded-2xl p-4 shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-orange-600 text-sm font-medium">🔖 Promoção</span>
+              <span className="text-slate-400 text-xs">
+                Opcional — produto com o campo &quot;Preço Promo&quot; vazio simplesmente não entra.
+              </span>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex bg-slate-100 rounded-xl p-1">
+                <button onClick={() => setModoPromo('markup')} disabled={readonly}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${modoPromo === 'markup' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+                  Markup sobre o custo
+                </button>
+                <button onClick={() => setModoPromo('desconto')} disabled={readonly}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${modoPromo === 'desconto' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+                  Desconto sobre o preço
+                </button>
+              </div>
+              <label className="text-slate-500 text-sm">
+                {modoPromo === 'markup' ? 'Markup promocional (%)' : 'Desconto (%)'}
+              </label>
+              <input type="number" value={promoValor} disabled={readonly}
+                onChange={e => setPromoValor(+e.target.value)}
+                className="w-24 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-sm" />
+              <button onClick={aplicarPromocao} disabled={readonly}
+                className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-sm rounded-xl disabled:opacity-50">
+                Aplicar a todos
+              </button>
+              <button onClick={limparPromocao} disabled={readonly}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm rounded-xl disabled:opacity-50">
+                Limpar
+              </button>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="text-slate-500 text-sm">Início</label>
+              <input type="date" value={promoInicio} disabled={readonly}
+                onChange={e => setPromoInicio(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-sm" />
+              <label className="text-slate-500 text-sm">Fim</label>
+              <input type="date" value={promoFim} disabled={readonly}
+                onChange={e => setPromoFim(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-sm" />
+              <span className="text-slate-400 text-xs">
+                Sem data = promoção sem prazo. A data final vale até o fim daquele dia.
+              </span>
+            </div>
+            {promoDatasInvalidas && (
+              <p className="text-red-600 text-xs">A data final é anterior à data inicial.</p>
+            )}
+            {(itensEmPromocao.length > 0 || itensSaindoDaPromocao.length > 0) && (
+              <p className="text-slate-500 text-xs">
+                {itensEmPromocao.length > 0 && <>Vão entrar/continuar em promoção: <strong>{itensEmPromocao.length}</strong> produto(s). </>}
+                {itensSaindoDaPromocao.length > 0 && <>Vão <strong>sair</strong> da promoção: {itensSaindoDaPromocao.length} produto(s).</>}
+              </p>
+            )}
+          </div>
+
+          <div className="bg-white border border-slate-100 rounded-2xl overflow-x-auto shadow-sm">
+            <table className="w-full text-sm min-w-[900px]">
               <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                 <th className="px-3 py-2 text-left">Produto</th>
                 <th className="px-3 py-2 text-right">Custo Novo</th>
@@ -983,6 +1158,8 @@ export default function EntradaXmlDetalheClient({
                 <th className="px-3 py-2 text-right">Margem Atual</th>
                 <th className="px-3 py-2 text-right">Novo Preço</th>
                 <th className="px-3 py-2 text-right">Nova Margem</th>
+                <th className="px-3 py-2 text-right bg-orange-50/60">Markup Promo</th>
+                <th className="px-3 py-2 text-right bg-orange-50/60">Preço Promo</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {itens.filter(i => i.produto_id && i.status_mapeamento !== 'ignorado').map(item => {
@@ -993,10 +1170,60 @@ export default function EntradaXmlDetalheClient({
                   const margemAtual = custoAtual > 0 ? ((precoAtual - custoAtual) / custoAtual * 100) : null
                   const novoPr = precosNovos[item.id] ?? precoAtual
                   const novaMargem = custo > 0 ? ((novoPr - custo) / custo * 100) : 0
+
+                  // ── Variação de custo ──────────────────────────────
+                  // Só compara quando há custo anterior; produto que nunca
+                  // teve custo cadastrado não "aumentou 100%", ele estreou.
+                  // Meio centavo de diferença é arredondamento, não variação.
+                  const temCustoAnterior = custoAtual > 0
+                  const difCusto = temCustoAnterior ? custo - custoAtual : 0
+                  const varCustoPct = temCustoAnterior ? (difCusto / custoAtual) * 100 : 0
+                  const custoMudou = temCustoAnterior && Math.abs(difCusto) >= 0.005
+                  const custoSubiu = custoMudou && difCusto > 0
+                  const destacarLinha = alertaCustoAtivo && custoSubiu && varCustoPct > alertaCustoPct
+
+                  // ── Variação do preço de venda ─────────────────────
+                  const difPreco = novoPr - precoAtual
+                  const precoMudou = Math.abs(difPreco) >= 0.005
+                  const precoSubiu = difPreco > 0
+
+                  const promo = precosPromo[item.id] ?? 0
+                  const markupPromo = custo > 0 && promo > 0 ? ((promo - custo) / custo * 100) : 0
+                  const promoAbaixoDoCusto = promo > 0 && promo <= custo
+                  const promoAcimaDoPreco = promo > 0 && novoPr > 0 && promo >= novoPr
+
                   return (
-                    <tr key={item.id} className="text-slate-700">
-                      <td className="px-3 py-2 text-xs max-w-[200px] truncate">{item.descricao_sistema || item.descricao_xml}</td>
-                      <td className="px-3 py-2 text-right text-xs text-slate-500">{fmt(custo)}</td>
+                    <tr key={item.id}
+                      className={destacarLinha ? 'bg-red-50 text-slate-700' : 'text-slate-700'}>
+                      <td className="px-3 py-2 text-xs max-w-[200px] truncate">
+                        {destacarLinha && (
+                          <span className="mr-1" title={`Custo subiu ${varCustoPct.toFixed(1)}% — acima do limite de ${alertaCustoPct}% configurado`}>⚠️</span>
+                        )}
+                        {item.descricao_sistema || item.descricao_xml}
+                      </td>
+
+                      {/* Custo novo + seta de variação */}
+                      <td className="px-3 py-2 text-right text-xs">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <span className={destacarLinha ? 'text-red-700 font-semibold' : 'text-slate-500'}>{fmt(custo)}</span>
+                          {!temCustoAnterior ? (
+                            <span className="text-slate-300" title="Produto sem custo cadastrado antes desta nota">—</span>
+                          ) : !custoMudou ? (
+                            <span className="text-slate-400" title="Custo igual ao cadastrado">=</span>
+                          ) : custoSubiu ? (
+                            <span className="text-red-600 font-semibold whitespace-nowrap"
+                              title={`Custo anterior ${fmt(custoAtual)} → subiu ${varCustoPct.toFixed(1)}%`}>
+                              ▲ {varCustoPct.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span className="text-emerald-600 font-semibold whitespace-nowrap"
+                              title={`Custo anterior ${fmt(custoAtual)} → caiu ${Math.abs(varCustoPct).toFixed(1)}%`}>
+                              ▼ {Math.abs(varCustoPct).toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
                       <td className="px-3 py-2 text-right text-xs text-slate-500">{fmt(precoAtual)}</td>
                       <td className="px-3 py-2 text-right text-xs">
                         {margemAtual === null ? (
@@ -1005,15 +1232,29 @@ export default function EntradaXmlDetalheClient({
                           <span className={margemAtual > 0 ? 'text-slate-500' : 'text-red-500'}>{margemAtual.toFixed(1)}%</span>
                         )}
                       </td>
+
+                      {/* Novo preço + seta de sentido da mudança */}
                       <td className="px-3 py-2 text-right">
-                        {readonly ? (
-                          <span className="text-sm">{fmt(novoPr)}</span>
-                        ) : (
-                          <input type="number" step="0.01" value={novoPr}
-                            onChange={e => setPrecosNovos(p => ({ ...p, [item.id]: +e.target.value }))}
-                            className="w-24 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
-                        )}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {readonly ? (
+                            <span className="text-sm">{fmt(novoPr)}</span>
+                          ) : (
+                            <input type="number" step="0.01" value={novoPr}
+                              onChange={e => setPrecosNovos(p => ({ ...p, [item.id]: +e.target.value }))}
+                              className="w-24 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                          )}
+                          {!precoMudou ? (
+                            <span className="text-slate-400 text-xs" title="Preço de venda mantido">=</span>
+                          ) : precoSubiu ? (
+                            <span className="text-red-600 text-xs font-semibold"
+                              title={`Preço sobe de ${fmt(precoAtual)} para ${fmt(novoPr)}`}>▲</span>
+                          ) : (
+                            <span className="text-emerald-600 text-xs font-semibold"
+                              title={`Preço cai de ${fmt(precoAtual)} para ${fmt(novoPr)}`}>▼</span>
+                          )}
+                        </div>
                       </td>
+
                       <td className="px-3 py-2 text-right">
                         {readonly ? (
                           <span className={`text-xs ${novaMargem > 0 ? 'text-emerald-600' : 'text-red-500'}`}>{novaMargem.toFixed(1)}%</span>
@@ -1036,15 +1277,76 @@ export default function EntradaXmlDetalheClient({
                             className="w-20 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                         )}
                       </td>
+
+                      {/* ── Promoção: markup e preço, um recalcula o outro ── */}
+                      <td className="px-3 py-2 text-right bg-orange-50/40">
+                        {readonly ? (
+                          <span className="text-xs text-slate-500">{promo > 0 ? `${markupPromo.toFixed(1)}%` : '—'}</span>
+                        ) : (
+                          <input type="number" step="0.1" placeholder="—"
+                            value={markupPromoInputs[item.id] ?? (promo > 0 ? markupPromo.toFixed(1) : '')}
+                            onChange={e => {
+                              const raw = e.target.value
+                              setMarkupPromoInputs(p => ({ ...p, [item.id]: raw }))
+                              if (raw.trim() === '') {
+                                setPrecosPromo(p => { const { [item.id]: _r, ...rest } = p; return rest })
+                                return
+                              }
+                              const m = parseFloat(raw)
+                              if (!Number.isNaN(m) && custo > 0) {
+                                setPrecosPromo(p => ({ ...p, [item.id]: Math.ceil(custo * (1 + m / 100) * 100) / 100 }))
+                              }
+                            }}
+                            onBlur={() => setMarkupPromoInputs(p => {
+                              const { [item.id]: _remove, ...rest } = p
+                              return rest
+                            })}
+                            className="w-20 bg-white border border-orange-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right bg-orange-50/40">
+                        <div className="flex items-center justify-end gap-1">
+                          {readonly ? (
+                            <span className="text-xs text-slate-500">{promo > 0 ? fmt(promo) : '—'}</span>
+                          ) : (
+                            <input type="number" step="0.01" placeholder="—"
+                              value={promo > 0 ? promo : ''}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value)
+                                setMarkupPromoInputs(p => { const { [item.id]: _r, ...rest } = p; return rest })
+                                if (Number.isNaN(v) || v <= 0) {
+                                  setPrecosPromo(p => { const { [item.id]: _r, ...rest } = p; return rest })
+                                } else {
+                                  setPrecosPromo(p => ({ ...p, [item.id]: v }))
+                                }
+                              }}
+                              className="w-24 bg-white border border-orange-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                          )}
+                          {promoAbaixoDoCusto && (
+                            <span className="text-red-600 text-xs" title={`Abaixo do custo novo (${fmt(custo)}) — venda no prejuízo`}>⚠</span>
+                          )}
+                          {!promoAbaixoDoCusto && promo > 0 && promoAcimaDoPreco && (
+                            <span className="text-amber-600 text-xs" title={`Igual ou acima do preço normal (${fmt(novoPr)}) — não é desconto nenhum`}>⚠</span>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   )
                 })}
               </tbody>
             </table>
           </div>
+
+          <p className="text-slate-400 text-xs">
+            ▲ vermelho = subiu · ▼ verde = caiu · = sem mudança.
+            {alertaCustoAtivo
+              ? ` Linha em vermelho: aumento de custo acima de ${alertaCustoPct}% (ajustável em Configurações → Compras e Custos).`
+              : ' O destaque de linha por aumento de custo está desligado em Configurações → Compras e Custos.'}
+          </p>
+
           {!readonly && (
             <div className="flex justify-end">
-              <button onClick={salvarPrecos} disabled={salvando}
+              <button onClick={salvarPrecos} disabled={salvando || promoDatasInvalidas}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50">
                 {salvando ? 'Salvando...' : 'Atualizar Preços →'}
               </button>

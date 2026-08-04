@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import OrcamentosClient from '@/components/orcamentos/OrcamentosClient'
+import { promocaoVigente } from '@/lib/produtos/promocao'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,11 +39,13 @@ export default async function OrcamentosPage() {
   const precoCheioPorProduto: Record<string, number> = {}
   if (produtoIds.length > 0) {
     const { data: prods } = await sb.from('produtos')
-      .select('id, preco_custo, preco_venda, preco_promocional, promocao_ativa')
+      .select('id, preco_custo, preco_venda, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim')
       .in('id', produtoIds as string[])
     for (const p of prods ?? []) {
       custoPorProduto[p.id] = Number(p.preco_custo ?? 0)
-      if (p.promocao_ativa && Number(p.preco_promocional ?? 0) > 0) {
+      // Promoção fora da janela de datas não conta como promoção — senão um
+      // desconto de fim de semana ficaria mascarando a margem para sempre.
+      if (promocaoVigente(p)) {
         precoCheioPorProduto[p.id] = Number(p.preco_venda ?? 0)
       }
     }

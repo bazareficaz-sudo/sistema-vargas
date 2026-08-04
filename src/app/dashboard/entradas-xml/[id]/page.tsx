@@ -18,7 +18,7 @@ export default async function EntradaXmlDetalhePage({ params }: { params: Promis
   // módulo entradas completo — nesse caso a tela abre em modo só-leitura.
   const somenteLeitura = !(await podeAcessarModulo('entradas', empresaId, user.id))
 
-  const [entradaRes, itensRes, dupRes, depositosRes, produtosRes, fornecedoresRes] = await Promise.all([
+  const [entradaRes, itensRes, dupRes, depositosRes, produtosRes, fornecedoresRes, configComercialRes] = await Promise.all([
     sb.from('nfe_entradas').select('*').eq('id', id).eq('empresa_id', empresaId).single(),
     sb.from('nfe_itens').select('*').eq('entrada_id', id).order('num_item'),
     sb.from('nfe_duplicatas').select('*').eq('entrada_id', id).order('data_vencimento'),
@@ -30,6 +30,11 @@ export default async function EntradaXmlDetalhePage({ params }: { params: Promis
       .order('nome')
       .limit(2000),
     sb.from('fornecedores').select('id, nome, cnpj').eq('empresa_id', empresaId).order('nome'),
+    // Limite de aumento de custo que destaca a linha na revisão de preços.
+    // maybeSingle: empresa sem linha de config cai no padrão de 5%.
+    sb.from('empresa_config_comercial')
+      .select('alerta_aumento_custo_ativo, alerta_aumento_custo_pct')
+      .eq('empresa_id', empresaId).maybeSingle(),
   ])
 
   if (!entradaRes.data) notFound()
@@ -45,6 +50,8 @@ export default async function EntradaXmlDetalhePage({ params }: { params: Promis
       empresaId={empresaId}
       operador={user.email ?? ''}
       somenteLeitura={somenteLeitura}
+      alertaCustoAtivo={configComercialRes.data?.alerta_aumento_custo_ativo ?? true}
+      alertaCustoPct={Number(configComercialRes.data?.alerta_aumento_custo_pct ?? 5)}
     />
   )
 }

@@ -7,12 +7,14 @@ import { calcSaude, type SaudeConfig, type FaixaSaude, FAIXAS_PADRAO, CONFIG_PAD
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import { promocaoVigente } from '@/lib/produtos/promocao'
 
 type Produto = {
   id: string; nome: string; sku: string; ean: string | null
   preco_venda: number; preco_custo: number; estoque: number; unidade: string
   marca: string | null
   promocao_ativa: boolean; preco_promocional: number | null
+  promocao_inicio?: string | null; promocao_fim?: string | null
 }
 type ItemVenda = {
   id: string; produto_id: string; nome: string; sku: string
@@ -183,7 +185,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     if (!q.trim() || q.length < 2) { setSugestoes([]); return }
     setBuscando(true)
     const palavras = q.trim().split(/\s+/).filter(Boolean)
-    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional'
+    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional, promocao_inicio, promocao_fim'
 
     if (palavras.length === 1 && /^\d{8,14}$/.test(palavras[0])) {
       const { data } = await sb.from('produtos')
@@ -251,7 +253,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           ? { ...i, quantidade: newQ, total: newQ * i.preco_unitario * (1 - i.desconto / 100) }
           : i)
       }
-      const emPromo = !!(p.promocao_ativa && p.preco_promocional && p.preco_promocional < p.preco_venda)
+      const emPromo = promocaoVigente(p)
       const precoFinal = emPromo ? p.preco_promocional! : p.preco_venda
       return [...prev, {
         id: uid(), produto_id: p.id, nome: p.nome, sku: p.sku,
@@ -826,7 +828,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
               </div>
               <div ref={sugestaoListRef}>
                 {sugestoes.map((p, i) => {
-                  const emPromo = !!(p.promocao_ativa && p.preco_promocional && p.preco_promocional < p.preco_venda)
+                  const emPromo = promocaoVigente(p)
                   return (
                   <div key={p.id} onMouseDown={() => { confirmarAdicao(p); setSugestaoIdx(-1) }}
                     className={`grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-2 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
