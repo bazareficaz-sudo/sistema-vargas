@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { limparTextoOrigem } from '@/lib/marketplaces/limparTextoOrigem'
+import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
+import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
 
 type ProdutoVinculado = {
   id: string; nome: string; sku: string | null; ean: string | null
@@ -66,10 +68,12 @@ function BadgeConfianca({ metodo, score }: { metodo: string; score: number }) {
 }
 
 export default function RascunhoEditorClient({
-  rascunho, historico,
+  rascunho, historico, canais, empresaId,
 }: {
   rascunho: Rascunho
   historico: { id: string; acao: string; observacao: string | null; created_at: string; usuario_nome: string | null }[]
+  canais: { id: string; nome: string; plataforma: string }[]
+  empresaId: string
 }) {
   const router = useRouter()
   const origem = rascunho.dados_origem ?? {}
@@ -186,6 +190,48 @@ export default function RascunhoEditorClient({
   useEffect(() => {
     if (!rascunho.produto_id) buscarSugestao()
   }, [rascunho.produto_id, buscarSugestao])
+
+  // ── Publicação ────────────────────────────────────────────────────────────
+  // Só Mercado Livre e Shopee sabem criar anúncio hoje. Canal de outra
+  // plataforma aparece na lista com o motivo, em vez de sumir e deixar o
+  // operador procurando por que a loja dele não está ali.
+  const PUBLICAVEIS = ['mercadolivre', 'shopee']
+  const [publicandoEm, setPublicandoEm] = useState<{ id: string; nome: string; plataforma: string } | null>(null)
+  const [copiandoImagens, setCopiandoImagens] = useState(false)
+  const publicacoes: any[] = Array.isArray(editados.publicacoes) ? editados.publicacoes : []
+
+  async function copiarImagensParaProduto() {
+    setCopiandoImagens(true); setMsg(null)
+    try {
+      const res = await fetch(`/api/marketplaces/rascunhos/${rascunho.id}/copiar-imagens`, { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok || !d.ok) throw new Error(d.erro || `Erro ${res.status}`)
+      setMsg({
+        tipo: 'ok',
+        texto: d.adicionadas > 0
+          ? `${d.adicionadas} imagem(ns) adicionada(s) ao produto${d.jaExistiam ? ` (${d.jaExistiam} já estavam lá)` : ''}.`
+          : 'Essas imagens já estavam no produto.',
+      })
+      router.refresh()
+    } catch (e: any) {
+      setMsg({ tipo: 'erro', texto: String(e?.message ?? e) })
+    } finally {
+      setCopiandoImagens(false)
+    }
+  }
+
+  async function registrarPublicacao(canal: { id: string; nome: string }) {
+    try {
+      await fetch(`/api/marketplaces/rascunhos/${rascunho.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registrarPublicacao: { canalId: canal.id } }),
+      })
+    } finally {
+      setPublicandoEm(null)
+      router.refresh()
+    }
+  }
 
   // ── Preço e estoque pelas regras já cadastradas ───────────────────────────
   const [precificacao, setPrecificacao] = useState<any>(null)
@@ -944,10 +990,64 @@ export default function RascunhoEditorClient({
               className="w-full px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 text-sm hover:bg-emerald-50 disabled:opacity-40">
               Marcar como pronto
             </button>
-            <p className="text-[11px] text-slate-400 pt-1">
-              Publicar em marketplace ainda não faz parte deste módulo — por enquanto o rascunho
-              chega até &quot;pronto&quot;.
-            </p>
+          </div>
+
+          {/* ── Publicar ───────────────────────────────────────────────── */}
+          <div className="border border-slate-200 rounded-xl p-4 bg-white space-y-2">
+            <h2 className="text-sm font-semibold text-slate-800">Publicar</h2>
+
+            {publicacoes.length > 0 && (
+              <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5">
+                Já publicado em: {publicacoes.map((p: any) => p.canalNome).join(', ')}
+              </div>
+            )}
+
+            {!produto ? (
+              <p className="text-xs text-slate-500">Vincule um produto antes de publicar.</p>
+            ) : prontos < checks.length ? (
+              <p className="text-xs text-amber-700">
+                Resolva os itens pendentes da saúde do rascunho antes de publicar.
+              </p>
+            ) : canais.length === 0 ? (
+              <p className="text-xs text-slate-500">Nenhum canal ativo.</p>
+            ) : (
+              <>
+                {imagensEscolhidas.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2">
+                    <button onClick={copiarImagensParaProduto} disabled={copiandoImagens}
+                      className="text-xs text-blue-700 hover:underline disabled:opacity-50">
+                      {copiandoImagens ? 'copiando...' : `Levar as ${imagensEscolhidas.length} imagens escolhidas para o produto`}
+                    </button>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      O anúncio usa as imagens do <b>cadastro do produto</b>. As escolhidas aqui só
+                      chegam lá por este botão.
+                    </p>
+                  </div>
+                )}
+
+                {canais.map(c => {
+                  const podePublicar = PUBLICAVEIS.includes(c.plataforma)
+                  const jaFoi = publicacoes.some((p: any) => p.canalId === c.id)
+                  return (
+                    <div key={c.id} className="flex items-center gap-2">
+                      <button
+                        onClick={() => setPublicandoEm(c)}
+                        disabled={!podePublicar}
+                        title={podePublicar ? '' : `O sistema ainda não cria anúncio em ${c.plataforma}.`}
+                        className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-40 text-left">
+                        {jaFoi ? '↻ Publicar de novo em ' : 'Publicar em '}<b>{c.nome}</b>
+                        {!podePublicar && <span className="text-[10px] text-slate-400"> (não disponível)</span>}
+                      </button>
+                    </div>
+                  )
+                })}
+
+                <p className="text-[11px] text-amber-700 pt-1">
+                  Publicar cria um anúncio <b>de verdade</b> na sua conta de vendedor, com o preço
+                  que estiver na tela de confirmação. Confira antes de concluir.
+                </p>
+              </>
+            )}
           </div>
 
           {historico.length > 0 && (
@@ -967,6 +1067,31 @@ export default function RascunhoEditorClient({
           )}
         </div>
       </div>
+
+      {/* Publicação: reaproveita as mesmas telas usadas para criar anúncio a
+          partir do produto, já preenchidas com o conteúdo do rascunho. Elas é
+          que sabem pedir categoria, atributos obrigatórios e logística de cada
+          marketplace — refazer isso aqui seria duplicar o que já funciona. */}
+      {publicandoEm?.plataforma === 'mercadolivre' && produto && (
+        <CriarAnuncioMercadoLivreModal
+          canal={{ id: publicandoEm.id, nome: publicandoEm.nome }}
+          empresaId={empresaId}
+          produtoIdInicial={produto.id}
+          conteudoInicial={{ titulo, descricao, preco }}
+          onClose={() => setPublicandoEm(null)}
+          onCriado={() => registrarPublicacao(publicandoEm)}
+        />
+      )}
+      {publicandoEm?.plataforma === 'shopee' && produto && (
+        <CriarAnuncioShopeeModal
+          canal={{ id: publicandoEm.id, nome: publicandoEm.nome }}
+          empresaId={empresaId}
+          produtoIdInicial={produto.id}
+          conteudoInicial={{ titulo, descricao, preco }}
+          onClose={() => setPublicandoEm(null)}
+          onCriado={() => registrarPublicacao(publicandoEm)}
+        />
+      )}
 
       {/* Imagem em tamanho grande — é aqui que dá para enxergar marca d'água,
           logotipo ou telefone impresso na foto, que no polegar não aparece. */}

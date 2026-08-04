@@ -14,7 +14,7 @@ export default async function RascunhoEditorPage({ params }: { params: Promise<{
   const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
   const empresaId = profile?.empresa_id ?? ''
 
-  const [rascunhoRes, historicoRes] = await Promise.all([
+  const [rascunhoRes, historicoRes, canaisRes] = await Promise.all([
     sb.from('anuncio_rascunhos')
       .select('*, produtos(id, nome, sku, ean, preco_venda, preco_custo, estoque, marca)')
       .eq('id', id).eq('empresa_id', empresaId).maybeSingle(),
@@ -22,6 +22,11 @@ export default async function RascunhoEditorPage({ params }: { params: Promise<{
       .select('id, acao, observacao, created_at, usuario_nome')
       .eq('rascunho_id', id).eq('empresa_id', empresaId)
       .order('created_at', { ascending: false }).limit(20),
+    // Canais para o painel de publicar. Só os ativos — publicar em canal
+    // desligado não faria nada além de erro.
+    sb.from('marketplace_canais')
+      .select('id, nome, plataforma')
+      .eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
   ])
 
   if (rascunhoRes.error) {
@@ -42,6 +47,8 @@ export default async function RascunhoEditorPage({ params }: { params: Promise<{
     <RascunhoEditorClient
       rascunho={rascunhoRes.data as any}
       historico={(historicoRes.data ?? []) as any[]}
+      canais={(canaisRes.data ?? []) as any[]}
+      empresaId={empresaId}
     />
   )
 }

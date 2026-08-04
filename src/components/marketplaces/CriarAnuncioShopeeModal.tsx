@@ -19,12 +19,16 @@ type ValorEscolhido = { valueId?: number; valueIds?: number[]; texto?: string; u
 type Marca = { brand_id: number; original_brand_name: string }
 type CanalLogistica = { logistic_id: number; logistic_name: string; enabled: boolean }
 
-export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, onClose, onCriado }: {
+export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, conteudoInicial, onClose, onCriado }: {
   canal?: { id: string; nome: string }
   canais?: { id: string; nome: string }[]
   empresaId: string; produtoIdInicial?: string
   // Anúncio já publicado em outro canal, usado como base (replicar).
   origemAnuncioId?: string
+  // Conteúdo já trabalhado em Anúncios Rascunhos. Entra por cima do que vem
+  // do cadastro do produto — se o operador escreveu título e descrição lá,
+  // não faz sentido a tela reabrir com o texto do cadastro.
+  conteudoInicial?: { titulo?: string | null; descricao?: string | null; preco?: string | null }
   onClose: () => void
   onCriado: () => void
 }) {
@@ -85,7 +89,11 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     if (!produtoIdInicial) return
     const sb = createClient()
     sb.from('produtos').select('*').eq('id', produtoIdInicial).single().then(({ data }) => {
-      if (data) selecionarProduto(data)
+      if (!data) return
+      selecionarProduto(data)
+      if (conteudoInicial?.titulo) setTitulo(conteudoInicial.titulo)
+      if (conteudoInicial?.descricao) setDescricao(conteudoInicial.descricao)
+      if (conteudoInicial?.preco) setPreco(conteudoInicial.preco)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produtoIdInicial])

@@ -122,14 +122,39 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (editados.titulo) patch.titulo = editados.titulo
   }
 
-  if ('status' in body) {
+  // ── Publicação ───────────────────────────────────────────────────────────
+  // "Publicado" não é um rótulo que se escolhe: é consequência de um anúncio
+  // ter sido criado de verdade no marketplace. Só a tela de publicar manda
+  // este campo, e ela manda junto qual canal e qual anúncio saiu — sem essa
+  // prova, o status continua recusado.
+  if (body.registrarPublicacao) {
+    const p = body.registrarPublicacao
+    const canalId = texto(p?.canalId, 60)
+    if (!canalId) {
+      return NextResponse.json({ ok: false, erro: 'Publicação sem canal informado' }, { status: 400 })
+    }
+    const { data: canal } = await sb.from('marketplace_canais')
+      .select('id, nome').eq('id', canalId).eq('empresa_id', guarda.empresaId).maybeSingle()
+    if (!canal) {
+      return NextResponse.json({ ok: false, erro: 'Canal não encontrado nesta empresa' }, { status: 400 })
+    }
+
+    const anteriores = Array.isArray((atual.dados_editados as any)?.publicacoes)
+      ? (atual.dados_editados as any).publicacoes
+      : []
+    const editados = { ...(patch.dados_editados ?? atual.dados_editados ?? {}) }
+    editados.publicacoes = [
+      ...anteriores,
+      { canalId: canal.id, canalNome: canal.nome, em: new Date().toISOString() },
+    ]
+    patch.dados_editados = editados
+    patch.status = 'publicado'
+  } else if ('status' in body) {
     if (!STATUS_VALIDOS.includes(body.status)) {
       return NextResponse.json({ ok: false, erro: 'Status inválido' }, { status: 400 })
     }
-    // "Publicado" é consequência de publicar de verdade, coisa que ainda não
-    // existe. Deixar marcar à mão criaria um rótulo que mente.
     if (body.status === 'publicado') {
-      return NextResponse.json({ ok: false, erro: 'A publicação ainda não está disponível — este status é definido pelo sistema ao publicar.' }, { status: 400 })
+      return NextResponse.json({ ok: false, erro: 'Este status é definido pelo sistema quando o anúncio é criado no marketplace — não dá para marcar à mão.' }, { status: 400 })
     }
     patch.status = body.status
   }

@@ -16,12 +16,16 @@ type Atributo = {
 }
 type TipoAnuncio = { id: string; name: string }
 
-export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, onClose, onCriado }: {
+export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, conteudoInicial, onClose, onCriado }: {
   canal?: { id: string; nome: string }
   canais?: { id: string; nome: string }[]
   empresaId: string; produtoIdInicial?: string
   // Anúncio já publicado em outro canal, usado como base (replicar).
   origemAnuncioId?: string
+  // Conteúdo já trabalhado em Anúncios Rascunhos. Entra por cima do que vem
+  // do cadastro do produto — se o operador escreveu título e descrição lá,
+  // não faz sentido a tela reabrir com o texto do cadastro.
+  conteudoInicial?: { titulo?: string | null; descricao?: string | null; preco?: string | null }
   onClose: () => void
   onCriado: () => void
 }) {
@@ -227,7 +231,15 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
     if (!produtoIdInicial) return
     const sb = createClient()
     sb.from('produtos').select('*').eq('id', produtoIdInicial).single().then(({ data }) => {
-      if (data) selecionarProduto(data)
+      if (!data) return
+      selecionarProduto(data)
+      if (conteudoInicial?.titulo) {
+        const t = conteudoInicial.titulo.slice(0, 60)
+        setTitulo(t)
+        tituloRef.current = t
+      }
+      if (conteudoInicial?.descricao) setDescricao(conteudoInicial.descricao)
+      if (conteudoInicial?.preco) setPreco(conteudoInicial.preco)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produtoIdInicial])
