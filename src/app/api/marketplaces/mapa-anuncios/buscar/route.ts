@@ -22,7 +22,7 @@ export async function GET(req: Request) {
 
   const condicoes = palavras.flatMap(p => [`nome.ilike.%${p}%`, `sku.ilike.%${p}%`, `ean.ilike.%${p}%`, `codigo_fornecedor.ilike.%${p}%`]).join(',')
   const { data } = await sb.from('produtos')
-    .select('id, nome, sku, ean, tipo, foto_url, codigo_fornecedor')
+    .select('id, nome, sku, ean, tipo, foto_url, codigo_fornecedor, preco_venda, preco_custo, estoque')
     .eq('empresa_id', guarda.empresaId)
     .eq('ativo', true)
     .or(condicoes)

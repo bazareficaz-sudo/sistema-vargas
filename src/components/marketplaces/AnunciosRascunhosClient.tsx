@@ -141,7 +141,12 @@ export default function AnunciosRascunhosClient({
           {rascunhos.map(r => {
             const s = STATUS[r.status] ?? STATUS.capturado
             return (
-              <div key={r.id} className="px-4 py-3 flex items-start gap-3 hover:bg-slate-50">
+              // A linha inteira abre o editor. O link "ver original" e o
+              // preço ficam dentro, então o clique neles não pode subir e
+              // navegar junto — daí o stopPropagation no <a>.
+              <div key={r.id}
+                onClick={() => router.push(`/dashboard/anuncios-rascunhos/${r.id}`)}
+                className="px-4 py-3 flex items-start gap-3 hover:bg-slate-50 cursor-pointer">
                 {r.imagem_principal
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={r.imagem_principal} alt="" className="w-12 h-12 rounded object-cover border border-slate-200 shrink-0" />
@@ -159,7 +164,9 @@ export default function AnunciosRascunhosClient({
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     Capturado em {dataBr(r.capturado_em)}
                     {r.origem_url && (
-                      <> · <a href={r.origem_url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">ver original</a></>
+                      <> · <a href={r.origem_url} target="_blank" rel="noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="text-blue-500 hover:underline">ver original</a></>
                     )}
                   </p>
                 </div>
