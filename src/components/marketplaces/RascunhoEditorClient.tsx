@@ -75,7 +75,7 @@ export default function RascunhoEditorClient({
   const origem = rascunho.dados_origem ?? {}
   const editados = rascunho.dados_editados ?? {}
 
-  const [aba, setAba] = useState<'conteudo' | 'imagens' | 'produto' | 'origem'>(
+  const [aba, setAba] = useState<'conteudo' | 'imagens' | 'produto' | 'comercial' | 'origem'>(
     rascunho.produto_id ? 'conteudo' : 'produto')
 
   // Conteúdo de trabalho: começa do que já foi editado; se nada foi editado
@@ -186,6 +186,32 @@ export default function RascunhoEditorClient({
   useEffect(() => {
     if (!rascunho.produto_id) buscarSugestao()
   }, [rascunho.produto_id, buscarSugestao])
+
+  // ── Preço e estoque pelas regras já cadastradas ───────────────────────────
+  const [precificacao, setPrecificacao] = useState<any>(null)
+  const [carregandoPreco, setCarregandoPreco] = useState(false)
+  const [erroPreco, setErroPreco] = useState('')
+
+  const calcularPrecos = useCallback(async () => {
+    setCarregandoPreco(true); setErroPreco('')
+    try {
+      const res = await fetch(`/api/marketplaces/rascunhos/${rascunho.id}/precificar`)
+      const d = await res.json()
+      if (!res.ok || !d.ok) throw new Error(d.erro || `Erro ${res.status}`)
+      setPrecificacao(d)
+    } catch (e: any) {
+      setErroPreco(String(e?.message ?? e))
+    } finally {
+      setCarregandoPreco(false)
+    }
+  }, [rascunho.id])
+
+  // Só busca quando a aba é aberta, e só uma vez — é consulta que varre
+  // canais, regras e estoque por depósito; não faz sentido pagar isso em toda
+  // abertura do rascunho.
+  useEffect(() => {
+    if (aba === 'comercial' && !precificacao && !carregandoPreco) calcularPrecos()
+  }, [aba, precificacao, carregandoPreco, calcularPrecos])
 
   // ── Busca manual de produto ───────────────────────────────────────────────
   const [busca, setBusca] = useState('')
@@ -330,6 +356,7 @@ export default function RascunhoEditorClient({
               ['conteudo', 'Conteúdo'],
               ['imagens', `Imagens${imagensEscolhidas.length > 0 ? ` (${imagensEscolhidas.length})` : ''}`],
               ['produto', produto ? 'Produto ✓' : 'Produto'],
+              ['comercial', 'Preço e estoque'],
               ['origem', 'Origem'],
             ] as const).map(([chave, rotulo]) => (
               <button key={chave} onClick={() => setAba(chave as any)}
@@ -685,6 +712,136 @@ export default function RascunhoEditorClient({
                   <p className="text-xs text-slate-400 mt-2">Nenhum produto encontrado.</p>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── ABA PREÇO E ESTOQUE ───────────────────────────────────── */}
+          {aba === 'comercial' && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-sm font-semibold text-slate-800">Preço pelas regras da empresa</h2>
+                <button onClick={calcularPrecos} disabled={carregandoPreco}
+                  className="text-xs text-blue-600 hover:underline">
+                  {carregandoPreco ? 'calculando...' : 'recalcular'}
+                </button>
+              </div>
+
+              {erroPreco && (
+                <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">{erroPreco}</div>
+              )}
+
+              {!precificacao && carregandoPreco && (
+                <p className="text-sm text-slate-400">Consultando canais e regras...</p>
+              )}
+
+              {precificacao?.semProduto && (
+                <div className="px-3 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                  {precificacao.aviso}{' '}
+                  <button onClick={() => setAba('produto')} className="underline">ir para a aba Produto</button>
+                </div>
+              )}
+
+              {precificacao && !precificacao.semProduto && (
+                <>
+                  {/* Referências: de onde sai o cálculo */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      ['Custo de referência', brl(precificacao.custoReferencia),
+                        precificacao.kit ? 'somado dos componentes do kit' : 'custo do produto'],
+                      ['Preço no seu catálogo', brl(precificacao.produto.precoVenda), null],
+                      ['Estoque', String(precificacao.kit ? precificacao.kit.estoque : precificacao.produto.estoque),
+                        precificacao.kit ? 'kits possíveis' : null],
+                      ['Preço na origem', precificacao.precoOrigem != null ? brl(precificacao.precoOrigem) : '—',
+                        'só referência'],
+                    ].map(([r, v, nota]) => (
+                      <div key={r as string} className="border border-slate-200 rounded-lg px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{r}</p>
+                        <p className="text-sm text-slate-800 mt-0.5">{v}</p>
+                        {nota && <p className="text-[10px] text-slate-400">{nota}</p>}
+                      </div>
+                    ))}
+                  </div>
+
+                  {precificacao.custoReferencia <= 0 && (
+                    <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                      O produto vinculado está <b>sem custo cadastrado</b>. Regras que calculam a
+                      partir do custo não têm como rodar, e o markup não pode ser conferido.
+                    </div>
+                  )}
+
+                  {precificacao.canais.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      Nenhum canal ativo. Conecte um marketplace em Marketplaces → Canais.
+                    </p>
+                  ) : precificacao.totalRegras === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      Você tem canal ativo, mas nenhuma regra de preço cadastrada. Crie em
+                      Marketplaces → Regras de Preço — as mesmas regras valem aqui.
+                    </p>
+                  ) : (
+                    precificacao.canais.map((canal: any) => (
+                      <div key={canal.canalId}>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                          {canal.canalNome}
+                        </p>
+                        {canal.regras.length === 0 ? (
+                          <p className="text-xs text-slate-400 mb-3">Sem regra ativa neste canal.</p>
+                        ) : (
+                          <div className="space-y-2 mb-4">
+                            {canal.regras.map((r: any) => (
+                              <div key={r.id}
+                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${r.abaixoDoCusto ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="text-sm text-slate-800">{r.nome}</p>
+                                    {r.paraPausar && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
+                                        estoque de risco
+                                      </span>
+                                    )}
+                                    {r.abaixoDoCusto && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 text-red-700">
+                                        no prejuízo
+                                      </span>
+                                    )}
+                                  </div>
+                                  {r.aplicavel ? (
+                                    <p className="text-[11px] text-slate-500 mt-0.5">
+                                      {r.preco != null ? <>preço {brl(r.preco)}</> : 'sem preço'}
+                                      {r.markup != null && <> · markup {r.markup.toFixed(1)}%</>}
+                                      {r.estoque != null && <> · estoque {r.estoque}</>}
+                                      {r.depositoNome && <> · depósito {r.depositoNome}</>}
+                                    </p>
+                                  ) : (
+                                    <p className="text-[11px] text-amber-700 mt-0.5">{r.motivo}</p>
+                                  )}
+                                </div>
+                                {r.aplicavel && r.preco != null && (
+                                  <button
+                                    onClick={() => { setPreco(String(r.preco)); setAba('conteudo') }}
+                                    className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 text-white hover:bg-slate-700 shrink-0">
+                                    usar {brl(r.preco)}
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+
+                  <p className="text-[11px] text-slate-400">
+                    O markup mostrado é sobre o custo. Regras de margem líquida da Shopee já
+                    descontam comissão, taxa e imposto dentro do preço calculado — nesse caso o
+                    markup aqui é maior que a margem que sobra, e é assim mesmo.
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    Clicar em &quot;usar&quot; só preenche o campo de preço na aba Conteúdo. Nada é
+                    enviado para marketplace nenhum — publicar ainda não faz parte deste módulo.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
