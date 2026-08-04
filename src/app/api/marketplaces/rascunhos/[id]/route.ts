@@ -27,6 +27,28 @@ function textoLongo(v: unknown, max: number): string | null {
   return limpo ? limpo.slice(0, max) : null
 }
 
+const MAX_IMAGENS = 20
+
+/** Só http(s), sem repetição, na ordem que o operador escolheu. */
+function listaDeImagens(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null
+  const vistas = new Set<string>()
+  const out: string[] = []
+  for (const item of v) {
+    if (typeof item !== 'string') continue
+    try {
+      const u = new URL(item.trim())
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') continue
+      const url = u.toString()
+      if (vistas.has(url)) continue
+      vistas.add(url)
+      out.push(url)
+      if (out.length >= MAX_IMAGENS) break
+    } catch { /* url inválida é descartada, não derruba o salvamento */ }
+  }
+  return out
+}
+
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const sb = await createClient()
@@ -81,6 +103,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const n = Number(d.preco)
       editados.preco = Number.isFinite(n) && n > 0 ? n : null
     }
+    if ('imagens' in d) {
+      const imagens = listaDeImagens(d.imagens)
+      if (imagens) {
+        editados.imagens = imagens
+        // A capa da listagem passa a ser a primeira escolhida. Sem escolha
+        // nenhuma, a capa continua sendo a da origem — e `qtd_imagens` segue
+        // significando "quantas foram capturadas", que é o que a listagem diz.
+        if (imagens.length > 0) patch.imagem_principal = imagens[0]
+      }
+    }
+
     editados.atualizadoEm = new Date().toISOString()
     patch.dados_editados = editados
 

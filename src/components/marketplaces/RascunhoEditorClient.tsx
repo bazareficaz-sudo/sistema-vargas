@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { limparTextoOrigem } from '@/lib/marketplaces/limparTextoOrigem'
 
 type ProdutoVinculado = {
   id: string; nome: string; sku: string | null; ean: string | null
@@ -74,7 +75,7 @@ export default function RascunhoEditorClient({
   const origem = rascunho.dados_origem ?? {}
   const editados = rascunho.dados_editados ?? {}
 
-  const [aba, setAba] = useState<'conteudo' | 'produto' | 'origem'>(
+  const [aba, setAba] = useState<'conteudo' | 'imagens' | 'produto' | 'origem'>(
     rascunho.produto_id ? 'conteudo' : 'produto')
 
   // Conteúdo de trabalho: começa do que já foi editado; se nada foi editado
@@ -93,6 +94,48 @@ export default function RascunhoEditorClient({
 
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+
+  // Imagens da origem e a escolha do operador. Enquanto ele não escolhe nada,
+  // a seleção fica vazia — e vazio aqui significa "ainda não decidi", não
+  // "não quero nenhuma".
+  const imagensOrigem: string[] = Array.isArray(origem.imagens) ? origem.imagens : []
+  const [imagensEscolhidas, setImagensEscolhidas] = useState<string[]>(
+    Array.isArray(editados.imagens) ? editados.imagens : [])
+  const [zoom, setZoom] = useState<string | null>(null)
+
+  function alternarImagem(src: string) {
+    setImagensEscolhidas(atual =>
+      atual.includes(src) ? atual.filter(x => x !== src) : [...atual, src])
+  }
+  function moverImagem(src: string, delta: number) {
+    setImagensEscolhidas(atual => {
+      const i = atual.indexOf(src)
+      const j = i + delta
+      if (i < 0 || j < 0 || j >= atual.length) return atual
+      const copia = [...atual]
+      ;[copia[i], copia[j]] = [copia[j], copia[i]]
+      return copia
+    })
+  }
+
+  // ── Base a partir do original ─────────────────────────────────────────────
+  const [mudancasLimpeza, setMudancasLimpeza] = useState<string[] | null>(null)
+
+  function gerarBaseDoOriginal() {
+    const opcoes = {
+      vendedor: rascunho.origem_vendedor,
+      marcaOrigem: origem.marca,
+      // A marca que entra no lugar é a do SEU cadastro, quando há produto
+      // vinculado. Sem vínculo, a marca de origem só é removida.
+      marcaDestino: produto?.marca ?? null,
+    }
+    const t = limparTextoOrigem(origem.titulo, opcoes)
+    const d = limparTextoOrigem(origem.descricao, opcoes)
+    setTitulo(t.texto)
+    setDescricao(d.texto)
+    if (produto?.marca) setMarca(produto.marca)
+    setMudancasLimpeza([...new Set([...t.mudancas, ...d.mudancas])])
+  }
 
   // ── Sugestão de produto ───────────────────────────────────────────────────
   const [sugestao, setSugestao] = useState<Candidato | null>(null)
@@ -158,6 +201,7 @@ export default function RascunhoEditorClient({
             marca: marca.trim() || null,
             categoria: categoria.trim() || null,
             preco: preco.trim() ? Number(preco.replace(',', '.')) : null,
+            imagens: imagensEscolhidas,
           },
           observacao: observacao.trim() || null,
           ...extra,
@@ -223,13 +267,12 @@ export default function RascunhoEditorClient({
   }
 
   // ── Painel de saúde ───────────────────────────────────────────────────────
-  const imagens: string[] = Array.isArray(origem.imagens) ? origem.imagens : []
   const checks = [
     { ok: !!produto, rotulo: 'Produto do sistema vinculado', dica: 'Sem isso não dá para levar preço nem estoque.' },
     { ok: titulo.trim().length >= 10, rotulo: 'Título próprio escrito', dica: 'Copiar o título do vendedor derruba o anúncio no ranking e pode dar problema de direito autoral.' },
     { ok: descricao.trim().length >= 30, rotulo: 'Descrição própria escrita', dica: 'A descrição capturada é do vendedor de origem — reescreva.' },
     { ok: !!preco.trim(), rotulo: 'Preço definido', dica: 'O preço da origem é referência, não o seu.' },
-    { ok: imagens.length > 0, rotulo: 'Tem imagens de referência', dica: 'Nenhuma imagem foi capturada.' },
+    { ok: imagensEscolhidas.length > 0, rotulo: 'Imagens escolhidas', dica: 'Escolha na aba Imagens quais entram no anúncio — algumas trazem logo ou marca da loja de origem.' },
   ]
   const prontos = checks.filter(c => c.ok).length
 
@@ -263,6 +306,7 @@ export default function RascunhoEditorClient({
           <div className="flex gap-1 border-b border-slate-200 mb-4">
             {([
               ['conteudo', 'Conteúdo'],
+              ['imagens', `Imagens${imagensEscolhidas.length > 0 ? ` (${imagensEscolhidas.length})` : ''}`],
               ['produto', produto ? 'Produto ✓' : 'Produto'],
               ['origem', 'Origem'],
             ] as const).map(([chave, rotulo]) => (
@@ -285,6 +329,44 @@ export default function RascunhoEditorClient({
               <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
                 O texto ao lado de cada campo é o <b>do anúncio de origem</b>, guardado só como referência.
                 Anúncio duplicado é penalizado no ranking dos marketplaces — reescreva com suas palavras.
+              </div>
+
+              {/* Base a partir do original */}
+              <div className="px-3 py-3 rounded-lg border border-slate-200 bg-slate-50">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button type="button" onClick={gerarBaseDoOriginal}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium">
+                    ✨ Montar base a partir do original
+                  </button>
+                  <span className="text-xs text-slate-500">
+                    Copia o texto de origem já sem a loja e sem a marca dela
+                    {produto?.marca ? <> — a marca vira <b>{produto.marca}</b>, do seu cadastro</> : null}.
+                  </span>
+                </div>
+                {(titulo.trim() || descricao.trim()) && (
+                  <p className="text-[11px] text-amber-700 mt-2">
+                    Isso vai substituir o que já está escrito nos campos de título e descrição.
+                  </p>
+                )}
+                {!produto && (
+                  <p className="text-[11px] text-slate-500 mt-2">
+                    Sem produto vinculado, a marca de origem é apenas removida — vincule na aba
+                    Produto para que a sua entre no lugar.
+                  </p>
+                )}
+                {mudancasLimpeza && (
+                  <div className="mt-2 text-[11px] text-slate-600">
+                    {mudancasLimpeza.length > 0 ? (
+                      <>Foi tirado do texto: {mudancasLimpeza.join(' · ')}.</>
+                    ) : (
+                      <>Nada precisou ser removido — o texto de origem não citava loja, marca nem contato.</>
+                    )}
+                    <p className="text-amber-700 mt-1">
+                      Isto <b>não é</b> um texto reescrito: sem os nomes, ele ainda é o texto do vendedor
+                      de origem. Use como ponto de partida e escreva do seu jeito antes de publicar.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <Campo rotulo="Título" original={origem.titulo}>
@@ -339,6 +421,96 @@ export default function RascunhoEditorClient({
                   placeholder="Anotação para você — não vai para lugar nenhum."
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" />
               </div>
+            </div>
+          )}
+
+          {/* ── ABA IMAGENS ───────────────────────────────────────────── */}
+          {aba === 'imagens' && (
+            <div className="space-y-4">
+              <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                <b>Confira cada imagem antes de marcar.</b> É comum a foto trazer marca d&apos;água,
+                logotipo ou telefone da loja de origem — e isso não pode ir para o seu anúncio.
+                Clique na imagem para ver grande.
+              </div>
+
+              {imagensOrigem.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhuma imagem foi capturada neste rascunho.</p>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-sm text-slate-700">
+                      <b>{imagensEscolhidas.length}</b> de {imagensOrigem.length} escolhida(s)
+                    </span>
+                    <button type="button" onClick={() => setImagensEscolhidas([])}
+                      className="text-xs text-slate-500 hover:text-slate-800">desmarcar todas</button>
+                    <span className="text-xs text-slate-400">
+                      A primeira da sua lista é a capa do anúncio.
+                    </span>
+                  </div>
+
+                  {/* Escolhidas, na ordem */}
+                  {imagensEscolhidas.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Escolhidas, na ordem</p>
+                      <div className="flex gap-2 flex-wrap">
+                        {imagensEscolhidas.map((src, i) => (
+                          <div key={src} className="w-28">
+                            <div className="relative aspect-square rounded-lg overflow-hidden border-2 border-emerald-400 bg-slate-50">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={src} alt="" className="w-full h-full object-contain cursor-zoom-in"
+                                onClick={() => setZoom(src)} />
+                              <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold">
+                                {i === 0 ? 'capa' : i + 1}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-center gap-1 mt-1">
+                              <button type="button" onClick={() => moverImagem(src, -1)} disabled={i === 0}
+                                title="Mover para trás"
+                                className="px-1.5 py-0.5 text-xs rounded border border-slate-200 disabled:opacity-30">←</button>
+                              <button type="button" onClick={() => moverImagem(src, 1)} disabled={i === imagensEscolhidas.length - 1}
+                                title="Mover para frente"
+                                className="px-1.5 py-0.5 text-xs rounded border border-slate-200 disabled:opacity-30">→</button>
+                              <button type="button" onClick={() => alternarImagem(src)}
+                                title="Tirar do anúncio"
+                                className="px-1.5 py-0.5 text-xs rounded border border-slate-200 text-red-600">×</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Todas as capturadas */}
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                      Todas as capturadas ({imagensOrigem.length})
+                    </p>
+                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                      {imagensOrigem.map((src, i) => {
+                        const escolhida = imagensEscolhidas.includes(src)
+                        return (
+                          <div key={i}
+                            className={`relative aspect-square rounded-lg overflow-hidden border-2 bg-slate-50 ${escolhida ? 'border-emerald-400' : 'border-slate-200'}`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={src} alt="" className="w-full h-full object-contain cursor-zoom-in"
+                              onClick={() => setZoom(src)} />
+                            <button type="button" onClick={() => alternarImagem(src)}
+                              className={`absolute bottom-1 left-1 right-1 py-1 rounded text-[10px] font-semibold ${escolhida ? 'bg-emerald-600 text-white' : 'bg-white/90 border border-slate-300 text-slate-700'}`}>
+                              {escolhida ? '✓ escolhida' : 'usar esta'}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400">
+                    As imagens continuam hospedadas no site de origem — o sistema guarda o endereço
+                    delas, não uma cópia. Se você tiver foto própria do produto, ela é sempre a
+                    escolha melhor.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -470,25 +642,12 @@ export default function RascunhoEditorClient({
                 </div>
               )}
 
-              {imagens.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                    Imagens capturadas ({imagens.length})
-                  </p>
-                  <div className="px-3 py-2 mb-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                    Imagens de terceiro. Servem para você saber o que é o produto — não use como
-                    foto do seu anúncio sem ter o direito de usar.
-                  </div>
-                  <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-                    {imagens.map((src, i) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <a key={i} href={src} target="_blank" rel="noreferrer noopener"
-                        className="block aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
-                        <img src={src} alt="" className="w-full h-full object-contain" />
-                      </a>
-                    ))}
-                  </div>
-                </div>
+              {imagensOrigem.length > 0 && (
+                <p className="text-sm text-slate-600">
+                  {imagensOrigem.length} imagem(ns) capturada(s) —{' '}
+                  <button type="button" onClick={() => setAba('imagens')}
+                    className="text-blue-600 hover:underline">escolher quais entram no anúncio</button>.
+                </p>
               )}
 
               {Array.isArray(origem.atributos) && origem.atributos.length > 0 && (
@@ -576,6 +735,24 @@ export default function RascunhoEditorClient({
           )}
         </div>
       </div>
+
+      {/* Imagem em tamanho grande — é aqui que dá para enxergar marca d'água,
+          logotipo ou telefone impresso na foto, que no polegar não aparece. */}
+      {zoom && (
+        <div onClick={() => setZoom(null)}
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6 cursor-zoom-out">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoom} alt="" className="max-w-full max-h-full object-contain" />
+          <div className="absolute bottom-4 left-0 right-0 text-center">
+            <p className="text-white/80 text-xs">
+              Tem logo, marca d&apos;água ou telefone de outra loja? Então essa imagem não serve.
+              {' '}<a href={zoom} target="_blank" rel="noreferrer noopener"
+                onClick={e => e.stopPropagation()}
+                className="underline">abrir em outra aba</a>
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
