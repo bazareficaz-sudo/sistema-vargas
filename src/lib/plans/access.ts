@@ -36,6 +36,18 @@ export async function loadPlanData(empresaId: string, userId: string): Promise<P
   const sub = subResult.data
 
   if (!sub) {
+    // Empresa sem assinatura cai aqui e recebe um punhado de módulos. Para
+    // system admin não faz diferença (temModulo libera tudo antes de olhar o
+    // plano), então o dono da conta não percebe — mas todo usuário comum da
+    // empresa fica sem PDV, financeiro, marketplaces e o resto, sem nenhuma
+    // mensagem explicando. Foi exatamente assim que passou despercebido na
+    // Bazar Eficaz. O aviso no log é o rastro para achar isso da próxima.
+    if (!isSystemAdmin) {
+      console.error(
+        `[plano] Empresa ${empresaId} não tem linha em subscriptions — ` +
+        `usuário ${userId} está recebendo só os módulos básicos de emergência.`,
+      )
+    }
     // No subscription yet — default to starter trial with basic modules
     return {
       planId: '',
