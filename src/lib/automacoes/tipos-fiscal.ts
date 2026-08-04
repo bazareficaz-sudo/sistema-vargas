@@ -7,10 +7,26 @@ import type { ResultadoExecucao } from './tipos'
 // mesma venda, emitirNfceParaVenda já é idempotente (checa nfce_status
 // antes de tentar de novo).
 async function vendasElegiveisDesde(sb: any, empresaId: string, desde: string) {
-  const { data } = await sb.from('vendas').select('id, cliente_id, forma_pagamento, created_at')
+  const { data, error } = await sb.from('vendas').select('id, cliente_id, forma_pagamento, created_at')
     .eq('empresa_id', empresaId).eq('status', 'concluida').eq('tipo_operacao', 'venda')
-    .neq('nfce_status', 'autorizada')
+    // ATENÇÃO: aqui estava `.neq('nfce_status', 'autorizada')`, e isso fazia a
+    // emissão automática NUNCA disparar.
+    //
+    // Em SQL, `NULL != 'autorizada'` não é verdadeiro — é NULO — então a linha
+    // é descartada. E venda recém-feita tem nfce_status NULO, porque ninguém
+    // tentou emitir ainda. Ou seja: o filtro que deveria dizer "ainda não foi
+    // autorizada" excluía exatamente as vendas novas, que são as únicas que
+    // interessam. Só sobrariam vendas com tentativa anterior falha.
+    //
+    // Medido em produção: a consulta antiga devolvia 0 vendas; esta devolve as
+    // 90 do dia (23 delas em pix).
+    .or('nfce_status.is.null,nfce_status.neq.autorizada')
     .gt('created_at', desde)
+
+  // Erro de consulta virando lista vazia é indistinguível de "não há venda":
+  // a regra gravaria 'sem_acao' e ninguém saberia. Propaga para o executor
+  // registrar como erro.
+  if (error) throw new Error(`Consulta de vendas elegíveis: ${error.message}`)
   return data ?? []
 }
 
