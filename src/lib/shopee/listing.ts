@@ -287,25 +287,41 @@ export type AtributoInput = {
   valueIds?: number[]  // múltipla escolha
   texto?: string
   unidade?: string     // atributos quantitativos (ex.: Tensão em V)
+  inputType?: number   // ENTRADA.* — define se texto livre é aceito
 }
 
-// Formato do value_id (DROP_DOWN) está confirmado. Já o de atributo TEXT
-// (texto livre) não apareceu documentado em nenhuma fonte consultada —
-// `original_value_name` é o nome mais plausível dado o padrão do resto da
-// API, mas não foi validado contra uma chamada real. Se a Shopee rejeitar,
-// o erro dela (guardado sem reformular) vai indicar isso.
+/**
+ * Monta um item de `attribute_list`.
+ *
+ * O valor de texto livre vai com `value_id: 0`. Isso não é enfeite: a Shopee
+ * recusou uma publicação real com
+ *
+ *   invalid AttributeValue.ValueId: ValueId is required
+ *
+ * quando o texto foi enviado sem esse campo. O zero é o que marca o valor
+ * como "digitado pelo vendedor" em vez de escolhido da lista dela.
+ */
 function montarAtributo(a: AtributoInput) {
   const valores: any[] = []
+
   if (a.valueIds?.length) {
     for (const id of a.valueIds) valores.push({ value_id: id })
   } else if (a.value_id != null) {
     valores.push({ value_id: a.value_id })
   }
-  if (a.texto?.trim()) {
-    const v: any = { original_value_name: a.texto.trim() }
+
+  // Atributo que só aceita escolha da lista não pode receber texto livre.
+  // Quem costuma cair aqui é o preenchimento por IA, que às vezes devolve o
+  // rótulo em vez do id — e a Shopee recusaria o anúncio inteiro por causa
+  // de um campo. Melhor publicar sem esse atributo do que não publicar.
+  const soLista = a.inputType === ENTRADA.LISTA || a.inputType === ENTRADA.MULTI
+
+  if (a.texto?.trim() && !soLista) {
+    const v: any = { value_id: 0, original_value_name: a.texto.trim() }
     if (a.unidade) v.value_unit = a.unidade
     valores.push(v)
   }
+
   return { attribute_id: a.attribute_id, attribute_value_list: valores }
 }
 
@@ -359,7 +375,13 @@ export async function criarAnuncio(sb: any, canal: ShopeeChannel, input: CriarAn
     if (input.comprimentoCm && input.larguraCm && input.alturaCm) {
       body.dimension = { package_length: input.comprimentoCm, package_width: input.larguraCm, package_height: input.alturaCm }
     }
-    if (input.atributos.length > 0) body.attribute_list = input.atributos.map(montarAtributo)
+    // Atributo que sobrou sem valor nenhum não vai. Mandar um item com
+    // `attribute_value_list` vazio é outro jeito de a Shopee recusar o
+    // anúncio inteiro por validação.
+    const atributosMontados = input.atributos
+      .map(montarAtributo)
+      .filter(a => a.attribute_value_list.length > 0)
+    if (atributosMontados.length > 0) body.attribute_list = atributosMontados
     if (input.brandId != null) body.brand = { brand_id: input.brandId, original_brand_name: input.brandNome ?? '' }
 
     const resposta = await shopeePost('/api/v2/product/add_item', body, callOptions)

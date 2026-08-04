@@ -553,7 +553,12 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
             .filter(atributoPreenchido)
             .map(a => {
               const v = valoresAtributos[a.attribute_id]
-              return { attribute_id: a.attribute_id, value_id: v.valueId, valueIds: v.valueIds, texto: v.texto, unidade: v.unidade }
+              // input_type viaja junto: é ele que diz se este atributo aceita
+              // texto livre ou só valor escolhido da lista da Shopee.
+              return {
+                attribute_id: a.attribute_id, value_id: v.valueId, valueIds: v.valueIds,
+                texto: v.texto, unidade: v.unidade, inputType: a.input_type,
+              }
             }),
           canaisLogisticaHabilitados: Array.from(logisticaSelecionada),
         }),
