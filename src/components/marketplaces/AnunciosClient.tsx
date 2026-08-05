@@ -166,6 +166,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [pausandoAtivando, setPausandoAtivando] = useState(false)
   const [resumoPausarAtivar, setResumoPausarAtivar] = useState('')
 
+  // Estoque do sistema → estoque do marketplace (só estoque, sem preço)
+  const [sincEstoqueEnviando, setSincEstoqueEnviando] = useState(false)
+  const [sincEstoqueResumo, setSincEstoqueResumo] = useState('')
+
   // Sincronizar só os selecionados (em vez do catálogo inteiro) — duas
   // direções: puxar da Shopee (atualizar aqui) e mandar pra Shopee (enviar
   // o que já está salvo aqui, sem regra/fórmula nenhuma).
@@ -447,6 +451,122 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setResumoSincSelecionados(partes.join(' · '))
     setSelecionados(new Set())
     setSincronizandoSelecionados(false)
+  }
+
+  // ── Estoque do sistema → estoque do marketplace ───────────────────────────
+  //
+  // Diferente do "Enviar p/ Shopee" logo abaixo, que manda o que já está
+  // salvo na linha do anúncio: aqui a origem é o ESTOQUE DO PRODUTO no
+  // sistema. É o botão para usar depois de uma entrada de mercadoria, de um
+  // inventário ou de uma venda por fora — quando o número certo está no
+  // cadastro e o marketplace ficou para trás.
+  //
+  // Nenhuma regra de preço entra nisso: preço não é tocado.
+  function rotaPush() {
+    return canal.plataforma === 'mercadolivre'
+      ? '/api/marketplace/mercadolivre/push'
+      : '/api/marketplace/shopee/push'
+  }
+
+  async function sincronizarEstoqueSelecionados() {
+    const alvos = filtrados.filter(a => selecionados.has(a.id))
+    if (alvos.length === 0) return
+
+    setSincEstoqueResumo('')
+    const sb = createClient()
+
+    // Kit não tem estoque próprio: o que vale é quantos kits dá para montar
+    // com os componentes. O número gravado em `produtos.estoque` do kit pode
+    // estar velho, então recalcula — mesma cautela do envio com regra.
+    const kitsCalculados = new Map<string, { custo: number; estoque: number }>()
+    const idsKit = Array.from(new Set<string>(
+      alvos.filter(a => a.produtos?.tipo === 'kit').map(a => String(a.produtos.id)),
+    ))
+    for (const kitId of idsKit) {
+      const r = await calcularKit(sb, kitId)
+      if (r) kitsCalculados.set(kitId, r)
+    }
+
+    const aplicaveis: { anuncio: any; estoqueNovo: number }[] = []
+    const pulados: { anuncio: any; motivo: string }[] = []
+
+    for (const a of alvos) {
+      if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado' }); continue }
+      if (a.tem_variacao) { pulados.push({ anuncio: a, motivo: 'Possui variações — envie individualmente' }); continue }
+      if (!a.id_externo) { pulados.push({ anuncio: a, motivo: 'Sem ID externo (não veio de sincronização)' }); continue }
+
+      const kit = a.produtos.tipo === 'kit' ? kitsCalculados.get(String(a.produtos.id)) : undefined
+      const estoqueNovo = Math.max(0, Math.floor(Number(kit ? kit.estoque : a.produtos.estoque ?? 0)))
+
+      // Já igual não vira chamada de API: além de inútil, gasta cota de
+      // requisição do marketplace numa seleção grande.
+      if (estoqueNovo === Number(a.estoque_reservado ?? -1)) {
+        pulados.push({ anuncio: a, motivo: `Já está com ${estoqueNovo}` })
+        continue
+      }
+      aplicaveis.push({ anuncio: a, estoqueNovo })
+    }
+
+    if (aplicaveis.length === 0) {
+      setSincEstoqueResumo(
+        pulados.length > 0
+          ? `Nada a enviar. ${pulados.length} anúncio(s) ignorado(s): ${[...new Set(pulados.map(p => p.motivo))].join(' · ')}`
+          : 'Nada a enviar.',
+      )
+      return
+    }
+
+    const nomeCanal = canal.plataforma === 'mercadolivre' ? 'Mercado Livre' : 'Shopee'
+    const amostra = aplicaveis.slice(0, 5)
+      .map(x => `• ${(x.anuncio.titulo ?? '').slice(0, 40)}: ${x.anuncio.estoque_reservado ?? 0} → ${x.estoqueNovo}`)
+      .join('\n')
+    const ok = confirm(
+      `Enviar o estoque do sistema para ${nomeCanal} em ${aplicaveis.length} anúncio(s)?\n\n` +
+      `${amostra}${aplicaveis.length > 5 ? `\n• ...e mais ${aplicaveis.length - 5}` : ''}\n\n` +
+      `${pulados.length > 0 ? `${pulados.length} ignorado(s).\n` : ''}` +
+      `O preço não é alterado.`,
+    )
+    if (!ok) return
+
+    setSincEstoqueEnviando(true)
+    let sucesso = 0, falha = 0
+    const erros: string[] = []
+
+    for (const { anuncio, estoqueNovo } of aplicaveis) {
+      // Grava aqui antes de mandar: a rota de push lê a linha do anúncio.
+      await sb.from('marketplace_anuncios')
+        .update({ estoque_reservado: estoqueNovo, updated_at: new Date().toISOString() })
+        .eq('id', anuncio.id)
+
+      try {
+        const resp = await fetch(rotaPush(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: canal.id, anuncioId: anuncio.id }),
+        })
+        const data = await resp.json()
+        if (data.ok) {
+          sucesso++
+          setAnuncios(prev => prev.map(x => x.id === anuncio.id ? { ...x, estoque_reservado: estoqueNovo } : x))
+        } else {
+          falha++
+          if (data.erro) erros.push(data.erro)
+        }
+      } catch (e: any) {
+        falha++
+        erros.push(e.message ?? 'falha de rede')
+      }
+      // Intervalo curto entre chamadas — seleção grande estoura o limite de
+      // requisições do marketplace se disparar tudo de uma vez.
+      await new Promise(r => setTimeout(r, 150))
+    }
+
+    const partes = [`${sucesso} enviado(s)`]
+    if (falha > 0) partes.push(`${falha} falha(s)${erros[0] ? `: ${erros[0]}` : ''}`)
+    if (pulados.length > 0) partes.push(`${pulados.length} ignorado(s)`)
+    setSincEstoqueResumo(partes.join(' · '))
+    setSincEstoqueEnviando(false)
+    setSelecionados(new Set())
   }
 
   // Sistema → Shopee: manda o preço/estoque que JÁ está salvo aqui, sem
@@ -841,6 +961,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               {enviandoSelecionados ? 'Enviando...' : '⇡ Enviar p/ Shopee'}
             </button>
           )}
+          {/* Vale para Shopee e Mercado Livre — as duas têm rota de push. */}
+          <button onClick={sincronizarEstoqueSelecionados} disabled={sincEstoqueEnviando}
+            title="Pega o estoque do produto no sistema e manda para o anúncio. O preço não é alterado."
+            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+            {sincEstoqueEnviando ? 'Enviando estoque...' : '📦 Sincronizar estoque'}
+          </button>
           <button onClick={() => setMapeamentoRapido(filtrados.filter(a => selecionados.has(a.id)).map(a => a.id))}
             title="Sugere um produto para cada anúncio e deixa você conferir linha a linha antes de aplicar"
             className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg">
@@ -911,6 +1037,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         <div className="bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
           <span>{resumoEnvioSelecionados}</span>
           <button onClick={() => setResumoEnvioSelecionados('')} className="text-indigo-500 hover:text-indigo-700">✕</button>
+        </div>
+      )}
+
+      {sincEstoqueResumo && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+          <span>{sincEstoqueResumo}</span>
+          <button onClick={() => setSincEstoqueResumo('')} className="text-emerald-500 hover:text-emerald-700">✕</button>
         </div>
       )}
 
