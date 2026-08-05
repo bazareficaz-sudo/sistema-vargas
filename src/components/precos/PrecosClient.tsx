@@ -42,6 +42,7 @@ type Props = {
   tagFiltro: string
   tagsDisponiveis: string[]
   entradaFiltro: string
+  entradasCasadas?: { rotulo: string; origem: 'manual' | 'xml' }[]
   entradaDeFiltro: string
   entradaAteFiltro: string
   precoDeFiltro: string
@@ -69,7 +70,7 @@ export default function PrecosClient({
   produtos: inicial, total, pagina, totalPaginas, q: qInicial,
   abaAtiva: abaInicial, categoriaFiltro, categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro, subcategoriaFiltro, tagFiltro, tagsDisponiveis,
-  entradaFiltro, entradaDeFiltro, entradaAteFiltro, precoDeFiltro, precoAteFiltro,
+  entradaFiltro, entradasCasadas = [], entradaDeFiltro, entradaAteFiltro, precoDeFiltro, precoAteFiltro,
   empresaId, idsFiltro, origemFiltro
 }: Props) {
   const router = useRouter()
@@ -637,6 +638,15 @@ export default function PrecosClient({
                   onBlur={() => navegar({ entrada: entradaF.trim(), pagina: '1' })}
                   placeholder="Ex: 1234"
                   className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white min-w-[120px]" />
+                {/* Quando mais de uma entrada casa, o operador precisa saber
+                    quais — senão os produtos "a mais" ficam sem explicação. */}
+                {(entradaF || entradaDeF || entradaAteF) && entradasCasadas.length > 0 && (
+                  <p className={`text-[10px] mt-1 max-w-[220px] ${entradasCasadas.length > 1 ? 'text-amber-700' : 'text-gray-400'}`}>
+                    {entradasCasadas.length === 1
+                      ? `Entrada ${entradasCasadas[0].rotulo}${entradasCasadas[0].origem === 'xml' ? ' (XML)' : ''}`
+                      : `${entradasCasadas.length} entradas: ${entradasCasadas.slice(0, 3).map(e => e.rotulo).join(', ')}${entradasCasadas.length > 3 ? '…' : ''}`}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Data de entrada — de</label>

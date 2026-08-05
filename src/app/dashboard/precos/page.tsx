@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import PrecosClient from '@/components/precos/PrecosClient'
+import { produtosDaEntrada } from '@/lib/produtos/filtroEntrada'
 
 export const dynamic = 'force-dynamic'
 const POR_PAGINA = 100
@@ -48,22 +49,17 @@ export default async function PrecosPage({
     categoriaNomes = [categoria, ...filhas]
   }
 
-  // Filtro por entrada de mercadoria (número/NF ou período de data de
-  // emissão) — resolve pros produtos que aparecem nos itens dessas entradas
-  // manuais (mesmo padrão já usado em produtos/page.tsx).
-  let idsDaEntrada: string[] | null = null
-  if (entrada || entradaDe || entradaAte) {
-    let entradasQuery = supabase.from('entradas').select('id').eq('empresa_id', empresaId)
-    if (entrada) entradasQuery = entradasQuery.or(`numero_entrada.ilike.%${entrada}%,numero_nf.ilike.%${entrada}%`)
-    if (entradaDe) entradasQuery = entradasQuery.gte('data_emissao', entradaDe)
-    if (entradaAte) entradasQuery = entradasQuery.lte('data_emissao', entradaAte)
-    const { data: entradasRows } = await entradasQuery.limit(500)
-    const entradaIds = (entradasRows ?? []).map(e => e.id)
-    const { data: itensRows } = entradaIds.length
-      ? await supabase.from('entrada_itens').select('produto_id').in('entrada_id', entradaIds)
-      : { data: [] as { produto_id: string | null }[] }
-    idsDaEntrada = Array.from(new Set<string>((itensRows ?? []).map(r => r.produto_id).filter(Boolean) as string[]))
-  }
+  // Filtro por entrada de mercadoria (número/NF e/ou período de emissão).
+  //
+  // Usa o módulo compartilhado com a tela de Produtos. A implementação que
+  // morava aqui só enxergava `entradas` (lançamento manual) e casava número
+  // por semelhança — nota importada por XML era invisível, e digitar "1"
+  // trazia meia dúzia de entradas que nada tinham a ver.
+  const resultadoEntrada = await produtosDaEntrada(supabase, empresaId, {
+    numero: entrada, de: entradaDe, ate: entradaAte,
+  })
+  const idsDaEntrada = resultadoEntrada?.produtoIds ?? null
+  const entradasCasadas = resultadoEntrada?.entradasCasadas ?? []
 
   function aplicarFiltros(qb: any): any {
     let out = qb
@@ -88,7 +84,9 @@ export default async function PrecosPage({
     query = query.in('id', idList).order('nome')
   } else {
     query = aplicarFiltros(query).eq('ativo', true).order('nome').range(offset, offset + POR_PAGINA - 1)
-    if (q) query = query.or(`nome.ilike.%${q}%,sku.ilike.%${q}%`)
+    // EAN entra na busca junto com nome/SKU — mesma tríade da tela de
+    // Produtos, para quem chega com o código de barras em mãos.
+    if (q) query = query.or(`nome.ilike.%${q}%,sku.ilike.%${q}%,ean.ilike.%${q}%`)
   }
 
   const { data: produtos, count } = await query
@@ -113,6 +111,7 @@ export default async function PrecosPage({
       tagFiltro={tag}
       tagsDisponiveis={tagsDisponiveis}
       entradaFiltro={entrada}
+      entradasCasadas={entradasCasadas}
       entradaDeFiltro={entradaDe}
       entradaAteFiltro={entradaAte}
       precoDeFiltro={precoDe}
