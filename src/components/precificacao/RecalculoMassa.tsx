@@ -10,11 +10,26 @@ import CampoNumero from './CampoNumero'
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+// Data de hoje no fuso do navegador. `toISOString()` converte para UTC e, à
+// noite no Brasil, devolveria o dia seguinte.
+function hoje(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export default function RecalculoMassa() {
   const [canais, setCanais] = useState<any[]>([])
   const [canaisEscolhidos, setCanaisEscolhidos] = useState<Set<string>>(new Set())
   const [apenasAtivos, setApenasAtivos] = useState(true)
   const [enviarAoMarketplace, setEnviarAoMarketplace] = useState(true)
+  // Recorte do que entra na conta. Sem isso a varredura é sempre o canal
+  // inteiro, e revisar "os ralos que chegaram hoje" vira caça ao tesouro numa
+  // lista de centenas.
+  const [busca, setBusca] = useState('')
+  const [entrada, setEntrada] = useState('')
+  const [entradaDe, setEntradaDe] = useState('')
+  const [entradaAte, setEntradaAte] = useState('')
+  const temRecorte = !!(busca.trim() || entrada.trim() || entradaDe || entradaAte)
 
   const [calculando, setCalculando] = useState(false)
   const [previa, setPrevia] = useState<any | null>(null)
@@ -43,6 +58,10 @@ export default function RecalculoMassa() {
         body: JSON.stringify({
           canaisIds: canaisEscolhidos.size > 0 ? [...canaisEscolhidos] : undefined,
           apenasAtivos,
+          busca: busca.trim() || undefined,
+          entrada: entrada.trim() || undefined,
+          entradaDe: entradaDe || undefined,
+          entradaAte: entradaAte || undefined,
         }),
       }).then(r => r.json())
       if (!d.ok) { setErro(d.erro ?? 'Erro ao calcular a prévia'); return }
@@ -180,6 +199,57 @@ export default function RecalculoMassa() {
           </div>
         </div>
 
+        {/* Recorte. Fica junto do canal porque é a mesma pergunta: o que entra
+            na conta. Vazio = o canal inteiro, como sempre foi. */}
+        <div className="border-t border-gray-100 pt-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">
+              Buscar produto ou anúncio
+            </label>
+            <input value={busca} onChange={e => setBusca(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') calcularPrevia() }}
+              placeholder="Ex: ralo onça"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500" />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Procura no título do anúncio e no nome, SKU e EAN do produto.
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-1.5">Entrada de mercadoria</p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Nº ou NF</label>
+                <input value={entrada} onChange={e => setEntrada(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') calcularPrevia() }}
+                  placeholder="Ex: 1879150"
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 w-32" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Entrou de</label>
+                <input type="date" value={entradaDe} onChange={e => setEntradaDe(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">até</label>
+                <input type="date" value={entradaAte} onChange={e => setEntradaAte(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500" />
+              </div>
+              <button type="button" onClick={() => { const h = hoje(); setEntradaDe(h); setEntradaAte(h) }}
+                className="px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                Entrou hoje
+              </button>
+              {temRecorte && (
+                <button type="button"
+                  onClick={() => { setBusca(''); setEntrada(''); setEntradaDe(''); setEntradaAte('') }}
+                  className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-700">
+                  limpar recorte
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input type="checkbox" checked={apenasAtivos} onChange={e => setApenasAtivos(e.target.checked)}
             className="w-4 h-4 accent-blue-600" />
@@ -221,10 +291,37 @@ export default function RecalculoMassa() {
       {r && (
         <>
           <div className="bg-white border border-gray-200 rounded-xl p-5">
-            <p className="text-sm text-gray-900 mb-3">
+            <p className="text-sm text-gray-900 mb-1">
               Varridos <strong>{r.totalAnuncios.toLocaleString('pt-BR')}</strong> anúncios.
               O preço foi calculado para <strong>{r.calculados.toLocaleString('pt-BR')}</strong> deles.
             </p>
+
+            {/* O recorte precisa aparecer no resultado. Sem isso, "0 anúncios"
+                parece falha do sistema em vez de filtro que não casou. */}
+            {(previa.entradasCasadas?.length > 0 || previa.produtosDaEntrada != null || busca.trim()) && (
+              <p className="text-xs text-gray-500 mb-3">
+                Recorte:
+                {busca.trim() && <> busca <b>“{busca.trim()}”</b></>}
+                {previa.produtosDaEntrada != null && (
+                  <>
+                    {busca.trim() && ' ·'} entrada de mercadoria
+                    {previa.entradasCasadas?.length === 1
+                      ? <> <b>{previa.entradasCasadas[0].rotulo}</b>{previa.entradasCasadas[0].origem === 'xml' ? ' (XML)' : ''}</>
+                      : previa.entradasCasadas?.length > 1
+                        ? <> — <b>{previa.entradasCasadas.length}</b> entradas casaram</>
+                        : <> — <b>nenhuma entrada casou</b></>}
+                    {' '}(<b>{previa.produtosDaEntrada}</b> produto(s))
+                  </>
+                )}
+              </p>
+            )}
+
+            {r.totalAnuncios === 0 && (
+              <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 mb-3">
+                Nenhum anúncio bateu com esse recorte no canal escolhido. Confira o termo da busca,
+                o número da nota e o canal — ou limpe o recorte para varrer tudo.
+              </p>
+            )}
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
               <Bloco rotulo="Sobem de preço" valor={r.sobem} cor="text-green-700" />

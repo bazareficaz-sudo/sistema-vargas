@@ -51,10 +51,27 @@ export type ResumoRecalculo = {
 
 const TOLERANCIA = 0.01 // centavos: abaixo disso o preço é "o mesmo"
 
+// Teto de produtos que a busca livre resolve. Existe porque a lista de ids
+// viaja dentro da própria consulta — um termo curto demais ("a") não pode
+// virar uma URL de 14 mil ids.
+const LIMITE_PRODUTOS_BUSCA = 400
+
 export async function varrerRecalculo(
   sb: any,
   empresaId: string,
-  opcoes: { canaisIds?: string[]; apenasAtivos?: boolean; limiteItens?: number } = {},
+  opcoes: {
+    canaisIds?: string[]
+    apenasAtivos?: boolean
+    limiteItens?: number
+    /** Texto livre: casa com o título do anúncio ou com nome/SKU/EAN do produto. */
+    busca?: string
+    /**
+     * Produtos aos quais a varredura fica restrita — normalmente o que veio de
+     * uma entrada de mercadoria. Lista vazia significa "a entrada não trouxe
+     * nenhum produto", e o resultado correto é zero, não a loja inteira.
+     */
+    produtoIds?: string[] | null
+  } = {},
 ): Promise<{ resumo: ResumoRecalculo; itens: ItemRecalculo[]; truncado: boolean }> {
   const limiteItens = opcoes.limiteItens ?? 500
 
@@ -73,6 +90,30 @@ export async function varrerRecalculo(
     totalAnuncios: 0, calculados: 0, semProduto: 0, semCusto: 0, semRegra: 0, semPrecoAtual: 0,
     sobem: 0, descem: 0, iguais: 0, emPrejuizoAgora: 0, emPrejuizoDepois: 0, somaDiferenca: 0,
   }
+
+  // Restrição por produto (entrada de mercadoria). Lista vazia é uma resposta
+  // legítima — devolve zero em vez de varrer tudo, que seria o oposto do que
+  // o operador pediu.
+  const idsProduto = opcoes.produtoIds ?? null
+  if (idsProduto && idsProduto.length === 0) {
+    return { resumo, itens: [], truncado: false }
+  }
+
+  // Busca livre: o texto pode estar no título do anúncio (que o vendedor
+  // escreveu) ou no cadastro do produto (nome/SKU/EAN). Os dois valem — no
+  // caso real "ralo onça", o anúncio se chama "Ralo Grelha Abacaxi Ferro
+  // Fundido" e só o produto tem o termo.
+  const termo = (opcoes.busca ?? '').trim()
+  let idsDaBusca: string[] = []
+  if (termo) {
+    // Vírgula e parênteses são separadores da sintaxe `or` do PostgREST.
+    const seguro = termo.replace(/[,()%]/g, ' ').trim()
+    const { data: achados } = await sb.from('produtos').select('id')
+      .eq('empresa_id', empresaId)
+      .or(`nome.ilike.%${seguro}%,sku.ilike.%${seguro}%,ean.ilike.%${seguro}%`)
+      .limit(LIMITE_PRODUTOS_BUSCA)
+    idsDaBusca = (achados ?? []).map((p: any) => p.id)
+  }
   const itens: ItemRecalculo[] = []
   // Custo de kit é caro (consulta os componentes) — calcula uma vez por
   // produto, não uma vez por anúncio.
@@ -87,6 +128,15 @@ export async function varrerRecalculo(
         .eq('canal_id', canal.id).eq('empresa_id', empresaId)
         .range(off, off + TAM - 1)
       if (opcoes.apenasAtivos) q = q.eq('status', 'ativo')
+      // Filtrar no banco, não em memória: sem isso, pedir 12 anúncios ainda
+      // custaria a varredura dos 8.600.
+      if (idsProduto) q = q.in('produto_id', idsProduto)
+      if (termo) {
+        const seguro = termo.replace(/[,()%]/g, ' ').trim()
+        q = idsDaBusca.length
+          ? q.or(`titulo.ilike.%${seguro}%,produto_id.in.(${idsDaBusca.join(',')})`)
+          : q.ilike('titulo', `%${seguro}%`)
+      }
       const { data } = await q
       const lote = data ?? []
 
