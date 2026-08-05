@@ -2,6 +2,8 @@ import { buscarConfigDoCanal } from './config'
 import { saudeDaMargem, calcular } from './motor'
 import { aplicarRegra, buscarRegras, descreverObjetivo, resolverRegra, type Regra } from './regras'
 import { calcularKit } from '@/lib/produtos/kit'
+import { resolverFreteML, embalagemDoAnuncio, logisticTypeDoAnuncio, listingTypeDoAnuncio, pesoCobravelML } from './mlFrete'
+import type { FaixaFrete } from './tipos'
 import type { SaudePreco } from './tipos'
 
 // Varredura de recálculo: percorre os anúncios, aplica a regra que vale pra
@@ -31,6 +33,10 @@ export type ItemRecalculo = {
   regraNome: string
   regraObjetivo: string
   regraId: string
+  /** Frete que entrou na conta do preço novo — 0 abaixo do limite de grátis. */
+  frete: number
+  /** true quando o valor veio da API do marketplace, não do custo médio. */
+  freteImportado: boolean
   avisos: string[]
 }
 
@@ -75,7 +81,7 @@ export async function varrerRecalculo(
 ): Promise<{ resumo: ResumoRecalculo; itens: ItemRecalculo[]; truncado: boolean }> {
   const limiteItens = opcoes.limiteItens ?? 500
 
-  let qCanais = sb.from('marketplace_canais').select('id, nome, plataforma').eq('empresa_id', empresaId)
+  let qCanais = sb.from('marketplace_canais').select('id, nome, plataforma, seller_id, access_token').eq('empresa_id', empresaId)
   if (opcoes.canaisIds?.length) qCanais = qCanais.in('id', opcoes.canaisIds)
   const { data: canais } = await qCanais.order('nome')
 
@@ -119,12 +125,17 @@ export async function varrerRecalculo(
   // produto, não uma vez por anúncio.
   const custoKitCache = new Map<string, number>()
 
+  // Escadas de frete já resolvidas nesta varredura. A chave é peso cobrável +
+  // logística + tipo de anúncio: caixas diferentes que dão o mesmo peso
+  // cobrável pagam o mesmo frete, então uma consulta serve para todas.
+  const freteCache = new Map<string, FaixaFrete[] | null>()
+
   const TAM = 1000
   for (const canal of canais ?? []) {
     const cfg = configPorCanal.get(canal.id)
     for (let off = 0; off < 30 * TAM; off += TAM) {
       let q = sb.from('marketplace_anuncios')
-        .select('id, titulo, preco_venda, preco_promocional, status, produto_id, produtos(id, nome, sku, categoria, marca, tipo, preco_custo, peso_kg)')
+        .select('id, titulo, preco_venda, preco_promocional, status, produto_id, dados_brutos, produtos(id, nome, sku, categoria, marca, tipo, preco_custo, peso_kg, comprimento_cm, largura_cm, altura_cm)')
         .eq('canal_id', canal.id).eq('empresa_id', empresaId)
         .range(off, off + TAM - 1)
       if (opcoes.apenasAtivos) q = q.eq('status', 'ativo')
@@ -161,8 +172,44 @@ export async function varrerRecalculo(
         if (!(precoAtual > 0)) { resumo.semPrecoAtual++; continue }
 
         const pesoKg = p.peso_kg != null ? Number(p.peso_kg) : null
-        const novo = aplicarRegra({ cfg, custoProduto: custo, regra: resolucao.vencedora, pesoKg })
-        const atual = calcular({ cfg, custoProduto: custo, objetivo: { tipo: 'preco', valor: precoAtual }, pesoKg })
+
+        // Frete real do Mercado Livre para ESTE anúncio, quando o canal está
+        // configurado para importar. Substitui o "custo médio" digitado —
+        // que erra por tamanho e por faixa de preço ao mesmo tempo.
+        let freteFaixas: FaixaFrete[] | null = null
+        const avisosFrete: string[] = []
+        if (cfg.freteMlImportar && canal.plataforma === 'mercadolivre' && canal.access_token && canal.seller_id) {
+          const emb = embalagemDoAnuncio(a.dados_brutos, p)
+          if (!emb) {
+            // Sem medida não dá pra saber o frete, e chutar uma caixa vira
+            // erro de preço — exatamente o que esta importação existe para
+            // evitar. Cai no frete configurado e diz por quê.
+            avisosFrete.push('Sem peso/medidas no anúncio nem no cadastro — frete pelo custo médio configurado.')
+          } else {
+            const logistica = logisticTypeDoAnuncio(a.dados_brutos)
+            const tipoAnuncio = listingTypeDoAnuncio(a.dados_brutos)
+            const chave = `${pesoCobravelML(emb)}|${logistica}|${tipoAnuncio}`
+            if (!freteCache.has(chave)) {
+              try {
+                const r = await resolverFreteML(
+                  sb,
+                  { id: canal.id, sellerId: String(canal.seller_id), accessToken: canal.access_token },
+                  emb, logistica, tipoAnuncio,
+                )
+                freteCache.set(chave, r.faixas)
+              } catch {
+                // Falha de consulta não derruba a varredura inteira: este
+                // anúncio volta pro frete configurado, e os outros seguem.
+                freteCache.set(chave, null)
+              }
+            }
+            freteFaixas = freteCache.get(chave) ?? null
+            if (!freteFaixas) avisosFrete.push('Não foi possível consultar o frete no Mercado Livre — usando o custo médio configurado.')
+          }
+        }
+
+        const novo = aplicarRegra({ cfg, custoProduto: custo, regra: resolucao.vencedora, pesoKg, freteFaixas })
+        const atual = calcular({ cfg, custoProduto: custo, objetivo: { tipo: 'preco', valor: precoAtual }, pesoKg, freteFaixas })
 
         const diferenca = Number((novo.preco - precoAtual).toFixed(2))
         resumo.calculados++
@@ -185,7 +232,8 @@ export async function varrerRecalculo(
             regraNome: resolucao.vencedora.nome,
             regraObjetivo: descreverObjetivo(resolucao.vencedora.objetivoTipo, resolucao.vencedora.objetivoValor),
             regraId: resolucao.vencedora.id,
-            avisos: novo.avisos,
+            frete: novo.frete, freteImportado: !!freteFaixas,
+            avisos: [...avisosFrete, ...novo.avisos],
           })
         }
       }

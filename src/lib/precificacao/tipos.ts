@@ -28,6 +28,19 @@ export type FaixaComissao = {
   fixo: number
 }
 
+/**
+ * Escada de frete por faixa de preço, importada do marketplace.
+ *
+ * É por faixa de PREÇO, não de peso, porque é assim que o Mercado Livre
+ * cobra: o mesmo pacote de 1 kg custa R$ 18,45 a R$ 79 e R$ 30,75 acima de
+ * R$ 200. Cada embalagem tem a sua escada — ver `mlFrete.ts`.
+ */
+export type FaixaFrete = {
+  min: number
+  max: number | null // null = sem teto
+  valor: number
+}
+
 export type ConfigTaxas = {
   id?: string
   canalId: string | null
@@ -55,6 +68,12 @@ export type ConfigTaxas = {
   freteLimiteGratis: number
   freteCustoMedio: number
   freteFaixas: { pesoAte: number; valor: number }[]
+
+  /**
+   * Buscar o frete real do Mercado Livre por anúncio, em vez de usar
+   * `freteCustoMedio`. Só vale para canal ML — ver `mlFrete.ts`.
+   */
+  freteMlImportar?: boolean
 
   embalagem: ItemCusto | null
   imposto: ItemCusto | null

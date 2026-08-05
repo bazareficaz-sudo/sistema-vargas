@@ -27,6 +27,7 @@ export const PRESET_SHOPEE: Omit<ConfigTaxas, 'canalId'> = {
   freteLimiteGratis: 0,
   freteCustoMedio: 0,
   freteFaixas: [],
+  freteMlImportar: false,
   embalagem: null,
   imposto: null,
   custosExtras: [],
@@ -53,6 +54,7 @@ export const PRESET_ML: Omit<ConfigTaxas, 'canalId'> = {
   freteLimiteGratis: 79,
   freteCustoMedio: 22,
   freteFaixas: [],
+  freteMlImportar: false,
   embalagem: null,
   imposto: null,
   custosExtras: [],
@@ -65,7 +67,7 @@ export function presetDaPlataforma(plataforma: string): Omit<ConfigTaxas, 'canal
   return {
     plataforma, nome: plataforma,
     comissaoModo: 'simples', comissaoPercentual: 0, comissaoFixo: 0, comissaoFaixas: [],
-    taxas: [], freteModo: 'nao', freteValor: 0, freteLimiteGratis: 0, freteCustoMedio: 0, freteFaixas: [],
+    taxas: [], freteModo: 'nao', freteValor: 0, freteLimiteGratis: 0, freteCustoMedio: 0, freteFaixas: [], freteMlImportar: false,
     embalagem: null, imposto: null, custosExtras: [], diasRecebimento: null,
   }
 }
@@ -88,6 +90,7 @@ export function linhaParaConfig(row: any): ConfigTaxas & { faixasSaude: FaixasSa
     freteLimiteGratis: Number(row.frete_limite_gratis ?? 0),
     freteCustoMedio: Number(row.frete_custo_medio ?? 0),
     freteFaixas: row.frete_faixas ?? [],
+    freteMlImportar: row.frete_ml_importar ?? false,
     embalagem: row.embalagem ?? null,
     imposto: row.imposto ?? null,
     custosExtras: row.custos_extras ?? [],
@@ -116,6 +119,7 @@ export function configParaLinha(cfg: ConfigTaxas & { faixasSaude?: FaixasSaude }
     frete_limite_gratis: cfg.freteLimiteGratis ?? 0,
     frete_custo_medio: cfg.freteCustoMedio ?? 0,
     frete_faixas: cfg.freteFaixas ?? [],
+    frete_ml_importar: cfg.freteMlImportar ?? false,
     embalagem: cfg.embalagem,
     imposto: cfg.imposto,
     custos_extras: cfg.custosExtras ?? [],

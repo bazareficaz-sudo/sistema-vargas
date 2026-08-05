@@ -136,10 +136,31 @@ export default function TaxasCanal({ canal, configInicial, origem, onSalvo }: {
             {cfg.freteModo === 'faixa_peso' && (
               <PesoEditor faixas={cfg.freteFaixas} onChange={f => set('freteFaixas', f)} />
             )}
-            {cfg.freteModo === 'gratis_acima' && (
+            {cfg.freteModo === 'gratis_acima' && cfg.plataforma === 'mercadolivre' && (
+              <div className="mt-2 border border-blue-200 bg-blue-50 rounded-lg p-3">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" checked={!!cfg.freteMlImportar}
+                    onChange={e => set('freteMlImportar', e.target.checked)}
+                    className="w-4 h-4 accent-blue-600 mt-0.5" />
+                  <span className="text-xs text-blue-900">
+                    <b>Buscar o frete real no Mercado Livre</b> (recomendado)
+                    <span className="block text-blue-800 mt-1">
+                      Consulta, anúncio por anúncio, quanto o ML cobra de você pelo frete grátis — pelas medidas e
+                      pelo peso da embalagem do próprio anúncio. Enquanto estiver desmarcado, vale o custo médio
+                      digitado acima.
+                    </span>
+                    <span className="block text-blue-700 mt-1">
+                      Um valor só não tem como acertar: medido na sua conta, 300 g custa R$ 16,15 e 20 kg custa
+                      R$ 75,05 — e o <i>mesmo</i> pacote de 1 kg custa R$ 18,45 a R$ 79 e R$ 30,75 acima de R$ 200.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
+            {cfg.freteModo === 'gratis_acima' && cfg.plataforma !== 'mercadolivre' && (
               <p className="text-xs text-gray-400 mt-2">
-                O Mercado Livre descontinuou a consulta automática do custo de frete grátis, então esse valor
-                precisa vir de você — tire a média dos seus últimos envios.
+                Esse valor precisa vir de você — tire a média dos seus últimos envios. A busca automática por
+                anúncio só existe para o Mercado Livre por enquanto.
               </p>
             )}
           </Secao>

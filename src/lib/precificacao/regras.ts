@@ -1,5 +1,5 @@
 import { calcular } from './motor'
-import type { ConfigTaxas, Objetivo, Resultado } from './tipos'
+import type { ConfigTaxas, FaixaFrete, Objetivo, Resultado } from './tipos'
 
 // Hierarquia de regras: qual objetivo de lucro vale pra um produto num canal.
 //
@@ -146,12 +146,14 @@ export function aplicarRegra(params: {
   custoProduto: number
   regra: Regra
   pesoKg?: number | null
+  /** Escada de frete importada do marketplace para este item. */
+  freteFaixas?: FaixaFrete[] | null
 }): Resultado & { margemMinimaAplicada: boolean } {
   const { cfg, custoProduto, regra } = params
   const arredondamento = regra.arredondamento as any
 
   const base = calcular({
-    cfg, custoProduto, pesoKg: params.pesoKg,
+    cfg, custoProduto, pesoKg: params.pesoKg, freteFaixas: params.freteFaixas,
     objetivo: { tipo: regra.objetivoTipo, valor: regra.objetivoValor } as Objetivo,
     arredondamento,
   })
@@ -161,7 +163,7 @@ export function aplicarRegra(params: {
   }
 
   const comPiso = calcular({
-    cfg, custoProduto, pesoKg: params.pesoKg,
+    cfg, custoProduto, pesoKg: params.pesoKg, freteFaixas: params.freteFaixas,
     objetivo: { tipo: 'margem_liquida', valor: regra.margemMinima },
     arredondamento,
   })

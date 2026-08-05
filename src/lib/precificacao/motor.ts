@@ -1,4 +1,4 @@
-import type { ConfigTaxas, FaixaComissao, ItemCusto, LinhaCalculo, Objetivo, Resultado, SaudePreco } from './tipos'
+import type { ConfigTaxas, FaixaComissao, ItemCusto, LinhaCalculo, Objetivo, Resultado, SaudePreco, FaixaFrete } from './tipos'
 
 // Motor de Precificação — função pura, síncrona, sem banco e sem tela.
 // É consumido pela simulação, pelo comparador entre canais, pelo indicador de
@@ -45,6 +45,18 @@ export function freteEm(cfg: ConfigTaxas, preco: number, pesoKg: number | null):
   return 0
 }
 
+/**
+ * O frete que vale para um preço, dada a escada importada do marketplace.
+ *
+ * Mora aqui, e não no módulo do Mercado Livre, porque é conta pura: o motor
+ * não pode depender de um módulo que fala com API e banco.
+ */
+export function freteDaFaixa(faixas: FaixaFrete[] | null | undefined, preco: number): number {
+  if (!faixas?.length) return 0
+  const achada = faixas.find(f => preco >= f.min && (f.max == null || preco <= f.max))
+  return achada?.valor ?? faixas[faixas.length - 1]?.valor ?? 0
+}
+
 function separarItem(item: ItemCusto | null | undefined, custo: number) {
   // Devolve {pctPreco, fixo}: o que incide sobre o preço fica como taxa
   // percentual (entra na resolução), o resto já vira valor em reais.
@@ -82,7 +94,12 @@ type Regime = {
   precoMax: number | null
 }
 
-function montarRegimes(cfg: ConfigTaxas, custo: number, pesoKg: number | null): Regime[] {
+function montarRegimes(
+  cfg: ConfigTaxas,
+  custo: number,
+  pesoKg: number | null,
+  freteFaixasItem?: FaixaFrete[] | null,
+): Regime[] {
   const faixas: FaixaComissao[] = cfg.comissaoModo === 'simples'
     ? [{ min: 0, max: null, percentual: cfg.comissaoPercentual, fixo: cfg.comissaoFixo }]
     : (cfg.comissaoFaixas?.length ? cfg.comissaoFaixas : [{ min: 0, max: null, percentual: 0, fixo: 0 }])
@@ -102,6 +119,28 @@ function montarRegimes(cfg: ConfigTaxas, custo: number, pesoKg: number | null): 
     const comuns = {
       pctPreco: faixa.percentual / 100 + taxas.pctPreco + extras.pctPreco + imposto.pctPreco,
       fixoBase: faixa.fixo + taxas.fixo + extras.fixo + imposto.fixo,
+    }
+    // Frete importado do marketplace: também é uma escada por faixa de preço,
+    // então cruza com a escada da comissão. Cada pedaço em que as duas são
+    // constantes vira um regime — que é o que a fórmula fechada sabe
+    // resolver com exatidão, sem iterar em cima do degrau.
+    //
+    // Tem precedência sobre o `freteModo` digitado: quando o número veio do
+    // ML, ele é a verdade, e o "custo médio" da configuração deixa de valer.
+    if (freteFaixasItem?.length) {
+      for (const ff of freteFaixasItem) {
+        const min = Math.max(faixa.min, ff.min)
+        const max = faixa.max == null
+          ? ff.max
+          : ff.max == null ? faixa.max : Math.min(faixa.max, ff.max)
+        if (max != null && max < min) continue // sem interseção
+        regimes.push({
+          faixa, freteGratis: ff.valor > 0,
+          pctPreco: comuns.pctPreco, fixo: comuns.fixoBase + ff.valor,
+          precoMin: min, precoMax: max,
+        })
+      }
+      continue
     }
     if (usaLimiteFrete) {
       // Abaixo do limite: sem custo de frete.
@@ -181,6 +220,11 @@ export function calcular(params: {
   custoProduto: number
   objetivo: Objetivo
   pesoKg?: number | null
+  /**
+   * Escada de frete importada do marketplace para ESTE item. Quando vem
+   * preenchida, substitui o frete configurado no canal — ver montarRegimes.
+   */
+  freteFaixas?: FaixaFrete[] | null
   arredondamento?: 'nenhum' | 'terminar_90' | 'terminar_99' | 'cima_inteiro'
 }): Resultado {
   const { cfg, custoProduto, objetivo } = params
@@ -188,7 +232,7 @@ export function calcular(params: {
   const avisos: string[] = []
 
   const { custoTotal, embalagemPctPreco } = custoBase(cfg, custoProduto)
-  const regimes = montarRegimes(cfg, custoProduto, pesoKg)
+  const regimes = montarRegimes(cfg, custoProduto, pesoKg, params.freteFaixas)
 
   // Acha o preço: resolve em cada regime e fica com as soluções coerentes.
   let preco: number
@@ -229,7 +273,12 @@ export function calcular(params: {
   // Com o preço na mão, tudo vira valor em reais.
   const faixa = faixaComissao(cfg, preco)
   const comissao = BRL(preco * (faixa.percentual / 100) + faixa.fixo)
-  const frete = BRL(freteEm(cfg, preco, pesoKg))
+  // O detalhamento precisa mostrar o MESMO frete que o preço usou. Quando a
+  // escada veio importada do marketplace, ela manda aqui também — senão a
+  // tela exibiria o custo médio digitado enquanto a conta usou outro número.
+  const frete = BRL(params.freteFaixas?.length
+    ? freteDaFaixa(params.freteFaixas, preco)
+    : freteEm(cfg, preco, pesoKg))
 
   const valorDe = (item: ItemCusto | null | undefined): number => {
     if (!item || !item.valor) return 0

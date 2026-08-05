@@ -397,6 +397,10 @@ export default function RecalculoMassa() {
                       <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">Hoje</th>
                       <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">Novo</th>
                       <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">Diferença</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-600"
+                        title="Frete que saiu do seu bolso nesta conta. 🔵 = valor real buscado no marketplace.">
+                        Frete
+                      </th>
                       <th className="text-center px-3 py-2 text-xs font-medium text-gray-600">Margem</th>
                       <th className="text-center px-3 py-2 text-xs font-medium text-gray-600" title="Deixe em branco para usar a margem da regra">
                         Margem desejada
@@ -436,6 +440,16 @@ export default function RecalculoMassa() {
                           </td>
                           <td className={`px-3 py-2 text-right font-mono ${dif > 0 ? 'text-green-700' : dif < 0 ? 'text-blue-700' : 'text-gray-400'}`}>
                             {dif > 0 ? '+' : ''}{brl(dif)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-xs whitespace-nowrap">
+                            {i.frete > 0 ? (
+                              <span className={i.freteImportado ? 'text-blue-700' : 'text-gray-500'}
+                                title={i.freteImportado
+                                  ? 'Valor real buscado no Mercado Livre para a embalagem deste anúncio'
+                                  : 'Custo médio configurado no canal'}>
+                                {i.freteImportado && '🔵 '}{brl(i.frete)}
+                              </span>
+                            ) : <span className="text-gray-300">—</span>}
                           </td>
                           <td className="px-3 py-2 text-center whitespace-nowrap text-xs">
                             <span title={sa.texto}>{sa.emoji} {i.margemAtual.toFixed(0)}%</span>
