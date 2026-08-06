@@ -107,6 +107,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
   const [modalObs, setModalObs] = useState(false)
   const [obs, setObs] = useState('')
+  // CPF/CNPJ na nota sem exigir cadastro de cliente — o pedido comum no
+  // balcão. Sem isso, TODA NFC-e saía como consumidor não identificado.
+  const [cpfNota, setCpfNota] = useState('')
+  const [nomeNota, setNomeNota] = useState('')
+  const cpfNotaDigitos = cpfNota.replace(/\D/g, '')
+  const cpfNotaValido = cpfNotaDigitos.length === 11 || cpfNotaDigitos.length === 14
+  // Documento pela metade não vira nota rejeitada: ou está completo, ou a
+  // venda nem deixa finalizar.
+  const cpfNotaIncompleto = cpfNotaDigitos.length > 0 && !cpfNotaValido
 
   const [entrega, setEntrega] = useState(false)
   const [modalEntrega, setModalEntrega] = useState(false)
@@ -334,6 +343,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   function limparTudo() {
     setItens([]); setBusca(''); setClienteSelecionado(null)
     setDescontoGlobal(0); setObs(''); setEntrega(false); setModoDevol(false)
+    setCpfNota(''); setNomeNota('')
     setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null)
     setModalOrc(false); setModalPag(false); setModalTroca(false); setModalCredito(false)
     setFiadoParcelas('1'); setFiadoPrimVenc(''); setFiadoIntervalo('30'); setFiadoObs(''); setErrFiado('')
@@ -415,6 +425,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       const { data: venda, error } = await sb.from('vendas').insert({
         empresa_id: empresaId,
         cliente_id: clienteSelecionado?.id ?? null,
+        // Nome e documento também ficam gravados na própria venda. É o que
+        // permite a NFC-e sair identificada quando o cliente não é cadastrado
+        // ("põe meu CPF na nota") — e o `cliente_nome` sequer estava sendo
+        // gravado quando havia cadastro.
+        cliente_nome: clienteSelecionado?.nome ?? (nomeNota.trim() || null),
+        cliente_cpf_cnpj: cpfNotaDigitos || null,
         operador_nome: operadorNome,
         status: 'concluida',
         subtotal: totalVendas,
@@ -725,7 +741,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
-        if (isFiado || totalPago >= total) concluirVenda(hasDevolucao ? 'mista' : 'venda')
+        // Mesma trava do botão: Enter não pode contornar documento incompleto.
+        if (!cpfNotaIncompleto && (isFiado || totalPago >= total)) concluirVenda(hasDevolucao ? 'mista' : 'venda')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -1299,10 +1316,39 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
               <p className="text-xs text-red-600 font-medium">{errFiado}</p>
             )}
 
+            {/* CPF/CNPJ na nota — sem exigir cadastro de cliente. Fica aqui,
+                no fechamento, porque é onde o cliente pede. */}
+            {clienteSelecionado?.cpf_cnpj ? (
+              <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                <p className="text-xs text-green-800">
+                  🧾 Nota sai identificada: <b>{clienteSelecionado.nome}</b> · {clienteSelecionado.cpf_cnpj}
+                </p>
+              </div>
+            ) : (
+              <div className="border border-gray-200 rounded-lg px-3 py-2.5 space-y-2">
+                <label className="block text-xs font-medium text-gray-600">
+                  CPF/CNPJ na nota <span className="text-gray-400 font-normal">(opcional)</span>
+                </label>
+                <input value={cpfNota} onChange={e => setCpfNota(e.target.value)} inputMode="numeric"
+                  placeholder="Só números"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${cpfNotaIncompleto ? 'border-red-400 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`} />
+                {cpfNotaValido && (
+                  <input value={nomeNota} onChange={e => setNomeNota(e.target.value)}
+                    placeholder="Nome do cliente (opcional)"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                )}
+                {cpfNotaIncompleto
+                  ? <p className="text-xs text-red-600">Faltam dígitos — CPF tem 11 e CNPJ tem 14. Complete ou apague.</p>
+                  : cpfNotaValido
+                    ? <p className="text-xs text-green-700">✓ {cpfNotaDigitos.length === 11 ? 'CPF' : 'CNPJ'} válido — a nota sai identificada.</p>
+                    : <p className="text-xs text-gray-400">Em branco, a nota sai como consumidor não identificado.</p>}
+              </div>
+            )}
+
             <div className="flex gap-2 pt-1">
               <button onClick={() => { setModalPag(false); setErrFiado('') }} className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cancelar (Esc)</button>
               <button onClick={() => concluirVenda(hasDevolucao ? 'mista' : 'venda')}
-                disabled={salvando || (!isFiado && totalPago < total) || (isCarteira && !clienteSelecionado)}
+                disabled={salvando || (!isFiado && totalPago < total) || (isCarteira && !clienteSelecionado) || cpfNotaIncompleto}
                 className={`flex-1 py-2.5 disabled:opacity-40 text-white font-semibold rounded-lg text-sm transition-colors ${isFiado ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                 {salvando ? 'Salvando...' : isFiado ? '📒 Confirmar Fiado (Enter)' : '✓ Confirmar (Enter)'}
               </button>

@@ -70,10 +70,26 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     return { ok: false, erro: `Produto(s) sem NCM cadastrado — emissão bloqueada: ${nomes}` }
   }
 
-  let cliente: { nome: string; cpf_cnpj: string | null } | null = null
+  // Destinatário da nota. Duas origens, nesta ordem:
+  //
+  //   1. cliente cadastrado (venda.cliente_id) — o caminho que já existia;
+  //   2. CPF/CNPJ informado direto na venda — o caso do balcão ("põe meu CPF
+  //      na nota"), que não tinha para onde ir e por isso NENHUMA das 96
+  //      notas emitidas até aqui saiu identificada.
+  //
+  // O cadastro tem prioridade porque é o dado mais completo; o informado na
+  // venda entra quando não há cadastro, ou quando o cadastro está sem
+  // documento.
+  let cliente: { nome: string | null; cpf_cnpj: string | null } | null = null
   if (venda.cliente_id) {
     const { data: cli } = await sb.from('clientes').select('nome, cpf_cnpj').eq('id', venda.cliente_id).single()
     cliente = cli ?? null
+  }
+  if (!cliente?.cpf_cnpj && venda.cliente_cpf_cnpj) {
+    cliente = {
+      nome: cliente?.nome ?? venda.cliente_nome ?? null,
+      cpf_cnpj: venda.cliente_cpf_cnpj,
+    }
   }
 
   const cfopPadrao = configFiscal?.cfop_venda_dentro ?? '5102'
@@ -158,14 +174,19 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
   }))
 
   const cpfCnpjDigits = cliente?.cpf_cnpj?.replace(/\D/g, '') ?? ''
+  // Só 11 (CPF) ou 14 (CNPJ) dígitos viram destinatário. Antes, qualquer
+  // texto não-vazio montava o bloco — um documento incompleto ia sem `cpf` e
+  // sem `cnpj`, e a SEFAZ rejeitava a nota inteira. Documento inválido agora
+  // vira nota de consumidor não identificado, que é ruim mas emite.
+  const documentoValido = cpfCnpjDigits.length === 11 || cpfCnpjDigits.length === 14
 
   const input: EmissaoNFCeInput = {
     referencia: venda.id,
     cnpjEmitente: empresa.cnpj,
     naturezaOperacao: configFiscal?.natureza_operacao ?? 'Venda de Mercadorias',
-    ...(cpfCnpjDigits ? {
+    ...(documentoValido ? {
       destinatario: {
-        nome: cliente?.nome,
+        nome: cliente?.nome ?? undefined,
         cpf: cpfCnpjDigits.length === 11 ? cpfCnpjDigits : undefined,
         cnpj: cpfCnpjDigits.length === 14 ? cpfCnpjDigits : undefined,
       },
