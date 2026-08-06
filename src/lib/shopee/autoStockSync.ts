@@ -1,5 +1,6 @@
 import { pushPrecoEstoque, unlistItems } from './write'
 import { calcularKit } from '@/lib/produtos/kit'
+import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra, type RegraCalculo } from './aplicarRegra'
 import type { ShopeeChannel } from './types'
 
@@ -34,6 +35,15 @@ export async function sincronizarEstoqueAutomatico(
     .limit(MAX_ITEMS_POR_RODADA)
 
   let processados = 0, enviados = 0, falhas = 0, pausados = 0
+  // Estoque unificado do grupo: quando ligado, o número que vai para o canal
+  // é a soma das empresas participantes, não só o desta empresa. Resolvido de
+  // uma vez para todos os produtos da rodada — não uma consulta por anúncio.
+  const cfgUnif = await buscarConfigUnificacao(sb, canal.empresaId)
+  const idsProdutos = Array.from(new Set<string>(
+    (anuncios ?? []).map((a: any) => a.produtos?.id).filter(Boolean),
+  ))
+  const mapaUnificado = await estoqueUnificadoDeProdutos(sb, canal.empresaId, idsProdutos, cfgUnif)
+
   const idsParaPausar: string[] = []
 
   for (const a of anuncios ?? []) {
@@ -69,7 +79,14 @@ export async function sincronizarEstoqueAutomatico(
       }
     }
 
-    if (estoqueNovo === undefined) estoqueNovo = produto.estoque ?? 0
+    // Kit tem estoque próprio (montável pelos componentes) e não entra na
+    // unificação — somar kit de duas empresas contaria o mesmo componente
+    // duas vezes.
+    if (estoqueNovo === undefined) {
+      estoqueNovo = (produto.tipo !== 'kit' && mapaUnificado?.has(produto.id))
+        ? mapaUnificado.get(produto.id)!
+        : (produto.estoque ?? 0)
+    }
 
     const updates: Record<string, any> = { updated_at: new Date().toISOString(), estoque_reservado: estoqueNovo }
     if (precoNovo !== undefined) updates.preco_venda = precoNovo
