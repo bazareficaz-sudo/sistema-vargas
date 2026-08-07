@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import BuscaCliente from '@/components/automacoes/BuscaCliente'
 import { abrirDanfe, type FormatoPapel } from '@/lib/fiscal/danfe'
 import type { Venda } from './VendasClient'
 
@@ -43,8 +44,21 @@ export default function DetalheVendaModal({
     observacao: string | null; entrega_solicitada: boolean; valor_pago: number | null; troco: number | null
     nfce_status: string | null; nfce_numero: string | null; nfce_chave: string | null; nfce_motivo_rejeicao: string | null
     nfce_url_pdf: string | null; operador_nome: string | null
+    cliente_id: string | null; cliente_nome: string | null; cliente_cpf_cnpj: string | null
   } | null>(null)
   const [emitindoNfce, setEmitindoNfce] = useState(false)
+
+  // Identificação do destinatário antes de emitir. Duas formas: escolher um
+  // cliente cadastrado ou digitar CPF/CNPJ na hora. Sem isso a nota sai como
+  // consumidor não identificado — que foi o caso das 96 primeiras.
+  const [identAberto, setIdentAberto] = useState(false)
+  const [identCliId, setIdentCliId] = useState<string | null>(null)
+  const [identCliNome, setIdentCliNome] = useState('')
+  const [identCpf, setIdentCpf] = useState('')
+  const [identNome, setIdentNome] = useState('')
+  const identCpfDigitos = identCpf.replace(/\D/g, '')
+  const identCpfValido = identCpfDigitos.length === 11 || identCpfDigitos.length === 14
+  const identCpfIncompleto = identCpfDigitos.length > 0 && !identCpfValido
 
   const [edicao, setEdicao] = useState(modoEdicaoInicial)
   const [salvando, setSalvando] = useState(false)
@@ -64,7 +78,7 @@ export default function DetalheVendaModal({
       const sb = createClient()
       const [{ data: itensData }, { data: vendaData }] = await Promise.all([
         sb.from('venda_itens').select('*').eq('venda_id', venda.id),
-        sb.from('vendas').select('observacao, entrega_solicitada, valor_pago, troco, nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf, operador_nome').eq('id', venda.id).single(),
+        sb.from('vendas').select('observacao, entrega_solicitada, valor_pago, troco, nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf, operador_nome, cliente_id, cliente_nome, cliente_cpf_cnpj').eq('id', venda.id).single(),
       ])
       setItens(itensData ?? [])
       setDetalhe(vendaData as any)
@@ -122,6 +136,24 @@ export default function DetalheVendaModal({
   async function emitirNfce() {
     setEmitindoNfce(true)
     try {
+      // Grava a identificação ANTES de emitir. A emissão lê a venda do banco,
+      // então o que não estiver salvo não entra na nota.
+      const patch: Record<string, any> = {}
+      if (identCliId) {
+        patch.cliente_id = identCliId
+        patch.cliente_nome = identCliNome || null
+      } else if (identCpfValido) {
+        patch.cliente_cpf_cnpj = identCpfDigitos
+        patch.cliente_nome = identNome.trim() || null
+      }
+      if (Object.keys(patch).length > 0) {
+        const sb = createClient()
+        const { error } = await sb.from('vendas').update(patch).eq('id', venda.id)
+        if (error) throw new Error(`Não foi possível salvar a identificação: ${error.message}`)
+        setDetalhe(prev => prev ? { ...prev, ...patch } : prev)
+        onAtualizado(patch as any)
+      }
+
       const res = await fetch('/api/fiscal/emitir-nfce', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -320,14 +352,69 @@ export default function DetalheVendaModal({
                     )}
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    <span className="text-xs text-amber-700">
-                      ⚠ Não emitida{detalhe?.nfce_motivo_rejeicao ? ` — ${detalhe.nfce_motivo_rejeicao}` : ''}
-                    </span>
-                    <button onClick={emitirNfce} disabled={emitindoNfce}
-                      className="text-xs text-amber-800 underline font-medium disabled:opacity-50 flex-shrink-0">
-                      {emitindoNfce ? 'Emitindo...' : 'Emitir agora'}
-                    </button>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-amber-700">
+                        ⚠ Não emitida{detalhe?.nfce_motivo_rejeicao ? ` — ${detalhe.nfce_motivo_rejeicao}` : ''}
+                      </span>
+                      <button onClick={emitirNfce} disabled={emitindoNfce || identCpfIncompleto}
+                        className="text-xs text-amber-800 underline font-medium disabled:opacity-50 flex-shrink-0">
+                        {emitindoNfce ? 'Emitindo...' : 'Emitir agora'}
+                      </button>
+                    </div>
+
+                    {/* Quem vai no destinatário da nota. */}
+                    {detalhe?.cliente_id || detalhe?.cliente_cpf_cnpj ? (
+                      <p className="text-xs text-green-800 bg-green-50 border border-green-200 rounded px-2 py-1.5">
+                        🧾 Sai identificada: <b>{detalhe.cliente_nome ?? 'cliente cadastrado'}</b>
+                        {detalhe.cliente_cpf_cnpj ? ` · ${detalhe.cliente_cpf_cnpj}` : ''}
+                      </p>
+                    ) : !identAberto ? (
+                      <button onClick={() => setIdentAberto(true)}
+                        className="text-xs text-blue-700 underline">
+                        + Identificar cliente na nota (CPF/CNPJ)
+                      </button>
+                    ) : (
+                      <div className="bg-white border border-gray-200 rounded-lg p-2.5 space-y-2">
+                        <p className="text-[11px] text-gray-500">
+                          Escolha um cliente cadastrado <b>ou</b> informe o CPF/CNPJ. Em branco, a nota sai como
+                          consumidor não identificado.
+                        </p>
+
+                        <BuscaCliente empresaId={empresaId} clienteId={identCliId} clienteNome={identCliNome}
+                          onChange={(id, nome) => {
+                            setIdentCliId(id); setIdentCliNome(nome)
+                            // Um caminho de cada vez: escolher cadastro limpa
+                            // o digitado, para não sobrar dado conflitante.
+                            if (id) { setIdentCpf(''); setIdentNome('') }
+                          }} />
+
+                        {!identCliId && (
+                          <>
+                            <div className="text-[11px] text-gray-400 text-center">ou</div>
+                            <input value={identCpf} onChange={e => setIdentCpf(e.target.value)} inputMode="numeric"
+                              placeholder="CPF/CNPJ — só números"
+                              className={`w-full border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none ${identCpfIncompleto ? 'border-red-400' : 'border-gray-300 focus:border-blue-500'}`} />
+                            {identCpfValido && (
+                              <input value={identNome} onChange={e => setIdentNome(e.target.value)}
+                                placeholder="Nome do cliente (opcional)"
+                                className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+                            )}
+                            {identCpfIncompleto && (
+                              <p className="text-[11px] text-red-600">
+                                Faltam dígitos — CPF tem 11 e CNPJ tem 14. Documento pela metade faz a SEFAZ
+                                rejeitar a nota.
+                              </p>
+                            )}
+                            {identCpfValido && (
+                              <p className="text-[11px] text-green-700">
+                                ✓ {identCpfDigitos.length === 11 ? 'CPF' : 'CNPJ'} válido — clique em Emitir agora.
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
