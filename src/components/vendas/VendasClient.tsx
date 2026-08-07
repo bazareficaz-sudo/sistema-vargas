@@ -188,9 +188,38 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     return [...contagem.entries()].sort((a, b) => b[1] - a[1])
   })()
 
-  const vendasFiltradas = formasFiltro.size === 0
-    ? vendas
-    : vendas.filter(v => formasDaVenda(v).some(f => formasFiltro.has(f)))
+  // Filtro por situação fiscal. Combina com os demais em cadeia: período e
+  // busca já reduziram `vendas`, pagamento reduz depois, e este reduz por
+  // último — marcar um não desmarca os outros.
+  //
+  // Troca e devolução ficam FORA da conta de "sem nota": NFC-e é emitida só
+  // para venda (é o mesmo critério do painel de detalhe). Sem isso, a lista
+  // de pendências viria cheia de devolução que nunca vai ter nota.
+  type SituacaoFiscal = '' | 'com' | 'sem' | 'rejeitada'
+  const [fiscalFiltro, setFiscalFiltro] = useState<SituacaoFiscal>('')
+
+  const ehVendaFiscalizavel = (v: Venda) => v.tipo_operacao === 'venda'
+  const temNota = (v: Venda) => v.nfce_status === 'autorizada'
+  const foiRecusada = (v: Venda) => v.nfce_status === 'rejeitada' || v.nfce_status === 'erro'
+
+  const casaFiscal = (v: Venda): boolean => {
+    if (fiscalFiltro === '') return true
+    if (fiscalFiltro === 'com') return temNota(v)
+    if (fiscalFiltro === 'rejeitada') return foiRecusada(v)
+    // 'sem' — o que ainda precisa de nota: nunca emitida, recusada ou
+    // cancelada. É a lista de trabalho, não só "status nulo".
+    return ehVendaFiscalizavel(v) && !temNota(v)
+  }
+
+  const contagemFiscal = {
+    com: vendas.filter(temNota).length,
+    sem: vendas.filter(v => ehVendaFiscalizavel(v) && !temNota(v)).length,
+    rejeitada: vendas.filter(foiRecusada).length,
+  }
+
+  const vendasFiltradas = vendas
+    .filter(v => formasFiltro.size === 0 || formasDaVenda(v).some(f => formasFiltro.has(f)))
+    .filter(casaFiscal)
 
   const totalFaturado = vendasFiltradas.filter(v => v.status === 'concluida').reduce((s, v) => s + (v.total ?? 0), 0)
 
@@ -553,6 +582,37 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           })}
           {formasFiltro.size > 0 && (
             <button onClick={() => setFormasFiltro(new Set())}
+              className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
+          )}
+        </div>
+      )}
+
+      {/* Situação fiscal — linha própria para deixar claro que soma com o
+          filtro de pagamento acima, em vez de substituí-lo. */}
+      {(contagemFiscal.com > 0 || contagemFiscal.sem > 0) && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs text-gray-500">Nota fiscal:</span>
+          {([
+            ['com', '🧾 Com NFC-e', contagemFiscal.com, 'Vendas com nota autorizada'],
+            ['sem', 'Sem NFC-e', contagemFiscal.sem, 'Vendas que ainda precisam de nota (troca e devolução não entram)'],
+            ['rejeitada', '⚠ Rejeitada', contagemFiscal.rejeitada, 'A SEFAZ recusou — veja o motivo no detalhe da venda'],
+          ] as [SituacaoFiscal, string, number, string][]).map(([valor, rotulo, qtd, ajuda]) => {
+            if (qtd === 0 && valor === 'rejeitada') return null
+            const on = fiscalFiltro === valor
+            return (
+              <button key={valor} title={ajuda}
+                onClick={() => setFiscalFiltro(on ? '' : valor)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                  on
+                    ? valor === 'rejeitada' ? 'bg-red-600 border-red-600 text-white' : 'bg-blue-600 border-blue-600 text-white'
+                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}>
+                {rotulo} <span className="opacity-60">{qtd}</span>
+              </button>
+            )
+          })}
+          {fiscalFiltro && (
+            <button onClick={() => setFiscalFiltro('')}
               className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
           )}
         </div>
