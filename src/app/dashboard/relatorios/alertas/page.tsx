@@ -24,6 +24,7 @@ export default async function RelatorioAlertasPage() {
     vendasMesAnteriorRes,
     clientesRes,
     entradasRes,
+    entradasXmlRes,
   ] = await Promise.all([
     supabase.from('produtos').select('id, nome, estoque, estoque_minimo, preco_custo, preco_venda, ativo, categoria').eq('empresa_id', empresaId).eq('ativo', true),
     supabase.from('vendas').select('id').eq('empresa_id', empresaId).eq('status', 'concluida').gte('created_at', inicio30.toISOString()),
@@ -37,6 +38,9 @@ export default async function RelatorioAlertasPage() {
       .lte('created_at', new Date(hoje.getFullYear(), hoje.getMonth(), 0, 23, 59, 59).toISOString()),
     supabase.from('clientes').select('id').eq('empresa_id', empresaId),
     supabase.from('entradas').select('id, status, valor_total').eq('empresa_id', empresaId).eq('status', 'confirmada').is('total_contas', null),
+    // A mesma compra entra por duas portas. Contar só o lançamento manual
+    // escondia as notas importadas que também ficaram sem conta a pagar.
+    supabase.from('nfe_entradas').select('id, status, valor_total').eq('empresa_id', empresaId).eq('status', 'finalizada').is('dados_financeiro', null),
   ])
 
   const produtos = produtosRes.data ?? []
@@ -148,7 +152,7 @@ export default async function RelatorioAlertasPage() {
   })
 
   // Entradas sem contas a pagar
-  const entradasSemContas = (entradasRes.data ?? []).length
+  const entradasSemContas = (entradasRes.data ?? []).length + (entradasXmlRes.data ?? []).length
   if (entradasSemContas > 0) alertas.push({
     tipo: 'info', titulo: 'Entradas sem contas a pagar',
     descricao: `${entradasSemContas} entradas confirmadas sem contas a pagar geradas.`,

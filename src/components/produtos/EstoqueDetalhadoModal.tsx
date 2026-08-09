@@ -133,7 +133,7 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
       // junção com vendas é feita manualmente abaixo.
       const vendaItensSelect = 'id, quantidade, tipo, created_at, venda_id'
 
-      const [estoqueRes, vendasRes, devolucoesRes, entradasRes, movRes] = await Promise.all([
+      const [estoqueRes, vendasRes, devolucoesRes, entradasRes, entradasXmlRes, movRes] = await Promise.all([
         sb.from('produto_estoque').select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome, ativo)')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id),
         sb.from('venda_itens').select(vendaItensSelect)
@@ -145,6 +145,10 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
           .eq('produto_id', produto.id).eq('tipo', 'devolucao').order('created_at', { ascending: false }).limit(100),
         // Sem embed de "entradas"/"fornecedores" pelo mesmo motivo do venda_itens acima.
         sb.from('entrada_itens').select('id, quantidade, entrada_id, created_at')
+          .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(100),
+        // Compra entra por duas portas — lançamento manual e nota por XML.
+        // Ler só a primeira escondia metade do histórico de entrada do produto.
+        sb.from('nfe_itens').select('id, quantidade_entrada, quantidade_xml, entrada_id, created_at')
           .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(100),
         sb.from('estoque_movimentacoes').select('id, tipo, quantidade, motivo, observacao, created_at')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id)
@@ -160,11 +164,35 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
         const { data: vendasInfo } = await sb.from('vendas').select('id, created_at, numero, vendedor_nome, operador_nome').in('id', vendaIds)
         for (const v of vendasInfo ?? []) vendasMap.set(v.id, v)
       }
+      // Normaliza a nota por XML no mesmo formato do lançamento manual, para
+      // o resto do bloco não precisar saber de onde a linha veio. A quantidade
+      // que vale é a conferida na entrada — a do XML é o que o fornecedor
+      // declarou, e nem sempre é o que chegou.
+      const itensEntradaXml = (entradasXmlRes.data ?? []).map((e: any) => ({
+        id: e.id, entrada_id: e.entrada_id, created_at: e.created_at,
+        quantidade: e.quantidade_entrada ?? e.quantidade_xml,
+        origemXml: true,
+      }))
+      const itensEntrada = [...(entradasRes.data ?? []), ...itensEntradaXml] as any[]
+
       const entradaIds = Array.from(new Set<string>((entradasRes.data ?? []).map((e: any) => e.entrada_id).filter(Boolean)))
+      const entradaXmlIds = Array.from(new Set<string>(itensEntradaXml.map((e: any) => e.entrada_id).filter(Boolean)))
       const entradasMap = new Map<string, { numero_entrada: string | null; numero_nf: string | null; data_entrada: string; fornecedor_id: string | null }>()
       if (entradaIds.length > 0) {
         const { data: entradasInfo } = await sb.from('entradas').select('id, numero_entrada, numero_nf, data_entrada, fornecedor_id').in('id', entradaIds)
         for (const ent of entradasInfo ?? []) entradasMap.set(ent.id, ent)
+      }
+      if (entradaXmlIds.length > 0) {
+        const { data: xmlInfo } = await sb.from('nfe_entradas')
+          .select('id, numero, serie, data_entrada, fornecedor_id, nome_fornecedor').in('id', entradaXmlIds)
+        for (const ent of xmlInfo ?? []) entradasMap.set(ent.id, {
+          numero_entrada: null,
+          numero_nf: ent.numero ? `${ent.numero}${ent.serie ? '-' + ent.serie : ''}` : null,
+          data_entrada: ent.data_entrada,
+          fornecedor_id: ent.fornecedor_id,
+          // Nota importada guarda o nome mesmo sem fornecedor cadastrado.
+          nomeFornecedorXml: ent.nome_fornecedor,
+        } as any)
       }
       const fornecedorIds = Array.from(new Set<string>(Array.from(entradasMap.values()).map(e => e.fornecedor_id).filter((v): v is string => Boolean(v))))
       const fornecedoresMap = new Map<string, { razao_social: string | null; nome_fantasia: string | null }>()
@@ -199,17 +227,19 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
       }
       const movVendas: Movimento[] = itensVenda.map(mapVendaItem)
 
-      const movEntradas: Movimento[] = (entradasRes.data ?? []).map((e: any) => {
+      const movEntradas: Movimento[] = itensEntrada.map((e: any) => {
         const ent = entradasMap.get(e.entrada_id)
         const forn = ent?.fornecedor_id ? fornecedoresMap.get(ent.fornecedor_id) : undefined
-        const fornecedor = forn?.nome_fantasia || forn?.razao_social || ''
+        const fornecedor = forn?.nome_fantasia || forn?.razao_social || (ent as any)?.nomeFornecedorXml || ''
         const numero = ent?.numero_entrada || (ent?.numero_nf ? `NF ${ent.numero_nf}` : '')
         return {
           id: `entrada-${e.id}`,
           data: ent?.data_entrada ?? e.created_at ?? new Date().toISOString(),
           tipo: 'entrada',
           quantidade: Number(e.quantidade) || 0,
-          detalhe: [numero, fornecedor].filter(Boolean).join(' · ') || 'Entrada de mercadoria',
+          // Marca a origem: as duas são "entrada de mercadoria", mas quem
+          // confere precisa saber se veio de nota importada ou de lançamento.
+          detalhe: [numero, fornecedor, e.origemXml ? '(XML)' : ''].filter(Boolean).join(' · ') || 'Entrada de mercadoria',
         }
       })
 
