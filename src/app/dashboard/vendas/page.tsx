@@ -17,7 +17,7 @@ export default async function VendasPage() {
   const [{ data: vendas, count, error: erroVendas }, { data: saudeConfig }, { data: saudeFaixas }, { data: configEstoque }, { data: configFiscal }, { data: configImpressao }] = await Promise.all([
     supabase
       .from('vendas')
-      .select('id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf', { count: 'exact' })
+      .select('id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, vendedor_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf', { count: 'exact' })
       .eq('empresa_id', empresaId)
       .gte('created_at', hoje.toISOString())
       .lte('created_at', fimHoje.toISOString())
