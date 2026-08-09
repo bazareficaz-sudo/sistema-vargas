@@ -574,28 +574,17 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       }
 
       // Carteira (cobrança na conta do cliente)
-      if (isCarteira && clienteSelecionado) {
-        const valorCarteira = formas.find(f => f.tipo === 'carteira')?.valor ?? total
-        await sb.from('contas_receber').insert({
-          empresa_id: empresaId,
-          cliente_id: clienteSelecionado.id,
-          cliente_nome: clienteSelecionado.nome,
-          origem: 'carteira',
-          origem_id: venda.id,
-          numero_doc: `CART-${venda.id?.slice(-6).toUpperCase()}`,
-          parcela_numero: 1,
-          total_parcelas: 1,
-          data_emissao: new Date().toISOString().split('T')[0],
-          data_vencimento: new Date().toISOString().split('T')[0],
-          valor_original: valorCarteira,
-          valor_recebido: 0,
-          status: 'aberto',
-          operador_nome: operadorNome,
-        })
-        await sb.from('clientes').update({
-          saldo_devedor: (clienteSelecionado.saldo_devedor ?? 0) + valorCarteira,
-        }).eq('id', clienteSelecionado.id)
-      }
+      //
+      // A conta a receber e o saldo do cliente NÃO são criados aqui: quem faz
+      // isso agora é o gatilho `trg_venda_carteira` no banco.
+      //
+      // Mudou de lugar porque a regra morando na tela alcançava só quem vendia
+      // por aqui. O PDV externo grava a venda direto no banco e nunca passava
+      // por este código — resultado medido: 87 vendas de carteira, R$ 4.498,15,
+      // que nunca foram cobradas de ninguém.
+      //
+      // No banco, vale para toda porta de entrada: PDV web, PDV externo,
+      // importação, API. Duplicar aqui criaria duas contas para a mesma venda.
 
       // Crédito gerado por devolução maior que compra — colunas alinhadas
       // com o schema real de creditos_cliente (o mesmo usado em "Novo
