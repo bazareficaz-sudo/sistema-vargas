@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -86,6 +87,16 @@ const STATUS_OPTS: { value: Status; label: string }[] = [
 ]
 
 // ── Component ─────────────────────────────────────────────────────────────────
+
+// Nomes que o operador reconhece. O banco guarda o código técnico.
+const ROTULO_MOV: Record<string, string> = {
+  venda: 'Venda', devolucao: 'Devolução',
+  entrada_compra: 'Entrada (compra)', entrada_nfe: 'Entrada (NF-e)',
+  ajuste_entrada: 'Ajuste (entrada)', ajuste_saida: 'Ajuste (saída)',
+  venda_marketplace: 'Venda marketplace',
+  transferencia_enviada: 'Transferência enviada',
+  transferencia_recebida: 'Transferência recebida',
+}
 
 export default function NovoPedidoClient({ fornecedores, empresa, empresaId, userId, pedidoExistente, itensExistentes }: Props) {
   const router = useRouter()
@@ -282,6 +293,21 @@ export default function NovoPedidoClient({ fornecedores, empresa, empresaId, use
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
   function abrirModal(p: ProdutoForn) { setModalProduto(p) }
+
+  // Histórico de movimentação do produto, consultado sem sair do pedido.
+  // Sair da tela no meio de uma compra custa o carrinho montado — por isso
+  // painel aqui, e não link para a tela de Movimentação de Estoque.
+  const [histProduto, setHistProduto] = useState<ProdutoForn | null>(null)
+  const [histLinhas, setHistLinhas] = useState<any[] | null>(null)
+
+  async function abrirHistorico(p: ProdutoForn) {
+    setHistProduto(p); setHistLinhas(null)
+    const sb = createClient()
+    const { data } = await sb.from('estoque_movimentacoes')
+      .select('created_at, tipo, quantidade, estoque_anterior, estoque_novo, motivo, usuario')
+      .eq('produto_id', p.id).order('created_at', { ascending: false }).limit(60)
+    setHistLinhas(data ?? [])
+  }
 
   function confirmarModal() {
     if (!modalProduto) return
@@ -972,6 +998,11 @@ export default function NovoPedidoClient({ fornecedores, empresa, empresaId, use
                                   + Adicionar
                                 </button>
                               )}
+                              <button onClick={e => { e.stopPropagation(); abrirHistorico(p) }}
+                                title="Ver a movimentação deste produto — entradas, vendas e ajustes"
+                                className="ml-1 text-xs text-slate-400 hover:text-blue-600 px-1.5 py-1 rounded-lg hover:bg-slate-100">
+                                📊
+                              </button>
                             </td>
                           </tr>
                         )
@@ -1349,6 +1380,86 @@ export default function NovoPedidoClient({ fornecedores, empresa, empresaId, use
           </div>
         </div>
       )}
+
+      {/* Histórico de movimentação do produto — consultado sem sair do pedido */}
+      {histProduto && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+          onClick={() => setHistProduto(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+            onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Movimentação do produto</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {histProduto.nome}
+                  <span className="text-slate-400"> · SKU {histProduto.sku || '—'} · estoque atual {histProduto.estoque}</span>
+                </p>
+              </div>
+              <button onClick={() => setHistProduto(null)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            </div>
+
+            <div className="overflow-auto flex-1">
+              {histLinhas === null ? (
+                <p className="text-sm text-slate-400 text-center py-10">Carregando...</p>
+              ) : histLinhas.length === 0 ? (
+                <div className="px-5 py-8 text-center">
+                  <p className="text-sm text-slate-500">Nenhuma movimentação registrada para este produto.</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    O registro de movimentação começou a valer a partir da implantação do módulo —
+                    compras e vendas anteriores podem não aparecer aqui.
+                  </p>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-4 py-2 text-[11px] font-semibold text-slate-500">Quando</th>
+                      <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500">Tipo</th>
+                      <th className="text-right px-3 py-2 text-[11px] font-semibold text-slate-500">Qtd</th>
+                      <th className="text-right px-3 py-2 text-[11px] font-semibold text-slate-500">Saldo depois</th>
+                      <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500">Origem</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {histLinhas.map((m: any, i: number) => {
+                      // Entrada e saída pelo sinal, não só pela cor — quem
+                      // imprime em preto e branco também precisa distinguir.
+                      const entra = ['entrada_compra','entrada_nfe','devolucao','ajuste_entrada','transferencia_recebida'].includes(m.tipo)
+                      return (
+                        <tr key={i} className="hover:bg-slate-50">
+                          <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
+                            {new Date(m.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-700">{ROTULO_MOV[m.tipo] ?? m.tipo}</td>
+                          <td className={`px-3 py-2 text-right text-sm font-medium ${entra ? 'text-emerald-700' : 'text-red-600'}`}>
+                            {entra ? '+' : '−'}{Math.abs(Number(m.quantidade ?? 0))}
+                          </td>
+                          <td className="px-3 py-2 text-right text-sm text-slate-600">{m.estoque_novo ?? '—'}</td>
+                          <td className="px-3 py-2 text-xs text-slate-400">
+                            {m.motivo || '—'}{m.usuario ? ` · ${m.usuario}` : ''}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                {histLinhas?.length ? `Últimas ${histLinhas.length} movimentações` : ''}
+              </span>
+              <button onClick={() => setHistProduto(null)}
+                className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+
   )
 }
