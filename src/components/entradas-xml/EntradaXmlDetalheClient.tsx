@@ -681,7 +681,10 @@ export default function EntradaXmlDetalheClient({
             fornecedor_id: entrada.fornecedor_id || null,
             valor: dup.valor,
             vencimento: dup.data_vencimento,
-            status: 'aberto',
+            // 'pendente', não 'aberto': é o status que a tela de Contas a
+            // Pagar entende. Com 'aberto' a conta não aparecia em nenhuma aba
+            // nem somava nos cards — nascia invisível.
+            status: 'pendente',
             origem: 'entrada_xml',
             origem_id: entrada.id,
             observacoes: obsFinanceiro || null,

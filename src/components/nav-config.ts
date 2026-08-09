@@ -149,6 +149,7 @@ export const NAV: NavGroup[] = [
         label: 'Pagar',
         items: [
           { href: '/dashboard/contas-pagar', label: 'Contas a Pagar', icon: '💳', modulo: 'contas_pagar' },
+          { href: '/dashboard/contas-pagar/relatorio', label: 'Relatório de Pagamentos', icon: '📊', modulo: 'contas_pagar' },
         ],
       },
       {

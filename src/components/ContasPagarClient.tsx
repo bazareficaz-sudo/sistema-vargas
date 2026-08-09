@@ -3,11 +3,14 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import PagarContasModal from '@/components/contas-pagar/PagarContasModal'
 
 type Conta = {
   id: string; descricao: string; valor: number; vencimento: string
   status: string; data_pagamento: string | null; forma_pagamento: string | null
   parcela: number; total_parcelas: number; observacoes: string | null
+  valor_pago: number | null; juros: number | null; multa: number | null
+  tipo_despesa_id: string | null
   fornecedores: { razao_social: string; nome_fantasia: string | null } | null
 }
 
@@ -34,10 +37,27 @@ export default function ContasPagarClient({
   const [contas, setContas] = useState(inicial)
   const [q, setQ] = useState(qInicial)
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
-  const [modalPgto, setModalPgto] = useState<Conta | null>(null)
-  const [dataPgto, setDataPgto] = useState(() => new Date().toISOString().split('T')[0])
-  const [formaPgto, setFormaPgto] = useState('pix')
-  const [salvando, setSalvando] = useState(false)
+  const [modalPgto, setModalPgto] = useState<Conta[] | null>(null)
+
+  // Ordenação e filtro por fornecedor. Client-side: a tela já carrega a lista
+  // do período, e o volume é de dezenas — paginar no servidor aqui só somaria
+  // espera sem resolver problema que exista.
+  const [ordem, setOrdem] = useState<'vencimento' | 'fornecedor' | 'valor'>('vencimento')
+  const [fornecedorFiltro, setFornecedorFiltro] = useState('')
+
+  const nomeForn = (c: Conta) =>
+    c.fornecedores?.nome_fantasia || c.fornecedores?.razao_social || ''
+
+  // Só os fornecedores que APARECEM na lista carregada. Uma lista fixa com o
+  // cadastro inteiro encheria o seletor de nomes sem nenhuma conta.
+  const fornecedoresPresentes = (() => {
+    const m = new Map<string, number>()
+    for (const c of contas) {
+      const n = nomeForn(c) || '(sem fornecedor)'
+      m.set(n, (m.get(n) ?? 0) + 1)
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+  })()
 
   function navegar(params: Record<string, string>) {
     const sp = new URLSearchParams({ status: statusFiltro, q, ...params })
@@ -51,24 +71,21 @@ export default function ContasPagarClient({
     setSelecionadas(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
 
-  async function registrarPagamento(ids: string[], data: string, forma: string) {
-    setSalvando(true)
-    const sb = createClient()
-    await sb.from('contas_pagar').update({
-      status: 'pago', data_pagamento: data, forma_pagamento: forma
-    }).in('id', ids)
+  // A gravação em si é do modal — ele é quem sabe o rateio de juros/multa por
+  // conta. Aqui só refletimos o resultado na lista para a tela não ficar
+  // mostrando como pendente algo que acabou de ser pago.
+  function aplicarPagamento(ids: string[], dados: { data: string; forma: string }) {
     setContas(prev => prev.map(c => ids.includes(c.id)
-      ? { ...c, status: 'pago', data_pagamento: data, forma_pagamento: forma }
+      ? { ...c, status: 'pago', data_pagamento: dados.data, forma_pagamento: dados.forma }
       : c))
     setSelecionadas(new Set())
     setModalPgto(null)
-    setSalvando(false)
     router.refresh()
   }
 
-  async function pagarSelecionadas() {
+  function pagarSelecionadas() {
     if (selecionadas.size === 0) return
-    await registrarPagamento([...selecionadas], dataPgto, formaPgto)
+    setModalPgto(contas.filter(c => selecionadas.has(c.id)))
   }
 
   async function cancelar(id: string) {
@@ -78,7 +95,21 @@ export default function ContasPagarClient({
     setContas(prev => prev.map(c => c.id === id ? { ...c, status: 'cancelado' } : c))
   }
 
-  const filtradas = contas.filter(c => !q || c.descricao.toLowerCase().includes(q.toLowerCase()))
+  const filtradas = contas
+    .filter(c => !q || c.descricao.toLowerCase().includes(q.toLowerCase()))
+    .filter(c => !fornecedorFiltro || (nomeForn(c) || '(sem fornecedor)') === fornecedorFiltro)
+    .slice()
+    .sort((a, b) => {
+      if (ordem === 'fornecedor') {
+        // Desempata por vencimento: dentro do mesmo fornecedor, o que vence
+        // antes é o que precisa ser decidido antes.
+        const porNome = nomeForn(a).localeCompare(nomeForn(b), 'pt-BR')
+        if (porNome !== 0) return porNome
+        return String(a.vencimento ?? '').localeCompare(String(b.vencimento ?? ''))
+      }
+      if (ordem === 'valor') return (b.valor ?? 0) - (a.valor ?? 0)
+      return String(a.vencimento ?? '').localeCompare(String(b.vencimento ?? ''))
+    })
   const totalFiltrado = filtradas.reduce((s, c) => s + Number(c.valor), 0)
 
   return (
@@ -87,7 +118,19 @@ export default function ContasPagarClient({
         <span>início</span><span>›</span><span>compras</span><span>›</span>
         <span className="text-gray-600 font-medium">contas a pagar</span>
       </div>
-      <h1 className="text-gray-900 text-xl font-semibold mb-5">Contas a Pagar</h1>
+      <div className="flex items-center justify-between mb-5">
+        <h1 className="text-gray-900 text-xl font-semibold">Contas a Pagar</h1>
+        <div className="flex gap-2">
+          <a href="/dashboard/configuracoes/tipos-despesa"
+            className="px-3 py-1.5 border border-gray-300 bg-white text-gray-600 text-sm rounded-lg hover:bg-gray-50">
+            Tipos de despesa
+          </a>
+          <a href="/dashboard/contas-pagar/relatorio"
+            className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-lg">
+            📊 Relatório
+          </a>
+        </div>
+      </div>
 
       {/* Cards resumo */}
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -118,25 +161,39 @@ export default function ContasPagarClient({
         <input value={q} onChange={e => setQ(e.target.value)}
           placeholder="Filtrar por descrição..."
           className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 bg-white w-64" />
+
+        <select value={fornecedorFiltro} onChange={e => setFornecedorFiltro(e.target.value)}
+          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Todos os fornecedores</option>
+          {fornecedoresPresentes.map(([nome, qtd]) => (
+            <option key={nome} value={nome}>{nome} ({qtd})</option>
+          ))}
+        </select>
+
+        <select value={ordem} onChange={e => setOrdem(e.target.value as any)}
+          title="Ordem da lista"
+          className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 bg-white">
+          <option value="vencimento">Ordenar por vencimento</option>
+          <option value="fornecedor">Ordenar por fornecedor</option>
+          <option value="valor">Ordenar por valor (maior primeiro)</option>
+        </select>
+
+        {(fornecedorFiltro || ordem !== 'vencimento') && (
+          <button onClick={() => { setFornecedorFiltro(''); setOrdem('vencimento') }}
+            className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
+        )}
       </div>
 
       {/* Ações em massa */}
       {selecionadas.size > 0 && (
         <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-4">
           <span className="text-sm font-medium text-green-700">{selecionadas.size} conta(s) selecionada(s)</span>
-          <div className="flex items-center gap-2">
-            <input type="date" value={dataPgto} onChange={e => setDataPgto(e.target.value)}
-              className="border border-gray-300 rounded-lg px-2 py-1 text-sm focus:outline-none" />
-            <select value={formaPgto} onChange={e => setFormaPgto(e.target.value)}
-              className="border border-gray-300 rounded-lg px-2 py-1 text-sm focus:outline-none">
-              {['pix','boleto','transferência','dinheiro','cartão','cheque'].map(f => (
-                <option key={f} value={f}>{f.charAt(0).toUpperCase() + f.slice(1)}</option>
-              ))}
-            </select>
-          </div>
-          <button onClick={pagarSelecionadas} disabled={salvando}
-            className="px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-            {salvando ? '...' : '✓ Registrar pagamento'}
+          <span className="text-sm text-green-800">
+            {fmt(contas.filter(c => selecionadas.has(c.id)).reduce((s, c) => s + Number(c.valor), 0))}
+          </span>
+          <button onClick={pagarSelecionadas}
+            className="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
+            ✓ Registrar pagamento
           </button>
           <button onClick={() => setSelecionadas(new Set())} className="ml-auto text-xs text-gray-500 hover:text-gray-700">Cancelar</button>
         </div>
@@ -208,7 +265,7 @@ export default function ContasPagarClient({
                   <td className="px-3 py-3">
                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       {c.status !== 'pago' && c.status !== 'cancelado' && (
-                        <button onClick={() => setModalPgto(c)}
+                        <button onClick={() => setModalPgto([c])}
                           className="text-xs text-green-600 hover:text-green-800 font-medium">Pagar</button>
                       )}
                       {c.status !== 'cancelado' && c.status !== 'pago' && (
@@ -236,41 +293,13 @@ export default function ContasPagarClient({
         </table>
       </div>
 
-      {/* Modal pagamento individual */}
       {modalPgto && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setModalPgto(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl p-6 w-96">
-            <h3 className="font-semibold text-gray-900 mb-1">Registrar Pagamento</h3>
-            <p className="text-sm text-gray-500 mb-4">{modalPgto.descricao}</p>
-            <p className="text-2xl font-bold text-gray-900 mb-5">{fmt(Number(modalPgto.valor))}</p>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Data do pagamento</label>
-                <input type="date" value={dataPgto} onChange={e => setDataPgto(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Forma de pagamento</label>
-                <select value={formaPgto} onChange={e => setFormaPgto(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                  {['pix','boleto','transferência','dinheiro','cartão','cheque'].map(f => (
-                    <option key={f} value={f}>{f.charAt(0).toUpperCase() + f.slice(1)}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button onClick={() => setModalPgto(null)} className="flex-1 px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
-                Cancelar
-              </button>
-              <button onClick={() => registrarPagamento([modalPgto.id], dataPgto, formaPgto)} disabled={salvando}
-                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg">
-                {salvando ? '...' : 'Confirmar'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PagarContasModal
+          contas={modalPgto}
+          empresaId={empresaId}
+          onFechar={() => setModalPgto(null)}
+          onPago={aplicarPagamento}
+        />
       )}
     </div>
   )
