@@ -23,6 +23,7 @@ export type Venda = {
   created_at: string
   cliente_id: string | null
   operador_nome: string | null
+  vendedor_nome: string | null
   canal: string | null
   clientes: Cliente
   nfce_status: string | null
@@ -73,7 +74,7 @@ function calcularRange(periodo: Periodo, custom: { inicio: string; fim: string }
   return { inicio, fim }
 }
 
-const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf'
+const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, vendedor_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf'
 
 export default function VendasClient({ empresaId, vendasIniciais, totalInicial, empresaEstoqueNome, empresaFiscalNome, saudeConfig, saudeFaixas, formatoImpressao, erroInicial }: {
   empresaId: string; vendasIniciais: Venda[]; totalInicial: number
@@ -715,7 +716,14 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                   {new Date(v.created_at).toLocaleDateString('pt-BR')} {new Date(v.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </td>
                 <td className="px-4 py-2.5 text-gray-900">{v.clientes?.nome ?? 'Consumidor'}</td>
-                <td className="px-4 py-2.5 text-gray-600 text-xs">{v.operador_nome ?? '—'}</td>
+                {/* Vendedor é quem VENDEU, escolhido ao fechar o pedido.
+                    `operador_nome` é o login do terminal ("balcao") e serve
+                    para outra pergunta — por isso vai só no title, para não
+                    perder a rastreabilidade nem ocupar a coluna. */}
+                <td className="px-4 py-2.5 text-gray-600 text-xs"
+                  title={v.operador_nome ? `Operador do PDV: ${v.operador_nome}` : undefined}>
+                  {v.vendedor_nome ?? v.operador_nome ?? '—'}
+                </td>
                 <td className="px-4 py-2.5 text-gray-600 text-xs max-w-[180px] truncate" title={itensV.map(i => i.produto_nome).join(', ')}>
                   {itensV.length > 0 ? `${itensV[0].produto_nome}${itensV.length > 1 ? ` +${itensV.length - 1}` : ''}` : '—'}
                 </td>
