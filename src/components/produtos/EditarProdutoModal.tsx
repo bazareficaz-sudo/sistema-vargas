@@ -277,8 +277,12 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     }
   }
 
-  async function preencherComIA() {
+  // `escopo` decide quais campos a resposta da IA pode tocar. 'fiscal' existe
+  // porque quem está na aba Fiscal quer resolver NCM/CFOP/CST — e não que a
+  // IA mexa em categoria, marca, descrição ou dimensões de passagem.
+  async function preencherComIA(escopo: 'tudo' | 'fiscal' = 'tudo') {
     if (!form || !form.nome.trim()) return
+    const soFiscal = escopo === 'fiscal'
     setPreenchendoIA(true); setErro(''); setMensagemIA(''); setTituloSugerido('')
     try {
       const res = await fetch('/api/produtos/ia-enriquecer', {
@@ -301,21 +305,21 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
       // Título nunca sobrescreve sozinho (nome sempre tem conteúdo, não é um
       // "campo vazio") — só aparece como sugestão com botão pra aplicar.
-      if (data.titulo_sugerido) setTituloSugerido(data.titulo_sugerido)
+      if (data.titulo_sugerido && !soFiscal) setTituloSugerido(data.titulo_sugerido)
 
       let preenchidos = 0
       setForm(prev => {
         if (!prev) return prev
         const novo = { ...prev }
-        if (!novo.categoria && data.categoria) { novo.categoria = data.categoria; preenchidos++ }
-        if (!novo.marca && data.marca) { novo.marca = data.marca; preenchidos++ }
+        if (!soFiscal && !novo.categoria && data.categoria) { novo.categoria = data.categoria; preenchidos++ }
+        if (!soFiscal && !novo.marca && data.marca) { novo.marca = data.marca; preenchidos++ }
         if (!novo.ncm && data.ncm) { novo.ncm = data.ncm; preenchidos++ }
         if (!novo.cest && data.cest) { novo.cest = data.cest; preenchidos++ }
-        if (!novo.descricao_marketplace && data.descricao_marketplace) { novo.descricao_marketplace = data.descricao_marketplace; preenchidos++ }
-        if (novo.peso_kg == null && data.peso_kg != null) { novo.peso_kg = data.peso_kg; preenchidos++ }
-        if (novo.altura_cm == null && data.altura_cm != null) { novo.altura_cm = data.altura_cm; preenchidos++ }
-        if (novo.largura_cm == null && data.largura_cm != null) { novo.largura_cm = data.largura_cm; preenchidos++ }
-        if (novo.comprimento_cm == null && data.comprimento_cm != null) { novo.comprimento_cm = data.comprimento_cm; preenchidos++ }
+        if (!soFiscal && !novo.descricao_marketplace && data.descricao_marketplace) { novo.descricao_marketplace = data.descricao_marketplace; preenchidos++ }
+        if (!soFiscal && novo.peso_kg == null && data.peso_kg != null) { novo.peso_kg = data.peso_kg; preenchidos++ }
+        if (!soFiscal && novo.altura_cm == null && data.altura_cm != null) { novo.altura_cm = data.altura_cm; preenchidos++ }
+        if (!soFiscal && novo.largura_cm == null && data.largura_cm != null) { novo.largura_cm = data.largura_cm; preenchidos++ }
+        if (!soFiscal && novo.comprimento_cm == null && data.comprimento_cm != null) { novo.comprimento_cm = data.comprimento_cm; preenchidos++ }
 
         // Aba Fiscal. CFOP/CST/CSOSN/PIS/COFINS vêm do regime da empresa
         // (determinístico, não é palpite da IA); origem, alíquotas e IBS/CBS
@@ -332,7 +336,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         return novo
       })
       setMensagemIA(preenchidos > 0
-        ? `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar. Os dados fiscais estão na aba Fiscal e devem ser conferidos com a contabilidade.`
+        ? (soFiscal
+            ? `✓ ${preenchidos} campo(s) fiscal(is) preenchido(s) — CONFIRA COM A CONTABILIDADE antes de salvar. NCM, CFOP, Origem e CST errados fazem a SEFAZ rejeitar a nota.`
+            : `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar. Os dados fiscais estão na aba Fiscal e devem ser conferidos com a contabilidade.`)
         : 'A IA não encontrou sugestões novas — os campos já estavam preenchidos ou não há confiança suficiente.')
     } catch {
       setErro('Erro ao consultar a IA — tente novamente.')
@@ -770,7 +776,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
               {/* Preencher com IA */}
               <div>
-                <button type="button" onClick={preencherComIA} disabled={preenchendoIA || !form.nome.trim()}
+                <button type="button" onClick={() => preencherComIA()} disabled={preenchendoIA || !form.nome.trim()}
                   className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 border border-violet-200 text-violet-700 text-sm font-medium rounded-lg transition-colors">
                   {preenchendoIA ? '✨ Pensando...' : '✨ Preencher com IA (título, categoria, marca, NCM, descrição, dimensões...)'}
                 </button>
@@ -1278,6 +1284,29 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
           {/* ── ABA FISCAL ── */}
           {aba === 'fiscal' && (
             <div className="space-y-4">
+              {/* IA restrita ao fiscal. Quem abre esta aba quer resolver
+                  NCM/CFOP/CST — não que a IA mexa em categoria, marca,
+                  descrição ou dimensões de passagem. */}
+              <div className="flex items-center justify-between gap-3 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-violet-900">Preencher os dados fiscais com IA</p>
+                  <p className="text-[11px] text-violet-700 mt-0.5">
+                    Deduz NCM, CEST e Origem pelo nome do produto; CFOP e os CST vêm do regime tributário
+                    da empresa. Só preenche campo vazio — nunca sobrescreve o que já está aí.
+                  </p>
+                </div>
+                <button type="button" onClick={() => preencherComIA('fiscal')}
+                  disabled={preenchendoIA || !form.nome?.trim()}
+                  title={!form.nome?.trim() ? 'O produto precisa de um nome para a IA deduzir os dados' : undefined}
+                  className="flex-shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
+                  {preenchendoIA ? 'Consultando...' : '✨ Preencher fiscal'}
+                </button>
+              </div>
+
+              {mensagemIA && (
+                <p className="text-xs text-violet-800 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">{mensagemIA}</p>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">NCM</label>
