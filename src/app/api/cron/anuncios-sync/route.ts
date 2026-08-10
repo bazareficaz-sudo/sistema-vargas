@@ -72,9 +72,15 @@ export async function GET(req: Request) {
   // Sem filtro de plataforma de propósito: o critério é "canal conectado".
   const { data: canais, error: erroCanais } = await sb
     .from('marketplace_canais')
-    .select('id, nome, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas, varredura_status, varredura_cursor, varredura_iniciada_em, varredura_itens, varredura_rodadas')
+    .select('id, nome, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas, varredura_status, varredura_cursor, varredura_iniciada_em, varredura_itens, varredura_rodadas, varredura_ultimo_em')
     .not('access_token', 'is', null)
-    .order('nome')
+    // Quem foi atendido há mais tempo vem primeiro (nunca atendido, antes de
+    // todos). Ordenar por NOME causava fome: os dois canais do Mercado Livre
+    // vinham antes no alfabeto, consumiam os 240s de orçamento, e os dois da
+    // Shopee — justamente os que estavam dias parados — nunca chegavam a
+    // rodar. Medido em produção na primeira noite: 2 rodadas seguidas
+    // atenderam só o ML.
+    .order('varredura_ultimo_em', { ascending: true, nullsFirst: true })
 
   // Nunca tratar erro de consulta como "0 canais" em silêncio — já custou
   // dias de sincronização parada sem nenhum log nesta base.
