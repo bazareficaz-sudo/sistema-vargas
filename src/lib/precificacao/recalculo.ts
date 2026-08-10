@@ -26,8 +26,20 @@ export type ItemRecalculo = {
   precoAtual: number
   precoNovo: number
   diferenca: number
+  /** Margem LÍQUIDA: lucro ÷ preço de venda. Não confundir com markup. */
   margemAtual: number
   margemNova: number
+  /**
+   * Lucro sobre o CUSTO (lucro ÷ custo), em %. Mesmo dinheiro da margem, só
+   * dividido pelo custo em vez de pelo preço — por isso dá um número maior.
+   *
+   * É esta a conta que as regras usam ("20% de lucro sobre o custo"), então é
+   * ela que precisa aparecer ao lado da margem. Não confundir com o `markup`
+   * do motor, que é preço ÷ custo: no mesmo item, a regra de 20% produz um
+   * markup de ~63%, porque o preço também tem que cobrir comissão e frete.
+   */
+  lucroSobreCustoAtual: number
+  lucroSobreCustoNovo: number
   saudeAtual: SaudePreco
   saudeNova: SaudePreco
   regraNome: string
@@ -227,6 +239,10 @@ export async function varrerRecalculo(
             custo, precoAtual, precoNovo: novo.preco, diferenca,
             margemAtual: Number(atual.margemLiquida.toFixed(2)),
             margemNova: Number(novo.margemLiquida.toFixed(2)),
+            // `roi` do motor JÁ é lucro ÷ custo em % — a mesma base das regras
+            // de "lucro sobre o custo". Bate com o número configurado na regra.
+            lucroSobreCustoAtual: Number(atual.roi.toFixed(2)),
+            lucroSobreCustoNovo: Number(novo.roi.toFixed(2)),
             saudeAtual: saudeDaMargem(atual.margemLiquida, cfg.faixasSaude),
             saudeNova: saudeDaMargem(novo.margemLiquida, cfg.faixasSaude),
             regraNome: resolucao.vencedora.nome,

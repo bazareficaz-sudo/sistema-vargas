@@ -31,12 +31,13 @@ export function paraNumero(t: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-export default function CampoNumero({ valor, onChange, className, placeholder, disabled }: {
+export default function CampoNumero({ valor, onChange, className, placeholder, disabled, title }: {
   valor: number | null | undefined
   onChange: (v: number | null) => void
   className?: string
   placeholder?: string
   disabled?: boolean
+  title?: string
 }) {
   const [texto, setTexto] = useState(() => paraTexto(valor))
 
@@ -55,6 +56,7 @@ export default function CampoNumero({ valor, onChange, className, placeholder, d
       value={texto}
       placeholder={placeholder}
       disabled={disabled}
+      title={title}
       onChange={e => { setTexto(e.target.value); onChange(paraNumero(e.target.value)) }}
       className={className}
     />

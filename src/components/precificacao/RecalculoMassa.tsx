@@ -401,9 +401,15 @@ export default function RecalculoMassa() {
                         title="Frete que saiu do seu bolso nesta conta. 🔵 = valor real buscado no marketplace.">
                         Frete
                       </th>
-                      <th className="text-center px-3 py-2 text-xs font-medium text-gray-600">Margem</th>
-                      <th className="text-center px-3 py-2 text-xs font-medium text-gray-600" title="Deixe em branco para usar a margem da regra">
+                      <th className="text-center px-3 py-2 text-xs font-medium text-gray-600"
+                        title="Margem líquida: quanto do preço de venda sobra de lucro, já descontados comissão, frete e taxas. Embaixo, o mesmo lucro dividido pelo custo — que é a base usada pelas regras.">
+                        Margem líquida
+                        <span className="block text-[10px] font-normal text-gray-400">lucro ÷ preço · s/ custo abaixo</span>
+                      </th>
+                      <th className="text-center px-3 py-2 text-xs font-medium text-gray-600"
+                        title="Margem líquida desejada (sobre o preço de venda). Em branco, vale o que a regra manda.">
                         Margem desejada
+                        <span className="block text-[10px] font-normal text-gray-400">líquida, sobre o preço</span>
                       </th>
                     </tr>
                   </thead>
@@ -455,13 +461,35 @@ export default function RecalculoMassa() {
                             <span title={sa.texto}>{sa.emoji} {i.margemAtual.toFixed(0)}%</span>
                             <span className="text-gray-300 mx-1">→</span>
                             <span title={sn.texto}>{sn.emoji} {margemDe(i).toFixed(0)}%</span>
+                            {/* O mesmo lucro na base do CUSTO. É nessa unidade
+                                que as regras são escritas ("20% de lucro sobre
+                                o custo"), então sem as duas lado a lado parece
+                                que o sistema entregou menos do que a regra
+                                pediu — quando é só outra forma de dividir. */}
+                            {i.lucroSobreCustoNovo != null && (
+                              <span className="block text-[10px] text-gray-400 mt-0.5"
+                                title="Lucro sobre o custo: o mesmo dinheiro da margem acima, dividido pelo custo em vez de pelo preço. É a base usada pelas regras.">
+                                s/ custo {i.lucroSobreCustoAtual.toFixed(0)}% → {i.lucroSobreCustoNovo.toFixed(0)}%
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-center">
                             <div className="flex items-center justify-center gap-1">
+                              {/* Placeholder e valor digitado precisam parecer
+                                  diferentes: o placeholder é o que a REGRA vai
+                                  produzir, não uma escolha de alguém. Iguais,
+                                  o número da regra parecia configuração. */}
                               <CampoNumero valor={aj?.margemAlvo ?? null}
                                 placeholder={String(i.margemNova.toFixed(0))}
                                 onChange={v => mudarMargem(i, v)}
-                                className="w-14 border border-gray-300 rounded px-1.5 py-1 text-xs text-center focus:outline-none focus:border-blue-500" />
+                                title={aj?.margemAlvo != null
+                                  ? 'Margem que você definiu para este anúncio'
+                                  : `A regra entrega ${i.margemNova.toFixed(0)}% de margem líquida. Digite aqui só se quiser outra.`}
+                                className={`w-14 border rounded px-1.5 py-1 text-xs text-center focus:outline-none focus:border-blue-500 ${
+                                  aj?.margemAlvo != null
+                                    ? 'border-blue-400 text-gray-900 font-medium'
+                                    : 'border-gray-200 text-gray-400 italic bg-gray-50'
+                                }`} />
                               <span className="text-xs text-gray-400">%</span>
                             </div>
                             {ajustado && !aj?.fixada && (

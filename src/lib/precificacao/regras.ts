@@ -179,9 +179,12 @@ export function aplicarRegra(params: {
 
 export function descreverObjetivo(tipo: string, valor: number): string {
   const v = String(valor).replace('.', ',')
-  if (tipo === 'margem_liquida') return `margem líquida de ${v}%`
+  // "20% de lucro sobre o custo" ao lado de uma coluna que mostra 12% parecia
+  // contradição — são o mesmo lucro em bases diferentes (custo e preço). A
+  // tela passou a mostrar as duas; aqui basta a base ficar explícita.
+  if (tipo === 'margem_liquida') return `margem líquida de ${v}% (sobre o preço)`
   if (tipo === 'sobre_custo') return `${v}% de lucro sobre o custo`
-  if (tipo === 'markup') return `markup ${v}×`
+  if (tipo === 'markup') return `markup ${v}× (preço = ${v}× o custo)`
   if (tipo === 'lucro_fixo') return `lucro fixo de R$ ${v}`
   if (tipo === 'preco') return `preço fixo de R$ ${v}`
   return `${tipo} ${v}`
