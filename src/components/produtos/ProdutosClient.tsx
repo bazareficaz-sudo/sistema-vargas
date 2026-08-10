@@ -18,6 +18,7 @@ import EstoqueDetalhadoModal from './EstoqueDetalhadoModal'
 import UnificarProdutosModal from './UnificarProdutosModal'
 import CriarAnuncioShopeeModal from '@/components/marketplaces/CriarAnuncioShopeeModal'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { botao, SEPARADOR } from '@/components/ui/botao'
 
 type Produto = {
   id: string
@@ -410,37 +411,84 @@ export default function ProdutosClient({
         <span className="text-gray-600 font-medium">produtos</span>
       </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      {/* Cabeçalho: título e as ações que existem SEMPRE. As ações de
+          seleção saíram daqui — dividiam a linha com o título e, com 8
+          botões, espremiam tudo até o texto quebrar em duas linhas. */}
+      <div className="flex items-center justify-between gap-4 mb-5">
         <h1 className="text-gray-900 text-xl font-semibold">Produtos</h1>
         <div className="flex items-center gap-2">
-          {selecionados.size > 0 && (
-            <div className="flex items-center gap-2 mr-2">
-              <span className="text-sm text-gray-600">{selecionados.size} selecionado(s)</span>
-              {podeExcluir && <button onClick={() => ativarSelecionados(true)} className="text-xs px-3 py-1.5 border border-green-300 text-green-700 rounded-lg hover:bg-green-50 transition-colors">Ativar</button>}
-              {podeExcluir && <button onClick={() => ativarSelecionados(false)} className="text-xs px-3 py-1.5 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">Desativar</button>}
-              {podeEditarProdutos && <button onClick={() => setAcoesEmMassa(true)} className="text-xs px-3 py-1.5 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors">Ações em massa</button>}
-              <button onClick={() => setImagemEmMassa(true)} className="text-xs px-3 py-1.5 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 transition-colors">🖼 Adicionar imagem</button>
-              <button onClick={() => setGerenciandoTags(true)} className="text-xs px-3 py-1.5 border border-teal-300 text-teal-700 rounded-lg hover:bg-teal-50 transition-colors">🏷 Tags</button>
-              <button onClick={() => setImprimindoEtiquetas(true)} className="text-xs px-3 py-1.5 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition-colors">🏷️ Emitir Etiquetas</button>
-              {podeEditarPrecos && <button onClick={abrirGestaoPrecos} disabled={enviandoPrecos} className="text-xs px-3 py-1.5 border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 transition-colors">
-                {enviandoPrecos ? 'Abrindo...' : '💲 Gestão de Preços'}
-              </button>}
-              {selecionados.size >= 2 && selecionados.size <= 5 && (
-                <button onClick={() => setUnificando(true)} className="text-xs px-3 py-1.5 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors">🔀 Unificar cadastro</button>
-              )}
-            </div>
-          )}
-          <button onClick={() => setImportandoUrl(true)} className="flex items-center gap-1.5 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
-            🔗 Importar de URL
+          <button onClick={() => setImportandoUrl(true)} className={botao('secundario')}>
+            Importar de URL
           </button>
           {podeEditarProdutos && (
-            <button onClick={() => setCriandoNovo(true)} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
-              + Novo produto
+            <button onClick={() => setCriandoNovo(true)} className={botao('primario')}>
+              Novo produto
             </button>
           )}
         </div>
       </div>
+
+      {/* Barra de ações da seleção.
+          Faixa própria, largura inteira, que só existe quando há seleção.
+          Agrupada por assunto e separada por divisórias em vez de por cor:
+          antes eram oito cores diferentes (verde, vermelho, azul, roxo, teal,
+          índigo, esmeralda, âmbar) para oito ações de mesma importância, o
+          que não hierarquiza nada e polui tudo. Aqui a cor só marca o que é
+          destrutivo. */}
+      {selecionados.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 bg-blue-50/60 border border-blue-200 rounded-xl px-4 py-3 mb-4">
+          <span className="text-sm font-medium text-blue-900 mr-1">
+            {selecionados.size} {selecionados.size === 1 ? 'produto selecionado' : 'produtos selecionados'}
+          </span>
+
+          {podeEditarProdutos && (
+            <button onClick={() => setAcoesEmMassa(true)} className={botao('secundario', 'sm')}>
+              Editar em massa
+            </button>
+          )}
+          <button onClick={() => setImagemEmMassa(true)} className={botao('secundario', 'sm')}>
+            Adicionar imagem
+          </button>
+          <button onClick={() => setGerenciandoTags(true)} className={botao('secundario', 'sm')}>
+            Gerenciar tags
+          </button>
+
+          <span className={SEPARADOR} />
+
+          <button onClick={() => setImprimindoEtiquetas(true)} className={botao('secundario', 'sm')}>
+            Emitir etiquetas
+          </button>
+          {podeEditarPrecos && (
+            <button onClick={abrirGestaoPrecos} disabled={enviandoPrecos} className={botao('secundario', 'sm')}>
+              {enviandoPrecos ? 'Abrindo…' : 'Gestão de preços'}
+            </button>
+          )}
+          {/* Só faz sentido com 2 a 5 produtos; some fora disso em vez de
+              aparecer desabilitado sem explicação. */}
+          {selecionados.size >= 2 && selecionados.size <= 5 && (
+            <button onClick={() => setUnificando(true)} className={botao('secundario', 'sm')}>
+              Unificar cadastro
+            </button>
+          )}
+
+          {podeExcluir && (
+            <>
+              <span className={SEPARADOR} />
+              <button onClick={() => ativarSelecionados(true)} className={botao('secundario', 'sm')}>
+                Ativar
+              </button>
+              <button onClick={() => ativarSelecionados(false)} className={botao('perigo', 'sm')}>
+                Desativar
+              </button>
+            </>
+          )}
+
+          <button onClick={() => setSelecionados(new Set())}
+            className={botao('sutil', 'sm', 'ml-auto')}>
+            Limpar seleção
+          </button>
+        </div>
+      )}
 
       {/* Barra de busca e filtros */}
       <form onSubmit={buscar} className="flex items-center gap-2 mb-0">
@@ -455,7 +503,7 @@ export default function ProdutosClient({
             className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 bg-white"
           />
         </div>
-        <button type="submit" className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 bg-white transition-colors">
+        <button type="submit" className={botao('secundario')}>
           Buscar
         </button>
         <div className="flex items-center gap-1 ml-2">
@@ -841,13 +889,13 @@ export default function ProdutosClient({
             </p>
             <div className="flex items-center gap-1">
               <button disabled={pagina <= 1} onClick={() => navegar({ pagina: String(pagina - 1) })}
-                className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40 bg-white transition-colors">
-                ← Anterior
+                className={botao('secundario', 'sm')}>
+                Anterior
               </button>
               <span className="px-3 py-1.5 text-xs text-gray-600 font-medium">{pagina} / {totalPaginas}</span>
               <button disabled={pagina >= totalPaginas} onClick={() => navegar({ pagina: String(pagina + 1) })}
-                className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40 bg-white transition-colors">
-                Próxima →
+                className={botao('secundario', 'sm')}>
+                Próxima
               </button>
             </div>
           </div>
