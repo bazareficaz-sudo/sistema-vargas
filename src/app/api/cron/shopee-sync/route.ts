@@ -49,9 +49,22 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, erro: erroCanais.message }, { status: 500 })
   }
 
-  const resultados: { canalId: string; ok: boolean; processados?: number; enviados?: number; falhas?: number; pausados?: number; pulado?: boolean; erro?: string }[] = []
+  // Empresas em que a fila (Fase 3) já envia de verdade. Nessas, esta rota
+  // sai de cena: dois mecanismos empurrando estoque para o mesmo anúncio
+  // brigariam entre si, e o último a escrever venceria por acaso.
+  const { data: filas } = await sb
+    .from('marketplace_fila_config')
+    .select('empresa_id').eq('ativo', true).eq('simulacao', false)
+  const filaAssumiu = new Set((filas ?? []).map((f: { empresa_id: string }) => f.empresa_id))
+
+  const resultados: { canalId: string; ok: boolean; processados?: number; enviados?: number; falhas?: number; pausados?: number; pulado?: boolean; motivo?: string; erro?: string }[] = []
 
   for (const canalRow of canais ?? []) {
+    if (filaAssumiu.has(canalRow.empresa_id)) {
+      resultados.push({ canalId: canalRow.id, ok: true, pulado: true, motivo: 'a fila assumiu o envio desta empresa' })
+      continue
+    }
+
     if (!canalRow.sincronizar_estoque || !canalRow.atualizar_estoque_canal) {
       resultados.push({ canalId: canalRow.id, ok: true, pulado: true })
       continue

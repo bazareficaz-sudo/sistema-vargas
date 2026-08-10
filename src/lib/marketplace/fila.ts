@@ -1,6 +1,7 @@
 import { calcularKit } from '@/lib/produtos/kit'
 import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
+import { enviarParaAnuncio, canalAceitaEnvio, sleep, THROTTLE_ENVIO_MS, type CanalEnvio } from './envio'
 
 // FASE 3 — processador da fila de atualização (sistema → marketplace).
 //
@@ -9,10 +10,15 @@ import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
 // mandaria, grava esse cálculo — e não envia nada. É o único jeito honesto de
 // descobrir os erros antes de eles chegarem nos anúncios de verdade.
 //
-// O envio real ainda NÃO está implementado aqui de propósito. Ligar o
-// interruptor "simulação" sem ter escrito o envio faria a fila marcar produtos
-// como enviados sem ter enviado — pior que não ter fila nenhuma. Enquanto o
-// envio não existir, sair da simulação é bloqueado.
+// Com a simulação DESLIGADA ele envia de verdade. Duas salvaguardas que não
+// são opcionais:
+//
+//  • o canal precisa ter "sincronizar estoque" e "atualizar estoque do canal"
+//    ligados em Configurar → canal. É por aí que se liga a fila em um canal
+//    só, sem tela nova;
+//  • produto cujo envio falhou NÃO é marcado como resolvido: volta na próxima
+//    rodada. Marcar como enviado o que não foi enviado é a falha mais cara
+//    que uma fila pode ter, porque some sem deixar rastro.
 
 export type ConfigFila = {
   empresa_id: string
@@ -27,6 +33,7 @@ export type ConfigFila = {
 export type ResultadoRodada = {
   empresaId: string
   executou: boolean
+  simulacao?: boolean
   motivo?: string
   pendentesAntes?: number
   produtosProcessados?: number
@@ -35,7 +42,16 @@ export type ResultadoRodada = {
   semMudanca?: number
   semAnuncio?: number
   comVariacao?: number
+  enviados?: number
+  falhasEnvio?: number
+  canalRecusou?: number
 }
+
+// Quantas rodadas um produto pode falhar antes de a fila desistir dele.
+// Sem limite, um anúncio quebrado (id externo inválido, anúncio encerrado no
+// canal) ficaria eternamente no topo da fila consumindo o teto da rodada e
+// impedindo os produtos de trás de serem atendidos.
+export const MAX_TENTATIVAS_ENVIO = 5
 
 /** Ainda falta o intervalo passar? Então esta rodada não é dela. */
 export function devidoExecutar(cfg: ConfigFila, agora = Date.now()): boolean {
@@ -103,10 +119,23 @@ export async function processarFilaDaEmpresa(
   const cfgUnif = await buscarConfigUnificacao(sb, cfg.empresa_id)
   const mapaUnificado = await estoqueUnificadoDeProdutos(sb, cfg.empresa_id, produtoIds, cfgUnif)
 
+  // Canais da empresa: plataforma, credenciais e os interruptores que dizem
+  // se aquele canal aceita receber atualizacao.
+  const { data: canaisRows } = await sb
+    .from('marketplace_canais')
+    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, atualizar_estoque_canal, sincronizar_estoque')
+    .eq('empresa_id', cfg.empresa_id)
+    .not('access_token', 'is', null)
+  const mapaCanal = new Map<string, CanalEnvio>((canaisRows ?? []).map((c: any) => [c.id, c as CanalEnvio]))
+
   const regrasUsadas = new Map<string, any>()
   const linhas: any[] = []
   const rodadaEm = new Date().toISOString()
   let anunciosAvaliados = 0, enviaria = 0, semMudanca = 0, semAnuncio = 0, comVariacao = 0
+  let enviados = 0, falhasEnvio = 0, canalRecusou = 0
+
+  // Produtos cujo envio falhou nesta rodada: continuam pendentes.
+  const comFalha = new Map<string, string>()
 
   for (const item of pendentes) {
     const produto = mapaProduto.get(item.produto_id)
@@ -157,6 +186,7 @@ export async function processarFilaDaEmpresa(
 
       let estoqueNovo = Math.max(0, estoqueBase - Number(a.estoque_reservado ?? 0))
       let detalhe = 'espelho direto do estoque do sistema'
+      let paraPausar = false
 
       if (a.regra_id) {
         let regra = regrasUsadas.get(a.regra_id)
@@ -191,7 +221,8 @@ export async function processarFilaDaEmpresa(
           if (r.aplicavel) {
             if (typeof r.estoqueNovo === 'number') estoqueNovo = r.estoqueNovo
             if (typeof r.precoNovo === 'number') precoNovo = r.precoNovo
-            detalhe = `regra aplicada${r.paraPausar ? ' · pausaria o anúncio (estoque de risco)' : ''}`
+            paraPausar = !!r.paraPausar
+            detalhe = `regra aplicada${paraPausar ? ' · pausa o anúncio (estoque de risco)' : ''}`
           } else {
             detalhe = `regra não pôde ser aplicada: ${r.motivo}`
           }
@@ -214,12 +245,57 @@ export async function processarFilaDaEmpresa(
       }
 
       enviaria++
+
+      let acao = 'enviaria'
+      let detalheFinal = `${detalhe} · motivo: ${item.motivo ?? '—'}`
+
+      if (!cfg.simulacao) {
+        const canal = mapaCanal.get(a.canal_id)
+        if (!canal) {
+          acao = 'erro'; detalheFinal = 'canal nao encontrado ou sem token'
+          comFalha.set(produto.id, detalheFinal); falhasEnvio++
+        } else if (!canalAceitaEnvio(canal)) {
+          // Nao e falha: e o canal dizendo que nao quer receber. Contar como
+          // falha faria o produto voltar para sempre por uma decisao de
+          // configuracao que nao vai mudar sozinha.
+          acao = 'canal_desligado'
+          detalheFinal = 'canal nao aceita atualizacao automatica (Configurar → canal)'
+          canalRecusou++
+        } else if (!a.id_externo) {
+          acao = 'erro'; detalheFinal = 'anuncio sem id no canal'
+          comFalha.set(produto.id, detalheFinal); falhasEnvio++
+        } else {
+          const r = await enviarParaAnuncio(sb, canal, String(a.id_externo), {
+            estoque: estoqueNovo,
+            preco: precoNovo ?? undefined,
+            pausar: paraPausar,
+          })
+          await sleep(THROTTLE_ENVIO_MS)
+
+          if (r.ok) {
+            acao = 'enviado'; enviados++
+            detalheFinal = `${detalheFinal}${r.pausado ? ' · anuncio pausado' : ''}`
+            // O que o canal tem agora e o que acabamos de mandar. Guardar isso
+            // evita reenviar o mesmo numero na proxima movimentacao e faz a
+            // tela de anuncios refletir a realidade sem esperar a varredura.
+            await sb.from('marketplace_anuncios').update({
+              estoque: estoqueNovo,
+              ...(precoNovo != null ? { preco_venda: precoNovo } : {}),
+            }).eq('id', a.id)
+          } else {
+            acao = 'erro'; falhasEnvio++
+            detalheFinal = r.erro ?? 'falha ao enviar'
+            comFalha.set(produto.id, detalheFinal)
+          }
+        }
+      }
+
       linhas.push({
         empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
-        anuncio_id: a.id, produto_id: produto.id, acao: 'enviaria',
+        anuncio_id: a.id, produto_id: produto.id, acao,
         estoque_sistema: estoqueBase, estoque_canal: a.estoque, estoque_enviaria: estoqueNovo,
         preco_canal: a.preco_venda, preco_enviaria: precoNovo,
-        detalhe: `${detalhe} · motivo: ${item.motivo ?? '—'}`,
+        detalhe: detalheFinal,
       })
     }
   }
@@ -228,20 +304,44 @@ export async function processarFilaDaEmpresa(
     await sb.from('marketplace_fila_simulacao').insert(linhas)
   }
 
-  // Em simulação a fila É esvaziada (enviado_em = agora). Se não fosse, os
-  // mesmos produtos apareceriam em toda rodada e a simulação viraria um
-  // retrato repetido, sem mostrar o fluxo real de movimentações.
-  await sb.from('marketplace_fila')
-    .update({ enviado_em: new Date().toISOString() })
-    .in('id', pendentes.map((p: any) => p.id))
+  // Quem foi resolvido sai da fila; quem falhou fica, para a proxima rodada
+  // tentar de novo — ate o limite de tentativas.
+  //
+  // Em simulacao nada falha, entao a fila esvazia inteira. Isso e de
+  // proposito: se ela nao esvaziasse, os mesmos produtos reapareceriam em
+  // toda rodada e a simulacao viraria um retrato repetido, sem mostrar o
+  // fluxo real de movimentacoes.
+  const agoraIso = new Date().toISOString()
+  const resolvidos = pendentes.filter((p: any) => !comFalha.has(p.produto_id))
+  const falhados = pendentes.filter((p: any) => comFalha.has(p.produto_id))
+
+  if (resolvidos.length) {
+    await sb.from('marketplace_fila')
+      .update({ enviado_em: agoraIso, ultimo_erro: null })
+      .in('id', resolvidos.map((p: any) => p.id))
+  }
+
+  for (const p of falhados) {
+    const tentativas = (p.tentativas ?? 0) + 1
+    const desistir = tentativas >= MAX_TENTATIVAS_ENVIO
+    await sb.from('marketplace_fila').update({
+      tentativas,
+      ultimo_erro: comFalha.get(p.produto_id) ?? 'falha ao enviar',
+      // Ao desistir, sai da fila mas o erro fica gravado e visivel na tela.
+      // Deixa-lo pendente para sempre travaria o topo da fila e faria os
+      // produtos de tras nunca serem atendidos.
+      ...(desistir ? { enviado_em: agoraIso } : {}),
+    }).eq('id', p.id)
+  }
 
   await sb.from('marketplace_fila_config')
     .update({ ultima_execucao: new Date().toISOString() }).eq('empresa_id', cfg.empresa_id)
 
   return {
-    ...base, executou: true,
+    ...base, executou: true, simulacao: cfg.simulacao,
     pendentesAntes: pendentes.length,
     produtosProcessados: pendentes.length,
     anunciosAvaliados, enviaria, semMudanca, semAnuncio, comVariacao,
+    enviados, falhasEnvio, canalRecusou,
   }
 }

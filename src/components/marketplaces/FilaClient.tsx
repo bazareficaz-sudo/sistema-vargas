@@ -29,11 +29,13 @@ type Simulacao = {
 }
 
 const ROTULO_ACAO: Record<string, { txt: string; cls: string }> = {
-  enviaria:       { txt: 'Enviaria',        cls: 'bg-blue-100 text-blue-700' },
-  sem_mudanca:    { txt: 'Já igual',        cls: 'bg-gray-100 text-gray-500' },
-  sem_anuncio:    { txt: 'Sem anúncio',     cls: 'bg-amber-100 text-amber-700' },
-  com_variacao:   { txt: 'Com variação',    cls: 'bg-purple-100 text-purple-700' },
-  erro:           { txt: 'Erro',            cls: 'bg-red-100 text-red-600' },
+  enviaria:        { txt: 'Enviaria',       cls: 'bg-blue-100 text-blue-700' },
+  enviado:         { txt: 'Enviado',        cls: 'bg-green-100 text-green-700' },
+  sem_mudanca:     { txt: 'Já igual',       cls: 'bg-gray-100 text-gray-500' },
+  sem_anuncio:     { txt: 'Sem anúncio',    cls: 'bg-amber-100 text-amber-700' },
+  com_variacao:    { txt: 'Com variação',   cls: 'bg-purple-100 text-purple-700' },
+  canal_desligado: { txt: 'Canal desligado', cls: 'bg-gray-100 text-gray-500' },
+  erro:            { txt: 'Erro',           cls: 'bg-red-100 text-red-600' },
 }
 
 function quando(iso: string) {
@@ -60,6 +62,8 @@ export default function FilaClient({
   const [aviso, setAviso] = useState('')
   const [aba, setAba] = useState<'fila' | 'simulacao'>('simulacao')
   const [filtroAcao, setFiltroAcao] = useState('')
+  const [pedindoConfirmacao, setPedindoConfirmacao] = useState(false)
+  const [confirmacao, setConfirmacao] = useState('')
 
   async function salvar() {
     setSalvando(true); setAviso('')
@@ -134,17 +138,54 @@ export default function FilaClient({
           </span>
         </label>
 
-        <label className="flex items-start gap-2 cursor-pointer mb-4 opacity-60">
-          <input type="checkbox" checked={cfg.simulacao} disabled
+        <label className="flex items-start gap-2 cursor-pointer mb-1">
+          <input type="checkbox" checked={cfg.simulacao}
+            onChange={e => {
+              if (e.target.checked) { setCfg(c => ({ ...c, simulacao: true })); setConfirmacao(''); return }
+              // Desligar a simulação é a decisão mais séria desta tela: a
+              // partir daí a fila altera anúncios de verdade. Um clique
+              // distraído não pode bastar.
+              setPedindoConfirmacao(true)
+            }}
             className="w-4 h-4 accent-blue-600 mt-0.5" />
           <span className="text-sm text-gray-900">
             <b>Somente simular (não enviar)</b>
             <span className="block text-xs text-gray-500">
-              Travado ligado nesta fase: o envio real ainda não foi construído. Desmarcar aqui faria a fila
-              marcar produtos como enviados sem ter enviado — pior que não ter fila.
+              Desmarcado, a fila passa a alterar os anúncios nos marketplaces.
             </span>
           </span>
         </label>
+
+        {pedindoConfirmacao && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-4 mt-2">
+            <p className="text-sm text-amber-900">
+              <b>Isto liga o envio real.</b> A partir da próxima rodada, a fila vai alterar estoque e preço
+              dos seus anúncios no Mercado Livre e na Shopee automaticamente, sem pedir confirmação por anúncio.
+            </p>
+            <p className="text-xs text-amber-800 mt-1.5">
+              Só os canais com <b>&quot;atualizar estoque do canal&quot;</b> ligado recebem — é assim que se começa
+              por um canal só. Confira em Configurar → canal antes de seguir.
+            </p>
+            <p className="text-xs text-amber-800 mt-1.5">
+              Para confirmar, digite <b>ENVIAR</b> abaixo.
+            </p>
+            <div className="flex items-center gap-2 mt-2">
+              <input value={confirmacao} onChange={e => setConfirmacao(e.target.value.toUpperCase())}
+                placeholder="ENVIAR"
+                className="border border-amber-300 rounded-lg px-3 py-1.5 text-sm w-32 focus:outline-none focus:border-amber-500" />
+              <button onClick={() => { setCfg(c => ({ ...c, simulacao: false })); setPedindoConfirmacao(false) }}
+                disabled={confirmacao !== 'ENVIAR'}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg">
+                Ligar envio real
+              </button>
+              <button onClick={() => { setPedindoConfirmacao(false); setConfirmacao('') }}
+                className="text-xs text-gray-500 hover:text-gray-700">cancelar</button>
+            </div>
+            <p className="text-[11px] text-amber-700 mt-2">
+              Nada muda até você clicar em <b>Salvar</b>.
+            </p>
+          </div>
+        )}
 
         <div className="grid sm:grid-cols-3 gap-4">
           <div>

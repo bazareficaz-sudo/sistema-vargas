@@ -9,8 +9,9 @@ import { processarFilaDaEmpresa, type ConfigFila } from '@/lib/marketplace/fila'
 // Assim o intervalo vira configuração de verdade, e não um agendamento fixo
 // que só o programador consegue mudar.
 //
-// Enquanto `simulacao` estiver ligado — o padrão — nada é enviado para
-// marketplace nenhum. A rodada calcula e grava o que enviaria.
+// Com `simulacao` ligado — o padrão — nada é enviado: a rodada calcula e
+// grava o que enviaria. Com ela desligada, envia de verdade, e só para os
+// canais que têm "atualizar estoque do canal" ligado em Configurar → canal.
 
 export const maxDuration = 300
 
@@ -33,17 +34,6 @@ export async function GET(req: Request) {
   const resultados: any[] = []
 
   for (const cfg of (configs ?? []) as ConfigFila[]) {
-    // Trava dura: enquanto o envio real não existir, sair da simulação não
-    // pode acontecer por engano. Marcar produto como enviado sem ter enviado
-    // é pior do que não ter fila.
-    if (!cfg.simulacao) {
-      resultados.push({
-        empresaId: cfg.empresa_id, executou: false,
-        motivo: 'envio real ainda não implementado — a fila só opera em simulação',
-      })
-      continue
-    }
-
     try {
       resultados.push(await processarFilaDaEmpresa(sb, cfg))
     } catch (e: any) {
