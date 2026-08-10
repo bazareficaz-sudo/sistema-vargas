@@ -1,3 +1,12 @@
+// APOSENTADO — fora do vercel.json desde a Fase 1.
+//
+// Esta rota importava o catálogo do Mercado Livre de 30 em 30 minutos. Quem
+// faz isso agora é /api/cron/anuncios-sync, que cobre todas as plataformas
+// com o mesmo mecanismo de cursor que aqui só existia para o ML.
+//
+// O arquivo fica por enquanto porque continua chamável à mão em caso de
+// necessidade, mas nenhum agendamento aponta para ele.
+
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncCatalogo } from '@/lib/mercadolivre/sync'

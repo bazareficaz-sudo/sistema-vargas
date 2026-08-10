@@ -54,15 +54,24 @@ async function callOpts(ctx: CallCtx) {
 // Gera páginas de item_id conforme a paginação da Shopee (offset + page_size).
 // Defensivo: se `has_next_page`/`next_offset` não vierem na resposta, para
 // quando a página trouxer menos itens que o solicitado.
+export type ShopeeCursor = { statusIdx: number; offset: number }
+
 export async function* listItemIds(
   ctx: CallCtx,
-  opts: { pageSize?: number } = {}
-): AsyncGenerator<{ itemId: number; itemStatus: string }[]> {
+  opts: { pageSize?: number; cursorInicial?: ShopeeCursor | null } = {}
+): AsyncGenerator<{ itens: { itemId: number; itemStatus: string }[]; cursor: ShopeeCursor | null }> {
   const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE
   const callOptions = await callOpts(ctx)
 
-  for (const itemStatus of STATUSES_TO_SYNC) {
-    let offset = 0
+  // Retomada: começa do status/offset onde a rodada anterior parou. Sem isto
+  // a varredura sempre recomeçava do offset 0 e, com o teto de itens por
+  // rodada, nunca passava dos primeiros 500 anúncios — os outros ~8.000
+  // nunca eram atualizados por ninguém.
+  const inicio = opts.cursorInicial ?? { statusIdx: 0, offset: 0 }
+
+  for (let statusIdx = inicio.statusIdx; statusIdx < STATUSES_TO_SYNC.length; statusIdx++) {
+    const itemStatus = STATUSES_TO_SYNC[statusIdx]
+    let offset = statusIdx === inicio.statusIdx ? inicio.offset : 0
     while (true) {
       const data = await shopeeGet(
         '/api/v2/product/get_item_list',
@@ -72,20 +81,34 @@ export async function* listItemIds(
       const items: { item_id: number; item_status?: string }[] = data?.response?.item ?? []
       if (items.length === 0) break
 
-      yield items.map(i => ({ itemId: i.item_id, itemStatus: i.item_status ?? itemStatus }))
-
       const hasNext = data?.response?.has_next_page
       const nextOffset = data?.response?.next_offset
-      await sleep(THROTTLE_MS)
 
+      // Onde continuar DEPOIS desta página. `null` significa "acabou o
+      // catálogo inteiro" — o que só é verdade no último status.
+      let proximo: ShopeeCursor | null
+      let fimDoStatus = false
       if (typeof hasNext === 'boolean') {
-        if (!hasNext) break
-        offset = typeof nextOffset === 'number' ? nextOffset : offset + items.length
+        fimDoStatus = !hasNext
+        proximo = { statusIdx, offset: typeof nextOffset === 'number' ? nextOffset : offset + items.length }
       } else {
         // Resposta sem indicação de paginação — fallback defensivo.
-        if (items.length < pageSize) break
-        offset += items.length
+        fimDoStatus = items.length < pageSize
+        proximo = { statusIdx, offset: offset + items.length }
       }
+      if (fimDoStatus) {
+        proximo = statusIdx + 1 < STATUSES_TO_SYNC.length ? { statusIdx: statusIdx + 1, offset: 0 } : null
+      }
+
+      yield {
+        itens: items.map(i => ({ itemId: i.item_id, itemStatus: i.item_status ?? itemStatus })),
+        cursor: proximo,
+      }
+
+      await sleep(THROTTLE_MS)
+
+      if (fimDoStatus) break
+      offset = proximo!.offset
     }
   }
 }

@@ -1,26 +1,33 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { syncCatalogo } from '@/lib/shopee/sync'
-import { syncPedidos } from '@/lib/shopee/orders'
 import { sincronizarEstoqueAutomatico } from '@/lib/shopee/autoStockSync'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 
-// Fase 7 (catálogo) + Central de Pedidos Fase 2 (pedidos): esta rota roda
-// periodicamente (ver vercel.json — schedule NÃO deve ser alterado aqui,
-// um schedule inválido já bloqueou silenciosamente todos os deploys do
-// projeto uma vez) e repete a sincronização de catálogo E de pedidos para
-// TODOS os canais Shopee conectados. Usa o cliente service-role (não há
-// usuário logado num disparo de cron) e trata cada canal isoladamente — a
-// falha de uma loja não deve travar as demais. Catálogo e pedidos do MESMO
-// canal rodam em paralelo (Promise.allSettled) para não dobrar o tempo total
-// à medida que a base cresce, dentro do orçamento de maxDuration.
-export const maxDuration = 300
+// Envio automático de estoque para a Shopee (sistema → canal).
+//
+// ── O que esta rota DEIXOU de fazer ─────────────────────────
+//
+// Antes ela também importava o catálogo e os pedidos da Shopee. As duas
+// coisas saíram daqui:
+//
+//   • catálogo  → /api/cron/anuncios-sync (Fase 1), que cobre TODAS as
+//     plataformas, é retomável e sabe continuar de onde parou;
+//   • pedidos   → /api/cron/pedidos-sync (Fase 2), que já roda de 10 em 10
+//     minutos e cobre Shopee, Mercado Livre e Nuvemshop.
+//
+// Fazendo as três coisas ao mesmo tempo, esta rota estourava os 300s da
+// Vercel todo dia — e morria antes de gravar o log, então a falha não
+// aparecia em lugar nenhum. Os dois canais Shopee ficaram 2 e 3 dias sem
+// atualizar sem ninguém ver.
+//
+// ── O que ainda faz, e por quanto tempo ─────────────────────
+//
+// Sobrou o envio automático de estoque. Ele é provisório: a Fase 3 (fila de
+// atualização) substitui isto por um envio disparado por movimentação real,
+// para todos os canais, e não por varredura periódica de um só. Quando a fila
+// entrar no ar, esta rota sai.
 
-function devidoSincronizarPedidos(canalRow: any): boolean {
-  if (!canalRow.ultima_sincronizacao_pedidos) return true
-  const intervaloMs = (canalRow.intervalo_sincronizacao_pedidos_min ?? 1440) * 60 * 1000
-  return Date.now() - new Date(canalRow.ultima_sincronizacao_pedidos).getTime() >= intervaloMs
-}
+export const maxDuration = 300
 
 export async function GET(req: Request) {
   const auth = req.headers.get('authorization')
@@ -32,24 +39,24 @@ export async function GET(req: Request) {
 
   const { data: canais, error: erroCanais } = await sb
     .from('marketplace_canais')
-    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, ultima_sincronizacao_pedidos, intervalo_sincronizacao_pedidos_min, sincronizar_estoque, debitar_estoque_vendas, atualizar_estoque_canal, aplicar_regra_produto')
+    .select('id, empresa_id, seller_id, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas, atualizar_estoque_canal, aplicar_regra_produto')
     .eq('plataforma', 'shopee')
     .not('access_token', 'is', null)
 
-  // Idem cron de pedidos: nunca tratar erro de consulta como "0 canais" em
-  // silêncio — já causou dias de sincronização parada sem nenhum log.
+  // Nunca tratar erro de consulta como "0 canais" em silêncio — já causou
+  // dias de sincronização parada sem nenhum log.
   if (erroCanais) {
     return NextResponse.json({ ok: false, erro: erroCanais.message }, { status: 500 })
   }
 
-  const resultados: {
-    canalId: string
-    catalogo: { ok: boolean; upserted?: number; failedCount?: number; erro?: string }
-    pedidos: { ok: boolean; skipped?: boolean; upserted?: number; failedCount?: number; erro?: string }
-    estoqueAuto: { ok: boolean; processados?: number; enviados?: number; falhas?: number; pausados?: number; erro?: string }
-  }[] = []
+  const resultados: { canalId: string; ok: boolean; processados?: number; enviados?: number; falhas?: number; pausados?: number; pulado?: boolean; erro?: string }[] = []
 
   for (const canalRow of canais ?? []) {
+    if (!canalRow.sincronizar_estoque || !canalRow.atualizar_estoque_canal) {
+      resultados.push({ canalId: canalRow.id, ok: true, pulado: true })
+      continue
+    }
+
     const canal: ShopeeChannel = {
       id: canalRow.id,
       empresaId: canalRow.empresa_id,
@@ -61,67 +68,19 @@ export async function GET(req: Request) {
       debitarEstoqueVendas: canalRow.debitar_estoque_vendas,
     }
 
-    const sincronizarPedidosAgora = devidoSincronizarPedidos(canalRow)
-
-    const [catalogoSettled, pedidosSettled] = await Promise.allSettled([
-      syncCatalogo(sb, canal),
-      sincronizarPedidosAgora ? syncPedidos(sb, canal) : Promise.resolve(null),
-    ])
-
-    let catalogo: { ok: boolean; upserted?: number; failedCount?: number; erro?: string }
-    if (catalogoSettled.status === 'fulfilled') {
-      const r = catalogoSettled.value
-      const status = r.upserted > 0 || r.totalFound === 0 ? 'ok' : 'erro'
+    try {
+      const r = await sincronizarEstoqueAutomatico(sb, canal, { aplicarRegraProduto: !!canalRow.aplicar_regra_produto })
       await sb.from('marketplace_sync_log').insert({
-        canal_id: canal.id, tipo: 'produto_sync', status,
-        mensagem: `[automático] Encontrados: ${r.totalFound} · Sincronizados: ${r.upserted} · Falhas: ${r.failed.length}${r.truncated ? ' · Truncado' : ''}`,
+        canal_id: canal.id, tipo: 'auto_estoque', status: r.falhas === 0 ? 'ok' : 'erro',
+        mensagem: `[automático] Processados: ${r.processados} · Enviados: ${r.enviados} · Falhas: ${r.falhas} · Pausados: ${r.pausados}`,
         detalhes: r,
       })
-      await sb.from('marketplace_canais').update({ ultima_sincronizacao: new Date().toISOString() }).eq('id', canal.id)
-      catalogo = { ok: true, upserted: r.upserted, failedCount: r.failed.length }
-    } else {
-      const erro = catalogoSettled.reason?.message ?? 'Erro ao sincronizar catálogo com a Shopee'
-      await sb.from('marketplace_sync_log').insert({ canal_id: canal.id, tipo: 'produto_sync', status: 'erro', mensagem: `[automático] ${erro}`, detalhes: { error: erro } })
-      catalogo = { ok: false, erro }
+      resultados.push({ canalId: canal.id, ok: true, ...r })
+    } catch (e: any) {
+      const erro = e?.message ?? 'Erro ao sincronizar estoque automaticamente'
+      await sb.from('marketplace_sync_log').insert({ canal_id: canal.id, tipo: 'auto_estoque', status: 'erro', mensagem: `[automático] ${erro}`, detalhes: { error: erro } })
+      resultados.push({ canalId: canal.id, ok: false, erro })
     }
-
-    let pedidos: { ok: boolean; skipped?: boolean; upserted?: number; failedCount?: number; erro?: string }
-    if (!sincronizarPedidosAgora) {
-      pedidos = { ok: true, skipped: true }
-    } else if (pedidosSettled.status === 'fulfilled' && pedidosSettled.value) {
-      const r = pedidosSettled.value
-      const status = r.upserted > 0 || r.totalFound === 0 ? 'ok' : 'erro'
-      await sb.from('marketplace_sync_log').insert({
-        canal_id: canal.id, tipo: 'sync_pedidos', status,
-        mensagem: `[automático] Encontrados: ${r.totalFound} · Sincronizados: ${r.upserted} · Falhas: ${r.failed.length}${r.truncated ? ' · Truncado' : ''}`,
-        detalhes: r,
-      })
-      await sb.from('marketplace_canais').update({ ultima_sincronizacao_pedidos: new Date().toISOString() }).eq('id', canal.id)
-      pedidos = { ok: true, upserted: r.upserted, failedCount: r.failed.length }
-    } else {
-      const erro = pedidosSettled.status === 'rejected' ? (pedidosSettled.reason?.message ?? 'Erro ao sincronizar pedidos com a Shopee') : 'Erro desconhecido'
-      await sb.from('marketplace_sync_log').insert({ canal_id: canal.id, tipo: 'sync_pedidos', status: 'erro', mensagem: `[automático] ${erro}`, detalhes: { error: erro } })
-      pedidos = { ok: false, erro }
-    }
-
-    let estoqueAuto: { ok: boolean; processados?: number; enviados?: number; falhas?: number; pausados?: number; erro?: string } = { ok: true }
-    if (canalRow.sincronizar_estoque && canalRow.atualizar_estoque_canal) {
-      try {
-        const r = await sincronizarEstoqueAutomatico(sb, canal, { aplicarRegraProduto: !!canalRow.aplicar_regra_produto })
-        await sb.from('marketplace_sync_log').insert({
-          canal_id: canal.id, tipo: 'auto_estoque', status: r.falhas === 0 ? 'ok' : 'erro',
-          mensagem: `[automático] Processados: ${r.processados} · Enviados: ${r.enviados} · Falhas: ${r.falhas} · Pausados: ${r.pausados}`,
-          detalhes: r,
-        })
-        estoqueAuto = { ok: true, ...r }
-      } catch (e: any) {
-        const erro = e?.message ?? 'Erro ao sincronizar estoque automaticamente'
-        await sb.from('marketplace_sync_log').insert({ canal_id: canal.id, tipo: 'auto_estoque', status: 'erro', mensagem: `[automático] ${erro}`, detalhes: { error: erro } })
-        estoqueAuto = { ok: false, erro }
-      }
-    }
-
-    resultados.push({ canalId: canal.id, catalogo, pedidos, estoqueAuto })
   }
 
   return NextResponse.json({ ok: true, canaisProcessados: resultados.length, resultados })

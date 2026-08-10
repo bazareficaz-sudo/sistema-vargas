@@ -1,5 +1,5 @@
 import { getIntegracaoCredentials, refreshAccessTokenIfNeeded, shopeeGet } from './client'
-import { getItemBaseInfoBatch, getItemExtraInfoBatch, getModelList, listItemIds } from './catalog'
+import { getItemBaseInfoBatch, getItemExtraInfoBatch, getModelList, listItemIds, type ShopeeCursor } from './catalog'
 import type { ShopeeChannel, SyncFailure, SyncResult } from './types'
 
 // Teto de itens processados por chamada de sincronização — não existe fila/
@@ -218,19 +218,36 @@ export async function testarConexao(
 export async function syncCatalogo(
   sb: any,
   canalInicial: ShopeeChannel,
-  opts: { maxItems?: number } = {}
-): Promise<SyncResult> {
+  opts: { maxItems?: number; cursorInicial?: ShopeeCursor | null; prazo?: number } = {}
+): Promise<SyncResult & { proximoCursor?: ShopeeCursor | null; passeCompleto?: boolean }> {
   const maxItems = opts.maxItems ?? DEFAULT_MAX_ITEMS
   const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
   const ctx = { sb, canal }
 
   const encontrados: { itemId: number; itemStatus: string }[] = []
   let truncated = false
+  let proximoCursor: ShopeeCursor | null = null
+  let passeCompleto = true
 
-  paginacao: for await (const pagina of listItemIds(ctx)) {
-    for (const item of pagina) {
-      if (encontrados.length >= maxItems) { truncated = true; break paginacao }
-      encontrados.push(item)
+  // Consome a página INTEIRA antes de checar o limite. Cortar no meio de uma
+  // página já buscada e salvar o cursor apontando para a página seguinte faria
+  // os itens do resto da página serem pulados para sempre — é o mesmo erro que
+  // já foi corrigido no Mercado Livre e que não pode voltar aqui.
+  paginacao: for await (const pagina of listItemIds(ctx, { cursorInicial: opts.cursorInicial ?? null })) {
+    encontrados.push(...pagina.itens)
+    proximoCursor = pagina.cursor
+
+    // Fim do catálogo: não há mais para onde ir.
+    if (pagina.cursor === null) { passeCompleto = true; break paginacao }
+
+    // Parar por volume ou por tempo dá no mesmo: salva onde está e continua na
+    // próxima rodada. O prazo existe porque a função morta pela Vercel não
+    // consegue salvar cursor nenhum — ela precisa parar antes, por conta.
+    const acabouOrcamento = opts.prazo != null && Date.now() > opts.prazo
+    if (encontrados.length >= maxItems || acabouOrcamento) {
+      truncated = true
+      passeCompleto = false
+      break paginacao
     }
   }
 
@@ -238,7 +255,7 @@ export async function syncCatalogo(
   let upserted = 0
 
   if (encontrados.length === 0) {
-    return { totalFound: 0, upserted: 0, failed: [], truncated: false }
+    return { totalFound: 0, upserted: 0, failed: [], truncated: false, proximoCursor: null, passeCompleto: true }
   }
 
   const rawItems = await getItemBaseInfoBatch(ctx, encontrados.map(e => e.itemId))
@@ -272,5 +289,5 @@ export async function syncCatalogo(
     }
   }
 
-  return { totalFound: encontrados.length, upserted, failed, truncated }
+  return { totalFound: encontrados.length, upserted, failed, truncated, proximoCursor, passeCompleto }
 }

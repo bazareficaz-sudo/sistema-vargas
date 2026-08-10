@@ -195,8 +195,8 @@ export async function testarConexao(
 export async function syncCatalogo(
   sb: any,
   canalInicial: MLChannel,
-  opts: { maxItems?: number } = {}
-): Promise<SyncResult> {
+  opts: { maxItems?: number; cursorInicial?: string | null; prazo?: number; persistirCursor?: boolean } = {}
+): Promise<SyncResult & { proximoCursor?: string | null; passeCompleto?: boolean }> {
   const maxItems = opts.maxItems ?? DEFAULT_MAX_ITEMS
   const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
   const ctx = { sb, canal }
@@ -213,10 +213,20 @@ export async function syncCatalogo(
   // ficavam pulados pra sempre, em toda sincronização futura. maxItems vira
   // um orçamento aproximado (pode passar um pouco, até pageSize-1 a mais),
   // mas nenhum id de uma página já buscada é descartado.
-  paginacao: for await (const pagina of listItemIdsScan(ctx, { scrollIdInicial: canal.mlScanScrollId ?? null })) {
+  // A varredura diária (Fase 1) passa o próprio cursor e não mexe no
+  // `ml_scan_scroll_id` do canal — esse continua servindo o botão
+  // "Sincronizar agora" da tela. São dois trabalhos diferentes; compartilhar
+  // um cursor só faria um embaralhar a posição do outro.
+  const cursorInicial = opts.cursorInicial !== undefined
+    ? opts.cursorInicial
+    : (canal.mlScanScrollId ?? null)
+  const persistirCursor = opts.persistirCursor ?? (opts.cursorInicial === undefined)
+
+  paginacao: for await (const pagina of listItemIdsScan(ctx, { scrollIdInicial: cursorInicial })) {
     encontrados.push(...pagina.ids)
-    if (encontrados.length >= maxItems) {
-      scrollIdParaSalvar = pagina.scrollId
+    scrollIdParaSalvar = pagina.scrollId
+    const acabouOrcamento = opts.prazo != null && Date.now() > opts.prazo
+    if (encontrados.length >= maxItems || acabouOrcamento) {
       passeCompleto = false
       break paginacao
     }
@@ -225,10 +235,14 @@ export async function syncCatalogo(
   // próxima sincronização recomeçar do zero e pegar itens novos/alterados.
   // passeCompleto=false (parou por maxItems) → salva onde parou pra
   // continuar dali na próxima chamada, sem repetir nem pular nada.
-  await sb.from('marketplace_canais').update({ ml_scan_scroll_id: passeCompleto ? null : scrollIdParaSalvar }).eq('id', canal.id)
+  if (persistirCursor) {
+    await sb.from('marketplace_canais').update({ ml_scan_scroll_id: passeCompleto ? null : scrollIdParaSalvar }).eq('id', canal.id)
+  }
+
+  const proximoCursor = passeCompleto ? null : scrollIdParaSalvar
 
   if (encontrados.length === 0) {
-    return { totalFound: 0, upserted: 0, failed: [], truncated: false }
+    return { totalFound: 0, upserted: 0, failed: [], truncated: false, proximoCursor: null, passeCompleto: true }
   }
 
   const rawItems = await getItemsBatch(ctx, encontrados)
@@ -250,5 +264,5 @@ export async function syncCatalogo(
     }
   }
 
-  return { totalFound: encontrados.length, upserted, failed, truncated: !passeCompleto }
+  return { totalFound: encontrados.length, upserted, failed, truncated: !passeCompleto, proximoCursor, passeCompleto }
 }
