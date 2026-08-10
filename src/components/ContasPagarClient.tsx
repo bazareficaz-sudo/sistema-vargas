@@ -4,17 +4,23 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import PagarContasModal from '@/components/contas-pagar/PagarContasModal'
+import NovaDespesaModal from '@/components/contas-pagar/NovaDespesaModal'
 
 type Conta = {
   id: string; descricao: string; valor: number; vencimento: string
   status: string; data_pagamento: string | null; forma_pagamento: string | null
   parcela: number; total_parcelas: number; observacoes: string | null
   valor_pago: number | null; juros: number | null; multa: number | null
-  tipo_despesa_id: string | null
+  tipo_despesa_id: string | null; competencia: string | null
   fornecedores: { razao_social: string; nome_fantasia: string | null } | null
 }
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
+
+function rotuloCompetencia(iso: string) {
+  const [a, m] = iso.split('-').map(Number)
+  return new Date(a, m - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' })
+}
 
 const STATUS_BADGE: Record<string, string> = {
   pendente: 'bg-yellow-100 text-yellow-700',
@@ -38,6 +44,7 @@ export default function ContasPagarClient({
   const [q, setQ] = useState(qInicial)
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [modalPgto, setModalPgto] = useState<Conta[] | null>(null)
+  const [modalNova, setModalNova] = useState(false)
 
   // Ordenação e filtro por fornecedor. Client-side: a tela já carrega a lista
   // do período, e o volume é de dezenas — paginar no servidor aqui só somaria
@@ -64,8 +71,11 @@ export default function ContasPagarClient({
     router.push(`/dashboard/contas-pagar?${sp.toString()}`)
   }
 
+  // Marca só o que está VISÍVEL. Usava `contas` (a lista inteira), então
+  // filtrar por fornecedor e clicar no cabeçalho selecionava as 78 contas —
+  // e o pagamento em massa iria muito além do que a tela mostrava.
   function toggleAll(c: boolean) {
-    setSelecionadas(c ? new Set(contas.filter(x => x.status !== 'pago' && x.status !== 'cancelado').map(x => x.id)) : new Set())
+    setSelecionadas(c ? new Set(selecionaveis.map(x => x.id)) : new Set())
   }
   function toggleOne(id: string) {
     setSelecionadas(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -84,8 +94,8 @@ export default function ContasPagarClient({
   }
 
   function pagarSelecionadas() {
-    if (selecionadas.size === 0) return
-    setModalPgto(contas.filter(c => selecionadas.has(c.id)))
+    if (marcadas.length === 0) return
+    setModalPgto(marcadas)
   }
 
   async function cancelar(id: string) {
@@ -111,6 +121,12 @@ export default function ContasPagarClient({
       return String(a.vencimento ?? '').localeCompare(String(b.vencimento ?? ''))
     })
   const totalFiltrado = filtradas.reduce((s, c) => s + Number(c.valor), 0)
+  // Conta paga ou cancelada não entra em pagamento em massa.
+  const selecionaveis = filtradas.filter(c => c.status !== 'pago' && c.status !== 'cancelado')
+  // O que será realmente pago: a interseção do que está marcado com o que
+  // está na tela. Se o usuário marca contas e depois troca o filtro, o que
+  // saiu de vista não é pago junto sem ele ver.
+  const marcadas = selecionaveis.filter(c => selecionadas.has(c.id))
 
   return (
     <div>
@@ -125,6 +141,10 @@ export default function ContasPagarClient({
             className="px-3 py-1.5 border border-gray-300 bg-white text-gray-600 text-sm rounded-lg hover:bg-gray-50">
             Tipos de despesa
           </a>
+          <button onClick={() => setModalNova(true)}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
+            + Nova despesa
+          </button>
           <a href="/dashboard/contas-pagar/relatorio"
             className="px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium rounded-lg">
             📊 Relatório
@@ -185,11 +205,11 @@ export default function ContasPagarClient({
       </div>
 
       {/* Ações em massa */}
-      {selecionadas.size > 0 && (
+      {marcadas.length > 0 && (
         <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-4">
-          <span className="text-sm font-medium text-green-700">{selecionadas.size} conta(s) selecionada(s)</span>
+          <span className="text-sm font-medium text-green-700">{marcadas.length} conta(s) selecionada(s)</span>
           <span className="text-sm text-green-800">
-            {fmt(contas.filter(c => selecionadas.has(c.id)).reduce((s, c) => s + Number(c.valor), 0))}
+            {fmt(marcadas.reduce((s, c) => s + Number(c.valor), 0))}
           </span>
           <button onClick={pagarSelecionadas}
             className="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors">
@@ -205,13 +225,14 @@ export default function ContasPagarClient({
             <tr className="bg-gray-50 border-b border-gray-200">
               <th className="w-10 px-4 py-3">
                 <input type="checkbox"
-                  checked={selecionadas.size > 0 && selecionadas.size === filtradas.filter(c => c.status !== 'pago' && c.status !== 'cancelado').length}
+                  checked={selecionaveis.length > 0 && marcadas.length === selecionaveis.length}
                   onChange={e => toggleAll(e.target.checked)}
                   className="w-4 h-4 accent-blue-600" />
               </th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Descrição</th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Fornecedor</th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Vencimento</th>
+              <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide" title="Mês a que a despesa pertence">Competência</th>
               <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Valor</th>
               <th className="text-center px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Status</th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Pagamento</th>
@@ -248,6 +269,18 @@ export default function ContasPagarClient({
                       </p>
                     )}
                   </td>
+                  <td className="px-3 py-3">
+                    {c.competencia ? (
+                      <>
+                        <p className="text-xs text-gray-700">{rotuloCompetencia(c.competencia)}</p>
+                        {/* Só destaca quando difere do vencimento — é aí que a
+                            informação muda alguma coisa para quem lê. */}
+                        {c.competencia.slice(0, 7) !== String(c.vencimento).slice(0, 7) && (
+                          <p className="text-[11px] text-blue-600">≠ vencimento</p>
+                        )}
+                      </>
+                    ) : <span className="text-xs text-gray-300">—</span>}
+                  </td>
                   <td className="px-3 py-3 text-right font-medium text-gray-900 text-sm">{fmt(Number(c.valor))}</td>
                   <td className="px-3 py-3 text-center">
                     <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_BADGE[c.status] ?? 'bg-gray-100 text-gray-500'}`}>
@@ -278,13 +311,13 @@ export default function ContasPagarClient({
               )
             })}
             {filtradas.length === 0 && (
-              <tr><td colSpan={8} className="py-12 text-center text-gray-400">Nenhuma conta encontrada.</td></tr>
+              <tr><td colSpan={9} className="py-12 text-center text-gray-400">Nenhuma conta encontrada.</td></tr>
             )}
           </tbody>
           {filtradas.length > 0 && (
             <tfoot>
               <tr className="bg-gray-50 border-t border-gray-200">
-                <td colSpan={4} className="px-4 py-3 text-xs text-gray-500">{filtradas.length} conta(s)</td>
+                <td colSpan={5} className="px-4 py-3 text-xs text-gray-500">{filtradas.length} conta(s)</td>
                 <td className="px-3 py-3 text-right text-sm font-bold text-gray-900">{fmt(totalFiltrado)}</td>
                 <td colSpan={3}></td>
               </tr>
@@ -292,6 +325,18 @@ export default function ContasPagarClient({
           )}
         </table>
       </div>
+
+      {modalNova && (
+        <NovaDespesaModal
+          empresaId={empresaId}
+          onFechar={() => setModalNova(false)}
+          onCriada={qtd => {
+            setModalNova(false)
+            alert(qtd > 1 ? `${qtd} contas criadas.` : 'Despesa criada.')
+            router.refresh()
+          }}
+        />
+      )}
 
       {modalPgto && (
         <PagarContasModal

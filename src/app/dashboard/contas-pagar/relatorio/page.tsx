@@ -36,7 +36,7 @@ export default async function RelatorioContasPagarPage({
   // é despesa de março para quem olha o caixa.
   const { data: pagas } = await supabase
     .from('contas_pagar')
-    .select('id, descricao, valor, valor_pago, juros, multa, desconto, vencimento, data_pagamento, forma_pagamento, fornecedor_id, tipo_despesa_id')
+    .select('id, descricao, valor, valor_pago, juros, multa, desconto, vencimento, competencia, data_pagamento, forma_pagamento, fornecedor_id, tipo_despesa_id')
     .eq('empresa_id', empresaId)
     .eq('status', 'pago')
     .gte('data_pagamento', de)
@@ -104,6 +104,20 @@ export default async function RelatorioContasPagarPage({
   const mediaAtraso = comAtraso.length
     ? comAtraso.reduce((s, x) => s + x.dias, 0) / comAtraso.length
     : 0
+
+  // ── Por competência ──
+  // O relatório soma pela data de PAGAMENTO, mas o gasto pertence ao mês da
+  // competência. Uma conta de luz de julho paga em agosto aparece no total
+  // de agosto e nesta tabela como despesa de julho — as duas leituras são
+  // corretas e respondem perguntas diferentes.
+  const porComp = new Map<string, { total: number; qtd: number }>()
+  for (const c of contas) {
+    const k = c.competencia ? String(c.competencia).slice(0, 7) : '__sem__'
+    const at = porComp.get(k) ?? { total: 0, qtd: 0 }
+    at.total += pago(c); at.qtd += 1
+    porComp.set(k, at)
+  }
+  const rankComp = [...porComp.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 
   const maiorTipo = rankTipo[0]
   const maiorForn = rankForn[0]
@@ -256,6 +270,40 @@ export default async function RelatorioContasPagarPage({
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Competência */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-5">
+            <div className="px-4 py-3 border-b border-gray-100">
+              <h2 className="text-sm font-semibold text-gray-700">Por competência</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                A que mês cada gasto pertence — não em que mês foi pago. A luz de julho paga em
+                agosto conta como julho aqui.
+              </p>
+            </div>
+            <table className="w-full">
+              <thead className="bg-gray-50 text-xs text-gray-500 uppercase">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium">Mês</th>
+                  <th className="px-3 py-2 text-right font-medium">Contas</th>
+                  <th className="px-4 py-2 text-right font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {rankComp.map(([mes, v]) => (
+                  <tr key={mes}>
+                    <td className="px-4 py-2.5 text-sm text-gray-900">
+                      {mes === '__sem__'
+                        ? <span className="text-gray-400">Sem competência informada</span>
+                        : new Date(Number(mes.slice(0, 4)), Number(mes.slice(5, 7)) - 1, 1)
+                            .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-sm text-gray-500">{v.qtd}</td>
+                    <td className="px-4 py-2.5 text-right text-sm font-medium text-gray-900">{fmt(v.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           {/* Demora para pagar */}
