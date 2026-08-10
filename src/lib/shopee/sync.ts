@@ -224,70 +224,75 @@ export async function syncCatalogo(
   const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
   const ctx = { sb, canal }
 
-  const encontrados: { itemId: number; itemStatus: string }[] = []
-  let truncated = false
+  const failed: SyncFailure[] = []
+  let totalFound = 0
+  let upserted = 0
   let proximoCursor: ShopeeCursor | null = null
   let passeCompleto = true
+  let truncated = false
 
-  // Consome a página INTEIRA antes de checar o limite. Cortar no meio de uma
-  // página já buscada e salvar o cursor apontando para a página seguinte faria
-  // os itens do resto da página serem pulados para sempre — é o mesmo erro que
-  // já foi corrigido no Mercado Livre e que não pode voltar aqui.
+  // Trabalha PÁGINA A PÁGINA: lista os ids da página, busca os detalhes,
+  // grava, e só então avança o cursor.
+  //
+  // A versão anterior listava tudo primeiro e processava depois. O orçamento
+  // de tempo só era conferido durante a listagem — que é a parte barata. A
+  // parte cara (detalhes + gravação, uma chamada e vários upserts por item)
+  // rodava inteira sem nenhuma checagem, então a função podia ser morta pela
+  // Vercel no meio dela sem salvar cursor nenhum. Processando por página, o
+  // ponto de parada é sempre uma fronteira exata e o custo por checagem é o
+  // de uma página, não o do lote inteiro.
+  //
+  // Não se perde nada em número de chamadas: o lote de detalhes da Shopee é
+  // de 20 itens e a página também tem 20.
   paginacao: for await (const pagina of listItemIds(ctx, { cursorInicial: opts.cursorInicial ?? null })) {
-    encontrados.push(...pagina.itens)
+    const ids = pagina.itens.map(e => e.itemId)
+    totalFound += ids.length
+
+    const rawItems = await getItemBaseInfoBatch(ctx, ids)
+    const retornados = new Set(rawItems.map((r: any) => String(r.item_id)))
+    for (const item of pagina.itens) {
+      if (!retornados.has(String(item.itemId))) {
+        failed.push({ itemId: String(item.itemId), error: 'Não retornado por get_item_base_info' })
+      }
+    }
+
+    // Vendas é uma chamada à parte (get_item_extra_info) — falha aqui não pode
+    // travar o sync, só faz os anúncios ficarem sem essa métrica desta vez
+    // (mantêm o valor antigo, já que mapItemToAnuncioRow só inclui `vendas`
+    // no upsert quando o valor veio preenchido).
+    const vendasPorItem = new Map<string, number>()
+    try {
+      const extraInfo = await getItemExtraInfoBatch(ctx, ids)
+      for (const info of extraInfo) {
+        if (info?.item_id != null && info?.sale != null) vendasPorItem.set(String(info.item_id), Number(info.sale))
+      }
+    } catch { /* segue sem vendas nesta página */ }
+
+    for (const rawItem of rawItems) {
+      const itemIdStr = String(rawItem.item_id)
+      try {
+        const { failed: itemFailed } = await processRawItem(ctx, rawItem, vendasPorItem.get(itemIdStr) ?? null)
+        upserted++
+        failed.push(...itemFailed)
+      } catch (e: any) {
+        failed.push({ itemId: itemIdStr, error: e?.message ?? 'Erro desconhecido ao processar item' })
+      }
+    }
+
+    // Cursor avança só DEPOIS de a página estar gravada. Se a função morrer
+    // antes disto, a rodada seguinte refaz esta página — repetir é inofensivo
+    // (o upsert é idempotente); pular não seria.
     proximoCursor = pagina.cursor
 
-    // Fim do catálogo: não há mais para onde ir.
     if (pagina.cursor === null) { passeCompleto = true; break paginacao }
 
-    // Parar por volume ou por tempo dá no mesmo: salva onde está e continua na
-    // próxima rodada. O prazo existe porque a função morta pela Vercel não
-    // consegue salvar cursor nenhum — ela precisa parar antes, por conta.
     const acabouOrcamento = opts.prazo != null && Date.now() > opts.prazo
-    if (encontrados.length >= maxItems || acabouOrcamento) {
+    if (totalFound >= maxItems || acabouOrcamento) {
       truncated = true
       passeCompleto = false
       break paginacao
     }
   }
 
-  const failed: SyncFailure[] = []
-  let upserted = 0
-
-  if (encontrados.length === 0) {
-    return { totalFound: 0, upserted: 0, failed: [], truncated: false, proximoCursor: null, passeCompleto: true }
-  }
-
-  const rawItems = await getItemBaseInfoBatch(ctx, encontrados.map(e => e.itemId))
-  const retornados = new Set(rawItems.map((r: any) => String(r.item_id)))
-  for (const item of encontrados) {
-    if (!retornados.has(String(item.itemId))) {
-      failed.push({ itemId: String(item.itemId), error: 'Não retornado por get_item_base_info' })
-    }
-  }
-
-  // Vendas é uma chamada à parte (get_item_extra_info) — falha aqui não pode
-  // travar o sync inteiro, só faz os anúncios ficarem sem essa métrica desta
-  // vez (ficam com o valor antigo, se houver, já que mapItemToAnuncioRow só
-  // inclui `vendas` no upsert quando o valor veio preenchido).
-  const vendasPorItem = new Map<string, number>()
-  try {
-    const extraInfo = await getItemExtraInfoBatch(ctx, encontrados.map(e => e.itemId))
-    for (const info of extraInfo) {
-      if (info?.item_id != null && info?.sale != null) vendasPorItem.set(String(info.item_id), Number(info.sale))
-    }
-  } catch { /* segue sem vendas nesta rodada */ }
-
-  for (const rawItem of rawItems) {
-    const itemIdStr = String(rawItem.item_id)
-    try {
-      const { failed: itemFailed } = await processRawItem(ctx, rawItem, vendasPorItem.get(itemIdStr) ?? null)
-      upserted++
-      failed.push(...itemFailed)
-    } catch (e: any) {
-      failed.push({ itemId: itemIdStr, error: e?.message ?? 'Erro desconhecido ao processar item' })
-    }
-  }
-
-  return { totalFound: encontrados.length, upserted, failed, truncated, proximoCursor, passeCompleto }
+  return { totalFound, upserted, failed, truncated, proximoCursor, passeCompleto }
 }

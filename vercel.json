@@ -9,6 +9,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/fila-anuncios",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/shopee-sync",
       "schedule": "0 4 * * *"
     },

@@ -201,18 +201,6 @@ export async function syncCatalogo(
   const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
   const ctx = { sb, canal }
 
-  const encontrados: string[] = []
-  let scrollIdParaSalvar: string | null = null
-  let passeCompleto = true // só vira false se paramos no meio (maxItems atingido)
-
-  // Sempre consome a página inteira antes de checar o limite — checar
-  // no meio (por id) fazia o corte cair bem no início de uma página recém
-  // buscada quando maxItems era múltiplo exato do tamanho de página (500 /
-  // 50), descartando os ~50 ids dela sem nunca processá-los E salvando o
-  // scroll_id JÁ APONTANDO PRA PÁGINA SEGUINTE — ou seja, aqueles itens
-  // ficavam pulados pra sempre, em toda sincronização futura. maxItems vira
-  // um orçamento aproximado (pode passar um pouco, até pageSize-1 a mais),
-  // mas nenhum id de uma página já buscada é descartado.
   // A varredura diária (Fase 1) passa o próprio cursor e não mexe no
   // `ml_scan_scroll_id` do canal — esse continua servindo o botão
   // "Sincronizar agora" da tela. São dois trabalhos diferentes; compartilhar
@@ -222,47 +210,65 @@ export async function syncCatalogo(
     : (canal.mlScanScrollId ?? null)
   const persistirCursor = opts.persistirCursor ?? (opts.cursorInicial === undefined)
 
+  const failed: SyncFailure[] = []
+  let totalFound = 0
+  let upserted = 0
+  let scrollIdParaSalvar: string | null = null
+  let passeCompleto = true
+
+  // Trabalha PÁGINA A PÁGINA: busca os ids da página, busca os detalhes,
+  // grava, e só então avança o cursor.
+  //
+  // Antes listava tudo primeiro e processava depois, com o orçamento de tempo
+  // conferido só durante a listagem — a parte barata. Medido em produção:
+  // 500 itens levaram 1m52s, quase tudo em detalhes e gravação, sem nenhuma
+  // checagem de tempo no meio. Uma loja maior morreria ali sem salvar cursor.
+  //
+  // Não se perde nada em número de chamadas: o multiget do ML é de 20 ids e a
+  // página do scan tem 50 — os mesmos 3 lotes de antes.
   paginacao: for await (const pagina of listItemIdsScan(ctx, { scrollIdInicial: cursorInicial })) {
-    encontrados.push(...pagina.ids)
+    totalFound += pagina.ids.length
+
+    const rawItems = await getItemsBatch(ctx, pagina.ids)
+    const retornados = new Set(rawItems.map((r: any) => String(r.id)))
+    for (const id of pagina.ids) {
+      if (!retornados.has(id)) failed.push({ itemId: id, error: 'Não retornado por /items (multiget)' })
+    }
+
+    for (const rawItem of rawItems) {
+      const itemIdStr = String(rawItem.id)
+      try {
+        const { failed: itemFailed } = await processRawItem(ctx, rawItem)
+        upserted++
+        failed.push(...itemFailed)
+      } catch (e: any) {
+        failed.push({ itemId: itemIdStr, error: e?.message ?? 'Erro desconhecido ao processar item' })
+      }
+    }
+
+    // Cursor avança só DEPOIS de a página estar gravada. Morrer antes disto
+    // faz a rodada seguinte refazer esta página — repetir é inofensivo (o
+    // upsert é idempotente); pular não seria.
     scrollIdParaSalvar = pagina.scrollId
+
     const acabouOrcamento = opts.prazo != null && Date.now() > opts.prazo
-    if (encontrados.length >= maxItems || acabouOrcamento) {
+    if (totalFound >= maxItems || acabouOrcamento) {
       passeCompleto = false
       break paginacao
     }
   }
-  // passeCompleto=true (chegou ao fim do catálogo) → reseta o cursor pra
-  // próxima sincronização recomeçar do zero e pegar itens novos/alterados.
-  // passeCompleto=false (parou por maxItems) → salva onde parou pra
-  // continuar dali na próxima chamada, sem repetir nem pular nada.
+
+  // passeCompleto=true (chegou ao fim do catálogo) → zera o cursor para a
+  // próxima passagem recomeçar do início e pegar itens novos/alterados.
   if (persistirCursor) {
-    await sb.from('marketplace_canais').update({ ml_scan_scroll_id: passeCompleto ? null : scrollIdParaSalvar }).eq('id', canal.id)
+    await sb.from('marketplace_canais')
+      .update({ ml_scan_scroll_id: passeCompleto ? null : scrollIdParaSalvar }).eq('id', canal.id)
   }
 
-  const proximoCursor = passeCompleto ? null : scrollIdParaSalvar
-
-  if (encontrados.length === 0) {
-    return { totalFound: 0, upserted: 0, failed: [], truncated: false, proximoCursor: null, passeCompleto: true }
+  return {
+    totalFound, upserted, failed,
+    truncated: !passeCompleto,
+    proximoCursor: passeCompleto ? null : scrollIdParaSalvar,
+    passeCompleto,
   }
-
-  const rawItems = await getItemsBatch(ctx, encontrados)
-  const retornados = new Set(rawItems.map((r: any) => String(r.id)))
-  const failed: SyncFailure[] = []
-  for (const id of encontrados) {
-    if (!retornados.has(id)) failed.push({ itemId: id, error: 'Não retornado por /items (multiget)' })
-  }
-
-  let upserted = 0
-  for (const rawItem of rawItems) {
-    const itemIdStr = String(rawItem.id)
-    try {
-      const { failed: itemFailed } = await processRawItem(ctx, rawItem)
-      upserted++
-      failed.push(...itemFailed)
-    } catch (e: any) {
-      failed.push({ itemId: itemIdStr, error: e?.message ?? 'Erro desconhecido ao processar item' })
-    }
-  }
-
-  return { totalFound: encontrados.length, upserted, failed, truncated: !passeCompleto, proximoCursor, passeCompleto }
 }
