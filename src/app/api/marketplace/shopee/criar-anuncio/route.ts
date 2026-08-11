@@ -5,7 +5,7 @@ import type { ShopeeChannel } from '@/lib/shopee/types'
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { canalId, produtoId, categoryId, categoriaIds, titulo, descricao, preco, estoque, peso, comprimento, largura, altura, brandId, brandNome, atributos, canaisLogisticaHabilitados } = body
+  const { canalId, produtoId, categoryId, categoriaIds, titulo, descricao, preco, estoque, peso, comprimento, largura, altura, brandId, brandNome, atributos, canaisLogisticaHabilitados, condicao } = body
 
   if (!canalId || !produtoId || !categoryId || !titulo || preco == null || estoque == null || !peso) {
     return NextResponse.json({ ok: false, erro: 'Dados obrigatórios ausentes (categoria, título, preço, estoque e peso são necessários).' }, { status: 400 })
@@ -51,6 +51,7 @@ export async function POST(req: Request) {
     brandId: brandId != null ? Number(brandId) : undefined,
     brandNome,
     atributos: atributos ?? [],
+    condicao: condicao === 'USED' ? 'USED' : 'NEW',
     logisticaHabilitada: (canaisLogisticaHabilitados ?? []).map((id: any) => Number(id)),
     fotoUrls,
   })

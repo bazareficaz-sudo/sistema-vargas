@@ -70,6 +70,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const [titulosSugeridos, setTitulosSugeridos] = useState<string[]>([])
   const [descricao, setDescricao] = useState('')
   const [preco, setPreco] = useState('')
+  // A Shopee exige a condição no anúncio; quase todo anúncio é novo,
+  // então 'NEW' é o padrão e o campo só é trocado quando for o caso.
+  const [condicao, setCondicao] = useState<'NEW' | 'USED'>('NEW')
   const [estoque, setEstoque] = useState('')
   const [peso, setPeso] = useState('')
   const [comprimento, setComprimento] = useState('')
@@ -544,7 +547,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
         body: JSON.stringify({
           canalId: canalAtivo.id, produtoId: produto.id, categoryId: categoriaFolha!.category_id,
           categoriaIds: caminhoCategoria.map(c => c.category_id),
-          titulo: titulo.trim(), descricao: descricao.trim(), preco: Number(preco), estoque: Number(estoque),
+          titulo: titulo.trim(), descricao: descricao.trim(), preco: Number(preco), estoque: Number(estoque), condicao,
           peso: Number(peso), comprimento: comprimento || undefined, largura: largura || undefined, altura: altura || undefined,
           brandId: brandId || undefined, brandNome: brandId ? marcas.find(m => String(m.brand_id) === brandId)?.original_brand_name : undefined,
           // Só os que estão em jogo: se o pai mudou de valor, o filho que
@@ -813,8 +816,8 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                   </div>
 
-                  {/* Preço / estoque */}
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* Preço / estoque / condição */}
+                  <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">Preço de venda (R$) *</label>
                       <input type="number" step="0.01" value={preco} onChange={e => setPreco(e.target.value)}
@@ -824,6 +827,14 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                       <label className="block text-xs font-medium text-gray-500 mb-1">Estoque *</label>
                       <input type="number" value={estoque} onChange={e => setEstoque(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Condição *</label>
+                      <select value={condicao} onChange={e => setCondicao(e.target.value as 'NEW' | 'USED')}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-500">
+                        <option value="NEW">Novo</option>
+                        <option value="USED">Usado</option>
+                      </select>
                     </div>
                   </div>
 

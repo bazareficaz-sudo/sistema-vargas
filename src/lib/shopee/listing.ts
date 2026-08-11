@@ -347,6 +347,7 @@ export type CriarAnuncioInput = {
   brandId?: number
   brandNome?: string
   atributos: AtributoInput[]
+  condicao?: 'NEW' | 'USED'
   logisticaHabilitada: number[] // logistic_id[]
   fotoUrls: string[] // até 9 — limite da Shopee
 }
@@ -376,6 +377,10 @@ export async function criarAnuncio(sb: any, canal: ShopeeChannel, input: CriarAn
       original_price: input.preco,
       seller_stock: [{ stock: input.estoque }],
       weight: input.pesoKg,
+      // Obrigatório no add_item. Sem ele a Shopee recusa o anúncio inteiro
+      // com "Parameter is not match the constraints, . : condition is
+      // required" — mensagem que não diz qual campo falta.
+      condition: input.condicao ?? 'NEW',
       logistic_info: input.logisticaHabilitada.map(logistic_id => ({ logistic_id, enabled: true })),
     }
     if (imageIdList.length > 0) body.image = { image_id_list: imageIdList }
