@@ -115,6 +115,24 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   configPreco?: any
 }) {
   const router = useRouter()
+  // Rota da plataforma do canal. Shopee e Mercado Livre expõem os MESMOS
+  // recursos, com o mesmo formato de corpo — o que faltava era escolher o
+  // caminho em vez de deixar '/shopee/' fixo no código. Era só isso que
+  // impedia o ML de ter atualizar/enviar/pausar/ativar e as regras em massa.
+  const plataforma: string = canal.plataforma
+  const ehML = plataforma === 'mercadolivre'
+  const nomeCanalPlataforma = ehML ? 'Mercado Livre' : 'Shopee'
+  const nomeCurto = ehML ? 'ML' : 'Shopee'
+  // Preposição certa: "na Shopee", "no Mercado Livre".
+  const preposicao = ehML ? 'no' : 'na'
+  function rotaCanal(recurso: string) {
+    return `/api/marketplace/${ehML ? 'mercadolivre' : 'shopee'}/${recurso}`
+  }
+  // Plataformas que já têm módulo de escrita. Nuvemshop ainda não tem, então
+  // os botões de envio não aparecem para ela — melhor ausente do que
+  // presente e falhando.
+  const temEscrita = plataforma === 'shopee' || ehML
+
   const [anuncios, setAnuncios] = useState(anunciosIniciais)
   // anunciosIniciais só vale como valor inicial do useState — sem isso,
   // router.refresh() (ex: depois de sincronizar) atualiza os dados no
@@ -372,7 +390,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       await sb.from('marketplace_anuncios').update(updates).eq('id', anuncio.id)
 
       try {
-        const resp = await fetch('/api/marketplace/shopee/push', {
+        const resp = await fetch(rotaCanal('push'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canalId: canal.id, anuncioId: anuncio.id }),
@@ -393,7 +411,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     let resumoPausa = ''
     if (idsParaPausar.length > 0) {
       try {
-        const resp = await fetch('/api/marketplace/shopee/pausar-ativar', {
+        const resp = await fetch(rotaCanal('pausar-ativar'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canalId: canal.id, anuncioIds: idsParaPausar, acao: 'pausar' }),
@@ -429,7 +447,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     for (const a of alvos) {
       if (!a.id_externo) { semIdExterno++; continue }
       try {
-        const resp = await fetch('/api/marketplace/shopee/sync-item', {
+        const resp = await fetch(rotaCanal('sync-item'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canalId: canal.id, idExterno: a.id_externo }),
@@ -580,7 +598,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   async function enviarSelecionadosParaShopee() {
     const alvos = filtrados.filter(a => selecionados.has(a.id))
     if (alvos.length === 0) return
-    if (!confirm(`Enviar preço/estoque atuais de ${alvos.length} anúncio(s) pra Shopee?`)) return
+    if (!confirm(`Enviar preço/estoque atuais de ${alvos.length} anúncio(s) para ${nomeCanalPlataforma}?`)) return
 
     setEnviandoSelecionados(true); setResumoEnvioSelecionados('')
     let sucesso = 0, falha = 0, semIdExterno = 0
@@ -589,7 +607,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     for (const a of alvos) {
       if (!a.id_externo) { semIdExterno++; continue }
       try {
-        const resp = await fetch('/api/marketplace/shopee/push', {
+        const resp = await fetch(rotaCanal('push'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ canalId: canal.id, anuncioId: a.id }),
@@ -622,11 +640,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     const ids = filtrados.filter(a => selecionados.has(a.id)).map(a => a.id)
     if (ids.length === 0) return
     const verbo = acao === 'pausar' ? 'pausar' : 'ativar'
-    if (!confirm(`${verbo === 'pausar' ? 'Pausar' : 'Ativar'} ${ids.length} anúncio(s) na Shopee? Isso muda a visibilidade pros clientes imediatamente.`)) return
+    if (!confirm(`${verbo === 'pausar' ? 'Pausar' : 'Ativar'} ${ids.length} anúncio(s) ${preposicao} ${nomeCanalPlataforma}? Isso muda a visibilidade pros clientes imediatamente.`)) return
 
     setPausandoAtivando(true); setResumoPausarAtivar('')
     try {
-      const resp = await fetch('/api/marketplace/shopee/pausar-ativar', {
+      const resp = await fetch(rotaCanal('pausar-ativar'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ canalId: canal.id, anuncioIds: ids, acao }),
@@ -961,18 +979,18 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       {selecionados.size > 0 && (
         <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-4 py-2.5 mb-4">
           <span className="text-sm text-purple-700 font-medium">{selecionados.size} selecionado(s)</span>
-          {canal.plataforma === 'shopee' && (
+          {temEscrita && (
             <button onClick={sincronizarSelecionados} disabled={sincronizandoSelecionados}
-              title="Puxa da Shopee pro sistema: status, preço, estoque, imagens..."
+              title={`Puxa d${ehML ? "o" : "a"} ${nomeCanalPlataforma} para o sistema: status, preço, estoque, imagens...`}
               className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
-              {sincronizandoSelecionados ? 'Atualizando...' : '⇣ Atualizar do Shopee'}
+              {sincronizandoSelecionados ? 'Atualizando...' : `⇣ Atualizar d${ehML ? 'o' : 'a'} ${nomeCurto}`}
             </button>
           )}
-          {canal.plataforma === 'shopee' && (
+          {temEscrita && (
             <button onClick={enviarSelecionadosParaShopee} disabled={enviandoSelecionados}
-              title="Manda o preço/estoque que já está salvo aqui pra Shopee"
+              title={`Manda o preço/estoque que já está salvo aqui para ${nomeCanalPlataforma}`}
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
-              {enviandoSelecionados ? 'Enviando...' : '⇡ Enviar p/ Shopee'}
+              {enviandoSelecionados ? 'Enviando...' : `⇡ Enviar p/ ${nomeCurto}`}
             </button>
           )}
           {/* Vale para Shopee e Mercado Livre — as duas têm rota de push. */}
@@ -998,25 +1016,25 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               ⧉ Replicar p/ outro canal
             </button>
           )}
-          {canal.plataforma === 'shopee' && (
+          {temEscrita && (
             <button onClick={() => { setRegraSelecionadaId(''); setOpcoesMassaPreco({ modoPreco: 'nao', valorPreco: '', arredondamento: 'nenhum', considerarPix: false, valorEmbalagem: '', percentualImposto: '', modoEstoque: 'nao', valorEstoque: '', depositoId: '', estoqueComplementar: '', estoqueRisco: '' }) }}
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg">
-              Atualizar preço/estoque na Shopee
+              Atualizar preço/estoque {preposicao} {nomeCanalPlataforma}
             </button>
           )}
-          {canal.plataforma === 'shopee' && (
+          {temEscrita && (
             <a href={`/dashboard/marketplaces/${canal.id}/regras`}
               className="px-3 py-1.5 border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-medium rounded-lg">
               Gerenciar regras
             </a>
           )}
-          {canal.plataforma === 'shopee' && (
+          {temEscrita && (
             <button onClick={() => pausarOuAtivarSelecionados('pausar')} disabled={pausandoAtivando}
               className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
               Pausar
             </button>
           )}
-          {canal.plataforma === 'shopee' && (
+          {temEscrita && (
             <button onClick={() => pausarOuAtivarSelecionados('ativar')} disabled={pausandoAtivando}
               className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
               Ativar
@@ -1439,7 +1457,21 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               <div>
                 <p className="text-xs font-medium text-gray-600 mb-2">Preço de venda</p>
                 <div className="space-y-2">
-                  {[['nao', 'Não alterar'], ['fixo', 'Valor fixo (R$)'], ['percentual', 'Ajuste percentual sobre o atual (%)'], ['formula', 'Fórmula: custo do produto vinculado × markup (%)'], ['shopee_liquido', 'Margem líquida sobre custo (considera comissão + taxas da Shopee)'], ['produto', 'Usar preço do produto vinculado']].map(([v, l]) => (
+                  {/* "Margem líquida" usa a tabela de comissão da SHOPEE
+                      (calcularPrecoParaMargem, em lib/shopee/comissao.ts).
+                      Aplicá-la a um anúncio do Mercado Livre daria um preço
+                      calculado com a comissão errada — some do menu em vez de
+                      entregar número furado. Para o ML, o caminho com a
+                      comissão e o frete corretos é a tela de Gestão de Preços,
+                      que usa o motor completo. */}
+                  {[
+                    ['nao', 'Não alterar'],
+                    ['fixo', 'Valor fixo (R$)'],
+                    ['percentual', 'Ajuste percentual sobre o atual (%)'],
+                    ['formula', 'Fórmula: custo do produto vinculado × markup (%)'],
+                    ...(ehML ? [] : [['shopee_liquido', 'Margem líquida sobre custo (considera comissão + taxas da Shopee)']]),
+                    ['produto', 'Usar preço do produto vinculado'],
+                  ].map(([v, l]) => (
                     <label key={v} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                       <input type="radio" name="modoPreco" checked={opcoesMassaPreco.modoPreco === v}
                         onChange={() => setOpcoesMassaPreco(p => p ? { ...p, modoPreco: v as any } : p)} className="accent-orange-600" />
