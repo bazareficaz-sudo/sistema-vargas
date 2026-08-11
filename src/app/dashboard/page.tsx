@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const ymd = (d: Date) => d.toISOString().slice(0, 10)
 
-type CompraRow = { valor_total: number | null; fornecedor_id: string | null; data_emissao: string | null; nome_fornecedor?: string | null }
+type CompraRow = { valor_total: number | null; fornecedor_id: string | null; data_emissao: string | null; data_entrada?: string | null; nome_fornecedor?: string | null }
 
 export default async function DashboardPage({
   searchParams,
@@ -77,7 +77,11 @@ export default async function DashboardPage({
     temVendas ? supabase.from('vendas').select('id, numero, total, status, created_at, clientes(nome)').eq('empresa_id', empresaId).gte('created_at', inicioHoje).order('created_at', { ascending: false }).limit(8) : Promise.resolve({ data: [] as any[] }),
     tem('marketplace') ? supabase.from('marketplace_canais').select('id, nome, plataforma').eq('empresa_id', empresaId).eq('ativo', true) : Promise.resolve({ data: [] as any[] }),
     tem('marketplace') ? supabase.from('marketplace_pedidos').select('valor_total, status, canal_id').eq('empresa_id', empresaId).gte('data_pedido', inicioHoje).not('status', 'in', '(cancelado,devolvido)') : Promise.resolve({ data: [] as any[] }),
-    (temCompras && tem('entradas')) ? supabase.from('entradas').select('valor_total, fornecedor_id, data_emissao').eq('empresa_id', empresaId).neq('status', 'cancelada').gte('data_emissao', inicioMesAntSelStr).lt('data_emissao', inicioProxMesSelStr) : Promise.resolve({ data: [] as CompraRow[] }),
+    // Entrada manual não tem nota, então quase nunca tem data de emissão
+    // (4 de 31 em produção) — a data que sempre existe é a da entrada da
+    // mercadoria. Filtrar só por data_emissao descartava as manuais inteiras
+    // e o card de compras mostrava apenas o que veio de XML.
+    (temCompras && tem('entradas')) ? supabase.from('entradas').select('valor_total, fornecedor_id, data_emissao, data_entrada').eq('empresa_id', empresaId).neq('status', 'cancelada').or(`and(data_emissao.gte.${inicioMesAntSelStr},data_emissao.lt.${inicioProxMesSelStr}),and(data_emissao.is.null,data_entrada.gte.${inicioMesAntSelStr},data_entrada.lt.${inicioProxMesSelStr})`) : Promise.resolve({ data: [] as CompraRow[] }),
     (temCompras && tem('entradas_xml')) ? supabase.from('nfe_entradas').select('valor_total, fornecedor_id, nome_fornecedor, data_emissao').eq('empresa_id', empresaId).neq('status', 'cancelada').gte('data_emissao', inicioMesAntSelStr).lt('data_emissao', inicioProxMesSelStr) : Promise.resolve({ data: [] as CompraRow[] }),
     (temCompras && tem('fornecedores')) ? supabase.from('fornecedores').select('id, razao_social, nome_fantasia').eq('empresa_id', empresaId) : Promise.resolve({ data: [] as any[] }),
   ])
@@ -107,8 +111,12 @@ export default async function DashboardPage({
 
   // ── Compras do mês (entradas manuais + XML combinadas) ─────────────────
   const comprasRows: CompraRow[] = [...(entradasCompraRes.data ?? []), ...(nfeEntradasCompraRes.data ?? [])]
-  const comprasMesAtual = comprasRows.filter(r => r.data_emissao && r.data_emissao >= inicioMesSelStr && r.data_emissao < inicioProxMesSelStr)
-  const comprasMesAnterior = comprasRows.filter(r => r.data_emissao && r.data_emissao < inicioMesSelStr)
+  // A data da nota quando existe; senão, a data em que a mercadoria entrou.
+  // Fatia em 10 porque data_entrada pode vir com hora e a comparação é com
+  // 'AAAA-MM-DD'.
+  const dataDaCompra = (r: CompraRow) => r.data_emissao ?? (r.data_entrada ? String(r.data_entrada).slice(0, 10) : null)
+  const comprasMesAtual = comprasRows.filter(r => { const d = dataDaCompra(r); return d && d >= inicioMesSelStr && d < inicioProxMesSelStr })
+  const comprasMesAnterior = comprasRows.filter(r => { const d = dataDaCompra(r); return d && d < inicioMesSelStr })
   const totalComprasMes = comprasMesAtual.reduce((s, r) => s + Number(r.valor_total ?? 0), 0)
   const totalComprasMesAnterior = comprasMesAnterior.reduce((s, r) => s + Number(r.valor_total ?? 0), 0)
   const variacaoCompras = totalComprasMesAnterior > 0 ? ((totalComprasMes - totalComprasMesAnterior) / totalComprasMesAnterior) * 100 : null
