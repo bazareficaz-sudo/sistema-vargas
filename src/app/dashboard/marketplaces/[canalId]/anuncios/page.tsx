@@ -5,6 +5,37 @@ import { buscarConfigDoCanal } from '@/lib/precificacao/config'
 
 export const dynamic = 'force-dynamic'
 
+// Colunas da LISTAGEM — de propósito não é `*`.
+//
+// `dados_brutos` (o payload cru da API do marketplace, guardado para
+// depuração) pesa 3.586 dos 4.208 bytes de cada linha: 85% do total. A tela
+// não mostra nada dele; usa um campo só, `listing_type_id`, para dizer se o
+// anúncio do Mercado Livre é Clássico ou Premium. Então esse campo vem
+// extraído, e o blob fica no banco.
+//
+// Medido em produção (11/08/2026), este canal e o do ML:
+//   com `*`         → Shp Eficaz 8,4 s / 3,44 MB · ML Eficaz 33,7 s / 6,85 MB
+//   com esta lista  → 1,2 s / 0,70 MB · 1,2 s / 0,97 MB
+//
+// Ao adicionar coluna nova na tabela, ela NÃO aparece aqui sozinha — é o
+// preço de não usar `*`, e é um preço que vale a pena.
+const COLUNAS_LISTAGEM = [
+  'id', 'empresa_id', 'canal_id', 'produto_id', 'id_externo',
+  // `descricao` fica DE FORA: 551 KB nos 789 anúncios de um canal, usada só
+  // no formulário de edição, um anúncio por vez. É buscada sob demanda ao
+  // abrir a edição (ver abrirEditar em AnunciosClient.tsx).
+  'titulo', 'sku_canal', 'url_anuncio', 'imagens',
+  'preco_venda', 'preco_promocional', 'promo_inicio', 'promo_fim',
+  'estoque_externo', 'estoque_reservado', 'vendas',
+  'status', 'status_externo', 'erro_msg', 'tem_variacao',
+  'categoria_externa', 'marca_externa', 'regra_id',
+  'ultima_atualizacao', 'ultima_atualizacao_externa', 'sincronizado_em',
+  'created_at', 'updated_at',
+  'frete_peso_cobravel', 'frete_logistic_type', 'frete_atualizado_em',
+  // Único pedaço de dados_brutos que a tela lê, extraído sem trazer o resto.
+  'listing_type:dados_brutos->>listing_type_id',
+].join(', ')
+
 export default async function AnunciosPage({ params, searchParams }: {
   params: Promise<{ canalId: string }>
   searchParams: Promise<{ q?: string; status?: string }>
@@ -43,7 +74,7 @@ export default async function AnunciosPage({ params, searchParams }: {
   for (let offset = 0; offset < 20 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
     let pagina = supabase
       .from('marketplace_anuncios')
-      .select('*, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao, produto_id)')
+      .select(`${COLUNAS_LISTAGEM}, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao, produto_id)`)
       .eq('canal_id', canalId)
       .order('created_at', { ascending: false })
       .range(offset, offset + TAMANHO_PAGINA - 1)

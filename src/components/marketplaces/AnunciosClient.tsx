@@ -67,7 +67,11 @@ const ML_TIPO_ANUNCIO_LABELS: Record<string, string> = {
   free: 'Grátis',
 }
 function tipoAnuncioML(a: any): string | null {
-  const listingType = a.dados_brutos?.listing_type_id
+  // `listing_type` vem extraído de dados_brutos pela consulta da página — o
+  // blob inteiro não é carregado (era 85% do peso da listagem). O acesso
+  // direto a dados_brutos fica como reserva para quem receber o anúncio por
+  // outro caminho, sem a extração.
+  const listingType = a.listing_type ?? a.dados_brutos?.listing_type_id
   if (!listingType) return null
   return ML_TIPO_ANUNCIO_LABELS[listingType] ?? listingType
 }
@@ -666,12 +670,22 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setEditando(null); setForm(formVazio); setBuscaProd(''); setModal(true)
   }
 
-  function abrirEditar(a: any) {
+  async function abrirEditar(a: any) {
     setEditando(a)
+    // A descrição NÃO vem na listagem: são 551 KB para os 789 anúncios de um
+    // canal, e ela só é usada aqui, para um anúncio de cada vez. Buscar sob
+    // demanda tira um terço do peso da tela e custa uma consulta de uma linha.
+    let descricao = a.descricao
+    if (descricao === undefined) {
+      const sb = createClient()
+      const { data } = await sb.from('marketplace_anuncios')
+        .select('descricao').eq('id', a.id).maybeSingle()
+      descricao = data?.descricao ?? ''
+    }
     setForm({
       produto_id: a.produto_id ?? '',
       titulo: a.titulo,
-      descricao: a.descricao ?? '',
+      descricao: descricao ?? '',
       preco_venda: String(a.preco_venda),
       preco_promocional: String(a.preco_promocional ?? ''),
       promo_inicio: a.promo_inicio ?? '',
