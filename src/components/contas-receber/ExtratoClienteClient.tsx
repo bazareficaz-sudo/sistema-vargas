@@ -31,6 +31,9 @@ type Recebimento = {
   desconto: number | null; juros: number | null; multa: number | null
   forma_pagamento: string | null; observacao: string | null; operador_nome: string | null
   created_at: string
+  // Data em que o dinheiro entrou. Nula no histórico anterior à coluna —
+  // aí vale a data do lançamento.
+  data_recebimento: string | null
 }
 
 type Linha = {
@@ -149,8 +152,8 @@ export default function ExtratoClienteClient({ cliente, contas, recebimentos }: 
       if (Number(r.desconto ?? 0) > 0) extras.push(`desconto ${fmt(Number(r.desconto))}`)
       eventos.push({
         id: `r-${r.id}`,
-        data: soData(r.created_at),
-        quando: dataBr(r.created_at),
+        data: soData(r.data_recebimento ?? r.created_at),
+        quando: dataBr(r.data_recebimento ?? r.created_at),
         tipo: 'pagamento',
         historico: `Pagamento${r.forma_pagamento ? ` — ${r.forma_pagamento}` : ''}`,
         detalhe: [r.conta_id ? docPorConta.get(r.conta_id) : null, extras.join(' · ') || null]

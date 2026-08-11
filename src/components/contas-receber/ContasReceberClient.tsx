@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import EnviarWhatsAppModal from '@/components/integracoes/EnviarWhatsAppModal'
 import VendaDaContaModal from './VendaDaContaModal'
+import ReceberEmMassaModal from './ReceberEmMassaModal'
 import Link from 'next/link'
 
 type Conta = {
@@ -117,6 +118,7 @@ export default function ContasReceberClient({
   // Compra que originou a conta — responde ao "por que tem isso na minha
   // conta?" sem sair da tela.
   const [vendoVenda, setVendoVenda] = useState<Conta | null>(null)
+  const [recebendoMassa, setRecebendoMassa] = useState(false)
 
   // Modal recebimento
   const [contaReceber, setContaReceber] = useState<Conta | null>(null)
@@ -306,12 +308,18 @@ export default function ContasReceberClient({
         updated_at: new Date().toISOString(),
       }).eq('id', contaReceber.id)
 
-      // Atualizar saldo_devedor do cliente
-      if (contaReceber.cliente_id && novoStatus === 'recebido') {
+      // Saldo devedor do cliente: abate o que entrou, sempre.
+      //
+      // Antes só abatia quando a conta era quitada por inteiro — pagamento
+      // parcial não mexia no saldo — e, quando abatia, subtraía o valor
+      // cheio da conta em vez do valor recebido, descontando de novo o que
+      // já tinha sido pago antes. Os dois defeitos juntos fizeram o saldo do
+      // cadastro divergir da soma real das contas em alguns clientes.
+      if (contaReceber.cliente_id) {
         const { data: cli } = await sb.from('clientes').select('saldo_devedor').eq('id', contaReceber.cliente_id).single()
         if (cli) {
           await sb.from('clientes').update({
-            saldo_devedor: Math.max(0, cli.saldo_devedor - contaReceber.valor_original),
+            saldo_devedor: Math.max(0, Number(cli.saldo_devedor ?? 0) - valor),
             data_ultimo_pagamento: new Date().toISOString(),
           }).eq('id', contaReceber.cliente_id)
         }
@@ -409,6 +417,22 @@ export default function ContasReceberClient({
 
   const podeReneg = contasSel.length > 0
 
+  // Receber em massa exige mais de uma conta do MESMO cliente: o rateio de
+  // juros e desconto e o abatimento do saldo devedor são por cliente, e
+  // misturar dois numa tacada só produziria valores errados nos dois.
+  const clienteDaSelecao = contasSelecionadas.length > 0 ? contasSelecionadas[0].cliente_id : null
+  const selecaoMesmoCliente = contasSelecionadas.length > 0
+    && contasSelecionadas.every(c => c.cliente_id && c.cliente_id === clienteDaSelecao)
+  const selecaoRecebivel = contasSelecionadas.every(c => ['aberto', 'parcial', 'vencido'].includes(c.status))
+  const podeReceberMassa = contasSelecionadas.length > 1 && selecaoMesmoCliente && selecaoRecebivel
+
+  // Motivo do bloqueio, pra não ser um botão que some sem explicação.
+  const motivoSemMassa = contasSelecionadas.length <= 1
+    ? null
+    : !selecaoMesmoCliente ? 'Selecione contas de um mesmo cliente para receber em massa.'
+    : !selecaoRecebivel ? 'Há conta paga ou cancelada na seleção.'
+    : null
+
   return (
     <div className="space-y-4">
       {/* ── Header ──────────────────────────────────────────────── */}
@@ -418,6 +442,12 @@ export default function ContasReceberClient({
           <p className="text-slate-500 text-sm">{contasFiltradas.length} conta(s) listadas</p>
         </div>
         <div className="flex gap-2">
+          {podeReceberMassa && (
+            <button onClick={() => setRecebendoMassa(true)}
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-xl transition-colors">
+              💰 Receber {contasSel.length} contas
+            </button>
+          )}
           {podeReneg && (
             <button onClick={() => setModalRenego(true)}
               className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-xl transition-colors">
@@ -477,6 +507,11 @@ export default function ContasReceberClient({
           {clientes.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
 
+        {motivoSemMassa && (
+          <p className="w-full text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            {motivoSemMassa}
+          </p>
+        )}
         {contasSel.length > 0 && (
           <button onClick={() => setContasSel([])}
             className="px-3 py-2 bg-slate-100 text-slate-700 text-sm rounded-xl hover:bg-slate-200">
@@ -870,6 +905,21 @@ export default function ContasReceberClient({
           />
         )
       })()}
+
+      {recebendoMassa && (
+        <ReceberEmMassaModal
+          contas={contasSelecionadas}
+          empresaId={empresaId}
+          operador={operador}
+          onFechar={() => setRecebendoMassa(false)}
+          onConcluido={atualizadas => {
+            const porId = new Map(atualizadas.map(a => [a.id, a]))
+            setContas(p => p.map(c => porId.has(c.id) ? { ...c, ...porId.get(c.id)! } : c))
+            setContasSel([])
+            setRecebendoMassa(false)
+          }}
+        />
+      )}
 
       {vendoVenda?.origem_id && (
         <VendaDaContaModal

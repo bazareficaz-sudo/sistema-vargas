@@ -36,7 +36,7 @@ export default async function ExtratoClientePage({ params }: { params: Promise<{
       .eq('empresa_id', empresaId).eq('cliente_id', clienteId)
       .order('data_emissao', { ascending: true }),
     sb.from('recebimentos')
-      .select('id, conta_id, valor, valor_liquido, desconto, juros, multa, forma_pagamento, observacao, operador_nome, created_at')
+      .select('id, conta_id, valor, valor_liquido, desconto, juros, multa, forma_pagamento, observacao, operador_nome, created_at, data_recebimento')
       .eq('empresa_id', empresaId).eq('cliente_id', clienteId)
       .order('created_at', { ascending: true }),
   ])
