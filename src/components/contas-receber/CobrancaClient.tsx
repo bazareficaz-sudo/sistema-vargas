@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import EnviarAtualizacaoContaModal from './EnviarAtualizacaoContaModal'
 
 type Conta = {
   id: string; cliente_id: string | null; cliente_nome: string
@@ -49,6 +50,9 @@ export default function CobrancaClient({
   const [promValor, setPromValor] = useState('')
   const [salvando, setSalvando] = useState(false)
 
+  // Envio da situação da conta: relatório de todas as compras em aberto,
+  // com o total, o que vence e o que já venceu.
+  const [modalAtualizacao, setModalAtualizacao] = useState<GrupoCliente | null>(null)
   const [modalBloquear, setModalBloquear] = useState<GrupoCliente | null>(null)
   const [motivoBloqueio, setMotivoBloqueio] = useState('')
   const [salvandoBlq, setSalvandoBlq] = useState(false)
@@ -197,6 +201,13 @@ export default function CobrancaClient({
                       WhatsApp
                     </a>
                   )}
+                  {g.cliente_id && (
+                    <button onClick={e => { e.stopPropagation(); setModalAtualizacao(g) }}
+                      title="Enviar a situação da conta em PDF pelo WhatsApp"
+                      className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs rounded-lg font-medium">
+                      📄 Situação da conta
+                    </button>
+                  )}
                   <button onClick={e => { e.stopPropagation(); setModalCob(g) }}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg font-medium">
                     Registrar
@@ -332,6 +343,15 @@ export default function CobrancaClient({
             </div>
           </div>
         </div>
+      )}
+
+      {modalAtualizacao?.cliente_id && (
+        <EnviarAtualizacaoContaModal
+          clienteId={modalAtualizacao.cliente_id}
+          clienteNome={modalAtualizacao.cliente_nome}
+          telefone={modalAtualizacao.telefone}
+          onFechar={() => setModalAtualizacao(null)}
+        />
       )}
     </div>
   )
