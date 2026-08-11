@@ -5,6 +5,9 @@ import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import VisualizadorImagem from './VisualizadorImagem'
+import EnviarImagensWhatsappModal from './EnviarImagensWhatsappModal'
+import { botao } from '@/components/ui/botao'
 import { gerarEanInternoUnico } from '@/lib/produtos/ean'
 import { usePermissao } from '@/contexts/PlanContext'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
@@ -55,7 +58,7 @@ type Produto = {
 
 type KitItem = { id?: string; produto_id: string; nome: string; unidade: string; quantidade: number; controla_estoque: boolean }
 
-type ProdutoImagem = { id: string; url: string; ordem: number; principal: boolean }
+type ProdutoImagem = { id: string; url: string; ordem: number; principal: boolean; titulo?: string | null }
 
 type AnuncioVinculado = {
   id: string; canalNome: string; plataforma: string; titulo: string
@@ -120,6 +123,37 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [urlInput, setUrlInput] = useState('')
   const [adicionandoUrl, setAdicionandoUrl] = useState(false)
   const [erroImg, setErroImg] = useState('')
+
+  // Visualizador em tela cheia, seleção para envio e título por imagem.
+  const [visualizando, setVisualizando] = useState<number | null>(null)
+  const [imgSelecionadas, setImgSelecionadas] = useState<Set<string>>(new Set())
+  const [enviandoWhatsapp, setEnviandoWhatsapp] = useState(false)
+  // Títulos em edição, por id. Só vão ao banco quando o produto é salvo —
+  // gravar a cada tecla encheria o banco de escrita por nada.
+  const [titulosImg, setTitulosImg] = useState<Record<string, string>>({})
+
+  function tituloDe(img: { id: string; titulo?: string | null }) {
+    return titulosImg[img.id] ?? img.titulo ?? ''
+  }
+  function alternarSelecaoImg(id: string) {
+    setImgSelecionadas(prev => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+  // Grava os títulos alterados. Chamado ao abrir o envio e ao salvar o
+  // produto: enviar uma legenda que ainda só existe na tela seria mentira.
+  async function salvarTitulosImagens() {
+    const ids = Object.keys(titulosImg)
+    if (ids.length === 0) return
+    const sb = createClient()
+    for (const id of ids) {
+      await sb.from('produto_imagens').update({ titulo: titulosImg[id].trim() || null }).eq('id', id)
+    }
+    setImagens(prev => prev.map(i => ids.includes(i.id) ? { ...i, titulo: titulosImg[i.id].trim() || null } : i))
+    setTitulosImg({})
+  }
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const buscarRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -235,7 +269,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   async function carregarImagens(produtoId: string) {
     const { data } = await sb
       .from('produto_imagens')
-      .select('id, url, ordem, principal')
+      .select('id, url, ordem, principal, titulo')
       .eq('produto_id', produtoId)
       .order('ordem', { ascending: true })
     setImagens(data ?? [])
@@ -529,6 +563,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   async function salvar() {
     if (!form || !produto) return
     setSalvando(true); setErro('')
+    // Títulos de imagem digitados nesta sessão vão junto no "Salvar
+    // alterações" — o usuário não deveria precisar de dois salvamentos para
+    // uma tela só.
+    await salvarTitulosImagens()
     const isKit = form.tipo === 'kit'
 
     // Kits: nunca confia no que está no formulário pro custo/estoque — sempre
@@ -1121,14 +1159,47 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               {/* Grade de imagens */}
               {imagens.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-xs text-gray-500">
-                    {imagens.length} imagem(ns) · Arraste para reordenar · A primeira é a imagem principal
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-gray-500 mr-auto">
+                      {imagens.length} imagem(ns) · Clique na foto para ver inteira · A primeira é a principal
+                    </p>
+                    {imgSelecionadas.size > 0 && (
+                      <>
+                        <span className="text-xs font-medium text-blue-700">
+                          {imgSelecionadas.size} selecionada(s)
+                        </span>
+                        <button
+                          onClick={async () => { await salvarTitulosImagens(); setEnviandoWhatsapp(true) }}
+                          className={botao('secundario', 'sm')}>
+                          Enviar por WhatsApp
+                        </button>
+                        <button onClick={() => setImgSelecionadas(new Set())} className={botao('sutil', 'sm')}>
+                          Limpar
+                        </button>
+                      </>
+                    )}
+                  </div>
                   <div className="grid grid-cols-3 gap-3">
                     {imagens.map((img, idx) => (
-                      <div key={img.id} className={`relative group rounded-xl overflow-hidden border-2 transition-colors ${img.principal ? 'border-blue-400' : 'border-gray-200'}`}>
+                      <div key={img.id} className={`relative group rounded-xl overflow-hidden border-2 transition-colors ${
+                        imgSelecionadas.has(img.id) ? 'border-blue-600' : img.principal ? 'border-blue-400' : 'border-gray-200'
+                      }`}>
+                        {/* Clicar na foto abre em tela cheia. A miniatura é
+                            cortada para caber na grade; não dá para conferir
+                            uma imagem olhando um recorte dela. */}
                         <img src={img.url} alt={`Imagem ${idx + 1}`}
-                          className="w-full h-36 object-cover bg-gray-100" />
+                          onClick={() => setVisualizando(idx)}
+                          title="Clique para ver a imagem inteira"
+                          className="w-full h-32 object-cover bg-gray-100 cursor-zoom-in" />
+                        {/* Seleção para envio. Fora do overlay de ações, que
+                            só aparece no hover — a marca de selecionado
+                            precisa ficar visível o tempo todo. */}
+                        <label onClick={e => e.stopPropagation()}
+                          className="absolute top-2 right-2 z-10 w-6 h-6 rounded-md bg-white/90 border border-gray-300 flex items-center justify-center cursor-pointer shadow-sm">
+                          <input type="checkbox" checked={imgSelecionadas.has(img.id)}
+                            onChange={() => alternarSelecaoImg(img.id)}
+                            className="w-4 h-4 accent-blue-600 cursor-pointer" />
+                        </label>
                         {/* Badge principal */}
                         {img.principal && (
                           <div className="absolute top-2 left-2 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
@@ -1159,8 +1230,19 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                           </button>
                         </div>
                         {/* Número */}
-                        <div className="absolute bottom-1.5 right-1.5 bg-black/50 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                        <div className="absolute bottom-[3.4rem] right-1.5 bg-black/50 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
                           {idx + 1}
+                        </div>
+                        {/* Título: vira a legenda da foto no envio por
+                            WhatsApp. Fica fora do overlay de hover porque
+                            precisa ser digitável, não só visível. */}
+                        <div className="bg-white px-2 py-1.5 border-t border-gray-100">
+                          <input
+                            value={tituloDe(img)}
+                            onChange={e => setTitulosImg(t => ({ ...t, [img.id]: e.target.value }))}
+                            placeholder="Título"
+                            title="Aparece como legenda ao enviar esta imagem por WhatsApp"
+                            className="w-full text-xs text-gray-700 placeholder-gray-400 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400" />
                         </div>
                       </div>
                     ))}
@@ -1561,6 +1643,22 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
           }]}
           empresaId={empresaId}
           onClose={() => setImprimindoEtiqueta(false)}
+        />
+      )}
+      {visualizando !== null && (
+        <VisualizadorImagem
+          imagens={imagens.map(i => ({ id: i.id, url: i.url, titulo: tituloDe(i) }))}
+          indice={visualizando}
+          onFechar={() => setVisualizando(null)}
+          onNavegar={setVisualizando}
+        />
+      )}
+
+      {enviandoWhatsapp && (
+        <EnviarImagensWhatsappModal
+          imagens={imagens.filter(i => imgSelecionadas.has(i.id)).map(i => ({ id: i.id, url: i.url, titulo: tituloDe(i) }))}
+          nomeProduto={form.nome ?? ''}
+          onFechar={() => setEnviandoWhatsapp(false)}
         />
       )}
     </div>
