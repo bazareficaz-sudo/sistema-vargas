@@ -3,12 +3,15 @@
 import { useState, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import EnviarWhatsAppModal from '@/components/integracoes/EnviarWhatsAppModal'
+import VendaDaContaModal from './VendaDaContaModal'
+import Link from 'next/link'
 
 type Conta = {
   id: string
   cliente_id: string | null
   cliente_nome: string
   origem: string
+  origem_id: string | null
   numero_doc: string | null
   parcela_numero: number
   total_parcelas: number
@@ -111,6 +114,9 @@ export default function ContasReceberClient({
 
   // Modal WhatsApp cobrança
   const [wppConta, setWppConta] = useState<Conta | null>(null)
+  // Compra que originou a conta — responde ao "por que tem isso na minha
+  // conta?" sem sair da tela.
+  const [vendoVenda, setVendoVenda] = useState<Conta | null>(null)
 
   // Modal recebimento
   const [contaReceber, setContaReceber] = useState<Conta | null>(null)
@@ -492,6 +498,7 @@ export default function ContasReceberClient({
               </th>
               <th className="px-3 py-3 text-left">Cliente</th>
               <th className="px-3 py-3 text-left">Doc / Origem</th>
+              <th className="px-3 py-3 text-center">Emissão</th>
               <th className="px-3 py-3 text-center">Vencimento</th>
               <th className="px-3 py-3 text-right">Valor</th>
               <th className="px-3 py-3 text-right">Recebido</th>
@@ -502,7 +509,7 @@ export default function ContasReceberClient({
           </thead>
           <tbody className="divide-y divide-slate-50">
             {contasFiltradas.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-12 text-slate-400">Nenhuma conta encontrada</td></tr>
+              <tr><td colSpan={10} className="text-center py-12 text-slate-400">Nenhuma conta encontrada</td></tr>
             )}
             {contasFiltradas.map(c => {
               const atraso = diasAtraso(c.data_vencimento)
@@ -526,6 +533,9 @@ export default function ContasReceberClient({
                   <td className="px-3 py-2.5">
                     <p className="text-slate-500 text-xs">{c.numero_doc ?? '—'}</p>
                     <p className="text-slate-400 text-xs capitalize">{c.origem}</p>
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    <p className="text-sm text-slate-500">{fmtDt(c.data_emissao)}</p>
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     <p className={`text-sm ${atraso > 0 && podeReceber ? 'text-red-500 font-medium' : 'text-slate-500'}`}>
@@ -554,6 +564,20 @@ export default function ContasReceberClient({
                           className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs rounded-lg transition-colors">
                           Receber
                         </button>
+                      )}
+                      {c.origem_id && (
+                        <button onClick={() => setVendoVenda(c)}
+                          title="Ver a compra que gerou esta conta"
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg transition-colors">
+                          🧾
+                        </button>
+                      )}
+                      {c.cliente_id && (
+                        <Link href={`/dashboard/contas-receber/extrato/${c.cliente_id}`}
+                          title="Extrato da conta deste cliente"
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs rounded-lg transition-colors">
+                          📄
+                        </Link>
                       )}
                       <button onClick={() => setWppConta(c)}
                         title="Enviar cobrança por WhatsApp"
@@ -846,6 +870,16 @@ export default function ContasReceberClient({
           />
         )
       })()}
+
+      {vendoVenda?.origem_id && (
+        <VendaDaContaModal
+          vendaId={vendoVenda.origem_id}
+          clienteNome={vendoVenda.cliente_nome}
+          clienteTelefone={clientes.find(cl => cl.id === vendoVenda.cliente_id)?.telefone ?? null}
+          contaDoc={vendoVenda.numero_doc}
+          onClose={() => setVendoVenda(null)}
+        />
+      )}
     </div>
   )
 }
