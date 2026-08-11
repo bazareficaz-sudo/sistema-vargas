@@ -1,4 +1,5 @@
 import { shopeeGet, shopeePost, shopeeUploadImage, getIntegracaoCredentials } from './client'
+import { garantirFormatoAceito } from '@/lib/imagens/converter'
 import { syncSingleItem } from './sync'
 import { ShopeeApiError, type ShopeeChannel } from './types'
 
@@ -268,11 +269,17 @@ export async function getLogisticsChannels(ctx: CallCtx): Promise<CanalLogistica
 export async function uploadImageFromUrl(ctx: CallCtx, imageUrl: string): Promise<string> {
   const respImagem = await fetch(imageUrl)
   if (!respImagem.ok) throw new ShopeeApiError(`Não foi possível baixar a imagem do produto (status ${respImagem.status})`)
-  const blob = await respImagem.blob()
+
+  // A Shopee recusa WebP com "image is invalid or not supported". O código
+  // anterior mandava o arquivo chamado "produto.jpg", mas o nome não muda os
+  // bytes — a Shopee lê o conteúdo. Aqui a imagem é convertida de verdade
+  // quando o formato não serve, e reduzida quando passa dos 5 MB do limite.
+  const original = await respImagem.arrayBuffer()
+  const img = await garantirFormatoAceito(original)
 
   const callOptions = await callOpts(ctx)
   const formData = new FormData()
-  formData.append('image', blob, 'produto.jpg')
+  formData.append('image', new Blob([new Uint8Array(img.buffer)], { type: img.contentType }), img.nomeArquivo)
   formData.append('scene', 'normal')
 
   const data = await shopeeUploadImage('/api/v2/media_space/upload_image', formData, callOptions)
