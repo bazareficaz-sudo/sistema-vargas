@@ -5,7 +5,7 @@ import type { ShopeeChannel } from '@/lib/shopee/types'
 
 export async function POST(req: Request) {
   const body = await req.json()
-  const { canalId, produtoId, categoryId, categoriaIds, titulo, descricao, preco, estoque, peso, comprimento, largura, altura, brandId, brandNome, atributos, canaisLogisticaHabilitados, condicao } = body
+  const { canalId, produtoId, categoryId, categoriaIds, titulo, descricao, preco, estoque, peso, comprimento, largura, altura, brandId, brandNome, atributos, canaisLogisticaHabilitados, condicao , fotos} = body
 
   if (!canalId || !produtoId || !categoryId || !titulo || preco == null || estoque == null || !peso) {
     return NextResponse.json({ ok: false, erro: 'Dados obrigatórios ausentes (categoria, título, preço, estoque e peso são necessários).' }, { status: 400 })
@@ -31,7 +31,16 @@ export async function POST(req: Request) {
   if (!produto) return NextResponse.json({ ok: false, erro: 'Produto não encontrado' }, { status: 404 })
 
   const { data: imagensProduto } = await sb.from('produto_imagens').select('url, principal').eq('produto_id', produtoId).order('ordem', { ascending: true })
-  const fotoUrls = (imagensProduto ?? []).sort((a: any, b: any) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0)).map((i: any) => i.url)
+  const urlsDoProduto = (imagensProduto ?? []).map((i: any) => i.url)
+  // Ordem escolhida na tela manda — é assim que se troca a foto principal de
+  // um anúncio (a primeira da lista é a capa) sem mexer na imagem principal
+  // do cadastro, que continua valendo pro PDV e pros outros anúncios.
+  // Filtra contra as imagens do próprio produto: a tela só oferece essas, e
+  // aceitar URL arbitrária do cliente seria publicar imagem de qualquer lugar.
+  const ordemEscolhida = Array.isArray(fotos) ? fotos.filter((u: any) => typeof u === 'string' && urlsDoProduto.includes(u)) : []
+  const fotoUrls = ordemEscolhida.length > 0
+    ? ordemEscolhida
+    : (imagensProduto ?? []).sort((a: any, b: any) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0)).map((i: any) => i.url)
   if (fotoUrls.length === 0) return NextResponse.json({ ok: false, erro: 'Produto sem nenhuma imagem cadastrada — a Shopee exige pelo menos uma.' }, { status: 400 })
 
   const canal: ShopeeChannel = {

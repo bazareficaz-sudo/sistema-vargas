@@ -8,13 +8,15 @@ import { createClient } from '@/lib/supabase/server'
 // O que dá pra reaproveitar depende do par origem→destino:
 //  - mesma plataforma: título, descrição, imagens e a CATEGORIA (o id é o
 //    mesmo nas duas contas, porque a árvore é da plataforma, não da conta).
-//  - Mercado Livre → Mercado Livre: também os atributos, que o sync guarda
-//    completos em dados_brutos.
-//  - Shopee: o sync NÃO traz atributos (o get_item_base_info não devolve
-//    attribute_list nesta conta), então lá os atributos seguem sendo
-//    preenchidos pela IA na tela de criação — sinalizado na resposta.
+//  - mesma plataforma: também os atributos, a condição (novo/usado) e os
+//    canais de envio — o sync guarda tudo em dados_brutos, nas duas.
 //  - plataformas diferentes: categoria e atributos não se aproveitam (as
 //    taxonomias não conversam); vai só o texto e as imagens.
+//
+// O comentário aqui dizia que a Shopee não trazia atributos. Está errado:
+// `dados_brutos.attribute_list` existe nos anúncios sincronizados. Enquanto
+// isso valeu, duplicar um anúncio da Shopee jogava fora os atributos e
+// obrigava a IA a adivinhá-los de novo.
 
 function atributosDoMercadoLivre(dadosBrutos: any): { id: string; valor: string }[] {
   const lista = dadosBrutos?.attributes
@@ -29,6 +31,45 @@ function atributosDoMercadoLivre(dadosBrutos: any): { id: string; valor: string 
     atributos.push({ id, valor: valor.trim() })
   }
   return atributos
+}
+
+// A Shopee devolve cada atributo como uma lista de valores escolhidos.
+// value_id 0 é texto livre (o nome digitado vai em original_value_name);
+// qualquer outro é opção da lista da categoria — e como o id de atributo e
+// de valor pertencem à categoria, não à loja, valem igual num anúncio novo
+// da mesma categoria.
+function atributosDaShopee(dadosBrutos: any): { attributeId: number; valueIds: number[]; texto?: string; unidade?: string }[] {
+  const lista = dadosBrutos?.attribute_list
+  if (!Array.isArray(lista)) return []
+  const saida: { attributeId: number; valueIds: number[]; texto?: string; unidade?: string }[] = []
+  for (const a of lista) {
+    const attributeId = Number(a?.attribute_id)
+    if (!attributeId) continue
+    const valores = Array.isArray(a?.attribute_value_list) ? a.attribute_value_list : []
+    const valueIds: number[] = []
+    let texto: string | undefined
+    let unidade: string | undefined
+    for (const v of valores) {
+      const id = Number(v?.value_id ?? 0)
+      if (id > 0) { valueIds.push(id); continue }
+      const nome = v?.original_value_name
+      if (typeof nome === 'string' && nome.trim()) {
+        texto = nome.trim()
+        if (typeof v?.value_unit === 'string' && v.value_unit.trim()) unidade = v.value_unit.trim()
+      }
+    }
+    if (valueIds.length === 0 && !texto) continue
+    saida.push({ attributeId, valueIds, texto, unidade })
+  }
+  return saida
+}
+
+// Canais de envio ligados no anúncio de origem. Fazem parte do "resto igual"
+// numa duplicação: publicar sem eles deixaria o anúncio novo sem frete.
+function logisticaDaShopee(dadosBrutos: any): number[] {
+  const lista = dadosBrutos?.logistic_info
+  if (!Array.isArray(lista)) return []
+  return lista.filter((l: any) => l?.enabled).map((l: any) => Number(l.logistic_id)).filter(Boolean)
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -71,6 +112,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       marcaExterna: anuncio.marca_externa ?? null,
       temVariacao: !!anuncio.tem_variacao,
       atributos: plataforma === 'mercadolivre' ? atributosDoMercadoLivre(brutos) : [],
+      atributosShopee: plataforma === 'shopee' ? atributosDaShopee(brutos) : [],
+      logisticaHabilitada: plataforma === 'shopee' ? logisticaDaShopee(brutos) : [],
+      // 'NEW' | 'USED' na Shopee; no ML vem 'new'/'used' em minúsculas.
+      condicao: typeof brutos?.condition === 'string' ? brutos.condition.toUpperCase() : null,
       // Peso/dimensões: a Shopee guarda em gramas-kg no próprio item; o
       // cadastro do produto costuma ter os mesmos valores, mas se o operador
       // ajustou só no anúncio, é esse número que vale.

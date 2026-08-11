@@ -19,12 +19,16 @@ type ValorEscolhido = { valueId?: number; valueIds?: number[]; texto?: string; u
 type Marca = { brand_id: number; original_brand_name: string }
 type CanalLogistica = { logistic_id: number; logistic_name: string; enabled: boolean }
 
-export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, conteudoInicial, onClose, onCriado }: {
+export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, modoDuplicar, conteudoInicial, onClose, onCriado }: {
   canal?: { id: string; nome: string }
   canais?: { id: string; nome: string }[]
   empresaId: string; produtoIdInicial?: string
   // Anúncio já publicado em outro canal, usado como base (replicar).
   origemAnuncioId?: string
+  // Duplicar = criar um segundo anúncio do mesmo produto NO MESMO canal,
+  // mudando só o que diferencia (título, um trecho da descrição, a capa).
+  // Replicar, sem esta marca, é levar o anúncio pra outro canal.
+  modoDuplicar?: boolean
   // Conteúdo já trabalhado em Anúncios Rascunhos. Entra por cima do que vem
   // do cadastro do produto — se o operador escreveu título e descrição lá,
   // não faz sentido a tela reabrir com o texto do cadastro.
@@ -63,6 +67,11 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
 
   const [canaisLogistica, setCanaisLogistica] = useState<CanalLogistica[]>([])
   const [logisticaSelecionada, setLogisticaSelecionada] = useState<Set<number>>(new Set())
+  // Capa DESTE anúncio. A imagem principal do cadastro segue valendo pro PDV
+  // e pros outros anúncios — trocar a capa aqui não mexe no produto, que é
+  // justamente o que permite dois anúncios do mesmo item com fotos de capa
+  // diferentes.
+  const [capaUrl, setCapaUrl] = useState<string | null>(null)
 
   const [titulo, setTitulo] = useState('')
   // Opcoes de titulo geradas pela IA — nunca aplicadas sozinhas: o operador
@@ -139,6 +148,11 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     const sb = createClient()
     const { data } = await sb.from('produto_imagens').select('id, url, principal, ordem').eq('produto_id', produtoId).order('ordem', { ascending: true })
     setImagens(data ?? [])
+    setCapaUrl(prev => {
+      const lista = data ?? []
+      if (prev && lista.some(i => i.url === prev)) return prev
+      return (lista.find(i => i.principal) ?? lista[0])?.url ?? null
+    })
   }
 
   useEffect(() => {
@@ -272,6 +286,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
             if (o.comprimentoCm) setComprimento(String(o.comprimentoCm))
             if (o.larguraCm) setLargura(String(o.larguraCm))
             if (o.alturaCm) setAltura(String(o.alturaCm))
+            if (o.condicao === 'NEW' || o.condicao === 'USED') setCondicao(o.condicao)
 
             // O category_id é da plataforma, não da conta — vale igual na
             // outra loja Shopee. Vindo do Mercado Livre não serve pra nada.
@@ -284,6 +299,19 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
               if (!ativo) return
               if (dCat.ok && dCat.encontrado && dCat.caminho?.length > 0) {
                 await aplicarCaminho(dCat, 'replicada')
+                // Os atributos vêm depois da categoria porque só existem
+                // dentro dela. attribute_id e value_id pertencem à categoria,
+                // não à loja — valem igual num anúncio novo da mesma.
+                const escolhidos: Record<number, ValorEscolhido> = {}
+                for (const at of (o.atributosShopee ?? [])) {
+                  const ids: number[] = at.valueIds ?? []
+                  escolhidos[at.attributeId] = {
+                    valueId: ids.length === 1 ? ids[0] : undefined,
+                    valueIds: ids.length > 1 ? ids : undefined,
+                    texto: at.texto, unidade: at.unidade,
+                  }
+                }
+                if (Object.keys(escolhidos).length > 0) setValoresAtributos(prev => ({ ...prev, ...escolhidos }))
                 return
               }
             }
@@ -501,6 +529,16 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [produto, canalAtivo])
 
+  // Canais de envio do anúncio de origem. Efeito próprio porque origem e
+  // lista de canais chegam por caminhos assíncronos diferentes — assim vale
+  // qual dos dois terminar por último, sem corrida.
+  useEffect(() => {
+    if (!origem?.logisticaHabilitada?.length || canaisLogistica.length === 0) return
+    const disponiveis = new Set(canaisLogistica.map(c => c.logistic_id))
+    const daOrigem = (origem.logisticaHabilitada as number[]).filter(id => disponiveis.has(id))
+    if (daOrigem.length > 0) setLogisticaSelecionada(new Set(daOrigem))
+  }, [origem, canaisLogistica])
+
   function toggleLogistica(id: number) {
     setLogisticaSelecionada(prev => {
       const novo = new Set(prev)
@@ -534,7 +572,20 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
 
   const atributosObrigatoriosFaltando = atributosEmJogo.filter(a => a.is_mandatory && !atributoPreenchido(a))
 
+  // Capa primeiro; o resto segue a ordem do cadastro. É essa lista que a
+  // Shopee usa — a primeira imagem é a que aparece na busca.
+  const fotosDoAnuncio = capaUrl
+    ? [capaUrl, ...imagens.map(i => i.url).filter(u => u !== capaUrl)]
+    : imagens.map(i => i.url)
+
+  // Dois anúncios idênticos na mesma loja são tratados como repetição pela
+  // Shopee e um deles perde alcance. Duplicar só faz sentido com título
+  // diferente — é o que o comprador vê na busca.
+  const tituloIgualAoOrigem = !!modoDuplicar && !!origem?.titulo
+    && titulo.trim().toLowerCase() === String(origem.titulo).trim().toLowerCase()
+
   const podeEnviar = !!canalAtivo && !!produto && !!categoriaFolha && titulo.trim() && Number(preco) > 0
+    && !tituloIgualAoOrigem
     && estoque !== '' && Number(peso) > 0 && atributosObrigatoriosFaltando.length === 0
     && imagens.length > 0
 
@@ -564,6 +615,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
               }
             }),
           canaisLogisticaHabilitados: Array.from(logisticaSelecionada),
+          fotos: fotosDoAnuncio,
         }),
       })
       const data = await resp.json()
@@ -647,13 +699,23 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
 
               {origem && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
-                  <p className="text-sm text-indigo-900 font-medium">⧉ Replicando o anúncio de <strong>{origem.canalNome}</strong></p>
+                  <p className="text-sm text-indigo-900 font-medium">
+                    {modoDuplicar
+                      ? <>⧉ Duplicando um anúncio em <strong>{origem.canalNome}</strong></>
+                      : <>⧉ Replicando o anúncio de <strong>{origem.canalNome}</strong></>}
+                  </p>
                   <p className="text-xs text-indigo-700 mt-1">
                     Título, descrição e medidas vieram de lá.{' '}
                     {origem.plataforma === 'shopee'
-                      ? 'A categoria também foi reaproveitada — os atributos precisam ser preenchidos aqui (o Shopee não devolve os atributos do anúncio na sincronização).'
+                      ? 'Categoria, atributos, condição e canais de envio também — mude o que vai diferenciar este anúncio e publique.'
                       : 'A categoria e os atributos NÃO vieram: o anúncio de origem é do Mercado Livre e as categorias das duas plataformas não se correspondem.'}
                   </p>
+                  {modoDuplicar && (
+                    <p className="text-xs text-indigo-700 mt-1">
+                      Vale mudar o título, um trecho da descrição e a capa — dois anúncios iguais
+                      na mesma loja disputam entre si em vez de somar.
+                    </p>
+                  )}
                   <p className="text-xs text-indigo-700 mt-1">Preço e estoque continuam sendo os do cadastro — confira antes de publicar.</p>
                   {origem.imagens?.length > 0 && origem.imagens.some((u: string) => !imagens.some(i => i.url === u)) && (
                     <button type="button" onClick={importarImagensDaOrigem} disabled={importandoImagens}
@@ -667,6 +729,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
               {produto && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 mb-2">Imagens do anúncio ({imagens.length}/9) *</p>
+                  {imagens.length > 1 && (
+                    <p className="text-[11px] text-gray-400 mb-2">Clique numa foto para usá-la como capa deste anúncio.</p>
+                  )}
                   {imagens.length === 0 && (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
                       ⚠ Esse produto não tem nenhuma imagem cadastrada — a Shopee exige pelo menos uma. Adicione abaixo.
@@ -675,8 +740,15 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                   <div className="flex flex-wrap gap-2">
                     {imagens.map(img => (
                       <div key={img.id} className="relative group w-16 h-16">
-                        <img src={img.url} alt="" className={`w-16 h-16 rounded-lg object-cover border-2 ${img.principal ? 'border-blue-500' : 'border-gray-200'}`} />
-                        {img.principal && <span className="absolute -top-1.5 -left-1.5 bg-blue-600 text-white text-[9px] px-1 rounded">principal</span>}
+                        {/* Clicar escolhe a capa DESTE anúncio. A estrela do
+                            overlay continua trocando a principal do cadastro,
+                            que é outra coisa: vale pro PDV e pros demais. */}
+                        <img src={img.url} alt="" onClick={() => setCapaUrl(img.url)}
+                          title="Usar como capa deste anúncio"
+                          className={`w-16 h-16 rounded-lg object-cover border-2 cursor-pointer ${
+                            capaUrl === img.url ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-gray-200'
+                          }`} />
+                        {capaUrl === img.url && <span className="absolute -top-1.5 -left-1.5 bg-emerald-600 text-white text-[9px] px-1 rounded">capa</span>}
                         <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                           {!img.principal && (
                             <button type="button" onClick={() => definirImagemPrincipal(img.id)} title="Definir como principal"
@@ -815,6 +887,13 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                     <textarea value={descricao} onChange={e => setDescricao(e.target.value)} rows={4}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                   </div>
+
+                  {tituloIgualAoOrigem && (
+                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      O título está igual ao do anúncio original. Mude alguma coisa antes de publicar —
+                      senão os dois anúncios competem pela mesma busca.
+                    </p>
+                  )}
 
                   {/* Preço / estoque / condição */}
                   <div className="grid grid-cols-3 gap-3">

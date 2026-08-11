@@ -16,12 +16,15 @@ type Atributo = {
 }
 type TipoAnuncio = { id: string; name: string }
 
-export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, conteudoInicial, onClose, onCriado }: {
+export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId, produtoIdInicial, origemAnuncioId, modoDuplicar, conteudoInicial, onClose, onCriado }: {
   canal?: { id: string; nome: string }
   canais?: { id: string; nome: string }[]
   empresaId: string; produtoIdInicial?: string
   // Anúncio já publicado em outro canal, usado como base (replicar).
   origemAnuncioId?: string
+  // Duplicar = segundo anúncio do mesmo produto NO MESMO canal, mudando só o
+  // que o diferencia. Replicar, sem esta marca, é levá-lo pra outro canal.
+  modoDuplicar?: boolean
   // Conteúdo já trabalhado em Anúncios Rascunhos. Entra por cima do que vem
   // do cadastro do produto — se o operador escreveu título e descrição lá,
   // não faz sentido a tela reabrir com o texto do cadastro.
@@ -68,6 +71,9 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
   const [listingTypeId, setListingTypeId] = useState('')
 
   const [condicao, setCondicao] = useState<'new' | 'used'>('new')
+  // Capa DESTE anúncio — não mexe na imagem principal do cadastro, que segue
+  // valendo pro PDV e pros outros anúncios do mesmo produto.
+  const [capaUrl, setCapaUrl] = useState<string | null>(null)
   const [titulo, setTitulo] = useState('')
   // Opcoes de titulo geradas pela IA — o operador escolhe, nunca aplica sozinha.
   const [titulosSugeridos, setTitulosSugeridos] = useState<string[]>([])
@@ -280,6 +286,11 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
     const sb = createClient()
     const { data } = await sb.from('produto_imagens').select('id, url, principal, ordem').eq('produto_id', produtoId).order('ordem', { ascending: true })
     setImagens(data ?? [])
+    setCapaUrl(prev => {
+      const lista = data ?? []
+      if (prev && lista.some(i => i.url === prev)) return prev
+      return (lista.find(i => i.principal) ?? lista[0])?.url ?? null
+    })
   }
 
   useEffect(() => {
@@ -376,6 +387,8 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
               tituloRef.current = tituloOrigem
             }
             if (o.descricao) setDescricao(o.descricao)
+            if (o.condicao === 'NEW') setCondicao('new')
+            else if (o.condicao === 'USED') setCondicao('used')
 
             // Categoria e atributos só se aproveitam dentro do próprio ML —
             // a taxonomia da Shopee não corresponde à do Mercado Livre.
@@ -558,9 +571,20 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
 
   const dimensoesOk = Number(peso) > 0 && Number(comprimento) > 0 && Number(largura) > 0 && Number(altura) > 0
 
+  // Capa primeiro; o resto na ordem do cadastro. É a primeira imagem que o
+  // Mercado Livre mostra na busca.
+  const fotosDoAnuncio = capaUrl
+    ? [capaUrl, ...imagens.map(i => i.url).filter(u => u !== capaUrl)]
+    : imagens.map(i => i.url)
+
+  // Dois anúncios iguais na mesma conta disputam a mesma busca em vez de
+  // somar — duplicar só compensa com título diferente.
+  const tituloIgualAoOrigem = !!modoDuplicar && !!origem?.titulo
+    && titulo.trim().toLowerCase() === String(origem.titulo).trim().toLowerCase()
+
   const podeEnviar = !!canalAtivo && !!produto && !!categoriaFolha && titulo.trim() && Number(preco) > 0
     && estoque !== '' && !!listingTypeId && atributosObrigatoriosFaltando.length === 0 && imagens.length > 0
-    && dimensoesOk
+    && dimensoesOk && !tituloIgualAoOrigem
 
   async function enviar() {
     if (!podeEnviar || !canalAtivo) return
@@ -577,6 +601,7 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
             pesoKg: Number(peso), comprimentoCm: Number(comprimento),
             larguraCm: Number(largura), alturaCm: Number(altura),
           },
+          fotos: fotosDoAnuncio,
         }),
       })
       const data = await resp.json()
@@ -682,6 +707,9 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
               {produto && (
                 <div>
                   <p className="text-xs font-medium text-gray-500 mb-2">Imagens do anúncio ({imagens.length}) *</p>
+                  {imagens.length > 1 && (
+                    <p className="text-[11px] text-gray-400 mb-2">Clique numa foto para usá-la como capa deste anúncio.</p>
+                  )}
                   {imagens.length === 0 && (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
                       ⚠ Esse produto não tem nenhuma imagem cadastrada — o Mercado Livre exige pelo menos uma. Adicione abaixo.
@@ -690,8 +718,15 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
                   <div className="flex flex-wrap gap-2">
                     {imagens.map(img => (
                       <div key={img.id} className="relative group w-16 h-16">
-                        <img src={img.url} alt="" className={`w-16 h-16 rounded-lg object-cover border-2 ${img.principal ? 'border-blue-500' : 'border-gray-200'}`} />
-                        {img.principal && <span className="absolute -top-1.5 -left-1.5 bg-blue-600 text-white text-[9px] px-1 rounded">principal</span>}
+                        {/* Clicar escolhe a capa DESTE anúncio; a estrela do
+                            overlay troca a principal do cadastro, que é outra
+                            coisa e vale pro PDV e pros demais anúncios. */}
+                        <img src={img.url} alt="" onClick={() => setCapaUrl(img.url)}
+                          title="Usar como capa deste anúncio"
+                          className={`w-16 h-16 rounded-lg object-cover border-2 cursor-pointer ${
+                            capaUrl === img.url ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-gray-200'
+                          }`} />
+                        {capaUrl === img.url && <span className="absolute -top-1.5 -left-1.5 bg-emerald-600 text-white text-[9px] px-1 rounded">capa</span>}
                         <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                           {!img.principal && (
                             <button type="button" onClick={() => definirImagemPrincipal(img.id)} title="Definir como principal"
@@ -858,13 +893,23 @@ export default function CriarAnuncioMercadoLivreModal({ canal, canais, empresaId
 
                   {origem && (
                     <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
-                      <p className="text-sm text-indigo-900 font-medium">⧉ Replicando o anúncio de <strong>{origem.canalNome}</strong></p>
+                      <p className="text-sm text-indigo-900 font-medium">
+                        {modoDuplicar
+                          ? <>⧉ Duplicando um anúncio em <strong>{origem.canalNome}</strong></>
+                          : <>⧉ Replicando o anúncio de <strong>{origem.canalNome}</strong></>}
+                      </p>
                       <p className="text-xs text-indigo-700 mt-1">
                         Título e descrição vieram de lá.{' '}
                         {origem.plataforma === 'mercadolivre'
                           ? 'A categoria e os atributos compatíveis também foram reaproveitados.'
                           : 'A categoria e os atributos NÃO vieram: o anúncio de origem é da Shopee e as categorias das duas plataformas não se correspondem.'}
                       </p>
+                      {modoDuplicar && (
+                        <p className="text-xs text-indigo-700 mt-1">
+                          Vale mudar o título, um trecho da descrição e a capa — dois anúncios iguais
+                          na mesma conta disputam entre si em vez de somar.
+                        </p>
+                      )}
                       <p className="text-xs text-indigo-700 mt-1">Preço e estoque continuam sendo os do cadastro — confira antes de publicar.</p>
                     </div>
                   )}

@@ -65,7 +65,7 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
   const [filtroStatus, setFiltroStatus] = useState('')
 
   // origemAnuncioId presente = está replicando um anúncio já trabalhado.
-  const [criarAberto, setCriarAberto] = useState<{ produtoId: string; canal: { id: string; nome: string; plataforma: string }; origemAnuncioId?: string } | null>(null)
+  const [criarAberto, setCriarAberto] = useState<{ produtoId: string; canal: { id: string; nome: string; plataforma: string }; origemAnuncioId?: string; duplicar?: boolean } | null>(null)
   const [escolherOrigem, setEscolherOrigem] = useState<{ produtoId: string; canal: { id: string; nome: string; plataforma: string } } | null>(null)
   const [selecionarAberto, setSelecionarAberto] = useState<{ canal: { id: string; nome: string; plataforma: string } } | null>(null)
   const [mapearAberto, setMapearAberto] = useState<{ anuncio: any; canal: any } | null>(null)
@@ -110,6 +110,19 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
     const sb = createClient()
     const { data } = await sb.from('marketplace_anuncios').select('*').eq('id', anuncioId).single()
     return data
+  }
+
+  // Duplicar: segundo anúncio do MESMO produto no MESMO canal, partindo do
+  // que já está publicado. O produto vem de quem chama, porque um kit
+  // relacionado tem produto próprio — usar o da busca criaria o anúncio para
+  // o item errado.
+  function duplicarAnuncio(a: Anuncio, produtoId: string) {
+    setCriarAberto({
+      produtoId,
+      canal: { id: a.canalId, nome: a.canalNome, plataforma: a.plataforma },
+      origemAnuncioId: a.id,
+      duplicar: true,
+    })
   }
 
   async function abrirAtualizarPreco(a: Anuncio) {
@@ -237,7 +250,8 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
             </select>
           }>
             <ListaAnuncios anuncios={filtrar(detalhe.anuncios, filtroStatus)} podeVerCustos={podeVerCustos}
-              onSincronizar={sincronizar} onAtualizarPreco={abrirAtualizarPreco} />
+              onSincronizar={sincronizar} onAtualizarPreco={abrirAtualizarPreco}
+              onDuplicar={a => duplicarAnuncio(a, detalhe.produto.id)} />
           </Secao>
 
           {/* Kits relacionados */}
@@ -261,7 +275,8 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
                     {kit.anuncios.length > 0 && (
                       <div className="mt-3">
                         <ListaAnuncios anuncios={kit.anuncios} podeVerCustos={podeVerCustos} compacto
-                          onSincronizar={sincronizar} onAtualizarPreco={abrirAtualizarPreco} />
+                          onSincronizar={sincronizar} onAtualizarPreco={abrirAtualizarPreco}
+                          onDuplicar={a => duplicarAnuncio(a, kit.kitId)} />
                       </div>
                     )}
                     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -356,11 +371,13 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
       {criarAberto && criarAberto.canal.plataforma === 'shopee' && (
         <CriarAnuncioShopeeModal canal={{ id: criarAberto.canal.id, nome: criarAberto.canal.nome }} empresaId={empresaId}
           produtoIdInicial={criarAberto.produtoId} origemAnuncioId={criarAberto.origemAnuncioId}
+          modoDuplicar={criarAberto.duplicar}
           onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
       )}
       {criarAberto && criarAberto.canal.plataforma === 'mercadolivre' && (
         <CriarAnuncioMercadoLivreModal canal={{ id: criarAberto.canal.id, nome: criarAberto.canal.nome }} empresaId={empresaId}
           produtoIdInicial={criarAberto.produtoId} origemAnuncioId={criarAberto.origemAnuncioId}
+          modoDuplicar={criarAberto.duplicar}
           onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
       )}
 
@@ -438,9 +455,10 @@ function Badge({ children, cor }: { children: React.ReactNode; cor: string }) {
   return <span className={`px-2 py-1 rounded-full border text-xs font-medium ${cor}`}>{children}</span>
 }
 
-function ListaAnuncios({ anuncios, podeVerCustos, compacto, onSincronizar, onAtualizarPreco }: {
+function ListaAnuncios({ anuncios, podeVerCustos, compacto, onSincronizar, onAtualizarPreco, onDuplicar }: {
   anuncios: Anuncio[]; podeVerCustos: boolean; compacto?: boolean
   onSincronizar: (a: Anuncio) => void; onAtualizarPreco: (a: Anuncio) => void
+  onDuplicar?: (a: Anuncio) => void
 }) {
   if (anuncios.length === 0) return <p className="text-sm text-gray-400 text-center py-6">Nenhum anúncio encontrado ainda.</p>
   return (
@@ -461,6 +479,13 @@ function ListaAnuncios({ anuncios, podeVerCustos, compacto, onSincronizar, onAtu
               {a.urlAnuncio && <a href={a.urlAnuncio} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border border-gray-200 rounded-lg hover:bg-gray-50">Ver</a>}
               <button onClick={() => onSincronizar(a)} className="text-xs px-2 py-1 border border-gray-200 rounded-lg hover:bg-gray-50">🔄</button>
               <button onClick={() => onAtualizarPreco(a)} className="text-xs px-2 py-1 border border-gray-200 rounded-lg hover:bg-gray-50">Preço/estoque</button>
+              {/* Anúncio com variação fica de fora: a tela de criação só monta
+                  anúncio simples, e um duplicado sem as variações seria outro
+                  produto na prática. */}
+              {onDuplicar && !a.temVariacao && (
+                <button onClick={() => onDuplicar(a)} title="Criar outro anúncio deste produto no mesmo canal"
+                  className="text-xs px-2 py-1 border border-gray-200 rounded-lg hover:bg-gray-50">⧉ Duplicar</button>
+              )}
             </div>
           </div>
         )
