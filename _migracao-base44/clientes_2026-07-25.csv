@@ -1,0 +1,47 @@
+﻿Nome;Tipo;CPF/CNPJ;Telefone;WhatsApp;Email;CEP;Logradouro;Número;Complemento;Bairro;Cidade;Estado;Zona de Entrega;Permite Carteira;Limite Crédito;Saldo Devedor;Status Crédito;Observação Crédito;Mensagem Alerta;Observação;Ativo
+EDER;Física;;21982586917;5521982586917;;;RUA MAJOR OSCAR COSTA;404;LOJA;BANGU;RIO DE JANEIRO;RJ;;Não;0,00;0,00;liberado;;;;Sim
+Vivian;Física;;21985233534;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+DIEGO CAIRO ;Física;;;;;;;;;;;;;Sim;200,00;10,00;liberado;;;;Sim
+Flavio;Física;;21974378422;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+Marcelo;Física;;21982551111;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+LUIZ FERNANDO;Física;06423220743;21966660398;;;;;;;;;;;Sim;1000,00;0,00;liberado;;;;Sim
+Djanira;Física;;21997165453;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+balcao;Física;;;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+CASSIA GONÇALVES;Física;;21990425264;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+ROSEMERE;Física;;;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+EDNALDO;Física;;21999103446;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+cliente teste 10;Física;;2122222222;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+CLIENTE ENTREGA TESTE;Física;;2177777777;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+RL;Física;;21974898132;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+amanda;Física;;21969241251;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+amanda;Física;;21969241251;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+Silva Teste;Física;;21982949060;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+Silvano;Física;;21982949060;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+RODOLFO SANDA;Física;;21974898132;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+MARCIA TOMAZ;Física;;21974051934;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+BALCAO;Física;;;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+JOEL (PENSÃO);Física;;;;;;;;;;;;;Sim;200,00;29,80;liberado;;;;Sim
+RITA / ZIEL;Física;;21980950951;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+CHATA;Física;;;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+CASIO (PARENTE FARINHA);Física;;;;;;;;;;;;;Sim;1000,00;7,50;liberado;;;;Sim
+MICHELE CRISTINA;Física;;21972045883;5521972045883;;;RUA SANTANA;2;CASA;BANGU;RIO DE JANEIRO;RJ;;Não;0,00;0,00;liberado;;;;Sim
+LUIZ FERNANDO;Física;;21998170077;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+SILVANA (AMIGA DA LILI) **;Física;;21964940893;21964940893;;;;;;;;;;Sim;500,00;0,00;liberado;;;;Sim
+HELIO ESMERIM **;Física;;;;;;;;;;;;;Sim;500,00;55,20;liberado;;;;Sim
+JOSINALDO NALDO ELETRICISTA **;Física;;21991438293;;;;;;;;;;;Sim;3000,00;0,00;liberado;;;;Sim
+LUANDER GABRIEL (JANETE) **;Física;;;;;;;;;;;;PROXIMIDADE;Sim;300,00;55,70;liberado;;;;Sim
+DANIEL BORRACHA **;Física;;21970113318;21970113318;;;;;;;;;;Sim;500,00;190,93;liberado;;;;Sim
+IGREJA ADVENTISTA BANGU;Física;;21993533195;;;;;;;;;;;Sim;2000,00;19,60;liberado;;;;Sim
+INDIO (CONCERTA GELADEIRA);Física;;21965684493;21965684493;;;;;;;;;;Sim;500,00;235,00;liberado;;;;Sim
+TIO RICO (TIO DO MAURICIO);Física;;21967179359;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+MAURICIO TOSTES (CAMILA);Física;;21982243746;;;;;;;;;;;Sim;1000,00;57,00;liberado;;;;Sim
+TIO HENRIQUE (TIO RICO);Física;;21967179359;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+ESCRITORIO CONTABILIDADE ROCHA RANGEL;Física;;21964286357;21964286357;;;;;;;;;;Sim;5000,00;638,25;liberado;;;;Sim
+Thainá;Física;;;21 97670-9318;;21820240;Rua Ângela do Amaral Rangel;116;;Bangu;Rio de Janeiro;RJ;PROXIMIDADE;Não;0,00;0,00;liberado;;;;Sim
+Cliente;Física;;(21) 97086-8796;(21) 97086-8796;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+Pedro;Física;;(31) 99714-0119;(31) 99714-0119;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+NELSON ROQUE GERENTE **;Física;;21988126772;21988126772;;;;;;;;;;Sim;1000,00;128,90;liberado;;;;Sim
+DIRCEU RA CAIRO **;Física;;;;;21831505;Rua Cairo;;;Senador Camará;Rio de Janeiro;RJ;;Sim;500,00;77,85;liberado;;;;Sim
+Jaudo;Física;;21991203602;;;;;;;;;;;Não;0,00;0,00;liberado;;;;Sim
+Cliente 21982949060;Física;;21982949060;;;;;;;;;;;Não;0,00;0,00;;;;;Sim
+Silvano Vargas;Física;08844056720;21982949060;21982949060;;21820092;Rua Rio da Prata;1801;;Bangu;Rio de Janeiro;RJ;;Sim;500,00;36,85;liberado;;cliente chato;beco da loira, dificil acesso;Sim

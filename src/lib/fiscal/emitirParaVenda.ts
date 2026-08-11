@@ -122,6 +122,45 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     return '00' // tributada integralmente
   }
 
+  // Desconto do cabeçalho da venda, rateado entre os itens.
+  //
+  // O PDV grava o desconto na venda (`vendas.desconto`), não no item. A NFC-e
+  // não tem esse conceito: o total da nota é a soma dos itens menos o desconto
+  // DELES. Sem ratear, a nota fechava no valor bruto enquanto o pagamento ia
+  // no líquido, e a SEFAZ recusava com "Rejeição 865: Total dos pagamentos
+  // menor que o total da nota" — toda venda com desconto era rejeitada.
+  //
+  // Rateio proporcional ao valor bruto de cada item; o último item absorve a
+  // sobra do arredondamento, para a soma bater no centavo com o desconto
+  // informado (mesma técnica do rateio de juros em contas a pagar).
+  const descontoVenda = Number(venda.desconto ?? 0)
+  const brutoPorItem: number[] = itensVenda.map((it: any) => Number(it.quantidade) * Number(it.preco_unitario))
+  const brutoTotal = brutoPorItem.reduce((a, b) => a + b, 0)
+
+  function ratearDesconto(): number[] {
+    const zeros = itensVenda!.map(() => 0)
+    if (descontoVenda <= 0 || brutoTotal <= 0) return zeros
+    // Desconto já lançado item a item: respeita o que veio e não rateia de novo.
+    if (itensVenda!.some((it: any) => Number(it.desconto ?? 0) > 0)) return zeros
+
+    const rateio = brutoPorItem.map(b => Math.round((descontoVenda * b / brutoTotal) * 100) / 100)
+    const somado = rateio.reduce((a, b) => a + b, 0)
+    const ultimo = rateio.length - 1
+    rateio[ultimo] = Math.round((rateio[ultimo] + (descontoVenda - somado)) * 100) / 100
+    return rateio
+  }
+  const descontoPorItem = ratearDesconto()
+
+  // Desconto maior que a mercadoria não vira nota válida em nenhum cenário.
+  // Barrar aqui com o valor à vista é mais útil que a recusa da SEFAZ, que
+  // devolve só o número da rejeição para quem está no balcão.
+  if (descontoVenda > brutoTotal) {
+    return {
+      ok: false,
+      erro: `Desconto (R$ ${descontoVenda.toFixed(2)}) maior que o valor dos produtos (R$ ${brutoTotal.toFixed(2)}) — emissão bloqueada.`,
+    }
+  }
+
   const itens: EmissaoNFCeInput['itens'] = itensVenda.map((it: any, idx: number) => {
     const produto = produtoPorId.get(it.produto_id) as any
     return {
@@ -134,7 +173,9 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
       unidade: produto.unidade || 'UN',
       quantidade: Number(it.quantidade),
       valorUnitario: Number(it.preco_unitario),
-      valorDesconto: Number(it.desconto ?? 0),
+      // Os dois nunca coexistem: o rateio só roda quando nenhum item traz
+      // desconto próprio, então somar é seguro e dispensa um condicional.
+      valorDesconto: Number(it.desconto ?? 0) + descontoPorItem[idx],
       icmsOrigem: String(produto.icms_origem ?? 0),
       icmsSituacaoTributaria: situacaoTributariaIcms(produto),
       // 49 = "outras operações": aceito nos dois regimes e não exige

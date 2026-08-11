@@ -1,0 +1,11 @@
+{
+  "titulo": "Cadastro de produto muito mais rápido e um novo jeito de acompanhar o estoque",
+  "slug": "cadastro-produto-movimentacao-estoque",
+  "resumo": "O preenchimento automático do cadastro de produto ficou mais completo, kits agora aceitam componente sem controle de estoque, e chegou a Movimentação de Estoque — o extrato completo de cada produto num só lugar.",
+  "conteudo": "<p>Fechando a semana com melhorias no cadastro de produto e uma novidade pedida há tempos: um extrato de verdade pro estoque. Confira:</p>\n\n<h2>🧠 Cadastro de produto muito mais rápido</h2>\n<ul>\n<li><strong>Preenchimento automático mais completo:</strong> agora sugere categoria, marca, NCM/CEST, descrição e até as dimensões do produto — você só revisa e confirma.</li>\n<li>Novos campos no cadastro: monitoramento de produto, descrição para marketplace, observação interna, dimensões e campos fiscais adicionais.</li>\n<li>Listagem de produtos reorganizada, com SKU e EAN mais fáceis de ver de relance.</li>\n</ul>\n\n<h2>📊 Movimentação de Estoque (novo)</h2>\n<p>Chegou uma tela nova que faltava: o <strong>extrato completo de cada produto</strong> — toda venda, entrada, devolução e ajuste, com o saldo antes e depois de cada movimento.</p>\n<ul>\n<li>Filtro por período, exportação em CSV e um gráfico mostrando a evolução do estoque ao longo do tempo.</li>\n<li><strong>Ajuste rápido de estoque</strong> direto no modal de detalhe do produto, sem precisar abrir o cadastro completo.</li>\n</ul>\n\n<h2>🧩 Kits mais flexíveis</h2>\n<p>Agora dá pra marcar um componente do kit como <strong>\"sem controle de estoque\"</strong> — útil para item que não faz sentido baixar do estoque, como um brinde ou uma embalagem.</p>\n\n<h2>✨ Outras novidades</h2>\n<p>No Mercado Livre, além de sincronizar anúncios já existentes, agora também dá pra <strong>criar um anúncio novo</strong> direto pelo sistema, do mesmo jeito que já funciona na Shopee.</p>\n\n<p>Obrigado por acompanhar de perto — seu retorno é o que mais pesa na hora de decidir a próxima melhoria. 🚀</p>",
+  "categoria": "novidade",
+  "publicado": true,
+  "destaque": true,
+  "autor": "Equipe Vargas",
+  "publicado_em": "2026-07-26T20:00:00-03:00"
+}
