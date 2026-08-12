@@ -1,6 +1,7 @@
 import { mlGet, refreshAccessTokenIfNeeded } from './client'
 import { getItemsBatch, listItemIdsScan } from './catalog'
 import type { MLChannel, SyncFailure, SyncResult } from './types'
+import { colunasQualidade } from '@/lib/marketplace/qualidade'
 
 // Teto de itens processados por chamada de sincronização — mesmo padrão da
 // Shopee: sync síncrono e limitado por chamada. Diferente de antes, agora
@@ -61,6 +62,9 @@ export function mapItemToAnuncioRow(rawItem: any, canal: MLChannel): { row: Reco
     tem_variacao: Array.isArray(rawItem.variations) && rawItem.variations.length > 0,
     url_anuncio: rawItem.permalink ?? null,
     dados_brutos: rawItem,
+    // Qualidade recalculada a cada sincronização: o anúncio muda no
+    // marketplace e a nota tem que acompanhar sozinha, sem passada extra.
+    ...colunasQualidade('mercadolivre', rawItem),
     ultima_atualizacao_externa: rawItem.last_updated ?? null,
     sincronizado_em: new Date().toISOString(),
     ultima_atualizacao: new Date().toISOString(),

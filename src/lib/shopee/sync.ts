@@ -1,6 +1,7 @@
 import { getIntegracaoCredentials, refreshAccessTokenIfNeeded, shopeeGet } from './client'
 import { getItemBaseInfoBatch, getItemExtraInfoBatch, getModelList, listItemIds, type ShopeeCursor } from './catalog'
 import type { ShopeeChannel, SyncFailure, SyncResult } from './types'
+import { colunasQualidade } from '@/lib/marketplace/qualidade'
 
 // Teto de itens processados por chamada de sincronização — não existe fila/
 // cron nesta fase, então a sincronização é síncrona e limitada. Lojas com
@@ -49,6 +50,9 @@ export function mapItemToAnuncioRow(rawItem: any, canal: ShopeeChannel, vendas?:
     tem_variacao: !!rawItem.has_model,
     ...(vendas != null ? { vendas } : {}),
     dados_brutos: rawItem,
+    // Qualidade recalculada a cada sincronização: o anúncio muda no
+    // marketplace e a nota tem que acompanhar sozinha, sem passada extra.
+    ...colunasQualidade('shopee', rawItem),
     ultima_atualizacao_externa: rawItem.update_time ? new Date(rawItem.update_time * 1000).toISOString() : null,
     sincronizado_em: new Date().toISOString(),
     ultima_atualizacao: new Date().toISOString(),
