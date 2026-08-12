@@ -230,12 +230,28 @@ export default function Sidebar({ empresa }: { empresa: string }) {
       {/* ── Painel lateral (flyout) ─────────────────────────────────────────── */}
       {painel && (
         <>
-          <div className="fixed inset-0 z-30" onClick={fecharNavegando} />
+          <div className="fixed inset-0 z-30 md:z-30" onClick={fecharNavegando} />
+          {/* No celular este painel abria em left-[216px] com z-40 — ou seja,
+              atrás da gaveta (z-50) e fora da tela de 360px. O submenu existia
+              e ninguém via: tocar num grupo parecia não fazer nada.
+              Aqui ele ocupa a tela inteira e fica acima de tudo; de md pra
+              cima continua sendo o flyout ao lado do trilho, como sempre. */}
           <div
             onMouseEnter={cancelarFechamento}
             onMouseLeave={agendarFechamento}
-            className={`fixed top-0 h-screen w-72 bg-white border-r border-slate-200 shadow-2xl z-40 flex flex-col ${expandido ? 'left-[216px]' : 'left-[72px]'}`}
+            className={`fixed top-0 h-screen bg-white border-r border-slate-200 shadow-2xl flex flex-col
+              inset-x-0 z-[60] w-full
+              md:inset-x-auto md:w-72 md:z-40 ${expandido ? 'md:left-[216px]' : 'md:left-[72px]'}`}
           >
+            {/* Voltar: no celular o painel cobre tudo, então precisa de uma
+                saída própria — não dá pra tocar fora do que ocupa a tela. */}
+            <button
+              onClick={() => setPainel(null)}
+              className="md:hidden flex items-center gap-2 px-4 h-14 border-b border-slate-100 text-slate-600 active:bg-slate-50"
+            >
+              <span className="text-lg leading-none">‹</span>
+              <span className="text-sm">Voltar ao menu</span>
+            </button>
 
             {painel === 'busca' && (
               <div className="p-4 flex flex-col h-full">
