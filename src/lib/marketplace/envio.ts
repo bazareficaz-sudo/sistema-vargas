@@ -2,6 +2,8 @@ import { pushPrecoEstoque, unlistItems } from '@/lib/shopee/write'
 import { atualizarPrecoEstoque, pausarAnuncio } from '@/lib/mercadolivre/write'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
+import { atualizarPrecoEstoque as atualizarPrecoEstoqueNuvemshop, publicarProduto } from '@/lib/nuvemshop/write'
+import type { NuvemshopChannel } from '@/lib/nuvemshop/types'
 
 // Envio de preço/estoque para o canal, escolhendo a plataforma.
 //
@@ -83,9 +85,35 @@ export async function enviarParaAnuncio(
       return { ok: true }
     }
 
-    // Nuvemshop e qualquer plataforma futura: não existe módulo de escrita
-    // ainda. Recusar com motivo é melhor do que devolver sucesso para um
-    // envio que nunca aconteceu — a fila marcaria o produto como resolvido.
+    if (canal.plataforma === 'nuvemshop') {
+      const c = {
+        id: canal.id, empresaId: canal.empresa_id,
+        storeId: String(canal.seller_id), accessToken: canal.access_token,
+      } as NuvemshopChannel
+
+      // Na Nuvemshop preço e estoque ficam na VARIANTE, não no produto —
+      // até o produto "simples" tem uma variante lá. Aqui só temos o id
+      // externo do produto, então o módulo busca as variantes na hora: uma
+      // chamada a mais, contra duas consultas ao banco pra chegar no mesmo
+      // lugar. Se isso pesar quando a fila crescer, o caminho é passar o
+      // anúncio inteiro pra cá, não remendar aqui.
+      const r = await atualizarPrecoEstoqueNuvemshop(c, {
+        produtoExternoId: idExterno, preco, estoque,
+      })
+      if (!r.ok) return { ok: false, erro: r.erro ?? 'A Nuvemshop recusou a atualização' }
+
+      // Sem "pausado" na Nuvemshop: o equivalente é tirar da vitrine.
+      if (alvo.pausar) {
+        await sleep(THROTTLE_ENVIO_MS)
+        await publicarProduto(c, idExterno, false)
+        return { ok: true, pausado: true }
+      }
+      return { ok: true }
+    }
+
+    // Plataforma futura sem módulo de escrita: recusar com motivo é melhor
+    // que devolver sucesso para um envio que nunca aconteceu — a fila
+    // marcaria o produto como resolvido.
     return { ok: false, erro: `Envio para "${canal.plataforma}" ainda não implementado` }
   } catch (e: unknown) {
     return { ok: false, erro: e instanceof Error ? e.message : 'Erro ao enviar para o canal' }
