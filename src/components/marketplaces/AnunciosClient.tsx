@@ -1079,7 +1079,79 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      {/* ── Cards (celular) ──────────────────────────────────────────────
+          A tabela tem 7 colunas e não cabe num celular nem com rolagem: pra
+          mapear é preciso ver foto, título e produto vinculado ao mesmo
+          tempo, e rolando pro lado some justamente a foto.
+          Aqui cada anúncio é um cartão focado no que trava o trabalho —
+          está vinculado ou não — com o botão Mapear à mão. É a MESMA lista
+          (`paginados`) e os MESMOS handlers da tabela; nada foi duplicado
+          em lógica, só a apresentação. */}
+      <div className="md:hidden space-y-2">
+        {paginados.length > 0 && (
+          <label className="flex items-center gap-2 px-1 pb-1 text-xs text-gray-500">
+            <input type="checkbox"
+              checked={filtrados.length > 0 && filtrados.every(x => selecionados.has(x.id))}
+              onChange={e => setSelecionados(e.target.checked ? new Set(filtrados.map(x => x.id)) : new Set())}
+              className="w-4 h-4 accent-purple-600" />
+            Selecionar todos os {filtrados.length} filtrados
+          </label>
+        )}
+
+        {paginados.map(a => (
+          <div key={a.id}
+            className={`bg-white border rounded-xl p-3 ${
+              selecionados.has(a.id) ? 'border-purple-300 ring-1 ring-purple-100' : 'border-gray-200'
+            }`}>
+            <div className="flex gap-3">
+              <input type="checkbox" checked={selecionados.has(a.id)} onChange={() => toggleSelecionado(a.id)}
+                className="w-5 h-5 mt-0.5 accent-purple-600 flex-shrink-0" />
+              {a.imagens?.[0] ? (
+                <img src={a.imagens[0]} alt="" className="w-14 h-14 flex-shrink-0 rounded-lg object-cover border border-gray-200" />
+              ) : (
+                <div className="w-14 h-14 flex-shrink-0 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-300">📷</div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-gray-900 leading-snug line-clamp-2">{a.titulo}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {a.sku_canal ? `SKU ${a.sku_canal}` : 'sem SKU no canal'} · {fmt(a.preco_venda)}
+                </p>
+              </div>
+            </div>
+
+            {/* O estado do vínculo é a informação que decide a próxima ação,
+                então ganha linha própria em vez de virar mais uma etiqueta. */}
+            <div className="mt-2.5 pt-2.5 border-t border-gray-100 flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                {estaMapeado(a) ? (
+                  <p className="text-xs text-emerald-700 truncate">
+                    ✓ {a.produtos?.nome ?? 'Vinculado por variação'}
+                    {a.produtos?.sku && <span className="text-emerald-600/70"> · {a.produtos.sku}</span>}
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500">Não vinculado a nenhum produto</p>
+                )}
+                {temDivergencia(a) && <p className="text-xs text-amber-700 mt-0.5">⚠ Diverge do produto</p>}
+              </div>
+              <button onClick={() => setMapeandoAberto(a)}
+                className={`text-xs px-3 h-8 rounded-lg flex-shrink-0 ${
+                  estaMapeado(a)
+                    ? 'border border-gray-200 text-gray-600'
+                    : 'bg-purple-600 text-white font-medium'
+                }`}>
+                {estaMapeado(a) ? 'Trocar' : 'Mapear'}
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {paginados.length === 0 && (
+          <p className="text-sm text-gray-400 text-center py-10">Nenhum anúncio com os filtros atuais.</p>
+        )}
+      </div>
+
+      {/* ── Tabela (desktop) — inalterada ────────────────────────────────── */}
+      <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
