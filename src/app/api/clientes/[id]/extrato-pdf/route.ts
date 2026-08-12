@@ -55,16 +55,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   const hoje = new Date().toISOString().slice(0, 10)
+  // Dias corridos entre a compra e hoje, com as duas pontas em UTC para o
+  // número não mudar por causa da hora em que o relatório foi gerado.
+  const emDias = (data: string) => Math.max(0, Math.round(
+    (Date.parse(hoje + 'T00:00:00Z') - Date.parse(data + 'T00:00:00Z')) / 86400000,
+  ))
+
   const linhas: LinhaExtrato[] = (contas ?? []).map(c => {
     const v = c.origem_id ? vendaPorId.get(c.origem_id) : undefined
+    const dataCompra = (v?.created_at ?? c.data_emissao).slice(0, 10)
     return {
-      dataCompra: (v?.created_at ?? c.data_emissao).slice(0, 10),
+      dataCompra,
       vendedor: v?.vendedor_nome ?? null,
       documento: c.numero_doc ?? (v?.numero ? `Venda #${v.numero}` : null),
-      vencimento: String(c.data_vencimento).slice(0, 10),
+      dias: emDias(dataCompra),
       valorOriginal: Number(c.valor_original ?? 0),
       valorAberto: Number(c.valor_aberto ?? 0),
-      vencida: String(c.data_vencimento).slice(0, 10) < hoje && c.status !== 'recebido',
     }
   })
 
@@ -94,17 +100,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: false, erro: erroLink?.message ?? 'Falha ao gerar o link do relatório' }, { status: 500 })
   }
 
-  const aVencer = linhas.filter(l => !l.vencida).reduce((t, l) => t + l.valorAberto, 0)
-  const vencido = linhas.filter(l => l.vencida).reduce((t, l) => t + l.valorAberto, 0)
-
   return NextResponse.json({
     ok: true,
     url: assinado.signedUrl,
     resumo: {
       compras: linhas.length,
-      aVencer, vencido, emAberto: aVencer + vencido,
-      // Vendas com comprovante disponível, pra tela oferecer o anexo.
-      vendaIds: (contas ?? []).map(c => c.origem_id).filter(Boolean) as string[],
+      emAberto: linhas.reduce((t, l) => t + l.valorAberto, 0),
+      maisAntigaDias: linhas.reduce((m, l) => Math.max(m, l.dias), 0),
     },
   })
 }

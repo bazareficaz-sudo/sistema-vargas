@@ -3,9 +3,12 @@ import { Document, Page, Text, View, StyleSheet, renderToBuffer } from '@react-p
 // Relatório da conta do cliente, para mandar por WhatsApp na cobrança.
 //
 // É o papel que o cliente confere no balcão: cada compra com a data, quem
-// vendeu e quanto foi, e no fim quanto ele deve — separando o que ainda vai
-// vencer do que já venceu. Vencido em destaque, porque é sobre isso que a
-// conversa vai ser.
+// vendeu, quanto foi e há quantos dias está na conta, e no fim o total.
+//
+// A coluna é DIAS, não vencimento: numa conta de balcão o combinado é
+// informal e o vencimento acaba sendo a própria data da compra — dizer
+// "venceu em 28/07" não informa nada, enquanto "há 15 dias" é o que
+// realmente pesa na conversa.
 
 export type EmpresaExtrato = {
   nome: string; cnpj: string | null; telefone: string | null
@@ -18,10 +21,10 @@ export type LinhaExtrato = {
   dataCompra: string
   vendedor: string | null
   documento: string | null
-  vencimento: string
+  /** Dias corridos entre a compra e a emissão do relatório. */
+  dias: number
   valorOriginal: number
   valorAberto: number
-  vencida: boolean
 }
 
 const s = StyleSheet.create({
@@ -34,13 +37,12 @@ const s = StyleSheet.create({
 
   cabecalho: { flexDirection: 'row', backgroundColor: '#f3f4f6', paddingVertical: 5, paddingHorizontal: 4 },
   linha: { flexDirection: 'row', paddingVertical: 4, paddingHorizontal: 4, borderBottomWidth: 0.5, borderBottomColor: '#eee' },
-  linhaVencida: { backgroundColor: '#fef2f2' },
   th: { fontFamily: 'Helvetica-Bold', fontSize: 8, color: '#444' },
 
   cData: { width: '14%' },
   cVend: { width: '24%' },
-  cDoc: { width: '20%' },
-  cVenc: { width: '14%' },
+  cDoc: { width: '22%' },
+  cDias: { width: '12%', textAlign: 'right' },
   cValor: { width: '14%', textAlign: 'right' },
   cAberto: { width: '14%', textAlign: 'right' },
 
@@ -63,9 +65,7 @@ export function ExtratoClienteDocument({ empresa, clienteNome, clienteDoc, linha
   emitidoEm: string
 }) {
   const totalOriginal = linhas.reduce((t, l) => t + l.valorOriginal, 0)
-  const aVencer = linhas.filter(l => !l.vencida).reduce((t, l) => t + l.valorAberto, 0)
-  const vencido = linhas.filter(l => l.vencida).reduce((t, l) => t + l.valorAberto, 0)
-  const emAberto = aVencer + vencido
+  const emAberto = linhas.reduce((t, l) => t + l.valorAberto, 0)
 
   const endereco = [empresa.logradouro, empresa.numero, empresa.bairro, empresa.cidade, empresa.uf]
     .filter(Boolean).join(', ')
@@ -89,19 +89,19 @@ export function ExtratoClienteDocument({ empresa, clienteNome, clienteDoc, linha
           <Text style={[s.th, s.cData]}>Compra</Text>
           <Text style={[s.th, s.cVend]}>Vendedor</Text>
           <Text style={[s.th, s.cDoc]}>Documento</Text>
-          <Text style={[s.th, s.cVenc]}>Vencimento</Text>
+          <Text style={[s.th, s.cDias]}>Dias</Text>
           <Text style={[s.th, s.cValor]}>Valor</Text>
           <Text style={[s.th, s.cAberto]}>Em aberto</Text>
         </View>
 
         {linhas.map((l, i) => (
-          <View key={i} style={l.vencida ? [s.linha, s.linhaVencida] : s.linha} wrap={false}>
+          <View key={i} style={s.linha} wrap={false}>
             <Text style={s.cData}>{dataBr(l.dataCompra)}</Text>
             <Text style={s.cVend}>{l.vendedor ?? '—'}</Text>
             <Text style={s.cDoc}>{l.documento ?? '—'}</Text>
-            <Text style={l.vencida ? [s.cVenc, s.vermelho] : s.cVenc}>{dataBr(l.vencimento)}</Text>
+            <Text style={s.cDias}>{l.dias === 0 ? 'hoje' : `${l.dias} ${l.dias === 1 ? 'dia' : 'dias'}`}</Text>
             <Text style={s.cValor}>{fmt(l.valorOriginal)}</Text>
-            <Text style={l.vencida ? [s.cAberto, s.vermelho] : s.cAberto}>{fmt(l.valorAberto)}</Text>
+            <Text style={s.cAberto}>{fmt(l.valorAberto)}</Text>
           </View>
         ))}
 
@@ -113,14 +113,6 @@ export function ExtratoClienteDocument({ empresa, clienteNome, clienteDoc, linha
           <View style={s.totalLinha}>
             <Text>Total comprado ({linhas.length} compra{linhas.length === 1 ? '' : 's'})</Text>
             <Text>{fmt(totalOriginal)}</Text>
-          </View>
-          <View style={s.totalLinha}>
-            <Text>A vencer</Text>
-            <Text>{fmt(aVencer)}</Text>
-          </View>
-          <View style={s.totalLinha}>
-            <Text style={vencido > 0 ? s.vermelho : undefined}>Vencido</Text>
-            <Text style={vencido > 0 ? [s.vermelho, s.negrito] : undefined}>{fmt(vencido)}</Text>
           </View>
           <View style={s.totalForte}>
             <Text style={s.negrito}>Total em aberto</Text>
