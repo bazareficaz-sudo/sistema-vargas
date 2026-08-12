@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'WhatsApp não configurado ou inativo' }, { status: 400 })
 
   const body = await request.json()
-  const { telefone, mensagem, tipo = 'manual', cliente_id, cliente_nome, referencia_tipo, referencia_id, pdf_url } = body
+  const { telefone, mensagem, tipo = 'manual', cliente_id, cliente_nome, referencia_tipo, referencia_id, pdf_url, pdf_nome } = body
 
   if (!telefone || !mensagem)
     return NextResponse.json({ error: 'Telefone e mensagem são obrigatórios' }, { status: 400 })
@@ -73,13 +73,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 500 })
     }
 
-    // Envia PDF em seguida, se houver
+    // Envia PDF em seguida, se houver. O resultado era descartado: quando o
+    // anexo falhava, a rota devolvia sucesso e nada ficava registrado — o
+    // texto chegava ao cliente e o arquivo não, sem ninguém saber.
+    let anexoEnviado: boolean | null = null
+    let anexoErro: string | null = null
     if (pdf_url) {
-      await zapiSendDocument(zapiCfg, telefone, pdf_url, undefined, 'cupom.pdf')
+      const doc = await zapiSendDocument(zapiCfg, telefone, pdf_url, undefined, pdf_nome ?? 'documento.pdf')
+      anexoEnviado = doc.success
+      anexoErro = doc.success ? null : (doc.error ?? 'falha desconhecida ao enviar o anexo')
     }
 
     await supabase.from('whatsapp_mensagens').update({
-      status: 'enviado', tentativas: 1,
+      // O texto foi entregue, então o status continua 'enviado' — não invento
+      // um valor novo que pode esbarrar num CHECK e derrubar o update. O que
+      // faltou fica em `erro`, que é onde dá pra procurar depois.
+      status: 'enviado',
+      tentativas: 1,
+      erro: anexoErro ? `Anexo não enviado: ${anexoErro}` : null,
       zapi_message_id: result.messageId ?? null,
       enviado_em: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -89,7 +100,10 @@ export async function POST(request: NextRequest) {
       ultima_mensagem_enviada: new Date().toISOString(),
     }).eq('empresa_id', empresaId)
 
-    return NextResponse.json({ success: true, messageId: result.messageId, logId: msg!.id })
+    return NextResponse.json({
+      success: true, messageId: result.messageId, logId: msg!.id,
+      anexoEnviado, anexoErro,
+    })
   } catch (e: any) {
     await supabase.from('whatsapp_mensagens').update({
       status: 'erro', tentativas: 1, erro: e.message, updated_at: new Date().toISOString(),

@@ -90,8 +90,14 @@ export async function zapiSendDocument(
   caption?: string,
   fileName = 'documento.pdf',
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  // A Z-API pede a extensão no CAMINHO: /send-document/pdf. Sem ela a
+  // chamada não entrega o arquivo — era por isso que a mensagem de texto
+  // chegava e o anexo nunca aparecia no WhatsApp do cliente.
+  // https://developer.z-api.io/en/message/send-message-document
+  const extensao = (fileName.split('.').pop() || 'pdf').toLowerCase()
+
   try {
-    const res = await fetch(buildUrl(config, 'send-document'), {
+    const res = await fetch(buildUrl(config, `send-document/${extensao}`), {
       method: 'POST',
       headers: headers(config),
       body: JSON.stringify({ phone: cleanPhone(phone), document: documentUrl, caption, fileName }),

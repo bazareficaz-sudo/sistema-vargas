@@ -38,6 +38,9 @@ export default function EnviarAtualizacaoContaModal({
   const [mensagem, setMensagem] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [enviado, setEnviado] = useState(false)
+  // A rota diz separadamente se o anexo saiu. Texto entregue sem o PDF não
+  // pode ser anunciado como "enviado" — o cliente ficaria sem o relatório.
+  const [anexoErro, setAnexoErro] = useState<string | null>(null)
 
   useEffect(() => {
     let ativo = true
@@ -83,10 +86,12 @@ export default function EnviarAtualizacaoContaModal({
           referencia_tipo: 'cliente',
           referencia_id: clienteId,
           pdf_url: urlRelatorio,
+          pdf_nome: `situacao-conta-${clienteNome.replace(/\s+/g, '-').toLowerCase()}.pdf`,
         }),
       })
       const d = await res.json()
       if (!res.ok || d.error) { setErro(d.error ?? 'Não foi possível enviar'); return }
+      setAnexoErro(d.anexoErro ?? null)
       setEnviado(true)
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Falha de rede')
@@ -111,8 +116,18 @@ export default function EnviarAtualizacaoContaModal({
 
           {enviado ? (
             <div className="text-center py-8">
-              <p className="text-lg font-semibold text-gray-900">Mensagem enviada</p>
-              <p className="text-sm text-gray-500 mt-1">O relatório foi para {tel}.</p>
+              <p className="text-lg font-semibold text-gray-900">
+                {anexoErro ? 'Mensagem enviada, anexo não' : 'Mensagem enviada'}
+              </p>
+              {anexoErro ? (
+                <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3 text-left">
+                  O texto chegou em {tel}, mas o relatório em PDF não foi aceito pelo WhatsApp:
+                  <span className="block mt-1 font-mono text-[11px]">{anexoErro}</span>
+                  Use &quot;Ver relatório&quot; para baixar e mandar à mão.
+                </p>
+              ) : (
+                <p className="text-sm text-gray-500 mt-1">O relatório foi para {tel}.</p>
+              )}
             </div>
           ) : resumo && (
             <>
@@ -142,7 +157,7 @@ export default function EnviarAtualizacaoContaModal({
         </div>
 
         <div className="px-6 py-4 border-t border-gray-100 flex items-center gap-2">
-          {urlRelatorio && !enviado && (
+          {urlRelatorio && (!enviado || anexoErro) && (
             <a href={urlRelatorio} target="_blank" rel="noreferrer" className={botao('sutil', 'sm')}>Ver relatório</a>
           )}
           <div className="flex-1" />
