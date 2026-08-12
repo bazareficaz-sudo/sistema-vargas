@@ -92,12 +92,32 @@ export function mapVariationToVariacaoRow(rawVar: any, anuncioId: string, empres
   }
 }
 
+// Enquanto supabase-marketplace-qualidade.sql não for rodado, as colunas de
+// qualidade não existem e o upsert inteiro seria recusado — derrubando a
+// sincronização por causa de um campo acessório. Nesse caso o anúncio é
+// gravado sem elas: catálogo desatualizado é bem pior que nota faltando.
+let semColunasQualidade = false
+
 export async function upsertAnuncio(sb: any, row: Record<string, any>): Promise<{ id: string; produtoId: string | null }> {
-  const { data, error } = await sb
+  const gravar = async (linha: Record<string, any>) => sb
     .from('marketplace_anuncios')
-    .upsert(row, { onConflict: 'canal_id,id_externo' })
+    .upsert(linha, { onConflict: 'canal_id,id_externo' })
     .select('id, produto_id')
     .single()
+
+  const semQualidade = () => {
+    const copia = { ...row }
+    for (const k of Object.keys(copia)) if (k.startsWith('qualidade_')) delete copia[k]
+    return copia
+  }
+
+  let { data, error } = await gravar(semColunasQualidade ? semQualidade() : row)
+
+  if (error && /qualidade_/.test(error.message ?? '')) {
+    semColunasQualidade = true
+    ;({ data, error } = await gravar(semQualidade()))
+  }
+
   if (error) throw new Error(error.message)
   return { id: data.id, produtoId: data.produto_id }
 }
