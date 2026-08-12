@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import GlobalLoadingIndicator from "@/components/GlobalLoadingIndicator";
 import "./globals.css";
@@ -7,6 +7,17 @@ const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
 });
+
+// Sem esta declaração o navegador do celular renderiza a página como se a
+// tela tivesse ~980px e depois encolhe tudo — é o que fazia os textos
+// saírem minúsculos e exigirem zoom. Não afeta o desktop em nada.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  // Sem limite de zoom: o operador precisa poder ampliar uma tabela densa,
+  // e travar isso é barreira de acessibilidade, não refinamento visual.
+  maximumScale: 5,
+}
 
 export const metadata: Metadata = {
   title: "Sistema Vargas — Gestão",

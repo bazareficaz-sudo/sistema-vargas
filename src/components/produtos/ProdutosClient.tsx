@@ -414,9 +414,11 @@ export default function ProdutosClient({
       {/* Cabeçalho: título e as ações que existem SEMPRE. As ações de
           seleção saíram daqui — dividiam a linha com o título e, com 8
           botões, espremiam tudo até o texto quebrar em duas linhas. */}
-      <div className="flex items-center justify-between gap-4 mb-5">
+      {/* No celular título e botões empilham: lado a lado, "Importar de URL"
+          e "Novo produto" espremiam o título até quebrar a palavra. */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-5">
         <h1 className="text-gray-900 text-xl font-semibold">Produtos</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setImportandoUrl(true)} className={botao('secundario')}>
             Importar de URL
           </button>
@@ -699,8 +701,12 @@ export default function ProdutosClient({
       </div>
 
       {/* Tabela */}
-      <div className="border border-gray-200 rounded-b-xl overflow-hidden bg-white">
-        <table className="w-full text-sm">
+      {/* A tabela tem mais colunas do que cabe num celular. Sem um contêiner
+          com rolagem própria ela empurra a PÁGINA para o lado, e aí o menu e
+          o cabeçalho saem de vista junto. Com ele, só a tabela desliza.
+          `min-w` evita que as colunas se esmaguem uma sobre a outra. */}
+      <div className="border border-gray-200 rounded-b-xl bg-white overflow-x-auto">
+        <table className="w-full text-sm min-w-[720px]">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="w-10 px-4 py-3">
@@ -883,7 +889,7 @@ export default function ProdutosClient({
 
         {/* Paginação */}
         {totalPaginas > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50">
             <p className="text-xs text-gray-500">
               Mostrando {((pagina - 1) * 50) + 1}–{Math.min(pagina * 50, total)} de {total.toLocaleString('pt-BR')} produtos
             </p>

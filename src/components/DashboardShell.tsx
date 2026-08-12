@@ -35,7 +35,7 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
         >
           <PlanAlertBanner />
           <SupportModeBanner />
-          <div className="flex-1 p-7">{children}</div>
+          <div className="flex-1 p-4 md:p-7">{children}</div>
         </main>
       </div>
     )
@@ -44,14 +44,17 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
   return (
     <div className="min-h-screen flex" style={{ background: '#ffffff' }} suppressHydrationWarning>
       <Sidebar empresa={empresa} />
+      {/* No celular o trilho do menu vira gaveta (ver Sidebar), então o
+          conteúdo começa colado na borda e ganha espaço no topo pra barra
+          com o botão. De md pra cima nada muda: continua deslocado pelos
+          mesmos 4.5rem do trilho. */}
       <main
         id="main-content"
-        className="flex-1 overflow-auto min-h-screen flex flex-col"
-        style={{ marginLeft: '4.5rem' }}
+        className="flex-1 overflow-auto min-h-screen flex flex-col ml-0 md:ml-[4.5rem] pt-14 md:pt-0"
       >
         <PlanAlertBanner />
         <SupportModeBanner />
-        <div className="flex-1 p-7">{children}</div>
+        <div className="flex-1 p-4 md:p-7">{children}</div>
       </main>
     </div>
   )
