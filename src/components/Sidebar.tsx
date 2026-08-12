@@ -73,6 +73,19 @@ export default function Sidebar({ empresa }: { empresa: string }) {
   // Ao navegar de verdade (clicar num link), fecha o painel E recolhe o
   // rail — diferente de clicar num ícone do rail só pra alternar o painel
   // (aí o mouse continua ali, não faz sentido recolher).
+  // Clique alterna o painel em vez de só fechar.
+  //
+  // O trilho foi feito pra mouse: `onMouseEnter` abre e o clique fecha. Num
+  // celular não existe hover — o toque virava só o clique, que fechava um
+  // painel que nunca abriu, e tocar num grupo parecia não fazer nada.
+  //
+  // No desktop o comportamento continua igual: quando se clica, o hover já
+  // deixou `painel` nesse grupo, então alternar resulta em fechar, que é o
+  // que acontecia antes.
+  function alternarPainel(id: PainelId) {
+    setPainel(atual => (atual === id ? null : id))
+  }
+
   function fecharNavegando() {
     setPainel(null)
     setRailHover(false)
@@ -193,14 +206,14 @@ export default function Sidebar({ empresa }: { empresa: string }) {
 
         <div className="flex-1 w-full overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 px-2 pb-2">
           <RailButton icon={<IconSearch className="w-5 h-5" />} label="Buscar" active={painel === 'busca'} expanded={expandido}
-            onMouseEnter={() => abrirPainel('busca')} onClick={() => setPainel(null)} />
+            onMouseEnter={() => abrirPainel('busca')} onClick={() => alternarPainel('busca')} />
           {favItems.length > 0 && (
             <RailButton icon={<IconStar className="w-5 h-5" />} label="Favoritos" active={painel === 'favoritos'} expanded={expandido}
-              onMouseEnter={() => abrirPainel('favoritos')} onClick={() => setPainel(null)} />
+              onMouseEnter={() => abrirPainel('favoritos')} onClick={() => alternarPainel('favoritos')} />
           )}
           {recentItems.length > 0 && (
             <RailButton icon={<IconClock className="w-5 h-5" />} label="Recentes" active={painel === 'recentes'} expanded={expandido}
-              onMouseEnter={() => abrirPainel('recentes')} onClick={() => setPainel(null)} />
+              onMouseEnter={() => abrirPainel('recentes')} onClick={() => alternarPainel('recentes')} />
           )}
 
           <div className={`h-px bg-slate-200 my-1.5 flex-shrink-0 ${expandido ? 'w-full' : 'w-8'}`} />
@@ -214,7 +227,7 @@ export default function Sidebar({ empresa }: { empresa: string }) {
                 active={painel === group.id || hasActive}
                 expanded={expandido}
                 onMouseEnter={() => abrirPainel(group.id)}
-                onClick={() => setPainel(null)}
+                onClick={() => alternarPainel(group.id)}
               />
             )
           })}
