@@ -141,6 +141,10 @@ export default function NovaEntradaClient({
   )
   const [buscaProd, setBuscaProd] = useState('')
   const [resultados, setResultados] = useState<any[]>([])
+  // true = nenhum produto tinha TODAS as palavras e a lista abaixo é o que
+  // bate em parte. Precisa aparecer na tela: sem o aviso, um resultado
+  // parecido passa por resultado certo.
+  const [buscaParcial, setBuscaParcial] = useState(false)
   const [buscando, setBuscando] = useState(false)
   const [indiceProd, setIndiceProd] = useState(-1)
   const [faseItem, setFaseItem] = useState<'busca' | 'qtd' | 'custo'>('busca')
@@ -195,6 +199,7 @@ export default function NovaEntradaClient({
     setBuscaProd(q)
     setIndiceProd(-1)
     if (buscarRef.current) clearTimeout(buscarRef.current)
+    setBuscaParcial(false)
     if (!q.trim()) { setResultados([]); return }
     setBuscando(true)
     buscarRef.current = setTimeout(async () => {
@@ -205,40 +210,87 @@ export default function NovaEntradaClient({
         return (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
       }
 
-      const palavras = q.trim().split(/\s+/).map(p => p.replace(/[,()%]/g, '')).filter(p => p.length >= 2)
+      // Aspas e barra invertida saem porque quebram o filtro do PostgREST;
+      // vírgula e parêntese, porque são a sintaxe do `.or()`. A barra comum
+      // fica: "3/4" é medida, e é justamente ela que separa uma bucha da
+      // outra.
+      // Antes o mínimo era 2 letras, e isso jogava fora justamente o que mais
+      // separa um produto do outro aqui: o número. "extensao 5 metros"
+      // buscava "extensao metros" e trazia as de 10 e 20 metros junto.
+      const palavras = q.trim().split(/\s+/).map(p => p.replace(/[,()%"'\\]/g, '')).filter(p => p.length >= 1)
       if (palavras.length === 0) { setResultados([]); setBuscando(false); return }
       const palavrasNorm = palavras.map(norm)
 
-      // Busca ampla no banco: QUALQUER palavra digitada pode trazer o
-      // produto (antes só a primeira palavra entrava na consulta — se o
-      // termo mais específico não fosse o primeiro digitado, o produto nem
-      // chegava a ser avaliado pelo filtro do cliente).
-      const condicoes = palavras.flatMap(p => [`nome.ilike.%${p}%`, `sku.ilike.%${p}%`, `ean.ilike.%${p}%`]).join(',')
-      const { data } = await sb.from('produtos')
+      // Palavra de 1 ou 2 caracteres só vale como palavra inteira: "5" tem
+      // que ser o 5 de "5 METROS", não o 5 de "4,5 METROS" ou de "0.75MM".
+      // Palavra maior segue valendo como pedaço, senão "bucha" não acharia
+      // "BUCHAS" e "3/4" não acharia `3/4"`.
+      const escapar = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+      const palavraInteira = (texto: string, p: string) => new RegExp(`(^|\\s)${escapar(p)}($|\\s)`).test(texto)
+      const curtas = palavrasNorm.filter(p => p.length <= 2)
+      function refinar(lista: any[]): any[] {
+        if (curtas.length === 0) return lista
+        const estrito = lista.filter((p: any) => {
+          const campos = norm(p.nome) + ' ' + norm(p.sku ?? '') + ' ' + norm(p.ean ?? '')
+          return curtas.every(c => palavraInteira(campos, c))
+        })
+        // Nunca esvazia a lista: se nada sobrevive ao critério estrito, o que
+        // veio do banco já contém todas as palavras e é melhor que nada.
+        return estrito.length > 0 ? estrito : lista
+      }
+
+      const base = () => sb.from('produtos')
         .select('id, nome, sku, ean, preco_custo, preco_venda, markup, marca')
         .eq('empresa_id', empresaId)
         .eq('ativo', true)
-        .or(condicoes)
-        .limit(300)
+      const camposDe = (p: string) => `nome.ilike.%${p}%,sku.ilike.%${p}%,ean.ilike.%${p}%`
 
-      // Classifica por QUANTAS palavras digitadas o produto contém, em vez
-      // de exigir que todas apareçam — antes, uma única palavra sem
-      // correspondência (ex: "cromada" quando o produto está cadastrado
-      // como "prata") zerava a lista inteira mesmo com as outras palavras
-      // batendo perfeitamente. Produto com mais palavras batendo sobe pro
-      // topo; produtos com pelo menos uma palavra batendo aparecem.
-      const pontuados = (data ?? [])
-        .map(p => {
-          const campos = norm(p.nome) + ' ' + norm(p.sku ?? '') + ' ' + norm(p.ean ?? '')
-          const acertos = palavrasNorm.filter(pw => campos.includes(pw)).length
-          const comecaComPrimeira = norm(p.nome).startsWith(palavrasNorm[0]) ? 1 : 0
-          return { ...p, _acertos: acertos, _score: comecaComPrimeira }
+      // TODAS as palavras, exigidas no banco. Cada `.or()` encadeado é somado
+      // com E aos anteriores, então "bucha red 3/4" traz só o produto que tem
+      // as três coisas — em vez de todas as buchas, todos os reds e todos os
+      // 3/4 misturados.
+      //
+      // Exigir no BANCO, e não filtrando depois, é o que faz diferença de
+      // verdade: a consulta ampla trazia no máximo 300 linhas de "qualquer
+      // palavra" e o produto certo podia nem estar entre elas, porque só de
+      // "bucha" o catálogo tem centenas.
+      let query = base()
+      for (const p of palavras) query = query.or(camposDe(p))
+      let lista: any[] = refinar((await query.limit(80)).data ?? []).slice(0, 50)
+      let parcial = false
+
+      // Rede de segurança para o caso que motivou a busca ampla no passado:
+      // uma palavra que não existe no cadastro (o operador escreve "cromada",
+      // o produto está como "prata") ou digitada com acento, que o `ilike`
+      // não ignora. Aí sim vale mostrar o que bate em parte — mas dizendo
+      // que é isso, em vez de misturar com o resultado exato.
+      if (lista.length === 0 && palavras.length > 1) {
+        const condicoes = palavras.flatMap(p => [`nome.ilike.%${p}%`, `sku.ilike.%${p}%`, `ean.ilike.%${p}%`]).join(',')
+        const { data } = await base().or(condicoes).limit(300)
+        lista = (data ?? [])
+          .map((p: any) => {
+            const campos = norm(p.nome) + ' ' + norm(p.sku ?? '') + ' ' + norm(p.ean ?? '')
+            return { ...p, _acertos: palavrasNorm.filter(pw => campos.includes(pw)).length }
+          })
+          .filter((p: any) => p._acertos > 0)
+          .sort((a: any, b: any) => b._acertos - a._acertos || a.nome.length - b.nome.length || a.nome.localeCompare(b.nome))
+          .slice(0, 50)
+        parcial = lista.length > 0
+      }
+
+      // Nome mais curto primeiro: entre "BUCHA RED 3/4 X 1/2" e "BUCHA RED
+      // 3/4 X 1/2 COM ANEL DE VEDACAO", o que tem menos palavra sobrando é
+      // o que foi digitado.
+      if (!parcial) {
+        lista = lista.sort((a: any, b: any) => {
+          const comecaA = norm(a.nome).startsWith(palavrasNorm[0]) ? 0 : 1
+          const comecaB = norm(b.nome).startsWith(palavrasNorm[0]) ? 0 : 1
+          return comecaA - comecaB || a.nome.length - b.nome.length || a.nome.localeCompare(b.nome)
         })
-        .filter(p => p._acertos > 0)
-        .sort((a, b) => b._acertos - a._acertos || b._score - a._score || a.nome.localeCompare(b.nome))
-        .slice(0, 50)
+      }
 
-      setResultados(pontuados)
+      setBuscaParcial(parcial)
+      setResultados(lista)
       setBuscando(false)
     }, 250)
   }
@@ -725,6 +777,12 @@ export default function NovaEntradaClient({
                 />
                 {(resultados.length > 0 || (buscaProd && !buscando)) && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-20 overflow-hidden flex flex-col">
+                    {buscaParcial && (
+                      <p className="px-4 py-2 text-xs text-amber-800 bg-amber-50 border-b border-amber-200 flex-shrink-0">
+                        Nenhum produto tem todas as palavras que você digitou. Abaixo, os que batem em parte —
+                        confira o nome antes de escolher.
+                      </p>
+                    )}
                     <div className="max-h-80 overflow-y-auto">
                     {resultados.map((r, i) => (
                       <button key={r.id} onClick={() => selecionarProduto(r)} onMouseEnter={() => setIndiceProd(i)}
