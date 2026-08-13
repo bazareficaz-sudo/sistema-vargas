@@ -706,6 +706,9 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                   </p>
                   <p className="text-xs text-indigo-700 mt-1">
                     Título, descrição e medidas vieram de lá.{' '}
+                    {origem.descricaoBuscadaAgora && (
+                      <>A descrição não estava no sistema e foi buscada agora no Mercado Livre.{' '}</>
+                    )}
                     {origem.plataforma === 'shopee'
                       ? 'Categoria, atributos, condição e canais de envio também — mude o que vai diferenciar este anúncio e publique.'
                       : 'A categoria e os atributos NÃO vieram: o anúncio de origem é do Mercado Livre e as categorias das duas plataformas não se correspondem.'}

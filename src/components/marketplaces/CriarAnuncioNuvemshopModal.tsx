@@ -448,6 +448,9 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
                   </p>
                   <p className="text-xs text-indigo-700 mt-1">
                     Título, descrição, marca e medidas vieram de lá.{' '}
+                    {origem.descricaoBuscadaAgora && (
+                      <>A descrição não estava no sistema e foi buscada agora no Mercado Livre.{' '}</>
+                    )}
                     {origem.plataforma === 'nuvemshop'
                       ? 'A categoria é procurada pelo nome, porque cada loja Nuvemshop tem as suas — confira abaixo.'
                       : 'A categoria não veio: no anúncio de origem ela é da outra plataforma e não corresponde às categorias desta loja.'}

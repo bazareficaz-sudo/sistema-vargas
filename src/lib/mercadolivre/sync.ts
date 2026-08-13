@@ -48,7 +48,11 @@ export function mapItemToAnuncioRow(rawItem: any, canal: MLChannel): { row: Reco
     empresa_id: canal.empresaId,
     canal_id: canal.id,
     titulo: rawItem.title ?? `Item ${rawItem.id}`,
-    descricao: null, // descrição é endpoint separado (/items/{id}/description) — não busca aqui pra não dobrar chamadas no sync de catálogo
+    // `descricao` fica FORA da linha de propósito. No Mercado Livre ela é um
+    // endpoint separado (/items/{id}/description) e buscá-la aqui dobraria as
+    // chamadas do sync de catálogo. Antes o campo ia como `null` explícito, e
+    // isso apagava no sync seguinte a descrição que outra tela tivesse
+    // buscado sob demanda — omitir a coluna preserva o que já estiver lá.
     preco_venda: preco,
     id_externo: String(rawItem.id),
     sku_canal: extrairSku(rawItem),
