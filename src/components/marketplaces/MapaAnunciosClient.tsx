@@ -7,6 +7,7 @@ import MapearAnuncioModal from './MapearAnuncioModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
 import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
+import CriarAnuncioNuvemshopModal from './CriarAnuncioNuvemshopModal'
 
 const fmt = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))
 
@@ -131,9 +132,17 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
     setPrecoAberto({ anuncio: anuncioCompleto, canal: { id: a.canalId, nome: a.canalNome, plataforma: a.plataforma } })
   }
 
+  // Uma rota por plataforma. Antes, o que não fosse Mercado Livre caía na
+  // rota da Shopee — e um anúncio Nuvemshop voltava com "canal não
+  // encontrado", erro que não explicava nada ao operador.
+  const PLATAFORMAS_COM_SYNC = ['shopee', 'mercadolivre', 'nuvemshop']
+
   async function sincronizar(a: Anuncio) {
-    const rota = a.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync-item' : '/api/marketplace/shopee/sync-item'
-    const res = await fetch(rota, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canalId: a.canalId, idExterno: a.idExterno }) })
+    if (!PLATAFORMAS_COM_SYNC.includes(a.plataforma)) {
+      avisar(`Sincronizar um anúncio ainda não existe para ${a.plataforma}.`)
+      return
+    }
+    const res = await fetch(`/api/marketplace/${a.plataforma}/sync-item`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canalId: a.canalId, idExterno: a.idExterno }) })
     const data = await res.json()
     avisar(data.ok ? 'Sincronizado.' : (data.erro ?? 'Erro ao sincronizar'))
     if (data.ok) recarregar()
@@ -379,6 +388,28 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
           produtoIdInicial={criarAberto.produtoId} origemAnuncioId={criarAberto.origemAnuncioId}
           modoDuplicar={criarAberto.duplicar}
           onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
+      )}
+      {criarAberto && criarAberto.canal.plataforma === 'nuvemshop' && (
+        <CriarAnuncioNuvemshopModal canal={{ id: criarAberto.canal.id, nome: criarAberto.canal.nome }} empresaId={empresaId}
+          produtoIdInicial={criarAberto.produtoId} origemAnuncioId={criarAberto.origemAnuncioId}
+          modoDuplicar={criarAberto.duplicar}
+          onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
+      )}
+      {/* Plataforma sem tela de criação: avisar em vez de abrir nada, que era
+          o que acontecia com a Nuvemshop antes — o botão não fazia nada. */}
+      {criarAberto && !['shopee', 'mercadolivre', 'nuvemshop'].includes(criarAberto.canal.plataforma) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setCriarAberto(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <p className="text-sm text-gray-800">
+              Criar anúncio direto pelo sistema ainda não existe para <strong>{criarAberto.canal.plataforma}</strong>.
+              Crie no painel do canal e depois use &quot;Mapear existente&quot;.
+            </p>
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setCriarAberto(null)} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Escolha de qual anúncio servir de base, quando há mais de um */}

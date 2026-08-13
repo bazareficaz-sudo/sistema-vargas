@@ -16,11 +16,21 @@ export type Requisito = {
   recomendado: number  // abaixo disso funciona, mas perde qualidade/zoom
   alvoAjuste: number   // para onde o botão de ajustar leva a imagem
   quadradaPreferida: boolean
+  /**
+   * O que acontece de fato abaixo do mínimo. Marketplace recusa; loja própria
+   * publica assim mesmo e o estrago é visual — dizer "pode não ser ativado"
+   * na Nuvemshop seria um aviso falso.
+   */
+  efeitoAbaixoDoMinimo?: string
 }
 
 export const REQUISITOS: Record<string, Requisito> = {
   shopee: { plataforma: 'Shopee', minimo: 500, recomendado: 1024, alvoAjuste: 1024, quadradaPreferida: true },
   mercadolivre: { plataforma: 'Mercado Livre', minimo: 500, recomendado: 1200, alvoAjuste: 1200, quadradaPreferida: true },
+  nuvemshop: {
+    plataforma: 'Nuvemshop', minimo: 500, recomendado: 1024, alvoAjuste: 1024, quadradaPreferida: true,
+    efeitoAbaixoDoMinimo: 'A loja publica assim mesmo, mas a foto sai borrada na vitrine e o zoom não funciona.',
+  },
 }
 
 export function requisitoDe(plataforma: string): Requisito {
@@ -42,7 +52,7 @@ export function avaliarDimensoes(
   if (menor < r.minimo) {
     return {
       nivel: 'erro',
-      mensagem: `Abaixo do mínimo da ${r.plataforma} (${r.minimo}×${r.minimo}). O anúncio pode não ser ativado.`,
+      mensagem: `Abaixo do mínimo da ${r.plataforma} (${r.minimo}×${r.minimo}). ${r.efeitoAbaixoDoMinimo ?? 'O anúncio pode não ser ativado.'}`,
       precisaAjuste: true,
     }
   }

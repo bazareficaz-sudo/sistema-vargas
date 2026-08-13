@@ -10,6 +10,7 @@ import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
 import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
+import CriarAnuncioNuvemshopModal from './CriarAnuncioNuvemshopModal'
 import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
@@ -157,6 +158,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [enviandoPrecoAberto, setEnviandoPrecoAberto] = useState<any | null>(null)
   const [criarAnuncioShopeeAberto, setCriarAnuncioShopeeAberto] = useState(false)
   const [criarAnuncioMLAberto, setCriarAnuncioMLAberto] = useState(false)
+  const [criarAnuncioNuvemshopAberto, setCriarAnuncioNuvemshopAberto] = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [mapeamentoRapido, setMapeamentoRapido] = useState<string[] | null>(null)
   // Replicação em massa pra outra conta do MESMO marketplace.
@@ -766,7 +768,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   async function sincronizar() {
     setSincronizando(true); setResumoSync(''); setErro('')
     try {
-      const endpoint = canal.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync' : '/api/marketplace/shopee/sync'
+      // Uma rota por plataforma: a Nuvemshop também tem `sync` desde a
+      // importação do catálogo, e mandá-la para a rota da Shopee só produzia
+      // "canal não encontrado".
+      const PLATAFORMAS_COM_SYNC = ['shopee', 'mercadolivre', 'nuvemshop']
+      const endpoint = `/api/marketplace/${PLATAFORMAS_COM_SYNC.includes(canal.plataforma) ? canal.plataforma : 'shopee'}/sync`
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -908,7 +914,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           )}
-          {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && (
+          {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre' || canal.plataforma === 'nuvemshop') && (
             <button onClick={sincronizar} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
               {sincronizando ? 'Sincronizando...' : '↺ Sincronizar agora'}
@@ -926,6 +932,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               title="Cria um anúncio de verdade no Mercado Livre via API, a partir de um produto do catálogo"
               className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg transition-colors">
               Publicar no Mercado Livre
+            </button>
+          )}
+          {canal.plataforma === 'nuvemshop' && (
+            <button onClick={() => setCriarAnuncioNuvemshopAberto(true)}
+              title="Cria o produto de verdade na loja Nuvemshop via API, a partir de um produto do catálogo"
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg transition-colors">
+              Publicar na Nuvemshop
             </button>
           )}
           <button onClick={abrirNovo}
@@ -1475,6 +1488,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           canal={{ id: canal.id, nome: canal.nome }}
           empresaId={empresaId}
           onClose={() => setCriarAnuncioMLAberto(false)}
+          onCriado={() => router.refresh()}
+        />
+      )}
+
+      {criarAnuncioNuvemshopAberto && (
+        <CriarAnuncioNuvemshopModal
+          canal={{ id: canal.id, nome: canal.nome }}
+          empresaId={empresaId}
+          onClose={() => setCriarAnuncioNuvemshopAberto(false)}
           onCriado={() => router.refresh()}
         />
       )}

@@ -3,7 +3,7 @@
 Anotações para retomar o trabalho numa sessão nova. Não é documentação do
 sistema: é o estado de quem estava com a mão na massa.
 
-Última atualização: 13/08/2026
+Última atualização: 13/08/2026 (segunda sessão do dia)
 
 ---
 
@@ -26,13 +26,49 @@ mostra como "produto simples" é, na API, um produto com uma variante só.
 Não existe "pausado": o equivalente é `published: false` (sai da vitrine, o
 produto continua existindo com o mesmo id).
 
+**Criar anúncio — pronto e exercitado contra a loja real:**
+- `src/lib/nuvemshop/listing.ts` — `criarAnuncio` (POST /products com a
+  variante embutida) e `listarCategorias`.
+- Rotas `criar-anuncio`, `categorias` e `sync-item` em
+  `src/app/api/marketplace/nuvemshop/`.
+- `CriarAnuncioNuvemshopModal.tsx`, ligado em **duas** telas: no Mapa de
+  Anúncios (cobre "+ Criar anúncio", "Replicar" e "Duplicar") e na tela de
+  Anúncios do canal, no botão "Publicar na Nuvemshop".
+
+**Lição da primeira tentativa do Silvano:** ele testou no sistema no ar e não
+funcionou em tela nenhuma — porque nada tinha sido publicado ainda, e porque a
+tela de Anúncios só tinha botão para Shopee e ML. Ligar a plataforma nova numa
+tela só não basta: os dois caminhos de publicar precisam existir juntos.
+
+**Teste feito de ponta a ponta (13/08, produto 360760870, criado fora da
+vitrine e apagado em seguida — não sobrou nada na loja nem na nossa tabela):**
+- `categories: [id]` no POST **funciona** — o produto saiu em "Hidráulica".
+- `stock_management: true` é aceito na criação. Sem ele o estoque seria
+  infinito e a loja venderia o que acabou, sem erro nenhum aparecer.
+- Imagem por URL funciona **mesmo apontando para o CDN da Shopee**: a
+  Nuvemshop baixou e rehospedou em 1024×1024 no domínio dela.
+- Preço "de": `price` é o riscado e `promotional_price` é o que o cliente
+  paga. Mandamos nessa ordem e o sync lê de volta os 27,22 certos.
+- `published: false` volta do sync como status `pausado`, como projetado, e o
+  produto já nasce com `url_anuncio` da loja.
+
+Campos da variante confirmados: `price / promotional_price / stock /
+stock_management / weight / width / height / depth / sku / barcode`.
+`/categories` traz `parent`, o que permite montar o caminho
+("Ferramentas > Brocas"). A loja tem 15 categorias.
+
+**Detalhe que vale saber:** `categoria_externa` do anúncio junta com " > "
+TODAS as categorias do produto, não um caminho. Um produto em "Casa e Jardins"
+e "Cozinha" vira uma string que parece caminho e não é. A replicação casa
+primeiro o caminho inteiro, depois cada pedaço pelo nome.
+
 **Falta (próxima fase):**
-1. **Criar anúncio** — `POST /products` com a variante embutida. Hoje o botão
-   "+ Criar anúncio" no Mapa de Anúncios **não faz nada** para a Nuvemshop:
-   `MapaAnunciosClient.tsx` só monta modal para `shopee` e `mercadolivre`
-   (linhas ~371 e ~377). É o módulo maior: payload, imagens, categorias.
-2. **UI de envio manual** — o botão "Preço/estoque" da tela de Anúncios ainda
-   não oferece a Nuvemshop.
+1. **UI de envio manual** — o botão "Preço/estoque" (tela de Anúncios e Mapa)
+   ainda não oferece a Nuvemshop: `EnviarPrecoEstoqueModal.tsx` trata tudo que
+   não é ML como Shopee, escreve o preço na nossa tabela e chama
+   `/api/marketplace/shopee/push`, que não acha o canal. Falta a rota
+   `nuvemshop/push` e a plataforma no modal.
+2. **Replicar em massa** — `anuncios/replicar-massa` só conhece Shopee e ML.
 
 ### Qualidade dos anúncios — parou na metade
 

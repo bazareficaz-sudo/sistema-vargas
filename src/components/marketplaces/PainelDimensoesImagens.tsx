@@ -83,7 +83,7 @@ export default function PainelDimensoesImagens({ imagens, plataforma, produtoId,
       {comErro.length > 0 && (
         <p className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">
           {comErro.length === 1 ? '1 imagem está' : `${comErro.length} imagens estão`} abaixo de {req.minimo}×{req.minimo} —
-          a {req.plataforma} pode não ativar o anúncio.
+          {req.efeitoAbaixoDoMinimo ?? ` a ${req.plataforma} pode não ativar o anúncio.`}
         </p>
       )}
 
