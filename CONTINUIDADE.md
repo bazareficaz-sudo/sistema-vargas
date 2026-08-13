@@ -29,11 +29,26 @@ produto continua existindo com o mesmo id).
 **Criar anúncio — pronto e exercitado contra a loja real:**
 - `src/lib/nuvemshop/listing.ts` — `criarAnuncio` (POST /products com a
   variante embutida) e `listarCategorias`.
-- Rotas `criar-anuncio`, `categorias` e `sync-item` em
+- Rotas `criar-anuncio`, `categorias`, `sync-item` e `ia-gerar-conteudo` em
   `src/app/api/marketplace/nuvemshop/`.
 - `CriarAnuncioNuvemshopModal.tsx`, ligado em **duas** telas: no Mapa de
   Anúncios (cobre "+ Criar anúncio", "Replicar" e "Duplicar") e na tela de
   Anúncios do canal, no botão "Publicar na Nuvemshop".
+
+**IA da Nuvemshop é diferente da dos marketplaces:** não há atributo de
+categoria para preencher, então ela gera só título e descrição — e a descrição
+sai em **HTML simples**, porque a vitrine renderiza HTML (texto puro vira um
+bloco corrido). Tags fora de uma lista curta são removidas na volta, junto com
+todo atributo (`style`, `class`), senão a IA manda `<h1>` e briga com o tema.
+
+Medido no prompt: sem uma regra explícita, o modelo anunciou uma argamassa em
+pó como "pronta para uso". A regra que proíbe afirmar estado de preparo e
+desempenho está lá por causa disso — se sair de novo, é ali que se mexe.
+
+Descrição gerada é gravada em `produtos.descricao_marketplace` quando o
+cadastro está vazio (nunca por cima do que já existe), então o trabalho serve
+para os próximos canais. Produto sem SKU no cadastro (são 12) recebe o id do
+produto no sistema, porque é pelo SKU que o pedido da loja acha o produto aqui.
 
 **Lição da primeira tentativa do Silvano:** ele testou no sistema no ar e não
 funcionou em tela nenhuma — porque nada tinha sido publicado ainda, e porque a

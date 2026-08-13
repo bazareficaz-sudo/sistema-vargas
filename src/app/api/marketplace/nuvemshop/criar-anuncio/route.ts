@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   }
 
   const { data: produto } = await sb.from('produtos')
-    .select('id, sku, ean, marca, peso_kg, comprimento_cm, largura_cm, altura_cm')
+    .select('id, sku, ean, marca, descricao_marketplace, peso_kg, comprimento_cm, largura_cm, altura_cm')
     .eq('id', produtoId).eq('empresa_id', empresaId).maybeSingle()
   if (!produto) return NextResponse.json({ ok: false, erro: 'Produto não encontrado' }, { status: 404 })
 
@@ -59,11 +59,12 @@ export async function POST(req: Request) {
   // aqui impediria o caso legítimo de publicar antes de fotografar.
 
   const canal = montarCanal(canalRow)
+  const descricaoFinal = typeof descricao === 'string' ? descricao.trim() : ''
 
   const resultado = await criarAnuncio(sb, canal, {
     produtoId, empresaId,
     titulo: String(titulo).trim(),
-    descricao: typeof descricao === 'string' ? descricao : '',
+    descricao: descricaoFinal,
     preco: Number(preco),
     precoDe: precoDe != null && precoDe !== '' ? Number(precoDe) : null,
     estoque: Number(estoque),
@@ -91,5 +92,18 @@ export async function POST(req: Request) {
   })
 
   if (!resultado.ok) return NextResponse.json({ ok: false, erro: resultado.erro }, { status: 400 })
-  return NextResponse.json(resultado)
+
+  // Descrição escrita aqui (quase sempre pela IA) vira descrição do produto
+  // quando o cadastro não tinha nenhuma: assim o trabalho não fica preso a
+  // este anúncio e já entra pronto no próximo canal. Nunca sobrescreve o que
+  // o operador escreveu antes — só preenche o que estava vazio.
+  let descricaoGravadaNoCadastro = false
+  if (descricaoFinal && !produto.descricao_marketplace?.trim()) {
+    const { error } = await sb.from('produtos')
+      .update({ descricao_marketplace: descricaoFinal })
+      .eq('id', produtoId).eq('empresa_id', empresaId)
+    descricaoGravadaNoCadastro = !error
+  }
+
+  return NextResponse.json({ ...resultado, descricaoGravadaNoCadastro })
 }

@@ -53,7 +53,11 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
   const [categoriasEscolhidas, setCategoriasEscolhidas] = useState<number[] | null>(null)
 
   const [titulo, setTitulo] = useState('')
+  // Opções de título geradas pela IA — nunca aplicadas sozinhas: quem escolhe
+  // é o operador (ou mantém o que digitou).
+  const [titulosSugeridos, setTitulosSugeridos] = useState<string[]>([])
   const [descricao, setDescricao] = useState('')
+  const [preenchendoIA, setPreenchendoIA] = useState(false)
   const [preco, setPreco] = useState('')
   const [precoDe, setPrecoDe] = useState('')
   const [estoque, setEstoque] = useState('')
@@ -69,7 +73,7 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
   const [origem, setOrigem] = useState<any | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
-  const [resultado, setResultado] = useState<{ itemId: string; warning?: string } | null>(null)
+  const [resultado, setResultado] = useState<{ itemId: string; warning?: string; descricaoGravadaNoCadastro?: boolean } | null>(null)
 
   // Produto pré-selecionado (entrada pelo Mapa de Anúncios ou por Produtos).
   useEffect(() => {
@@ -107,10 +111,15 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
     // O cadastro guarda o nome em CAIXA ALTA — na vitrine da loja isso fica
     // ruim de ler. Continua editável no campo.
     setTitulo(formatarTituloAnuncio(p.nome))
+    setTitulosSugeridos([])
     setDescricao(p.descricao_marketplace ?? '')
     setPreco(p.preco_venda ? String(p.preco_venda) : '')
     setEstoque(p.estoque != null ? String(p.estoque) : '0')
-    setSku(p.sku ?? '')
+    // Produto sem SKU no cadastro (são 12 hoje) cairia na loja sem código
+    // nenhum — e é pelo SKU que o pedido da Nuvemshop encontra o produto aqui
+    // na volta. Nesse caso vale o id do produto no sistema: feio de ler, mas
+    // único e estável. Continua editável.
+    setSku(p.sku || p.id)
     setEan(p.ean ?? '')
     setMarca(p.marca ?? '')
     setPeso(p.peso_kg ? String(p.peso_kg) : '')
@@ -179,6 +188,16 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
       ordem++
     }
     setImportandoImagens(false)
+  }
+
+  // Imagem principal do CADASTRO — outra coisa que a capa deste anúncio. Ela
+  // vale pro PDV, pra listagem de produtos e pros próximos anúncios.
+  async function definirImagemPrincipal(id: string) {
+    if (!produto) return
+    const sb = createClient()
+    await sb.from('produto_imagens').update({ principal: false }).eq('produto_id', produto.id)
+    await sb.from('produto_imagens').update({ principal: true }).eq('id', id)
+    setImagens(prev => prev.map(img => ({ ...img, principal: img.id === id })))
   }
 
   async function removerImagem(img: { id: string; url: string; principal: boolean }) {
@@ -260,6 +279,36 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
 
   const categoriasSelecionadas = categoriasEscolhidas ?? categoriasCasadasPorNome.map(c => c.id)
 
+  // Gera título e descrição. Nunca publica sozinha: enche os campos, que
+  // continuam editáveis, e os títulos ficam como opção para clicar.
+  //
+  // Roda depois da categoria porque as categorias já escolhidas entram no
+  // prompt — "Hidráulica > Torneiras" muda o texto que faz sentido escrever.
+  async function preencherComIA() {
+    if (!produto) return
+    setPreenchendoIA(true); setErro('')
+    try {
+      const resp = await fetch('/api/marketplace/nuvemshop/ia-gerar-conteudo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          produtoNome: produto.nome,
+          produtoMarca: marca || produto.marca,
+          produtoCategoria: produto.categoria,
+          produtoDescricao: produto.descricao_marketplace,
+          categoriasLoja: categorias.filter(c => categoriasSelecionadas.includes(c.id)).map(c => c.caminho),
+        }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setErro(data.erro ?? 'Erro ao gerar conteúdo com IA'); return }
+      if (Array.isArray(data.titulos) && data.titulos.length > 0) setTitulosSugeridos(data.titulos)
+      if (data.descricao) setDescricao(data.descricao)
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : 'Erro ao usar IA')
+    } finally {
+      setPreenchendoIA(false)
+    }
+  }
+
   function alternarCategoria(id: number) {
     setCategoriasEscolhidas(
       categoriasSelecionadas.includes(id)
@@ -308,7 +357,7 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
       })
       const data = await resp.json()
       if (!data.ok) { setErro(data.erro ?? 'Erro ao criar anúncio'); return }
-      setResultado({ itemId: data.itemId, warning: data.warning })
+      setResultado({ itemId: data.itemId, warning: data.warning, descricaoGravadaNoCadastro: data.descricaoGravadaNoCadastro })
       onCriado()
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Erro ao criar anúncio')
@@ -344,6 +393,9 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
               <p className="text-sm font-medium text-emerald-800">✓ Produto criado na Nuvemshop (id {resultado.itemId})</p>
               {!publicado && (
                 <p className="text-xs text-emerald-700 mt-1">Criado fora da vitrine — publique na loja quando estiver pronto.</p>
+              )}
+              {resultado.descricaoGravadaNoCadastro && (
+                <p className="text-xs text-emerald-700 mt-1">A descrição também foi gravada no cadastro do produto, que estava sem.</p>
               )}
               {resultado.warning && <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{resultado.warning}</p>}
               <button onClick={onClose} className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">Fechar</button>
@@ -420,8 +472,13 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
                         ⚠ Esse produto não tem imagem cadastrada. A Nuvemshop aceita publicar assim, mas o produto aparece
                         sem foto na vitrine — o que na prática não vende.
                       </p>
-                    ) : imagens.length > 1 && (
-                      <p className="text-[11px] text-gray-400 mb-2">Clique numa foto para usá-la como capa deste anúncio.</p>
+                    ) : (
+                      <p className="text-[11px] text-gray-400 mb-2">
+                        A <strong>capa</strong> é a foto que aparece na vitrine e na busca da loja — é a primeira da lista.
+                        {imagens.length > 1
+                          ? ' Clique em outra foto (ou no botão "capa" dela) para trocar.'
+                          : ' Com uma foto só, ela é a capa; adicione outra no + para poder escolher.'}
+                      </p>
                     )}
                     <div className="flex flex-wrap gap-2">
                       {imagens.map(img => (
@@ -432,7 +489,21 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
                               capaUrl === img.url ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-gray-200'
                             }`} />
                           {capaUrl === img.url && <span className="absolute -top-1.5 -left-1.5 bg-emerald-600 text-white text-[9px] px-1 rounded">capa</span>}
-                          <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <div className="absolute inset-0 bg-black/50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                            {/* Botão explícito além do clique na foto: clicar
+                                na imagem não se anuncia sozinho, e a troca de
+                                capa é justamente o que se quer fazer aqui. */}
+                            {capaUrl !== img.url && (
+                              <button type="button" onClick={() => setCapaUrl(img.url)} title="Usar como capa deste anúncio"
+                                className="text-white text-[10px] px-1 py-0.5 bg-emerald-600/90 rounded hover:bg-emerald-600">capa</button>
+                            )}
+                            {/* A estrela troca a imagem principal do CADASTRO,
+                                que vale pro PDV e pros outros anúncios — coisa
+                                diferente da capa deste anúncio. */}
+                            {!img.principal && (
+                              <button type="button" onClick={() => definirImagemPrincipal(img.id)} title="Definir como imagem principal do cadastro"
+                                className="text-white text-xs hover:scale-110">⭐</button>
+                            )}
                             <button type="button" onClick={() => removerImagem(img)} title="Remover" className="text-white text-xs hover:scale-110">🗑</button>
                           </div>
                         </div>
@@ -453,11 +524,29 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
                       }} />
                   </div>
 
+                  <button type="button" onClick={preencherComIA} disabled={preenchendoIA}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 border border-violet-200 text-violet-700 text-sm font-medium rounded-lg transition-colors">
+                    {preenchendoIA ? '✨ Pensando...' : '✨ Gerar título e descrição com IA'}
+                  </button>
+
                   {/* Título e descrição */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Título *</label>
                     <input value={titulo} onChange={e => setTitulo(e.target.value)}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                    {titulosSugeridos.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-[11px] text-gray-400">Opções da IA — clique para usar:</p>
+                        {titulosSugeridos.map((t, i) => (
+                          <button key={i} type="button" onClick={() => setTitulo(t)}
+                            className={`w-full text-left text-xs px-3 py-1.5 rounded-lg border ${
+                              titulo === t ? 'border-violet-400 bg-violet-50 text-violet-800' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}>
+                            {t} <span className="text-gray-300">({t.length})</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {tituloIgualAoOrigem && (
                       <p className="text-xs text-amber-700 mt-1">
                         O título está igual ao do anúncio de origem. Na mesma loja, dois produtos com o mesmo nome
@@ -471,6 +560,12 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
                     <textarea value={descricao} onChange={e => setDescricao(e.target.value)} rows={5}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                     <p className="text-[11px] text-gray-400 mt-1">A Nuvemshop aceita HTML simples aqui (parágrafos, negrito, listas).</p>
+                    {descricao.trim() && !produto.descricao_marketplace && (
+                      <p className="text-[11px] text-emerald-700 mt-1">
+                        Este produto não tem descrição no cadastro — ao publicar, esta descrição é gravada lá também
+                        e passa a servir para os próximos anúncios.
+                      </p>
+                    )}
                   </div>
 
                   {/* Preço e estoque */}
@@ -507,7 +602,12 @@ export default function CriarAnuncioNuvemshopModal({ canal, canais, empresaId, p
                       <label className="block text-xs font-medium text-gray-500 mb-1">SKU</label>
                       <input value={sku} onChange={e => setSku(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-                      <p className="text-[11px] text-gray-400 mt-1">É por ele que o pedido da loja acha o produto aqui — vale manter o do cadastro.</p>
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        É por ele que o pedido da loja acha o produto aqui.{' '}
+                        {produto.sku
+                          ? 'Veio do cadastro — vale manter.'
+                          : 'Este produto não tem SKU no cadastro, então entrou o id dele no sistema. Se preferir um código curto, cadastre o SKU no produto.'}
+                      </p>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">EAN / código de barras</label>
