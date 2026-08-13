@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ChangeEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
 import { limparTextoOrigem } from '@/lib/marketplaces/limparTextoOrigem'
 import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
 import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
@@ -120,6 +121,61 @@ export default function RascunhoEditorClient({
       ;[copia[i], copia[j]] = [copia[j], copia[i]]
       return copia
     })
+  }
+
+  // Imagens que o operador trouxe: subiu do computador ou colou o endereço.
+  // Ficam separadas das capturadas porque são de outra natureza — a captura é
+  // material de terceiro, para conferir; estas são da loja, e o próprio aviso
+  // desta tela diz que foto própria é sempre a escolha melhor.
+  const [imagensProprias, setImagensProprias] = useState<string[]>(
+    Array.isArray(editados.imagensProprias) ? editados.imagensProprias : [])
+  const [subindoImagem, setSubindoImagem] = useState(false)
+  const [erroImagem, setErroImagem] = useState('')
+  const [urlNova, setUrlNova] = useState('')
+
+  function adicionarPropria(url: string) {
+    setImagensProprias(atual => (atual.includes(url) ? atual : [...atual, url]))
+    // Já entra escolhida: quem subiu a foto quer usá-la — e como entra no fim
+    // da lista, não rouba a capa de quem já estava escolhido.
+    setImagensEscolhidas(atual => (atual.includes(url) ? atual : [...atual, url]))
+  }
+
+  function removerPropria(url: string) {
+    setImagensProprias(atual => atual.filter(x => x !== url))
+    setImagensEscolhidas(atual => atual.filter(x => x !== url))
+  }
+
+  async function subirImagens(e: ChangeEvent<HTMLInputElement>) {
+    const arquivos = Array.from(e.target.files ?? [])
+    if (arquivos.length === 0) return
+    setSubindoImagem(true); setErroImagem('')
+    const sb = createClient()
+    const falhas: string[] = []
+    for (const arquivo of arquivos) {
+      const ext = arquivo.name.split('.').pop()?.toLowerCase() ?? 'jpg'
+      // Guardadas por rascunho, não por produto: no momento do upload o
+      // rascunho pode nem ter produto vinculado ainda.
+      const caminho = `${empresaId}/rascunhos/${rascunho.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await sb.storage.from('produto-imagens').upload(caminho, arquivo, { upsert: false })
+      if (error) { falhas.push(`${arquivo.name}: ${error.message}`); continue }
+      const { data: { publicUrl } } = sb.storage.from('produto-imagens').getPublicUrl(caminho)
+      adicionarPropria(publicUrl)
+    }
+    if (falhas.length > 0) setErroImagem('Não subiu: ' + falhas.join('; '))
+    setSubindoImagem(false)
+    e.target.value = ''
+  }
+
+  function adicionarPorUrl() {
+    const url = urlNova.trim()
+    if (!url) return
+    if (!/^https?:\/\//i.test(url)) {
+      setErroImagem('O endereço precisa começar com http:// ou https://')
+      return
+    }
+    setErroImagem('')
+    adicionarPropria(url)
+    setUrlNova('')
   }
 
   // ── Base a partir do original ─────────────────────────────────────────────
@@ -296,6 +352,7 @@ export default function RascunhoEditorClient({
             categoria: categoria.trim() || null,
             preco: preco.trim() ? Number(preco.replace(',', '.')) : null,
             imagens: imagensEscolhidas,
+            imagensProprias,
           },
           observacao: observacao.trim() || null,
           ...extra,
@@ -581,23 +638,64 @@ export default function RascunhoEditorClient({
                 Clique na imagem para ver grande.
               </div>
 
-              {imagensOrigem.length === 0 ? (
-                <p className="text-sm text-slate-500">Nenhuma imagem foi capturada neste rascunho.</p>
-              ) : (
-                <>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="text-sm text-slate-700">
-                      <b>{imagensEscolhidas.length}</b> de {imagensOrigem.length} escolhida(s)
-                    </span>
-                    <button type="button" onClick={() => setImagensEscolhidas([])}
-                      className="text-xs text-slate-500 hover:text-slate-800">desmarcar todas</button>
-                    <span className="text-xs text-slate-400">
-                      A primeira da sua lista é a capa do anúncio.
-                    </span>
+              {/* Imagens próprias — subir do computador ou colar o endereço */}
+              <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Suas imagens {imagensProprias.length > 0 && `(${imagensProprias.length})`}
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className={`px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 bg-blue-50 text-xs font-medium cursor-pointer hover:bg-blue-100 ${subindoImagem ? 'opacity-50' : ''}`}>
+                    <input type="file" accept="image/*" multiple className="hidden"
+                      onChange={subirImagens} disabled={subindoImagem} />
+                    {subindoImagem ? 'Subindo...' : '↑ Subir do computador'}
+                  </label>
+                  <input value={urlNova} onChange={e => setUrlNova(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarPorUrl() } }}
+                    placeholder="ou cole o endereço de uma imagem (https://...)"
+                    className="flex-1 min-w-[220px] border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500" />
+                  <button type="button" onClick={adicionarPorUrl} disabled={!urlNova.trim()}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+                    Adicionar
+                  </button>
+                </div>
+                {erroImagem && <p className="text-xs text-red-600">{erroImagem}</p>}
+                {imagensProprias.length > 0 && (
+                  <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                    {imagensProprias.map(src => (
+                      <div key={src} className="relative aspect-square rounded-lg overflow-hidden border-2 border-blue-300 bg-slate-50">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={src} alt="" className="w-full h-full object-contain cursor-zoom-in"
+                          onClick={() => setZoom(src)} />
+                        <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-bold">sua</span>
+                        <button type="button" onClick={() => removerPropria(src)}
+                          title="Tirar esta imagem"
+                          className="absolute top-1 right-1 w-5 h-5 rounded bg-white/90 border border-slate-300 text-red-600 text-xs leading-none">×</button>
+                      </div>
+                    ))}
                   </div>
+                )}
+                <p className="text-[11px] text-slate-400">
+                  As que você sobe ficam guardadas no sistema e já entram escolhidas. Diferente das
+                  capturadas, não dependem do site de origem continuar no ar.
+                </p>
+              </div>
 
-                  {/* Escolhidas, na ordem */}
-                  {imagensEscolhidas.length > 0 && (
+              {/* Contagem e ordem valem para capturadas e próprias juntas, por
+                  isso ficam fora do bloco das capturadas: um rascunho pode não
+                  ter captura nenhuma e ainda assim ter foto sua. */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm text-slate-700">
+                  <b>{imagensEscolhidas.length}</b> escolhida(s) de {imagensOrigem.length + imagensProprias.length}
+                </span>
+                <button type="button" onClick={() => setImagensEscolhidas([])}
+                  className="text-xs text-slate-500 hover:text-slate-800">desmarcar todas</button>
+                <span className="text-xs text-slate-400">
+                  A primeira da sua lista é a capa do anúncio.
+                </span>
+              </div>
+
+              {/* Escolhidas, na ordem */}
+              {imagensEscolhidas.length > 0 && (
                     <div>
                       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Escolhidas, na ordem</p>
                       <div className="flex gap-2 flex-wrap">
@@ -628,7 +726,11 @@ export default function RascunhoEditorClient({
                     </div>
                   )}
 
-                  {/* Todas as capturadas */}
+              {/* Todas as capturadas */}
+              {imagensOrigem.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhuma imagem foi capturada neste rascunho.</p>
+              ) : (
+                <>
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
                       Todas as capturadas ({imagensOrigem.length})
