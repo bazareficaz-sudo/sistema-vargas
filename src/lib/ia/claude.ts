@@ -38,3 +38,43 @@ export async function perguntarJSON(prompt: string, modelo: string = MODELO): Pr
   if (!match) throw new Error('A IA não retornou um JSON válido: ' + texto.slice(0, 200))
   return JSON.parse(match[0])
 }
+
+/**
+ * Mesma coisa, olhando IMAGENS.
+ *
+ * O modelo lê imagem, não desenha: não existe API da Anthropic que gere ou
+ * edite foto. O que dá para fazer — e é o que esta função serve — é conferir
+ * imagem que já existe.
+ *
+ * As imagens vão como BYTES, não como endereço. A API aceita as duas formas,
+ * mas na de endereço quem baixa é a Anthropic — e a CDN do Mercado Livre
+ * recusa esse download, derrubando a chamada inteira (medido). Quem baixa e
+ * prepara é `src/lib/imagens/paraVisao.ts`.
+ *
+ * Cada imagem entra rotulada ("Imagem 1"), senão não há como o modelo devolver
+ * um veredito por imagem que a gente consiga casar de volta com a lista.
+ */
+export async function perguntarJSONComImagens(
+  prompt: string,
+  imagens: { base64: string; mediaType: string }[],
+  modelo: string = MODELO,
+): Promise<any> {
+  if (imagens.length === 0) throw new Error('Nenhuma imagem para analisar.')
+
+  const conteudo: any[] = []
+  imagens.forEach((img, i) => {
+    conteudo.push({ type: 'text', text: `Imagem ${i + 1}:` })
+    conteudo.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.base64 } })
+  })
+  conteudo.push({ type: 'text', text: prompt })
+
+  const resp = await getClient().messages.create({
+    model: modelo,
+    max_tokens: modelo === MODELO_FORTE ? 6000 : 2000,
+    messages: [{ role: 'user', content: conteudo }],
+  })
+  const texto = resp.content.filter(b => b.type === 'text').map(b => (b as any).text).join('')
+  const match = texto.match(/\{[\s\S]*\}/)
+  if (!match) throw new Error('A IA não retornou um JSON válido: ' + texto.slice(0, 200))
+  return JSON.parse(match[0])
+}

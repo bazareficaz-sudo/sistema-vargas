@@ -178,6 +178,43 @@ export default function RascunhoEditorClient({
     setUrlNova('')
   }
 
+  // ── Conferência das capturadas com IA ─────────────────────────────────────
+  // A IA olha e opina; ela não marca nem desmarca imagem nenhuma. Quem escolhe
+  // continua sendo o operador — o resultado aqui é aviso, não decisão.
+  type AchadoImagem = { url: string; problemas: string[]; observacao: string | null; serveDeCapa: boolean }
+  const [conferindo, setConferindo] = useState(false)
+  const [achados, setAchados] = useState<Record<string, AchadoImagem> | null>(null)
+  const [melhorCapa, setMelhorCapa] = useState<string | null>(null)
+  const [erroConferencia, setErroConferencia] = useState('')
+
+  const ROTULO_PROBLEMA: Record<string, string> = {
+    marca_dagua: "marca d'água", logotipo: 'logotipo', telefone: 'telefone/contato',
+    texto_promocional: 'texto de propaganda', colagem: 'montagem',
+    outro_produto: 'outro produto', baixa_qualidade: 'qualidade ruim',
+  }
+
+  async function conferirImagensComIA() {
+    setConferindo(true); setErroConferencia('')
+    try {
+      const res = await fetch(`/api/marketplaces/rascunhos/${rascunho.id}/analisar-imagens`, { method: 'POST' })
+      const d = await res.json()
+      if (!res.ok || !d.ok) throw new Error(d.erro || `Erro ${res.status}`)
+      const mapa: Record<string, AchadoImagem> = {}
+      for (const item of d.imagens as AchadoImagem[]) mapa[item.url] = item
+      setAchados(mapa)
+      setMelhorCapa(d.melhorCapaUrl ?? null)
+      if (d.naoAnalisadas > 0) {
+        // Pode ser teto da rodada ou imagem que não baixou — em qualquer dos
+        // casos o que importa ao operador é que aquelas continuam sem conferir.
+        setErroConferencia(`${d.naoAnalisadas} imagem(ns) ficaram de fora (limite de 12 por rodada, ou não abriram). Confira essas no olho.`)
+      }
+    } catch (e: unknown) {
+      setErroConferencia(e instanceof Error ? e.message : 'Falha ao conferir as imagens')
+    } finally {
+      setConferindo(false)
+    }
+  }
+
   // ── Base a partir do original ─────────────────────────────────────────────
   const [mudancasLimpeza, setMudancasLimpeza] = useState<string[] | null>(null)
 
@@ -638,6 +675,27 @@ export default function RascunhoEditorClient({
                 Clique na imagem para ver grande.
               </div>
 
+              {imagensOrigem.length > 0 && (
+                <div className="space-y-2">
+                  <button type="button" onClick={conferirImagensComIA} disabled={conferindo}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 border border-violet-200 text-violet-700 text-sm font-medium rounded-lg transition-colors">
+                    {conferindo ? '✨ Olhando as imagens...' : `✨ Conferir as ${imagensOrigem.length} capturadas com IA`}
+                  </button>
+                  {erroConferencia && (
+                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{erroConferencia}</p>
+                  )}
+                  {achados && (
+                    <p className="text-xs text-slate-500">
+                      {(() => {
+                        const sujas = Object.values(achados).filter(a => a.problemas.length > 0).length
+                        if (sujas === 0) return 'A IA não viu marca d\'água, logo nem telefone em nenhuma. Confira mesmo assim antes de publicar.'
+                        return `A IA desconfiou de ${sujas} imagem(ns) — veja as tarjas abaixo. Ela pode errar nos dois sentidos: olhe as marcadas e também as limpas.`
+                      })()}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Imagens próprias — subir do computador ou colar o endereço */}
               <div className="rounded-lg border border-slate-200 p-3 space-y-3">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
@@ -738,16 +796,37 @@ export default function RascunhoEditorClient({
                     <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                       {imagensOrigem.map((src, i) => {
                         const escolhida = imagensEscolhidas.includes(src)
+                        const achado = achados?.[src]
+                        const suja = (achado?.problemas.length ?? 0) > 0
                         return (
-                          <div key={i}
-                            className={`relative aspect-square rounded-lg overflow-hidden border-2 bg-slate-50 ${escolhida ? 'border-emerald-400' : 'border-slate-200'}`}>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={src} alt="" className="w-full h-full object-contain cursor-zoom-in"
-                              onClick={() => setZoom(src)} />
-                            <button type="button" onClick={() => alternarImagem(src)}
-                              className={`absolute bottom-1 left-1 right-1 py-1 rounded text-[10px] font-semibold ${escolhida ? 'bg-emerald-600 text-white' : 'bg-white/90 border border-slate-300 text-slate-700'}`}>
-                              {escolhida ? '✓ escolhida' : 'usar esta'}
-                            </button>
+                          <div key={i} className="space-y-1">
+                            <div
+                              className={`relative aspect-square rounded-lg overflow-hidden border-2 bg-slate-50 ${
+                                suja ? 'border-red-400' : escolhida ? 'border-emerald-400' : 'border-slate-200'
+                              }`}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={src} alt="" className="w-full h-full object-contain cursor-zoom-in"
+                                onClick={() => setZoom(src)} />
+                              {suja && (
+                                <span className="absolute top-1 left-1 right-1 px-1 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold text-center leading-tight">
+                                  {achado!.problemas.map(p => ROTULO_PROBLEMA[p] ?? p).join(' · ')}
+                                </span>
+                              )}
+                              {!suja && melhorCapa === src && (
+                                <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-violet-600 text-white text-[9px] font-bold">
+                                  boa capa
+                                </span>
+                              )}
+                              <button type="button" onClick={() => alternarImagem(src)}
+                                className={`absolute bottom-1 left-1 right-1 py-1 rounded text-[10px] font-semibold ${escolhida ? 'bg-emerald-600 text-white' : 'bg-white/90 border border-slate-300 text-slate-700'}`}>
+                                {escolhida ? '✓ escolhida' : 'usar esta'}
+                              </button>
+                            </div>
+                            {achado?.observacao && (
+                              <p className={`text-[10px] leading-tight ${suja ? 'text-red-700' : 'text-slate-400'}`}>
+                                {achado.observacao}
+                              </p>
+                            )}
                           </div>
                         )
                       })}
