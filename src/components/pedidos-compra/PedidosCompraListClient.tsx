@@ -17,6 +17,8 @@ interface Pedido {
   qtdItens: number
   fornecedor_id: string | null
   fornecedores: { nome_fantasia: string; razao_social: string } | null
+  cancelado_em?: string | null
+  cancelado_motivo?: string | null
 }
 
 interface Fornecedor { id: string; nome_fantasia: string; razao_social: string }
@@ -45,13 +47,58 @@ export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Pr
   const router = useRouter()
   const [busca, setBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<Status | ''>('')
+  const [ocupado, setOcupado] = useState<string | null>(null)
+  const [aviso, setAviso] = useState('')
 
   const filtrados = pedidos.filter(p => {
     const forn = p.fornecedores?.nome_fantasia || p.fornecedores?.razao_social || ''
     if (busca && !forn.toLowerCase().includes(busca.toLowerCase()) && !p.numero?.includes(busca)) return false
-    if (filtroStatus && p.status !== filtroStatus) return false
-    return true
+    if (filtroStatus) return p.status === filtroStatus
+    // "Todos" mostra o que está em andamento. Pedido cancelado tem aba
+    // própria: deixá-lo no meio dos ativos faria o gestor contar como compra
+    // programada o que já foi desistido.
+    return p.status !== 'cancelado'
   })
+
+  async function cancelar(p: Pedido) {
+    const motivo = prompt(`Cancelar o pedido #${p.numero}?\n\nMotivo (fica registrado):`)
+    if (motivo === null) return
+    setOcupado(p.id); setAviso('')
+    const res = await fetch(`/api/pedidos-compra/${p.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acao: 'cancelar', motivo }),
+    })
+    const d = await res.json()
+    setOcupado(null)
+    if (!d.ok) { setAviso(d.erro ?? 'Não foi possível cancelar.'); return }
+    setAviso(`Pedido #${p.numero} cancelado. Ele fica na aba Cancelado.`)
+    router.refresh()
+  }
+
+  async function reabrir(p: Pedido) {
+    if (!confirm(`Reabrir o pedido #${p.numero}? Ele volta como rascunho.`)) return
+    setOcupado(p.id); setAviso('')
+    const res = await fetch(`/api/pedidos-compra/${p.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acao: 'reabrir' }),
+    })
+    const d = await res.json()
+    setOcupado(null)
+    if (!d.ok) { setAviso(d.erro ?? 'Não foi possível reabrir.'); return }
+    setAviso(`Pedido #${p.numero} reaberto como rascunho.`)
+    router.refresh()
+  }
+
+  async function excluir(p: Pedido) {
+    if (!confirm(`Excluir de vez o pedido #${p.numero}?\n\nOs itens vão junto e não há como desfazer. Para manter o registro de que ele existiu, cancele em vez de excluir.`)) return
+    setOcupado(p.id); setAviso('')
+    const res = await fetch(`/api/pedidos-compra/${p.id}`, { method: 'DELETE' })
+    const d = await res.json()
+    setOcupado(null)
+    if (!d.ok) { setAviso(d.erro ?? 'Não foi possível excluir.'); return }
+    setAviso(`Pedido #${p.numero} excluído.`)
+    router.refresh()
+  }
 
   function nomeFornecedor(p: Pedido) {
     return p.fornecedores?.nome_fantasia || p.fornecedores?.razao_social || '—'
@@ -105,15 +152,23 @@ export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Pr
       <div className="flex gap-2 flex-wrap">
         <button onClick={() => setFiltroStatus('')}
           className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${filtroStatus === '' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
-          Todos ({pedidos.length})
+          Todos ({pedidos.length - counts.cancelado})
         </button>
-        {(Object.entries(STATUS) as [Status, { label: string; color: string }][]).map(([key, cfg]) => counts[key] > 0 && (
-          <button key={key} onClick={() => setFiltroStatus(filtroStatus === key ? '' : key)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${filtroStatus === key ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
-            {cfg.label} ({counts[key]})
-          </button>
-        ))}
+        {(Object.entries(STATUS) as [Status, { label: string; color: string }][])
+          // Cancelado aparece SEMPRE, mesmo zerado: é a aba que responde "para
+          // onde foi o pedido que sumiu da lista". As outras só quando têm algo.
+          .filter(([key]) => key === 'cancelado' || counts[key] > 0)
+          .map(([key, cfg]) => (
+            <button key={key} onClick={() => setFiltroStatus(filtroStatus === key ? '' : key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${filtroStatus === key ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+              {cfg.label} ({counts[key]})
+            </button>
+          ))}
       </div>
+
+      {aviso && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{aviso}</div>
+      )}
 
       {/* Search */}
       <div className="relative max-w-xs">
@@ -159,6 +214,12 @@ export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Pr
                     <td className="px-4 py-3">
                       <span className="font-medium text-slate-800">{nomeFornecedor(p)}</span>
                       {p.observacoes && <p className="text-xs text-slate-400 truncate max-w-[200px]">{p.observacoes}</p>}
+                      {p.status === 'cancelado' && (
+                        <p className="text-xs text-red-500 truncate max-w-[240px]">
+                          Cancelado{p.cancelado_em ? ` em ${new Date(p.cancelado_em).toLocaleDateString('pt-BR')}` : ''}
+                          {p.cancelado_motivo ? ` · ${p.cancelado_motivo}` : ''}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold ${st.color}`}>
@@ -174,15 +235,46 @@ export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Pr
                       {p.previsao_entrega ? new Date(p.previsao_entrega + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Link href={`/dashboard/pedidos-compra/novo?id=${p.id}`}
-                          className="px-2 py-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg">
-                          ✏ Editar
-                        </Link>
-                        <button onClick={() => duplicar(p)}
-                          className="px-2 py-1 text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg">
-                          📋 Duplicar
-                        </button>
+                      <div className={`flex items-center gap-1 transition-opacity ${ocupado === p.id ? '' : 'opacity-0 group-hover:opacity-100'}`}>
+                        {p.status === 'cancelado' ? (
+                          <>
+                            <button onClick={() => reabrir(p)} disabled={ocupado === p.id}
+                              className="px-2 py-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg disabled:opacity-50">
+                              ↺ Reabrir
+                            </button>
+                            <button onClick={() => excluir(p)} disabled={ocupado === p.id}
+                              className="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-lg disabled:opacity-50">
+                              🗑 Excluir
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <Link href={`/dashboard/pedidos-compra/novo?id=${p.id}`}
+                              className="px-2 py-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg">
+                              ✏ Editar
+                            </Link>
+                            <button onClick={() => duplicar(p)}
+                              className="px-2 py-1 text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg">
+                              📋 Duplicar
+                            </button>
+                            {p.status !== 'recebido' && (
+                              <button onClick={() => cancelar(p)} disabled={ocupado === p.id}
+                                title="Mantém o pedido no histórico, marcado como cancelado"
+                                className="px-2 py-1 text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg disabled:opacity-50">
+                                ✕ Cancelar
+                              </button>
+                            )}
+                            {/* Excluir de vez só para rascunho: pedido que
+                                nunca saiu daqui. O servidor recusa o resto. */}
+                            {p.status === 'rascunho' && (
+                              <button onClick={() => excluir(p)} disabled={ocupado === p.id}
+                                title="Rascunho nunca enviado — apaga de vez"
+                                className="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-lg disabled:opacity-50">
+                                🗑 Excluir
+                              </button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

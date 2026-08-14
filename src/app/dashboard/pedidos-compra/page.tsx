@@ -16,7 +16,7 @@ export default async function PedidosCompraPage() {
   // e resolvido por um Map, mesmo padrao usado em outras telas desta base.
   const { data: pedidos, error: erroPedidos } = await supabase
     .from('pedidos_compra')
-    .select('id, numero, status, data_pedido, previsao_entrega, total, subtotal, observacoes, created_at, fornecedor_id')
+    .select('id, numero, status, data_pedido, previsao_entrega, total, subtotal, observacoes, created_at, fornecedor_id, cancelado_em, cancelado_motivo')
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: false })
     .limit(200)
