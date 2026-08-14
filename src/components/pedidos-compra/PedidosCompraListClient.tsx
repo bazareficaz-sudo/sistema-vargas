@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import EnviarPedidoWhatsappModal from './EnviarPedidoWhatsappModal'
 
 type Status = 'rascunho' | 'em_cotacao' | 'aguardando_aprovacao' | 'enviado' | 'parcialmente_recebido' | 'recebido' | 'cancelado'
 
@@ -48,6 +49,7 @@ export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Pr
   const [busca, setBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<Status | ''>('')
   const [ocupado, setOcupado] = useState<string | null>(null)
+  const [enviandoWhats, setEnviandoWhats] = useState<Pedido | null>(null)
   const [aviso, setAviso] = useState('')
 
   const filtrados = pedidos.filter(p => {
@@ -257,6 +259,11 @@ export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Pr
                               className="px-2 py-1 text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg">
                               📋 Duplicar
                             </button>
+                            <button onClick={() => setEnviandoWhats(p)}
+                              title="Manda a lista para o fornecedor — sem custo e sem total"
+                              className="px-2 py-1 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg">
+                              💬 WhatsApp
+                            </button>
                             {p.status !== 'recebido' && (
                               <button onClick={() => cancelar(p)} disabled={ocupado === p.id}
                                 title="Mantém o pedido no histórico, marcado como cancelado"
@@ -284,6 +291,15 @@ export default function PedidosCompraListClient({ pedidos, empresaId, erro }: Pr
           </table>
         )}
       </div>
+
+      {enviandoWhats && (
+        <EnviarPedidoWhatsappModal
+          pedidoId={enviandoWhats.id}
+          numero={enviandoWhats.numero}
+          onFechar={() => setEnviandoWhats(null)}
+          onEnviado={() => router.refresh()}
+        />
+      )}
     </div>
   )
 }

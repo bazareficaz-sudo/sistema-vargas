@@ -1068,8 +1068,14 @@ export default function NovoPedidoClient({ fornecedores, empresa, empresaId, use
                             </p>
                           )}
                         </div>
+                        {/* Sempre visível, e com aparência de botão. Antes era
+                            um ✕ cinza-claro que só aparecia no hover: quem usa
+                            no celular não tem hover, e mesmo no mouse ninguém
+                            achava. É o mesmo padrão que já tinha escondido o
+                            menu do celular. */}
                         <button onClick={() => removerItem(item.produto_id)}
-                          className="text-slate-200 hover:text-red-500 transition-colors text-sm opacity-0 group-hover:opacity-100 shrink-0">
+                          title="Tirar este produto do pedido"
+                          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-md border border-slate-200 text-slate-400 hover:bg-red-50 hover:border-red-200 hover:text-red-600 transition-colors text-xs">
                           ✕
                         </button>
                       </div>
