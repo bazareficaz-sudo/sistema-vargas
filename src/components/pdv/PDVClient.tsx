@@ -7,7 +7,7 @@ import { calcSaude, type SaudeConfig, type FaixaSaude, FAIXAS_PADRAO, CONFIG_PAD
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
-import { promocaoVigente } from '@/lib/produtos/promocao'
+import { promocaoVigente, precoPorQuantidade } from '@/lib/produtos/promocao'
 
 type Produto = {
   id: string; nome: string; sku: string; ean: string | null
@@ -15,6 +15,7 @@ type Produto = {
   marca: string | null
   promocao_ativa: boolean; preco_promocional: number | null
   promocao_inicio?: string | null; promocao_fim?: string | null
+  precos_quantidade?: unknown
 }
 type ItemVenda = {
   id: string; produto_id: string; nome: string; sku: string
@@ -23,6 +24,13 @@ type ItemVenda = {
   tipo: 'venda' | 'devolucao'
   custo: number
   em_promocao: boolean; preco_original: number
+  // Guardado no item para recalcular o preço quando a quantidade mudar no
+  // carrinho — a faixa de atacado só se conhece com a quantidade final.
+  produto?: Produto
+  /** Operador digitou o preço à mão: nenhum recálculo automático mexe nele. */
+  precoManual?: boolean
+  /** Preço veio de uma faixa de quantidade (atacado). */
+  faixaAplicada?: boolean
 }
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
@@ -194,7 +202,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     if (!q.trim() || q.length < 2) { setSugestoes([]); return }
     setBuscando(true)
     const palavras = q.trim().split(/\s+/).filter(Boolean)
-    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional, promocao_inicio, promocao_fim'
+    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional, promocao_inicio, promocao_fim, precos_quantidade'
 
     if (palavras.length === 1 && /^\d{8,14}$/.test(palavras[0])) {
       const { data } = await sb.from('produtos')
@@ -258,18 +266,18 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       if (idx >= 0) {
         const newQ = prev[idx].quantidade + q
         if (newQ === 0) return prev.filter((_, ix) => ix !== idx)
-        return prev.map((i, ix) => ix === idx
-          ? { ...i, quantidade: newQ, total: newQ * i.preco_unitario * (1 - i.desconto / 100) }
-          : i)
+        return prev.map((i, ix) => (ix === idx ? reprecificar(i, newQ) : i))
       }
       const emPromo = promocaoVigente(p)
-      const precoFinal = emPromo ? p.preco_promocional! : p.preco_venda
+      const precoFinal = precoPorQuantidade(p as any, q)
       return [...prev, {
         id: uid(), produto_id: p.id, nome: p.nome, sku: p.sku,
         quantidade: q, preco_unitario: precoFinal, desconto: 0,
         total: q * precoFinal, estoque_disponivel: p.estoque, unidade: p.unidade,
         tipo: tipoItem, custo: p.preco_custo,
         em_promocao: emPromo, preco_original: p.preco_venda,
+        produto: p,
+        faixaAplicada: precoFinal < (emPromo ? p.preco_promocional! : p.preco_venda),
       }]
     })
     setBusca(''); setSugestoes([]); setQtdInput('1'); setProdutoPendente(null)
@@ -286,6 +294,27 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
   function adicionarProdutoE(p: Produto, qtd?: number) { confirmarAdicao(p, qtd) }
 
+  // Recalcula quantidade, preço e total de um item do carrinho.
+  //
+  // O preço muda com a quantidade porque a faixa de atacado só se conhece
+  // depois de saber quantas unidades vão. Produto sem faixa configurada
+  // devolve o mesmo preço de sempre — o comportamento antigo, byte a byte.
+  // Preço digitado à mão nunca é recalculado.
+  function reprecificar(item: ItemVenda, novaQtd: number): ItemVenda {
+    if (item.precoManual || !item.produto) {
+      return { ...item, quantidade: novaQtd, total: novaQtd * item.preco_unitario * (1 - item.desconto / 100) }
+    }
+    const preco = precoPorQuantidade(item.produto as any, novaQtd)
+    const semFaixa = item.em_promocao ? item.produto.preco_promocional! : item.produto.preco_venda
+    return {
+      ...item,
+      quantidade: novaQtd,
+      preco_unitario: preco,
+      faixaAplicada: preco < semFaixa,
+      total: novaQtd * preco * (1 - item.desconto / 100),
+    }
+  }
+
   function removerItem(id: string) {
     setItens(p => p.filter(i => i.id !== id))
     setItemSelecionado(null)
@@ -297,7 +326,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       if (i.id !== id) return i
       // Mantém tipo coerente com sinal da quantidade
       const novoTipo: 'venda' | 'devolucao' = qtd < 0 ? 'devolucao' : 'venda'
-      return { ...i, quantidade: qtd, tipo: novoTipo, total: qtd * i.preco_unitario * (1 - i.desconto / 100) }
+      return { ...reprecificar(i, qtd), tipo: novoTipo }
     }))
   }
 
@@ -309,7 +338,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
   function alterarPreco(id: string, preco: number) {
     setItens(p => p.map(i => i.id === id
-      ? { ...i, preco_unitario: preco, total: i.quantidade * preco * (1 - i.desconto / 100) }
+      // `precoManual` trava o recálculo por faixa: preço digitado à mão é
+      // decisão do operador e não pode ser desfeita por ele mudar a
+      // quantidade depois.
+      ? { ...i, preco_unitario: preco, precoManual: true, faixaAplicada: false, total: i.quantidade * preco * (1 - i.desconto / 100) }
       : i))
   }
 

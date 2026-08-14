@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
+import { faixasDoProduto } from '@/lib/produtos/promocao'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import VisualizadorImagem from './VisualizadorImagem'
 import EnviarImagensWhatsappModal from './EnviarImagensWhatsappModal'
@@ -32,6 +33,7 @@ type Produto = {
   promocao_inicio?: string | null
   promocao_fim?: string | null
   promocao_ativa?: boolean
+  precos_quantidade?: unknown
   codigo_fornecedor?: string | null
   ibs_cst?: string | null
   ibs_cclasstrib?: string | null
@@ -104,6 +106,11 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [buscaKit, setBuscaKit] = useState('')
   const [resultadosKit, setResultadosKit] = useState<Produto[]>([])
   const [promocaoInfinita, setPromocaoInfinita] = useState(false)
+  // Faixas de atacado. Sempre três linhas na tela, mesmo vazias — é mais fácil
+  // preencher a segunda quando ela já está ali do que descobrir um botão de
+  // "adicionar faixa". Linha em branco não é gravada.
+  const [faixas, setFaixas] = useState<{ qtd: string; preco: string }[]>(
+    [{ qtd: '', preco: '' }, { qtd: '', preco: '' }, { qtd: '', preco: '' }])
   const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
   const [mensagemIA, setMensagemIA] = useState('')
@@ -164,6 +171,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       setForm({ ...produto })
       setAba(abaInicial ?? 'geral')
       setPromocaoInfinita(!produto.promocao_fim)
+      const salvas = faixasDoProduto(produto as any)
+      setFaixas([0, 1, 2].map(i => salvas[i]
+        ? { qtd: String(salvas[i].qtd), preco: String(salvas[i].preco) }
+        : { qtd: '', preco: '' }))
       if (produto.tipo === 'kit') carregarKitItens(produto.id)
       carregarImagens(produto.id)
       carregarAnunciosVinculados(produto.id)
@@ -569,6 +580,14 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     await salvarTitulosImagens()
     const isKit = form.tipo === 'kit'
 
+    // Faixas de atacado: linha em branco some, faixa incompleta ou inválida
+    // some junto — meia faixa gravada viraria preço zero numa venda. A ordem
+    // por quantidade é garantida aqui, não na leitura.
+    const faixasParaSalvar = faixas
+      .map(f => ({ qtd: Math.trunc(Number(f.qtd)), preco: Number(f.preco) }))
+      .filter(f => Number.isFinite(f.qtd) && f.qtd > 1 && Number.isFinite(f.preco) && f.preco > 0)
+      .sort((a, b) => a.qtd - b.qtd)
+
     // Kits: nunca confia no que está no formulário pro custo/estoque — sempre
     // recalcula ao vivo a partir dos componentes atuais antes de gravar, pra
     // não persistir um valor obsoleto (ex: usuário editou a composição sem
@@ -594,6 +613,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       promocao_inicio: form.promocao_inicio ?? null,
       promocao_fim: promocaoInfinita ? null : (form.promocao_fim ?? null),
       promocao_ativa: form.promocao_ativa ?? false,
+      precos_quantidade: faixasParaSalvar.length > 0 ? faixasParaSalvar : null,
       unidade: form.unidade,
       categoria: form.categoria || null,
       marca: form.marca || null,
@@ -676,6 +696,43 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
   const markupCalculado = form.preco_custo > 0 && form.preco_venda > 0
     ? (((form.preco_venda - form.preco_custo) / form.preco_custo) * 100) : 0
+
+  const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  // ── Promoção: preço, desconto e markup são o mesmo número visto de três
+  // ângulos. O preço é o que fica gravado; os outros dois são calculados a
+  // partir dele e, quando editados, viram preço de volta. Assim não existe
+  // estado duplicado para sair de sincronia.
+  const precoPromo = form.preco_promocional ?? null
+  const descontoPromo = precoPromo != null && form.preco_venda > 0
+    ? ((form.preco_venda - precoPromo) / form.preco_venda) * 100 : null
+  const markupPromo = precoPromo != null && form.preco_custo > 0
+    ? ((precoPromo - form.preco_custo) / form.preco_custo) * 100 : null
+  const lucroPromo = precoPromo != null && form.preco_custo > 0
+    ? precoPromo - form.preco_custo : null
+
+  function aplicarDescontoPromo(desconto: number) {
+    if (!Number.isFinite(desconto) || form!.preco_venda <= 0) { campo('preco_promocional', null); return }
+    const preco = form!.preco_venda * (1 - desconto / 100)
+    campo('preco_promocional', preco > 0 ? parseFloat(preco.toFixed(2)) : null)
+  }
+
+  function aplicarMarkupPromo(markup: number) {
+    if (!Number.isFinite(markup) || form!.preco_custo <= 0) { campo('preco_promocional', null); return }
+    const preco = form!.preco_custo * (1 + markup / 100)
+    campo('preco_promocional', preco > 0 ? parseFloat(preco.toFixed(2)) : null)
+  }
+
+  function alterarFaixa(indice: number, chave: 'qtd' | 'preco', valor: string) {
+    setFaixas(atual => atual.map((f, i) => (i === indice ? { ...f, [chave]: valor } : f)))
+  }
+
+  /** Preencher a faixa pelo markup, como no preço promocional acima. */
+  function aplicarMarkupFaixa(indice: number, markup: number) {
+    if (!Number.isFinite(markup) || form!.preco_custo <= 0) return
+    const preco = form!.preco_custo * (1 + markup / 100)
+    alterarFaixa(indice, 'preco', preco > 0 ? preco.toFixed(2) : '')
+  }
 
   const abas: { key: Aba; label: string; show?: boolean }[] = [
     { key: 'geral',    label: 'Geral' },
@@ -1044,15 +1101,62 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               {form.promocao_ativa ? (
                 <>
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Preço promocional (R$)</label>
-                    <input type="number" step="0.01"
-                      value={form.preco_promocional ?? ''}
-                      onChange={e => campo('preco_promocional', parseFloat(e.target.value) || null)}
-                      placeholder={`Normal: ${form.preco_venda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
-                      className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-orange-500 font-mono text-base" />
-                    {form.preco_promocional && form.preco_venda > 0 && (
-                      <p className="text-xs text-orange-600 mt-1">
-                        Desconto de {(((form.preco_venda - form.preco_promocional) / form.preco_venda) * 100).toFixed(1)}% sobre o preço normal
+                    {/* Três formas de dizer a mesma coisa. Quem pensa "20% off"
+                        não deveria abrir a calculadora, e quem pensa em markup
+                        precisa ver se a promoção ainda paga o custo. */}
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Preço promocional</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <input type="number" step="0.01"
+                          value={form.preco_promocional ?? ''}
+                          onChange={e => campo('preco_promocional', parseFloat(e.target.value) || null)}
+                          placeholder={form.preco_venda.toFixed(2)}
+                          className="w-full border border-orange-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-orange-500 font-mono text-base" />
+                        <p className="text-[11px] text-gray-400 mt-0.5">R$</p>
+                      </div>
+                      <div>
+                        <input type="number" step="0.1"
+                          value={descontoPromo == null ? '' : descontoPromo.toFixed(1)}
+                          onChange={e => aplicarDescontoPromo(parseFloat(e.target.value))}
+                          placeholder="0,0"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-orange-500 font-mono text-base" />
+                        <p className="text-[11px] text-gray-400 mt-0.5">% desconto</p>
+                      </div>
+                      <div>
+                        <input type="number" step="0.1"
+                          value={markupPromo == null ? '' : markupPromo.toFixed(1)}
+                          onChange={e => aplicarMarkupPromo(parseFloat(e.target.value))}
+                          placeholder="—"
+                          disabled={!(form.preco_custo > 0)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-orange-500 font-mono text-base disabled:bg-gray-100 disabled:text-gray-400" />
+                        <p className="text-[11px] text-gray-400 mt-0.5">% markup</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {[5, 10, 15, 20, 30].map(d => (
+                        <button key={d} type="button" onClick={() => aplicarDescontoPromo(d)}
+                          className="px-2.5 py-1 text-xs rounded-lg border border-orange-200 text-orange-700 hover:bg-orange-50">
+                          -{d}%
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs mt-2">
+                      <span className="text-gray-500">Normal {fmtBRL(form.preco_venda)}</span>
+                      {form.preco_custo > 0 && <span className="text-gray-500"> · custo {fmtBRL(form.preco_custo)}</span>}
+                      {form.preco_promocional != null && form.preco_promocional > 0 && (
+                        <>
+                          {' · '}
+                          <span className={lucroPromo != null && lucroPromo <= 0 ? 'text-red-600 font-semibold' : 'text-emerald-600'}>
+                            {lucroPromo == null
+                              ? 'sem custo cadastrado — não dá para saber o lucro'
+                              : `lucro ${fmtBRL(lucroPromo)} por unidade`}
+                          </span>
+                        </>
+                      )}
+                    </p>
+                    {form.preco_promocional != null && form.preco_promocional >= form.preco_venda && (
+                      <p className="text-xs text-red-600 mt-1">
+                        O preço promocional não é menor que o normal — o sistema ignora a promoção assim e cobra o preço normal.
                       </p>
                     )}
                   </div>
@@ -1087,6 +1191,87 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   <p className="text-sm">Ative a promoção para configurar o preço especial e o período.</p>
                 </div>
               )}
+
+              {/* ── Preço por quantidade (atacado) ──
+                  Fica fora do interruptor de propósito: promoção é campanha
+                  com data, atacado é política de venda e vale sempre. */}
+              <div className="pt-5 border-t border-gray-200">
+                <p className="text-sm font-medium text-gray-900">Preço por quantidade</p>
+                <p className="text-xs text-gray-500 mb-3">
+                  Quem leva mais paga menos por unidade. Vale sempre, mesmo sem promoção ativa,
+                  e o PDV troca o preço sozinho quando a quantidade alcança a faixa.
+                </p>
+
+                <div className="space-y-2">
+                  {faixas.map((f, i) => {
+                    const qtd = Number(f.qtd)
+                    const preco = Number(f.preco)
+                    const valida = qtd > 1 && preco > 0
+                    const mk = valida && form.preco_custo > 0
+                      ? ((preco - form.preco_custo) / form.preco_custo) * 100 : null
+                    const desc = valida && form.preco_venda > 0
+                      ? ((form.preco_venda - preco) / form.preco_venda) * 100 : null
+                    return (
+                      <div key={i} className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-gray-500 w-14">Nível {i + 1}</span>
+                        <span className="text-xs text-gray-500">a partir de</span>
+                        <input type="number" min="2" step="1" value={f.qtd}
+                          onChange={e => alterarFaixa(i, 'qtd', e.target.value)}
+                          placeholder="qtd"
+                          className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500" />
+                        <span className="text-xs text-gray-500">{form.unidade} →</span>
+                        <input type="number" step="0.01" value={f.preco}
+                          onChange={e => alterarFaixa(i, 'preco', e.target.value)}
+                          placeholder="R$ por unidade"
+                          className="w-32 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500" />
+                        {form.preco_custo > 0 && (
+                          <input type="number" step="0.1"
+                            value={mk == null ? '' : mk.toFixed(1)}
+                            onChange={e => aplicarMarkupFaixa(i, parseFloat(e.target.value))}
+                            placeholder="markup %"
+                            title="Markup desta faixa — digite para calcular o preço a partir do custo"
+                            className="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500" />
+                        )}
+                        {valida && (
+                          <span className="text-xs text-gray-500">
+                            {desc != null && desc > 0 && <span className="text-orange-600">-{desc.toFixed(1)}% </span>}
+                            {mk != null && (
+                              <span className={mk <= 0 ? 'text-red-600 font-semibold' : ''}>
+                                · lucro {fmtBRL(preco - form.preco_custo)}/un
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {(() => {
+                  // Faixa que cobra mais caro que uma faixa menor é erro de
+                  // digitação, e o PDV cobraria o menor preço mesmo assim —
+                  // melhor avisar aqui do que deixar a tabela mentindo.
+                  const validas = faixas
+                    .map(f => ({ qtd: Number(f.qtd), preco: Number(f.preco) }))
+                    .filter(f => f.qtd > 1 && f.preco > 0)
+                    .sort((a, b) => a.qtd - b.qtd)
+                  const foraDeOrdem = validas.some((f, i) => i > 0 && f.preco >= validas[i - 1].preco)
+                  const acimaDoNormal = validas.some(f => form.preco_venda > 0 && f.preco >= form.preco_venda)
+                  if (!foraDeOrdem && !acimaDoNormal) return null
+                  return (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                      {acimaDoNormal
+                        ? 'Alguma faixa está com preço igual ou maior que o preço normal — quem leva mais pagaria mais.'
+                        : 'As faixas não estão em ordem decrescente de preço: uma quantidade maior ficou mais cara que uma menor.'}
+                    </p>
+                  )
+                })()}
+
+                <p className="text-[11px] text-gray-400 mt-2">
+                  Deixe em branco as faixas que não usar. O markup é calculado sobre o custo atual
+                  ({form.preco_custo > 0 ? fmtBRL(form.preco_custo) : 'não cadastrado'}) — muda sozinho se o custo mudar.
+                </p>
+              </div>
             </div>
           )}
 
