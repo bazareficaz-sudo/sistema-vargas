@@ -3,7 +3,10 @@
 Anotações para retomar o trabalho numa sessão nova. Não é documentação do
 sistema: é o estado de quem estava com a mão na massa.
 
-Última atualização: 13/08/2026 (segunda sessão do dia)
+Última atualização: 14/08/2026
+
+Tudo que está descrito aqui como pronto está **no ar** (último deploy:
+`f9986a4`, com as três migrações do dia já rodadas).
 
 ---
 
@@ -82,8 +85,27 @@ primeiro o caminho inteiro, depois cada pedaço pelo nome.
    ainda não oferece a Nuvemshop: `EnviarPrecoEstoqueModal.tsx` trata tudo que
    não é ML como Shopee, escreve o preço na nossa tabela e chama
    `/api/marketplace/shopee/push`, que não acha o canal. Falta a rota
-   `nuvemshop/push` e a plataforma no modal.
+   `nuvemshop/push` e a plataforma no modal. **É a fatia mais óbvia a pegar.**
 2. **Replicar em massa** — `anuncios/replicar-massa` só conhece Shopee e ML.
+
+### Descrição do Mercado Livre — buscada sob demanda
+
+No ML a descrição **não vem no item**: é o endpoint `/items/{id}/description`,
+e o sync de catálogo não o chama para não dobrar as chamadas de uma rodada de
+7 mil anúncios. O efeito, medido: **0 de 7.693 anúncios do ML tinham
+descrição** (Shopee 1.279/1.279, Nuvemshop 223/236). Por isso replicar ou
+duplicar do ML sempre vinha com a descrição vazia.
+
+A rota de replicação passou a buscá-la na hora quando falta e gravar de volta
+— uma chamada por replicação, e da segunda vez já está no banco. **Os outros
+~7.690 continuam sem**, e só se preenchem conforme forem usados. Encher tudo
+de uma vez é uma varredura de ~7.700 chamadas (umas duas horas em ritmo
+seguro); não é urgente, mas é uma fatia própria se alguém quiser a coluna
+cheia.
+
+Cuidado que já mordeu: o sync gravava `descricao: null` explícito, o que
+apagaria no sync seguinte tudo que fosse buscado. A coluna saiu da linha do
+upsert — **omitir preserva**. Conferido rodando o sync logo depois de gravar.
 
 ### Qualidade dos anúncios — parou na metade
 
@@ -104,6 +126,62 @@ nota itemizada de verdade no ML o caminho é o endpoint `/items/{id}/health`
 
 Números por canal: ML Eficaz 4.986 anúncios (health 0,77), ML Ouro 2.025
 (0,70), Shp Eficaz 675, Shp Ouro 431.
+
+### Estoque por depósito — 540 produtos para acertar
+
+**A causa já está corrigida; a sujeira acumulada não.**
+
+São duas fontes: `produtos.estoque` (campo do produto) e `produto_estoque`
+(tabela por depósito). A tabela por depósito passou a ser alimentada por
+DIFERENÇAS quando o sistema já tinha estoque, e o saldo que existia naquele
+momento nunca foi copiado para lá. Somar a diferença só chega no número certo
+se o depósito já estivesse certo antes.
+
+O sintoma é o pior tipo: o operador conta a prateleira, põe 3, o topo da tela
+mostra 3 e o quadro por depósito mostra **-3**. Nenhum dos dois números está
+errado por si.
+
+Corrigido: ajuste manual é contagem física, então agora **sobrescreve** o
+depósito em vez de incrementar (só quando há UM depósito ativo — com dois ou
+mais o total do produto não diz quanto tem em cada um, e a tela avisa). O
+modal também mostra quando os dois divergem.
+
+**Medido em 14/08:** de 14.287 produtos ativos, 13.698 batem, **540 divergem**
+e 49 não têm linha de depósito nenhuma — 4.146 unidades de diferença, e 9
+produtos com depósito negativo e estoque positivo. Daqui em diante cada
+produto ajustado pela contagem se acerta sozinho; os 540 antigos **não**.
+
+A correção em massa é segura de escrever (só existe um depósito ativo, o
+"Padrão" — o "Principal" está inativo com zero), mas **mexe em dado de
+produção e depende de autorização do Silvano**. Não foi feita.
+
+### Categorias — árvore montada, faxina pendente
+
+A tabela `categorias` sempre teve `pai_id`; o cadastro do produto é que
+oferecia a lista achatada. Agora tem Categoria → Subcategoria encadeadas, com
+criação de subcategoria ali mesmo pelo "+", e a tela de Categorias ganhou a
+coluna **"Fica dentro de"**, que move uma categoria para dentro de outra **e
+reclassifica os produtos na mesma ação** (`categoria` vira o pai,
+`subcategoria` vira quem foi movido).
+
+**O que falta é trabalho de cadastro, não de código.** Medido: 102 categorias,
+das quais só 2 eram subcategorias de verdade, e o resto está achatado e
+duplicado:
+
+- MATERIAL HIDRÁULICO (1.788) · MATERIAL HIDRAULICO (762) · Material
+  Hidráulico · MATERIAL HIDR�ULICO — a mesma coisa quatro vezes, uma delas
+  com acento quebrado.
+- Mesma história em FERRAGENS/Ferragens, FERRAMENTAS/Ferramentas,
+  MATERIAL ELÉTRICO/Material Eletrico/MATERIAL EL�TRICO, PRODUTOS
+  QUIMICOS/Produtos Quimicos/Produtos Químicos.
+- TORNEIRAS, REGISTROS, RALOS E GRELHAS, CONEXAO SOLDAVEL, MANGUEIRAS são
+  partes de MATERIAL HIDRÁULICO. ALICATES, CHAVE FENDA, DISCOS, LIXAS, BROCAS
+  são partes de FERRAMENTAS.
+
+A tela mostra quantos produtos cada categoria tem — é assim que as duplicadas
+ficam visíveis. **Guardado como TEXTO, não como id**: dezenas de telas,
+relatórios e a IA leem `produtos.categoria` por nome. Trocar por chave
+estrangeira é outro projeto.
 
 ### Celular — fatias feitas, resto pendente
 
@@ -130,6 +208,13 @@ não vale passar por 99 telas.
   Shopee e ML também.
 - **27 produtos com estoque negativo.** A vitrine foi zerada, mas o saldo
   negativo no sistema continua — provavelmente entrada que faltou dar.
+- **540 produtos com depósito divergindo** do estoque (ver seção própria).
+  Decidir se autoriza a correção em massa.
+- **Faxina das categorias**: unificar as duplicadas e montar a árvore com a
+  coluna "Fica dentro de" (ver seção própria). É clique, não código.
+- **Código do fornecedor em branco**: no pedido #000001, 9 de 14 produtos não
+  têm. O pedido por WhatsApp cai no EAN nesses casos — funciona, mas o código
+  do catálogo do fornecedor é melhor.
 - **Contador**: confirmar se a empresa é contribuinte **substituído** (ST vem
   recolhido do fornecedor). Disso depende a tabela de conversão de CFOP por
   modelo — ver abaixo.
@@ -166,6 +251,32 @@ substituída, 5405 vale para os dois modelos e basta corrigir os 49.
 - **Dashboard** — entradas manuais não entravam em "Compras do mês": a
   consulta filtrava por `data_emissao`, que entrada manual não tem (4 de 31
   preenchidas). Passou a usar a data de entrada quando não há emissão.
+- **Busca da entrada manual** — pedia ao banco QUALQUER palavra, cortava em
+  300 linhas e só então pontuava. Como só de "bucha" o catálogo tem centenas,
+  o produto certo podia nem chegar a ser avaliado. Agora as palavras são
+  exigidas no BANCO (cada `.or()` encadeado soma com E). "bucha red 3/4" saiu
+  de 50 resultados embaralhados para 8. Palavra de 1–2 caracteres vale só como
+  palavra INTEIRA — o "5" de "5 METROS", não o de "4,5 METROS" —, senão o
+  número era descartado e vinham as extensões de 10 e 20 metros.
+- **Preço por quantidade (atacado)** — três níveis no cadastro, aplicados de
+  verdade no PDV: o preço do item é recalculado quando a quantidade muda. Preço
+  digitado à mão trava o recálculo. Devolução usa o módulo da quantidade (quem
+  devolve 12 pagou o preço de 12; sem isso a loja devolveria a mais). A faixa
+  não sobrescreve a promoção — vale o menor dos dois. **Orçamentos ainda não
+  aplica as faixas**, só o PDV.
+- **Rascunhos** — dá para subir imagem própria e adicionar por endereço (antes
+  só existia o que o robô capturou, que é justamente o material de terceiro do
+  qual a tela manda desconfiar). E a IA confere as capturadas: marca marca
+  d'água, logotipo, telefone e texto promocional, e aponta a melhor capa. Ela
+  não marca nem desmarca nada.
+- **Pedidos ao fornecedor** — cancelar (mantém a linha, com data e motivo),
+  reabrir (volta como RASCUNHO, nunca ao status anterior) e excluir (só
+  rascunho ou já cancelado; a trava está na rota, não só no botão). Envio por
+  WhatsApp com o telefone do fornecedor preenchido do cadastro, mandando nome
+  do produto, código do fornecedor e quantidade — **sem custo e sem total**, de
+  propósito: o preço aqui é o que a loja pagou, e mandá-lo é abrir a carta
+  antes de o fornecedor cotar. Item com quantidade zero fica de fora (6 dos 14
+  do pedido real estavam assim).
 
 ---
 
@@ -181,8 +292,16 @@ substituída, 5405 vale para os dois modelos e basta corrigir os 49.
 - **Não abro a aplicação.** Nenhuma mudança de tela desta sessão foi
   conferida visualmente — a verificação é do Silvano, e foi ela que pegou os
   dois bugs do menu no celular.
-- **Migração antes do deploy.** Código que grava coluna nova quebra o
-  upsert INTEIRO se o SQL não tiver rodado. Já aconteceu com a qualidade;
-  `upsertAnuncio` ganhou uma proteção que remove os campos e regrava.
+- **Migração antes do deploy — e conferir, não perguntar.** Código que lê ou
+  grava coluna nova quebra a consulta INTEIRA se o SQL não tiver rodado. Em
+  14/08 isso ia derrubar a busca do PDV: bastava um `select` da coluna nova
+  para a tela que vende parar. O jeito certo é **checar as colunas no banco
+  antes de publicar** (um `select` da coluna em `limit(1)` responde na hora),
+  em vez de confiar na memória de quem rodou o SQL. Foi assim que o deploy
+  daquele dia foi segurado — e depois liberado.
+- **O botão que só aparece no hover é armadilha recorrente.** Já aconteceu no
+  menu do celular e no remover-item do pedido de compra. Sem hover no celular,
+  o recurso simplesmente não existe para o operador. Se for ação, que seja
+  visível.
 - **Este arquivo fica desatualizado sozinho.** Atualizar ao terminar cada
   fatia, ou ele vira mentira com aparência de verdade.
