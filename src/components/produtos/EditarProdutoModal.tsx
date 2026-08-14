@@ -24,7 +24,7 @@ const TIPOS = [
 type Produto = {
   id: string; nome: string; sku: string | null; ean: string | null
   preco_venda: number; preco_custo: number; unidade: string
-  categoria: string | null; marca: string | null
+  categoria: string | null; subcategoria?: string | null; marca: string | null
   estoque: number; estoque_minimo: number
   ativo: boolean; disponivel_pdv: boolean; permite_fracao: boolean
   ncm: string | null; cest?: string | null; tipo: string
@@ -99,7 +99,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [aba, setAba] = useState<Aba>('geral')
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
-  const [categorias, setCategorias] = useState<{ id: string; nome: string }[]>([])
+  const [categorias, setCategorias] = useState<{ id: string; nome: string; pai_id: string | null }[]>([])
+  const [criandoSub, setCriandoSub] = useState(false)
   const [marcas, setMarcas] = useState<{ id: string; nome: string }[]>([])
   const [kitItens, setKitItens] = useState<KitItem[]>([])
   const [recalculandoKit, setRecalculandoKit] = useState(false)
@@ -269,13 +270,29 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
   useEffect(() => {
     Promise.all([
-      sb.from('categorias').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+      sb.from('categorias').select('id, nome, pai_id').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
       sb.from('marcas').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     ]).then(([cats, mks]) => {
       setCategorias(cats.data ?? [])
       setMarcas(mks.data ?? [])
     })
   }, [empresaId])
+
+  // Produto gravado com uma categoria que hoje é SUBcategoria de outra — o que
+  // acontece assim que o gestor organiza a árvore e move, por exemplo,
+  // TORNEIRAS para dentro de MATERIAL HIDRÁULICO. A tela passa a exibir (e a
+  // gravar) nos dois níveis, em vez de mostrar a subcategoria como se fosse
+  // categoria raiz e não achá-la na lista.
+  useEffect(() => {
+    if (!form?.categoria || categorias.length === 0) return
+    const achada = categorias.find(c => c.nome === form.categoria)
+    if (!achada?.pai_id) return
+    const pai = categorias.find(c => c.id === achada.pai_id)
+    if (!pai) return
+    setForm(prev => (prev && prev.categoria === achada.nome
+      ? { ...prev, categoria: pai.nome, subcategoria: prev.subcategoria ?? achada.nome }
+      : prev))
+  }, [categorias, form?.categoria])
 
   async function carregarImagens(produtoId: string) {
     const { data } = await sb
@@ -616,6 +633,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       precos_quantidade: faixasParaSalvar.length > 0 ? faixasParaSalvar : null,
       unidade: form.unidade,
       categoria: form.categoria || null,
+      subcategoria: form.subcategoria || null,
       marca: form.marca || null,
       estoque,
       estoque_minimo: form.estoque_minimo,
@@ -656,6 +674,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       nome: form.nome,
       descricao_marketplace: form.descricao_marketplace || null,
       categoria: form.categoria || null,
+      subcategoria: form.subcategoria || null,
       marca: form.marca || null,
       ean: form.ean || null,
     })
@@ -698,6 +717,40 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     ? (((form.preco_venda - form.preco_custo) / form.preco_custo) * 100) : 0
 
   const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  // ── Categoria → subcategoria ──
+  // A tabela `categorias` sempre teve `pai_id`; o que faltava era o cadastro
+  // do produto enxergar os dois níveis em vez de uma lista achatada.
+  const categoriasRaiz = categorias.filter(c => !c.pai_id)
+  const categoriaAtual = categoriasRaiz.find(c => c.nome === form.categoria) ?? null
+  const subcategoriasDaCategoria = categoriaAtual
+    ? categorias.filter(c => c.pai_id === categoriaAtual.id)
+    : []
+
+  /**
+   * Cria uma subcategoria dentro da categoria escolhida, sem sair da tela.
+   *
+   * Existe porque o caminho contrário — abrir Cadastros → Categorias, criar,
+   * voltar, reabrir o produto — é o que faz o operador desistir e deixar o
+   * produto na categoria genérica.
+   */
+  async function criarSubcategoria() {
+    if (!categoriaAtual) return
+    const nome = prompt(`Nova subcategoria dentro de "${categoriaAtual.nome}":`)?.trim()
+    if (!nome) return
+
+    const jaExiste = categorias.find(c => c.pai_id === categoriaAtual.id && c.nome.toLowerCase() === nome.toLowerCase())
+    if (jaExiste) { campo('subcategoria', jaExiste.nome); return }
+
+    setCriandoSub(true)
+    const { data, error } = await sb.from('categorias')
+      .insert({ empresa_id: empresaId, nome, pai_id: categoriaAtual.id, ativo: true })
+      .select('id, nome, pai_id').single()
+    setCriandoSub(false)
+    if (error) { setErro(`Não foi possível criar a subcategoria: ${error.message}`); return }
+    setCategorias(prev => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome)))
+    campo('subcategoria', data.nome)
+  }
 
   // ── Promoção: preço, desconto e markup são o mesmo número visto de três
   // ângulos. O preço é o que fica gravado; os outros dois são calculados a
@@ -916,16 +969,51 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                 </div>
               </div>
 
-              {/* Categoria + Marca */}
+              {/* Categoria → Subcategoria + Marca */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Categoria</label>
-                  <select value={form.categoria ?? ''} onChange={e => campo('categoria', e.target.value)}
+                  <select value={form.categoria ?? ''}
+                    onChange={e => {
+                      // Trocar a categoria zera a subcategoria: subcategoria de
+                      // outra categoria não faz sentido nenhum e viraria lixo
+                      // silencioso no cadastro.
+                      setForm(prev => prev ? { ...prev, categoria: e.target.value, subcategoria: null } : prev)
+                    }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500">
                     <option value="">— Sem categoria —</option>
-                    {categorias.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+                    {categoriasRaiz.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
                   </select>
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Subcategoria
+                    {form.categoria && subcategoriasDaCategoria.length === 0 && (
+                      <span className="text-gray-400 font-normal"> — nenhuma cadastrada em {form.categoria}</span>
+                    )}
+                  </label>
+                  <div className="flex gap-1.5">
+                    <select value={form.subcategoria ?? ''} onChange={e => campo('subcategoria', e.target.value || null)}
+                      disabled={!form.categoria}
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400">
+                      <option value="">{form.categoria ? '— Sem subcategoria —' : 'Escolha a categoria antes'}</option>
+                      {subcategoriasDaCategoria.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+                      {/* A subcategoria gravada pode não existir mais na tabela
+                          (renomeada, desativada). Mostrar mesmo assim evita que
+                          salvar o produto apague a classificação sem avisar. */}
+                      {form.subcategoria && !subcategoriasDaCategoria.some(c => c.nome === form.subcategoria) && (
+                        <option value={form.subcategoria}>{form.subcategoria} (fora da lista)</option>
+                      )}
+                    </select>
+                    <button type="button" onClick={criarSubcategoria} disabled={!form.categoria || criandoSub}
+                      title="Criar uma subcategoria dentro desta categoria"
+                      className="px-2.5 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+                      {criandoSub ? '…' : '+'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Marca</label>
                   <select value={form.marca ?? ''} onChange={e => campo('marca', e.target.value)}

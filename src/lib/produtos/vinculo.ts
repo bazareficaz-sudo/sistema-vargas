@@ -13,6 +13,9 @@ export type CamposSincronizaveis = Partial<{
   nome: string
   descricao_marketplace: string | null
   categoria: string | null
+  // Subcategoria acompanha a categoria: propagar uma sem a outra deixaria o
+  // produto da empresa parceira com "MATERIAL HIDRÁULICO / Alicates".
+  subcategoria: string | null
   marca: string | null
   ean: string | null
 }>

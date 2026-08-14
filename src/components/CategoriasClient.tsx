@@ -6,9 +6,13 @@ import { useRouter } from 'next/navigation'
 
 type Categoria = { id: string; nome: string; pai_id: string | null; ativo: boolean; created_at: string }
 
-export default function CategoriasClient({ categorias: inicial, empresaId }: { categorias: Categoria[]; empresaId: string }) {
+export default function CategoriasClient({ categorias: inicial, empresaId, contagem = {} }: {
+  categorias: Categoria[]; empresaId: string; contagem?: Record<string, number>
+}) {
   const router = useRouter()
   const [categorias, setCategorias] = useState(inicial)
+  const [movendo, setMovendo] = useState<string | null>(null)
+  const [aviso, setAviso] = useState('')
   const [novoNome, setNovoNome] = useState('')
   const [novoPai, setNovoPai] = useState('')
   const [salvando, setSalvando] = useState(false)
@@ -57,6 +61,65 @@ export default function CategoriasClient({ categorias: inicial, empresaId }: { c
     setCategorias(prev => prev.filter(c => c.id !== id))
   }
 
+  /**
+   * Move uma categoria para dentro de outra — e leva os produtos junto.
+   *
+   * É a operação que faltava. A base tem 100 categorias soltas no mesmo nível,
+   * várias delas partes de outra: TORNEIRAS, REGISTROS e RALOS E GRELHAS são
+   * MATERIAL HIDRÁULICO. Sem isto, transformar TORNEIRAS em subcategoria
+   * deixaria 1.788 produtos apontando para uma categoria que sumiu do primeiro
+   * nível — classificados em lugar nenhum.
+   *
+   * Por isso a mudança de pai reclassifica os produtos na mesma ação:
+   * `categoria` vira o nome do pai e `subcategoria` vira o nome de quem foi
+   * movido. Passa a ser um clique em vez de 1.788 edições.
+   */
+  async function moverPara(cat: Categoria, novoPaiId: string) {
+    const pai = novoPaiId ? categorias.find(c => c.id === novoPaiId) : null
+    if (novoPaiId && !pai) return
+    if (novoPaiId === cat.id) { setErro('Uma categoria não pode ser subcategoria dela mesma.'); return }
+    // Só um nível: o cadastro do produto tem dois campos, não uma árvore.
+    if (pai?.pai_id) { setErro(`"${pai.nome}" já é uma subcategoria. O sistema trabalha com dois níveis.`); return }
+    if (categorias.some(c => c.pai_id === cat.id)) {
+      setErro(`"${cat.nome}" tem subcategorias dentro dela. Mova ou apague as subcategorias antes.`); return
+    }
+
+    const quantos = contagem[cat.nome] ?? 0
+    const destino = pai ? `dentro de "${pai.nome}"` : 'para o primeiro nível'
+    const texto = quantos > 0
+      ? `Mover "${cat.nome}" ${destino}?\n\n${quantos} produto(s) serão reclassificados: categoria passa a ser "${pai?.nome ?? cat.nome}"${pai ? ` e subcategoria "${cat.nome}"` : ' e ficam sem subcategoria'}.`
+      : `Mover "${cat.nome}" ${destino}?`
+    if (!confirm(texto)) return
+
+    setMovendo(cat.id); setErro(''); setAviso('')
+    const sb = createClient()
+
+    const { error } = await sb.from('categorias').update({ pai_id: novoPaiId || null }).eq('id', cat.id)
+    if (error) { setMovendo(null); setErro(`Erro ao mover: ${error.message}`); return }
+
+    // Reclassifica os produtos que estavam nesta categoria. Vira subcategoria
+    // do novo pai; voltando para o primeiro nível, volta a ser categoria.
+    let reclassificados = 0
+    if (pai) {
+      const { data, error: e2 } = await sb.from('produtos')
+        .update({ categoria: pai.nome, subcategoria: cat.nome })
+        .eq('empresa_id', empresaId).eq('categoria', cat.nome).select('id')
+      if (e2) { setMovendo(null); setErro(`Categoria movida, mas os produtos não foram reclassificados: ${e2.message}`); return }
+      reclassificados = data?.length ?? 0
+    } else {
+      const { data, error: e2 } = await sb.from('produtos')
+        .update({ categoria: cat.nome, subcategoria: null })
+        .eq('empresa_id', empresaId).eq('subcategoria', cat.nome).select('id')
+      if (e2) { setMovendo(null); setErro(`Categoria movida, mas os produtos não foram reclassificados: ${e2.message}`); return }
+      reclassificados = data?.length ?? 0
+    }
+
+    setCategorias(prev => prev.map(c => (c.id === cat.id ? { ...c, pai_id: novoPaiId || null } : c)))
+    setMovendo(null)
+    setAviso(`"${cat.nome}" movida${reclassificados > 0 ? ` · ${reclassificados} produto(s) reclassificado(s)` : ''}.`)
+    router.refresh()
+  }
+
   function nomePai(paiId: string | null) {
     if (!paiId) return null
     return categorias.find(c => c.id === paiId)?.nome ?? null
@@ -96,6 +159,13 @@ export default function CategoriasClient({ categorias: inicial, empresaId }: { c
           </button>
         </div>
         {erro && <p className="mt-2 text-sm text-red-600">{erro}</p>}
+        {aviso && <p className="mt-2 text-sm text-emerald-700">{aviso}</p>}
+        <p className="mt-3 text-xs text-gray-500">
+          Dois níveis: categoria e subcategoria. Para transformar uma categoria existente em
+          subcategoria — TORNEIRAS dentro de MATERIAL HIDRÁULICO, por exemplo — use a coluna
+          <b> Fica dentro de</b> na lista abaixo. Os produtos daquela categoria são reclassificados
+          junto, sem precisar editar um por um.
+        </p>
       </div>
 
       {/* Lista */}
@@ -104,8 +174,8 @@ export default function CategoriasClient({ categorias: inicial, empresaId }: { c
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Nome</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Subcategoria de</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Subcategorias</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Fica dentro de</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Uso</th>
               <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Ativo</th>
               <th className="px-4 py-3"></th>
             </tr>
@@ -127,9 +197,28 @@ export default function CategoriasClient({ categorias: inicial, empresaId }: { c
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-gray-500 text-xs">{nomePai(c.pai_id) ?? <span className="text-gray-300">—</span>}</td>
+                <td className="px-4 py-3 text-xs">
+                  {/* Mudar o pai aqui é o que reorganiza a árvore E os produtos
+                      de uma vez — ver moverPara(). */}
+                  <select value={c.pai_id ?? ''} disabled={movendo === c.id}
+                    onChange={e => moverPara(c, e.target.value)}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-700 bg-white disabled:opacity-50">
+                    <option value="">— categoria principal —</option>
+                    {raizes.filter(r => r.id !== c.id).map(r => (
+                      <option key={r.id} value={r.id}>dentro de {r.nome}</option>
+                    ))}
+                  </select>
+                </td>
                 <td className="px-4 py-3 text-gray-500 text-xs">
-                  {!c.pai_id ? `${subs.filter(s => s.pai_id === c.id).length} subcategoria(s)` : '—'}
+                  {(contagem[c.nome] ?? 0) > 0 && (
+                    <span className="text-gray-700">{contagem[c.nome]} produto(s)</span>
+                  )}
+                  {!c.pai_id && subs.filter(s => s.pai_id === c.id).length > 0 && (
+                    <span className="text-gray-400"> · {subs.filter(s => s.pai_id === c.id).length} subcategoria(s)</span>
+                  )}
+                  {(contagem[c.nome] ?? 0) === 0 && subs.filter(s => s.pai_id === c.id).length === 0 && (
+                    <span className="text-gray-300">vazia</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-center">
                   <button onClick={() => toggleAtivo(c)}
