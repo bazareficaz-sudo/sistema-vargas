@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
-import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { ajustarDepositoPrincipal, definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 
 type Produto = { id: string; nome: string; sku: string | null; unidade: string; estoque: number }
 
@@ -63,6 +63,9 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
   const [motivoAjuste, setMotivoAjuste] = useState('')
   const [salvandoAjuste, setSalvandoAjuste] = useState(false)
   const [erroAjuste, setErroAjuste] = useState('')
+  // Fica visível depois do ajuste quando o depósito não pôde receber a
+  // contagem — sem isso o operador não teria como saber.
+  const [avisoDeposito, setAvisoDeposito] = useState('')
 
   async function carregarPorDeposito() {
     const sb = createClient()
@@ -98,7 +101,22 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
     const { error } = await sb.from('produtos').update({ estoque: nova, updated_at: new Date().toISOString() }).eq('id', produto.id)
     if (error) { setSalvandoAjuste(false); setErroAjuste(error.message); return }
 
-    await ajustarDepositoPrincipal(sb, empresaId, produto.id, delta)
+    // Ajuste manual é contagem física: o número informado é a verdade sobre a
+    // prateleira, não uma correção relativa. Por isso o depósito recebe o
+    // valor contado, e não a diferença — somar a diferença só acerta se o
+    // depósito já estivesse certo antes, e é justamente aí que ele não estava.
+    const resultadoDeposito = await definirContagemNoDeposito(sb, empresaId, produto.id, nova)
+    if (resultadoDeposito === 'varios_depositos') {
+      // Com mais de um depósito ativo, o total do produto não diz quanto tem
+      // em cada um — mantém o comportamento antigo e avisa na tela.
+      await ajustarDepositoPrincipal(sb, empresaId, produto.id, delta)
+    }
+    setAvisoDeposito(resultadoDeposito === 'varios_depositos'
+      ? 'Há mais de um depósito ativo: a diferença foi lançada no depósito principal. Confira a distribuição entre os depósitos.'
+      : resultadoDeposito === 'sem_deposito'
+        ? 'Nenhum depósito ativo cadastrado — o estoque do produto foi ajustado, mas não há onde registrar por depósito.'
+        : '')
+
     const depositoId = await buscarDepositoPrincipal(sb, empresaId)
     await registrarMovimentoEstoque(sb, {
       empresaId, depositoId, produtoId: produto.id, produtoNome: produto.nome,
@@ -377,6 +395,20 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                     </tfoot>
                   </table>
                 </div>
+                {/* Os dois números têm origens diferentes: "Estoque atual" é o
+                    campo do produto, e o quadro acima é a tabela por depósito.
+                    Quando divergem, dizer o que fazer vale mais do que deixar
+                    o operador achando que o sistema errou a conta. */}
+                {totalDepositos !== estoqueAtual && (
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                    O total por depósito ({totalDepositos}) está diferente do estoque do produto ({estoqueAtual}).
+                    O controle por depósito começou depois, e o saldo que já existia nunca entrou nele.
+                    Um ajuste pela contagem física acerta os dois de uma vez.
+                  </p>
+                )}
+                {avisoDeposito && (
+                  <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">{avisoDeposito}</p>
+                )}
               </div>
             )}
 
