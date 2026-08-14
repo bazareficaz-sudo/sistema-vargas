@@ -7,6 +7,7 @@ import { calcularCustoItem, type NFeItem as NFeItemParser } from '@/lib/nfe-pars
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
+import { definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -171,6 +172,48 @@ export default function EntradaXmlDetalheClient({
 
   // Conferência
   const [confQtd, setConfQtd] = useState<Record<string, number>>({})
+
+  // ── Aba Estoque ──
+  // `zerar` marcado = ao finalizar, o produto termina com exatamente o que
+  // veio na nota, em vez de somar ao saldo atual. Fica gravado no item porque
+  // a entrada por XML é retomável: quem marca hoje pode finalizar amanhã.
+  const [zerar, setZerar] = useState<Record<string, boolean>>(
+    Object.fromEntries(itensIniciais.map(i => [i.id, !!i.zerar_estoque_antes])))
+  const [salvandoZerar, setSalvandoZerar] = useState(false)
+  // Saldo lido na hora de abrir a aba, e não da prop `produtos`: entre carregar
+  // a página e finalizar a entrada pode ter havido venda.
+  const [estoqueAgora, setEstoqueAgora] = useState<Record<string, { estoque: number; minimo: number; unidade: string }>>({})
+  const [carregandoEstoque, setCarregandoEstoque] = useState(false)
+
+  const zerarCount = Object.values(zerar).filter(Boolean).length
+
+  async function carregarEstoqueAgora() {
+    const ids = [...new Set(itens.filter(i => i.produto_id && i.status_mapeamento !== 'ignorado').map(i => i.produto_id))]
+    if (ids.length === 0) { setEstoqueAgora({}); return }
+    setCarregandoEstoque(true)
+    const { data } = await sb.from('produtos')
+      .select('id, estoque, estoque_minimo, unidade').in('id', ids)
+    setEstoqueAgora(Object.fromEntries((data ?? []).map((p: any) => [
+      p.id, { estoque: Number(p.estoque) || 0, minimo: Number(p.estoque_minimo) || 0, unidade: p.unidade ?? 'UN' },
+    ])))
+    setCarregandoEstoque(false)
+  }
+
+  useEffect(() => {
+    if (aba === 'estoque') carregarEstoqueAgora()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aba])
+
+  async function salvarZerar() {
+    setSalvandoZerar(true)
+    for (const item of itens) {
+      const valor = !!zerar[item.id]
+      if (valor === !!item.zerar_estoque_antes) continue
+      await sb.from('nfe_itens').update({ zerar_estoque_antes: valor }).eq('id', item.id)
+    }
+    setItens(prev => prev.map(i => ({ ...i, zerar_estoque_antes: !!zerar[i.id] })))
+    setSalvandoZerar(false)
+  }
 
   // Custos
   const [incluirIpi, setIncluirIpi] = useState(true)
@@ -642,26 +685,55 @@ export default function EntradaXmlDetalheClient({
         const { data: prodAntes, error: erroBusca } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
         if (erroBusca) throw erroBusca
         const estoqueAnterior = prodAntes?.estoque ?? 0
-        const estoqueNovo = estoqueAnterior + qtd
+        const vaiZerar = !!item.zerar_estoque_antes
+        const estoqueNovo = vaiZerar ? qtd : estoqueAnterior + qtd
 
-        const { error: erroRpc } = await sb.rpc('incrementar_estoque', {
-          p_produto_id: item.produto_id,
-          p_empresa_id: empresaId,
-          p_deposito_id: depositoId,
-          p_quantidade: qtd,
-          p_custo: custo,
-        })
-        if (erroRpc) {
-          // fallback: update direto
-          const { error: erroUpdate } = await sb.from('produtos').update({ estoque: estoqueNovo, preco_custo: custo }).eq('id', item.produto_id)
+        if (vaiZerar) {
+          // Zerar é sobrescrever, então a RPC de incremento não serve. O saldo
+          // vai direto para a quantidade da nota, e o depósito recebe o mesmo
+          // número — a mesma regra da contagem física no cadastro do produto.
+          const { error: erroUpdate } = await sb.from('produtos')
+            .update({ estoque: estoqueNovo, preco_custo: custo }).eq('id', item.produto_id)
           if (erroUpdate) throw erroUpdate
+          await definirContagemNoDeposito(sb, empresaId, item.produto_id, estoqueNovo)
+
+          // Dois movimentos, não um: o extrato precisa fechar somando. Um
+          // movimento só, de 15 para 6, faria a coluna "quantidade" mentir.
+          if (estoqueAnterior !== 0) {
+            await registrarMovimentoEstoque(sb, {
+              empresaId, depositoId, produtoId: item.produto_id, produtoNome: item.descricao_sistema || item.descricao_xml,
+              tipo: estoqueAnterior > 0 ? 'ajuste_saida' : 'ajuste_entrada',
+              quantidade: Math.abs(estoqueAnterior), estoqueAnterior, estoqueNovo: 0,
+              motivo: `Estoque zerado antes da entrada NF-e ${entrada.numero}/${entrada.serie}`,
+              referenciaTipo: 'entrada_xml', referenciaId: entrada.id, usuario: operador,
+            })
+          }
+          await registrarMovimentoEstoque(sb, {
+            empresaId, depositoId, produtoId: item.produto_id, produtoNome: item.descricao_sistema || item.descricao_xml,
+            tipo: 'entrada_nfe', quantidade: qtd, estoqueAnterior: 0, estoqueNovo,
+            motivo: `Entrada NF-e ${entrada.numero}/${entrada.serie}`, referenciaTipo: 'entrada_xml', referenciaId: entrada.id,
+            usuario: operador,
+          })
+        } else {
+          const { error: erroRpc } = await sb.rpc('incrementar_estoque', {
+            p_produto_id: item.produto_id,
+            p_empresa_id: empresaId,
+            p_deposito_id: depositoId,
+            p_quantidade: qtd,
+            p_custo: custo,
+          })
+          if (erroRpc) {
+            // fallback: update direto
+            const { error: erroUpdate } = await sb.from('produtos').update({ estoque: estoqueNovo, preco_custo: custo }).eq('id', item.produto_id)
+            if (erroUpdate) throw erroUpdate
+          }
+          await registrarMovimentoEstoque(sb, {
+            empresaId, depositoId, produtoId: item.produto_id, produtoNome: item.descricao_sistema || item.descricao_xml,
+            tipo: 'entrada_nfe', quantidade: qtd, estoqueAnterior, estoqueNovo,
+            motivo: `Entrada NF-e ${entrada.numero}/${entrada.serie}`, referenciaTipo: 'entrada_xml', referenciaId: entrada.id,
+            usuario: operador,
+          })
         }
-        await registrarMovimentoEstoque(sb, {
-          empresaId, depositoId, produtoId: item.produto_id, produtoNome: item.descricao_sistema || item.descricao_xml,
-          tipo: 'entrada_nfe', quantidade: qtd, estoqueAnterior, estoqueNovo,
-          motivo: `Entrada NF-e ${entrada.numero}/${entrada.serie}`, referenciaTipo: 'entrada_xml', referenciaId: entrada.id,
-          usuario: operador,
-        })
         produtoIdsAfetados.add(item.produto_id)
       }
 
@@ -740,6 +812,7 @@ export default function EntradaXmlDetalheClient({
     { id: 'dados',       label: '📄 Dados NF-e' },
     { id: 'mapeamento',  label: `🔗 Mapeamento ${naoMapeados > 0 ? `(${naoMapeados} pendente${naoMapeados > 1 ? 's' : ''})` : '✓'}` },
     { id: 'conferencia', label: '📦 Conferência' },
+    { id: 'estoque',     label: `📊 Estoque${zerarCount > 0 ? ` (${zerarCount} zerar)` : ''}` },
     { id: 'custos',      label: '💰 Custos' },
     { id: 'precos',      label: '🏷 Revisão Preços' },
     { id: 'fiscal',      label: `🧬 Dados Fiscais${candidatosFiscais.length > 0 ? ` (${candidatosFiscais.length})` : ''}` },
@@ -997,6 +1070,101 @@ export default function EntradaXmlDetalheClient({
                 {salvando ? 'Salvando...' : 'Confirmar Conferência →'}
               </button>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ABA ESTOQUE ───────────────────────────────────────────── */}
+      {aba === 'estoque' && (
+        <div className="space-y-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-700 text-sm">
+            Como fica o estoque de cada produto depois desta entrada. Marque <b>Zerar antes</b> nos
+            produtos em que o saldo do sistema não vale mais — o produto termina com exatamente o que
+            veio na nota, em vez de somar ao que estava lá.
+          </div>
+
+          {carregandoEstoque ? (
+            <p className="text-sm text-slate-400">Lendo o estoque atual...</p>
+          ) : (
+            <>
+              <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
+                    <th className="px-3 py-2 text-left">Produto</th>
+                    <th className="px-3 py-2 text-right">Estoque hoje</th>
+                    <th className="px-3 py-2 text-right">Entra</th>
+                    <th className="px-3 py-2 text-right">Fica</th>
+                    <th className="px-3 py-2 text-right">Mínimo</th>
+                    <th className="px-3 py-2 text-center">Zerar antes</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {itens.filter(i => i.status_mapeamento !== 'ignorado' && i.produto_id).map(item => {
+                      const info = estoqueAgora[item.produto_id]
+                      const atual = info?.estoque ?? 0
+                      const qtd = confQtd[item.id] ?? item.qtd_conferida ?? item.quantidade_entrada ?? item.quantidade_xml
+                      const vaiZerar = !!zerar[item.id]
+                      const fica = vaiZerar ? qtd : atual + qtd
+                      const minimo = info?.minimo ?? 0
+                      const abaixoDoMinimo = minimo > 0 && fica < minimo
+                      return (
+                        <tr key={item.id} className={atual < 0 ? 'bg-red-50' : ''}>
+                          <td className="px-3 py-2">
+                            <p className="text-slate-700 text-xs">{item.descricao_sistema || item.descricao_xml}</p>
+                            <p className="text-slate-400 text-xs">{info?.unidade ?? item.unidade_sistema ?? item.unidade_xml}</p>
+                          </td>
+                          <td className={`px-3 py-2 text-right text-xs font-medium ${atual < 0 ? 'text-red-600' : 'text-slate-600'}`}>
+                            {atual}
+                            {atual < 0 && <span className="block text-[10px] font-normal">negativo</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right text-xs text-emerald-600">+{qtd}</td>
+                          <td className="px-3 py-2 text-right text-xs font-bold text-slate-800">
+                            {fica}
+                            {vaiZerar && atual !== 0 && (
+                              <span className="block text-[10px] font-normal text-orange-600">
+                                em vez de {atual + qtd}
+                              </span>
+                            )}
+                          </td>
+                          <td className={`px-3 py-2 text-right text-xs ${abaixoDoMinimo ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+                            {minimo > 0 ? minimo : '—'}
+                            {abaixoDoMinimo && <span className="block text-[10px]">continua abaixo</span>}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <input type="checkbox" disabled={readonly}
+                              checked={vaiZerar}
+                              onChange={e => setZerar(p => ({ ...p, [item.id]: e.target.checked }))}
+                              className="w-4 h-4 accent-orange-500" />
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {zerarCount > 0 && (
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-orange-800 text-sm">
+                  <b>{zerarCount} produto(s) terão o estoque zerado</b> antes de receber a quantidade da nota.
+                  O saldo que existia é descartado — no extrato fica um ajuste registrado, com o motivo, para
+                  explicar o que aconteceu depois.
+                </div>
+              )}
+
+              {itens.some(i => i.status_mapeamento !== 'ignorado' && !i.produto_id) && (
+                <p className="text-xs text-slate-500">
+                  Itens ainda não mapeados não aparecem aqui — sem produto vinculado não há estoque para comparar.
+                </p>
+              )}
+
+              {!readonly && (
+                <div className="flex justify-end">
+                  <button onClick={salvarZerar} disabled={salvandoZerar}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50">
+                    {salvandoZerar ? 'Salvando...' : 'Salvar marcações →'}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

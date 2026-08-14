@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
-import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { ajustarDepositoPrincipal, definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { gerarProximoSku } from '@/components/produtos/sku'
@@ -23,6 +23,8 @@ type ItemEntrada = {
   preco_venda_novo: number
   atualizar_custo: boolean
   atualizar_preco: boolean
+  /** Zerar o saldo antes de somar a entrada — ver etapa Estoque. */
+  zerar_estoque?: boolean
 }
 
 type ItemReajuste = {
@@ -42,10 +44,10 @@ type ItemReajuste = {
 
 type Parcela = { numero: number; vencimento: string; valor: number }
 
-const ETAPAS = ['dados', 'itens', 'reajuste', 'pagamento', 'confirmacao'] as const
+const ETAPAS = ['dados', 'itens', 'estoque', 'reajuste', 'pagamento', 'confirmacao'] as const
 type Etapa = typeof ETAPAS[number]
 
-const ETAPA_LABELS = ['Dados da NF', 'Itens', 'Reajuste de Preços', 'Pagamento', 'Confirmação']
+const ETAPA_LABELS = ['Dados da NF', 'Itens', 'Estoque', 'Reajuste de Preços', 'Pagamento', 'Confirmação']
 
 const ESTADOS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
 
@@ -137,6 +139,7 @@ export default function NovaEntradaClient({
       preco_venda_novo: i.preco_venda_novo,
       atualizar_custo: i.atualizar_custo,
       atualizar_preco: i.atualizar_preco,
+      zerar_estoque: !!i.zerar_estoque_antes,
     }))
   )
   const [buscaProd, setBuscaProd] = useState('')
@@ -159,6 +162,7 @@ export default function NovaEntradaClient({
   // Etapa 3: Reajuste
   const [reajustes, setReajustes] = useState<ItemReajuste[]>([])
   const [carregandoReajuste, setCarregandoReajuste] = useState(false)
+  const [estoqueAgora, setEstoqueAgora] = useState<Record<string, { estoque: number; minimo: number; unidade: string }>>({})
 
   // Pagamento
   const [formaPag, setFormaPag] = useState('boleto')
@@ -435,8 +439,17 @@ export default function NovaEntradaClient({
       }))
 
     setReajustes([...reajustesNota, ...reajustesKits])
+
+    // Saldo atual lido agora, na passagem para a etapa de Estoque: entre
+    // montar a lista e finalizar a entrada pode ter havido venda.
+    const { data: estoqueData } = await sb.from('produtos')
+      .select('id, estoque, estoque_minimo, unidade').in('id', produtosIds)
+    setEstoqueAgora(Object.fromEntries((estoqueData ?? []).map((p: any) => [
+      p.id, { estoque: Number(p.estoque) || 0, minimo: Number(p.estoque_minimo) || 0, unidade: p.unidade ?? 'UN' },
+    ])))
+
     setCarregandoReajuste(false)
-    setEtapa('reajuste')
+    setEtapa('estoque')
   }
 
   function updateReajuste(idx: number, field: keyof ItemReajuste, value: any) {
@@ -513,6 +526,7 @@ export default function NovaEntradaClient({
           sku: i.sku, quantidade: i.quantidade, preco_custo_anterior: i.preco_custo_anterior,
           preco_custo_novo: i.preco_custo_novo, markup: i.markup, preco_venda_novo: i.preco_venda_novo,
           atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
+          zerar_estoque_antes: !!i.zerar_estoque,
           subtotal: i.preco_custo_novo * i.quantidade,
         })))
       }
@@ -581,15 +595,36 @@ export default function NovaEntradaClient({
         const depositoPrincipalId = await buscarDepositoPrincipal(sb, empresaId)
         for (const item of produtosComId) {
           const qtdAtual = estoqueMap[item.produto_id!] ?? 0
-          const qtdNova = qtdAtual + item.quantidade
+          // Zerar antes: o produto termina com o que veio nesta entrada, e não
+          // com a soma. Escolhido item a item na etapa Estoque.
+          const qtdNova = item.zerar_estoque ? item.quantidade : qtdAtual + item.quantidade
           await sb.from('produtos').update({ estoque: qtdNova }).eq('id', item.produto_id!)
           // Espelha no depósito principal — mesmo motivo do PDV (ver
           // src/lib/produtos/depositoPrincipal.ts): sem isso o quadro por
           // depósito no Estoque Detalhado nunca acompanha as entradas.
-          await ajustarDepositoPrincipal(sb, empresaId, item.produto_id!, item.quantidade)
+          if (item.zerar_estoque) {
+            // Sobrescreve em vez de somar a diferença — mesma regra da
+            // contagem física no cadastro do produto.
+            await definirContagemNoDeposito(sb, empresaId, item.produto_id!, qtdNova)
+          } else {
+            await ajustarDepositoPrincipal(sb, empresaId, item.produto_id!, item.quantidade)
+          }
+          // Dois movimentos quando zera, não um: o extrato precisa fechar
+          // somando. Um movimento só, de 15 para 6, faria a coluna
+          // "quantidade" mentir.
+          if (item.zerar_estoque && qtdAtual !== 0) {
+            await registrarMovimentoEstoque(sb, {
+              empresaId, depositoId: depositoPrincipalId, produtoId: item.produto_id!, produtoNome: item.nome_produto,
+              tipo: qtdAtual > 0 ? 'ajuste_saida' : 'ajuste_entrada',
+              quantidade: Math.abs(qtdAtual), estoqueAnterior: qtdAtual, estoqueNovo: 0,
+              motivo: `Estoque zerado antes da entrada NF ${numeroNf || entrada.id.slice(0, 8)}`,
+              referenciaTipo: 'entrada', referenciaId: entrada.id,
+            })
+          }
           await registrarMovimentoEstoque(sb, {
             empresaId, depositoId: depositoPrincipalId, produtoId: item.produto_id!, produtoNome: item.nome_produto,
-            tipo: 'entrada_compra', quantidade: item.quantidade, estoqueAnterior: qtdAtual, estoqueNovo: qtdNova,
+            tipo: 'entrada_compra', quantidade: item.quantidade,
+            estoqueAnterior: item.zerar_estoque ? 0 : qtdAtual, estoqueNovo: qtdNova,
             motivo: `Entrada NF ${numeroNf || entrada.id.slice(0, 8)}`, referenciaTipo: 'entrada', referenciaId: entrada.id,
           })
           // Estoque do kit é um valor calculado e guardado (não ao vivo) —
@@ -922,13 +957,100 @@ export default function NovaEntradaClient({
             </button>
             <button onClick={avancarParaReajuste} disabled={carregandoReajuste || itens.length === 0}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-              {carregandoReajuste ? 'Carregando...' : 'Próximo: Reajuste de Preços →'}
+              {carregandoReajuste ? 'Carregando...' : 'Próximo: Estoque →'}
             </button>
           </div>
         </div>
       )}
 
-      {/* ── ETAPA 3: Reajuste de Preços ── */}
+      {/* ── ETAPA 3: Estoque ── */}
+      {etapa === 'estoque' && (
+        <div className="space-y-4">
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+            <div>
+              <h2 className="font-semibold text-gray-800">Estoque depois desta entrada</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Marque <b>Zerar antes</b> nos produtos em que o saldo do sistema não vale mais — o produto
+                termina com exatamente o que veio nesta entrada, em vez de somar ao que estava lá.
+              </p>
+            </div>
+
+            <div className="border border-gray-200 rounded-lg overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Produto</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Estoque hoje</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Entra</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Fica</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-gray-500">Mínimo</th>
+                    <th className="text-center px-3 py-2 text-xs font-medium text-gray-500">Zerar antes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {itens.map((item, idx) => {
+                    const info = item.produto_id ? estoqueAgora[item.produto_id] : undefined
+                    const atual = info?.estoque ?? 0
+                    const fica = item.zerar_estoque ? item.quantidade : atual + item.quantidade
+                    const minimo = info?.minimo ?? 0
+                    const abaixoDoMinimo = minimo > 0 && fica < minimo
+                    return (
+                      <tr key={idx} className={atual < 0 ? 'bg-red-50' : ''}>
+                        <td className="px-3 py-2">
+                          <p className="text-gray-800 text-xs">{item.nome_produto}</p>
+                          <p className="text-gray-400 text-xs">
+                            {item.sku ?? '—'}
+                            {!item.produto_id && ' · produto novo, sem estoque anterior'}
+                          </p>
+                        </td>
+                        <td className={`px-3 py-2 text-right text-xs font-medium ${atual < 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                          {item.produto_id ? atual : '—'}
+                          {atual < 0 && <span className="block text-[10px] font-normal">negativo</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs text-green-600">+{item.quantidade}</td>
+                        <td className="px-3 py-2 text-right text-xs font-bold text-gray-900">
+                          {fica}
+                          {item.zerar_estoque && atual !== 0 && (
+                            <span className="block text-[10px] font-normal text-orange-600">em vez de {atual + item.quantidade}</span>
+                          )}
+                        </td>
+                        <td className={`px-3 py-2 text-right text-xs ${abaixoDoMinimo ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                          {minimo > 0 ? minimo : '—'}
+                          {abaixoDoMinimo && <span className="block text-[10px]">continua abaixo</span>}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input type="checkbox" checked={!!item.zerar_estoque}
+                            disabled={!item.produto_id}
+                            onChange={e => setItens(prev => prev.map((it, i) => i === idx ? { ...it, zerar_estoque: e.target.checked } : it))}
+                            className="w-4 h-4 accent-orange-500" />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {itens.some(i => i.zerar_estoque) && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg px-4 py-3 text-sm text-orange-800">
+                <b>{itens.filter(i => i.zerar_estoque).length} produto(s) terão o estoque zerado</b> antes de
+                receber a quantidade desta entrada. O saldo que existia é descartado — fica registrado no
+                extrato como ajuste, com o motivo, para explicar o que aconteceu depois.
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-between">
+            <button onClick={() => setEtapa('itens')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
+            <button onClick={() => setEtapa('reajuste')}
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+              Próximo: Reajuste de Preços →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ETAPA 4: Reajuste de Preços ── */}
       {etapa === 'reajuste' && (
         <div className="space-y-4">
           <div className="bg-white border border-gray-200 rounded-xl p-5">
