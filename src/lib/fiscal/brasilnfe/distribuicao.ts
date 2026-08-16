@@ -89,9 +89,24 @@ export async function listarDfe(creds: BrasilNFeCredentials, cnpj: string, _ulti
   if (status >= 400) {
     throw new FiscalProviderError(json?.Error ?? `Erro ${status} ao listar notas recebidas na Brasil NFe`, 'brasilnfe_erro', json)
   }
-  // "Não existe notas fiscais para o período informado" vem como um
-  // `Error` de negócio dentro de uma resposta 200 — não é uma falha de
-  // verdade, é só o período vazio. Trata como lista vazia, não como erro.
+  // "Não existe notas fiscais para o período informado" vem como um `Error`
+  // de negócio dentro de uma resposta 200 — não é falha, é período vazio.
+  //
+  // Mas ERRO NENHUM pode ser tratado assim. Antes, qualquer `Error` dentro de
+  // um 200 virava lista vazia, e a tela dizia "Nenhuma NF-e nova encontrada".
+  // Medido: a segunda empresa recebia "Token Inválido!" e o operador via a
+  // mesma mensagem de quem não tem nota — passou dias achando que a SEFAZ não
+  // tinha nada, com sete notas esperando no painel da Brasil NFe.
+  const erroNegocio = typeof json?.Error === 'string' ? json.Error.trim() : ''
+  const periodoVazio = /n[ãa]o existe notas/i.test(erroNegocio)
+  if (erroNegocio && !periodoVazio) {
+    throw new FiscalProviderError(
+      `Brasil NFe: ${erroNegocio}`,
+      /token/i.test(erroNegocio) ? 'credencial_invalida' : 'brasilnfe_erro',
+      json,
+    )
+  }
+
   const lista: any[] = Array.isArray(json) ? json : (Array.isArray(json?.Notas) ? json.Notas : (Array.isArray(json?.NotasFiscais) ? json.NotasFiscais : []))
   const entradas = lista.filter(d =>
     (d?.CnpjDestinatario ?? '').replace(/\D/g, '') === cnpjLimpo && Number(d?.ModeloDocumento) === MODELO_NFE
