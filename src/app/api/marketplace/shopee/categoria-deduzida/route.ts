@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { deduzirCategoriaPorPalavras } from '@/lib/shopee/listing'
 import type { ShopeeChannel } from '@/lib/shopee/types'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Pré-seleção de categoria por dedução de palavras-chave — sem IA. Usado
 // como 2º fallback (depois de marketplace_categoria_sugestao, que é uma
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

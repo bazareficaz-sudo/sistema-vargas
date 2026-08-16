@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import PrecosClient from '@/components/precos/PrecosClient'
 import { produtosDaEntrada } from '@/lib/produtos/filtroEntrada'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 const POR_PAGINA = 100
@@ -25,7 +26,7 @@ export default async function PrecosPage({
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
   const [{ data: categoriasRows }, { data: marcasRows }] = await Promise.all([

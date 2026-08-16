@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getIntegracaoCredentials, shopeeGet, shopeePost } from '@/lib/shopee/client'
 import { ShopeeApiError } from '@/lib/shopee/types'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return erro('Não autenticado', 'cancelado')
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
 
   let partnerId: number, partnerKey: string

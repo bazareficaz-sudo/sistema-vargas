@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import EditarEntradaClient from '@/components/entradas/EditarEntradaClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,11 +11,7 @@ export default async function EntradaDetalhePage({
   const { id } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('empresa_id, role')
-    .eq('id', user!.id)
-    .single()
+  const profile = await perfilDaSessao(supabase, user!.id, 'empresa_id, role')
   const empresaId = profile?.empresa_id ?? ''
   const operadorNome = user?.email ?? ''
 

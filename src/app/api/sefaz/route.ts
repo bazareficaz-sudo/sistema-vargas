@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getFiscalProvider } from '@/lib/fiscal/factory'
 import { FiscalProviderError } from '@/lib/fiscal/types'
 import type { TipoManifesto } from '@/lib/fiscal/types'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 const ACOES_MANIFESTO: Record<string, TipoManifesto> = {
   ciencia: 'ciencia',
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await sb.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
-    const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+    const profile = await perfilDaSessao(sb, user.id)
     const empresaId = profile?.empresa_id
     if (!empresaId) return NextResponse.json({ error: 'Empresa não encontrada' }, { status: 400 })
 

@@ -1,10 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import AutomacoesClient from '@/components/automacoes/AutomacoesClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export default async function AutomacoesPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
   const [{ data: automacoes }, { data: canais }] = await Promise.all([

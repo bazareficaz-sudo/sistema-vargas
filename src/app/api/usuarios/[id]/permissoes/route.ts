@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao, registrarAuditoria, permissoesDoPapel, padraoDaPermissao, type Papel } from '@/lib/auth/permissoes'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Lê e grava as exceções de permissão de um usuário.
 //
@@ -15,7 +16,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const guarda = await exigirPermissao(sb, 'gerenciar_usuarios')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
-  const { data: alvo } = await sb.from('profiles').select('empresa_id, role, nome').eq('id', id).single()
+  const alvo = await perfilDaSessao(sb, id, 'empresa_id, role, nome')
   if (!alvo || alvo.empresa_id !== guarda.empresaId) {
     return NextResponse.json({ ok: false, erro: 'Usuário não encontrado' }, { status: 404 })
   }
@@ -45,7 +46,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const guarda = await exigirPermissao(sb, 'gerenciar_usuarios')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
-  const { data: alvo } = await sb.from('profiles').select('empresa_id, role').eq('id', id).single()
+  const alvo = await perfilDaSessao(sb, id, 'empresa_id, role')
   if (!alvo || alvo.empresa_id !== guarda.empresaId) {
     return NextResponse.json({ ok: false, erro: 'Usuário não encontrado' }, { status: 404 })
   }

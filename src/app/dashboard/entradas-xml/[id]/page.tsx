@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import EntradaXmlDetalheClient from '@/components/entradas-xml/EntradaXmlDetalheClient'
 import { podeAcessarModulo } from '@/lib/plans/access'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,7 @@ export default async function EntradaXmlDetalhePage({ params }: { params: Promis
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id ?? ''
 
   // Planos restritos (ex.: "Consulta Fiscal") têm o módulo entradas_xml sem o

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import UsuariosPdvClient from '@/components/usuarios-pdv/UsuariosPdvClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,11 +8,7 @@ export default async function UsuariosPdvPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('empresa_id, role, tenant_id')
-    .eq('id', user!.id)
-    .single()
+  const profile = await perfilDaSessao(supabase, user!.id, 'empresa_id, role, tenant_id')
 
   const empresaAtualId = profile?.empresa_id ?? ''
 

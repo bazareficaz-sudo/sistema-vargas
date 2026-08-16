@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getCategoryTree, type CategoriaShopee } from '@/lib/shopee/listing'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import type { ShopeeChannel } from '@/lib/shopee/types'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 const MAX_NIVEIS = 6
 
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

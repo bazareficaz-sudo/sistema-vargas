@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { produtosDaEntrada } from '@/lib/produtos/filtroEntrada'
 import ProdutosClient from '@/components/produtos/ProdutosClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 const POR_PAGINA = 50
 
@@ -29,7 +30,7 @@ export default async function ProdutosPage({
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
   // Categorias/marcas da empresa — alimentam os selects de filtro e a

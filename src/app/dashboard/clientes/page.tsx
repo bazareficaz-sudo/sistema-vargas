@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export default async function ClientesPage({
   searchParams,
@@ -13,7 +14,7 @@ export default async function ClientesPage({
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id
 
   let query = supabase

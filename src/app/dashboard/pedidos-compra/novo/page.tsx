@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import NovoPedidoClient from '@/components/pedidos-compra/NovoPedidoClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,7 @@ export default async function NovoPedidoPage({
   const { id } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
   // Nome e CNPJ entram no cabeçalho do pedido impresso — documento que sai da

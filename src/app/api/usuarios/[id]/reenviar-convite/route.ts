@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
 import { APP_URL } from '@/lib/appUrl'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Gera um novo link de acesso para um usuário que ainda não definiu senha.
 //
@@ -26,8 +27,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const guarda = await exigirPermissao(sb, 'gerenciar_usuarios')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
-  const { data: alvo } = await sb.from('profiles')
-    .select('empresa_id, status').eq('id', id).single()
+  const alvo = await perfilDaSessao(sb, id, 'empresa_id, status')
   if (!alvo || alvo.empresa_id !== guarda.empresaId) {
     return NextResponse.json({ ok: false, erro: 'Usuário não encontrado' }, { status: 404 })
   }

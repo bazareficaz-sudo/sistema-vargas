@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { listarCategorias } from '@/lib/nuvemshop/listing'
 import { COLUNAS_CANAL, montarCanal } from '@/lib/nuvemshop/canal'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Categorias da loja, para o select da tela de criar anúncio.
 //
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
 import { buscarCandidatosCest, resolverCest, type CandidatoCest } from '@/lib/fiscal/cest'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Sugestão por IA pra completar campos vazios do cadastro de produto, com
 // base só no nome e no EAN — nunca inventa categoria/marca nova (só aceita
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

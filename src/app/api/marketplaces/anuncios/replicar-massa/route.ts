@@ -4,6 +4,7 @@ import { criarAnuncio as criarAnuncioShopee, getLogisticsChannels } from '@/lib/
 import { criarAnuncio as criarAnuncioML, getAtributos, getTiposAnuncio } from '@/lib/mercadolivre/listing'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Replica vários anúncios já trabalhados pra outra conta (canal) do MESMO
 // marketplace, de uma vez.
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

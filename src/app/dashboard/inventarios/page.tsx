@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import InventariosClient from '@/components/inventarios/InventariosClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,8 +10,7 @@ export default async function InventariosPage() {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await sb
-    .from('profiles').select('empresa_id, role').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id, 'empresa_id, role')
   const empresaId = profile?.empresa_id ?? ''
 
   const [{ data: inventarios }, { data: depositos }, { data: categorias }, { data: marcas }] = await Promise.all([

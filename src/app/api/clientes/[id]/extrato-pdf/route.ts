@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { gerarExtratoClientePdfBuffer, type LinhaExtrato } from '@/lib/contas-receber/extratoPdf'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Monta o relatório da conta do cliente e devolve o link do PDF, para a tela
 // de Cobrança mandar por WhatsApp.
@@ -20,7 +21,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

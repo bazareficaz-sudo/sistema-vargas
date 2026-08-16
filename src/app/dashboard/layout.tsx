@@ -10,17 +10,14 @@ import type { PlanData } from '@/lib/plans/types'
 import { provisionarEmpresaEUsuario } from '@/lib/signup/provisionar'
 import PlanProvider from '@/components/plan/PlanProvider'
 import DashboardShell from '@/components/DashboardShell'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  let { data: profile } = await supabase
-    .from('profiles')
-    .select('empresa_id, role, status, empresas(nome)')
-    .eq('id', user.id)
-    .single()
+  let profile = await perfilDaSessao(supabase, user.id, 'empresa_id, role, status, empresas(nome)')
 
   // Rede de segurança: se o usuário se cadastrou pelo site mas ainda não tem
   // perfil (ex.: confirmou o e-mail e entrou direto por /login em vez de
@@ -28,12 +25,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // completa o provisionamento aqui — primeira vez que abre o painel.
   if (!profile && user.user_metadata?.pending_signup) {
     await provisionarEmpresaEUsuario(createAdminClient(), user.id, user.user_metadata)
-    const retry = await supabase
-      .from('profiles')
-      .select('empresa_id, role, status, empresas(nome)')
-      .eq('id', user.id)
-      .single()
-    profile = retry.data
+    profile = await perfilDaSessao(supabase, user.id, 'empresa_id, role, status, empresas(nome)')
   }
 
   // Usuário bloqueado/inativado por um admin perde acesso na hora — não

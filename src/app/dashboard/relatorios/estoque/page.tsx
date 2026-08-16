@@ -1,12 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import EstoqueBIClient from '@/components/relatorios/EstoqueBIClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
 export default async function RelatorioEstoquePage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
   // Últimos 30 dias para calcular giro

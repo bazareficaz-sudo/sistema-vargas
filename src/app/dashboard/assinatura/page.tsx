@@ -2,13 +2,14 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { buscarPreapproval, listarPagamentos } from '@/lib/mercadopago/preapproval'
 import AssinaturaClient from '@/components/assinatura/AssinaturaClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export default async function AssinaturaPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(supabase, user.id)
   const empresaId = profile?.empresa_id ?? ''
 
   const { data: sub } = await supabase

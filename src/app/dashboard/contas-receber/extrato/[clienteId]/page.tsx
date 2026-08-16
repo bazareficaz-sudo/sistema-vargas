@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ExtratoClienteClient from '@/components/contas-receber/ExtratoClienteClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Extrato da conta do cliente — o que ele comprou fiado e o que já pagou,
 // em ordem cronológica e com saldo correndo, como um extrato bancário.
@@ -17,7 +18,7 @@ export default async function ExtratoClientePage({ params }: { params: Promise<{
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) redirect('/dashboard')
 

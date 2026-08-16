@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { zapiSendText, zapiSendDocument } from '@/lib/zapi'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('empresa_id, nome')
-    .eq('id', user.id)
-    .single()
+  const profile = await perfilDaSessao(supabase, user.id, 'empresa_id, nome')
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ error: 'Empresa não encontrada' }, { status: 400 })
 

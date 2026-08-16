@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { syncSingleItem } from '@/lib/nuvemshop/sync'
 import { COLUNAS_CANAL, montarCanal } from '@/lib/nuvemshop/canal'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Sincroniza UM produto da loja de volta para marketplace_anuncios — o botão
 // 🔄 das telas de anúncio. Existia para Shopee e Mercado Livre; sem o
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

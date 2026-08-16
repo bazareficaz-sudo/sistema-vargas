@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao, registrarAuditoria, PAPEIS, type Papel } from '@/lib/auth/permissoes'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 const STATUS_VALIDOS = ['ativo', 'inativo', 'bloqueado']
 
@@ -17,8 +18,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ ok: false, erro: 'Você não pode alterar seu próprio acesso por aqui' }, { status: 400 })
   }
 
-  const { data: alvo } = await sb.from('profiles')
-    .select('empresa_id, role, status, cargo, telefone, observacoes').eq('id', id).single()
+  const alvo = await perfilDaSessao(sb, id, 'empresa_id, role, status, cargo, telefone, observacoes')
   if (!alvo || alvo.empresa_id !== guarda.empresaId) return NextResponse.json({ ok: false, erro: 'Usuário não encontrado' }, { status: 404 })
 
   const body = await req.json()

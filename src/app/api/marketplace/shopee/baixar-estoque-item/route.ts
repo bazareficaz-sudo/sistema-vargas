@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { baixarEstoquePedidoItem } from '@/lib/produtos/estoque'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Dispara a baixa atômica de um item de pedido — usado depois de um
 // mapeamento manual feito na hora, direto do painel de detalhe do pedido
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

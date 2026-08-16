@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import PDVClient from '@/components/pdv/PDVClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,11 +10,7 @@ export default async function PDVPage() {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await sb
-    .from('profiles')
-    .select('empresa_id, role, empresas(nome)')
-    .eq('id', user.id)
-    .single()
+  const profile = await perfilDaSessao(sb, user.id, 'empresa_id, role, empresas(nome)')
 
   const empresaId = profile?.empresa_id ?? ''
   const empresaNome = (profile?.empresas as unknown as { nome: string } | null)?.nome ?? ''

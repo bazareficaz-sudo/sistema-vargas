@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import ImpressaoConfig from '@/components/configuracoes/ImpressaoConfig'
 import type { ConfigImpressao } from '@/lib/vendas/comprovantePdf'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +11,7 @@ export default async function ImpressaoPage() {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id ?? ''
 
   const [{ data: config }, { data: empresa }] = await Promise.all([

@@ -3,6 +3,7 @@ import { loadPlanData } from '@/lib/plans/access'
 import { permissoesEfetivas, buscarExcecoes, type Papel } from '@/lib/auth/permissoes'
 import FiltroMes from '@/components/dashboard/FiltroMes'
 import Link from 'next/link'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,8 +18,7 @@ export default async function DashboardPage({
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: profile } = await supabase
-    .from('profiles').select('empresa_id, nome').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id, 'empresa_id, nome')
 
   const empresaId = profile?.empresa_id ?? ''
   const plan = await loadPlanData(empresaId, user!.id)

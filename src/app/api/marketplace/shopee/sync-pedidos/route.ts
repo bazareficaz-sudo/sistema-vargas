@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { syncPedidos } from '@/lib/shopee/orders'
 import type { ShopeeChannel } from '@/lib/shopee/types'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Cada pedido processado gera vários round-trips de banco (resolver vínculo
 // de item, upsert de pedido/itens/pacote, baixa de estoque) — com uma loja
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 

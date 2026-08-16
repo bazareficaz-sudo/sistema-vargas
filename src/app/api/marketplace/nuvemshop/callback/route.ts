@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { trocarCodigoPorToken } from '@/lib/nuvemshop/client'
 import { getLoja } from '@/lib/nuvemshop/catalog'
 import { textoLocalizado } from '@/lib/nuvemshop/types'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +20,7 @@ export async function GET(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.redirect(new URL('/login', req.url))
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.redirect(new URL('/dashboard/marketplaces?erro=sem-empresa', req.url))
 

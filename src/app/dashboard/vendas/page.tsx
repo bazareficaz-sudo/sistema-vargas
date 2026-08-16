@@ -1,10 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import VendasClient from '@/components/vendas/VendasClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export default async function VendasPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id, empresas(nome, nome_fantasia)').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id, 'empresa_id, empresas(nome, nome_fantasia)')
   const empresaId = profile?.empresa_id
   const empresaNome = (profile?.empresas as unknown as { nome: string; nome_fantasia: string | null } | null)
   const nomePropria = empresaNome?.nome_fantasia ?? empresaNome?.nome ?? ''

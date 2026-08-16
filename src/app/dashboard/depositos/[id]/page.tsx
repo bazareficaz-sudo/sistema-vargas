@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import DetalheDepositoClient from '@/components/depositos/DetalheDepositoClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,8 +10,7 @@ export default async function DetalheDepositoPage({ params }: { params: { id: st
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await sb
-    .from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id ?? ''
 
   const [{ data: deposito }, { data: estoque }, { data: movimentacoes }, { data: depositos }] = await Promise.all([

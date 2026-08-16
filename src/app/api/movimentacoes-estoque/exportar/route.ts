@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { calcularPeriodo, TIPO_LABEL, deltaMovimento, type PeriodoPreset } from '@/lib/estoque/periodo'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 function escapar(v: unknown): string {
   return `"${String(v ?? '').replace(/"/g, '""')}"`
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(supabase, user.id)
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ error: 'Empresa não encontrada' }, { status: 400 })
 

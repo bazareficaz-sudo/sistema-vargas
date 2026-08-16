@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import SaudeVendaConfig from '@/components/configuracoes/SaudeVendaConfig'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +10,7 @@ export default async function SaudeVendaPage() {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id, role').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id, 'empresa_id, role')
   const empresaId = profile?.empresa_id ?? ''
 
   const [{ data: config }, { data: faixas }] = await Promise.all([

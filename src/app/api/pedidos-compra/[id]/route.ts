@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ const STATUS_CANCELAVEIS = ['rascunho', 'em_cotacao', 'aguardando_aprovacao', 'e
 async function empresaDoUsuario(sb: any): Promise<string | null> {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return null
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   return profile?.empresa_id ?? null
 }
 

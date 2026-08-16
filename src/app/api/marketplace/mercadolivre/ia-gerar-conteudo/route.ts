@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { instrucaoTitulos, validarTitulos } from '@/lib/ia/tituloAnuncio'
 import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // O Mercado Livre corta o titulo em 60 caracteres.
 const MAX_TITULO_ML = 60
@@ -33,7 +34,7 @@ export async function POST(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const padrao = profile?.empresa_id ? await buscarPadraoAnuncio(sb, profile.empresa_id) : null
 
   const atributosTexto = (atributos ?? []).map(a => {

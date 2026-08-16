@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { zapiSendText } from '@/lib/zapi'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -21,7 +22,7 @@ type Item = { quantidade: number; produto_id: string }
 async function contexto(sb: any) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return null
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   return profile?.empresa_id ?? null
 }
 

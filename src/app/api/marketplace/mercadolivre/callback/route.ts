@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { urlDoApp } from '@/lib/appUrl'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -15,7 +16,7 @@ export async function GET(req: Request) {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.redirect(new URL('/login', req.url))
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id
 
   const { data: integracao } = await sb

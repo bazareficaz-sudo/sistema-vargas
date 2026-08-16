@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao, registrarAuditoria, PAPEIS, type Papel } from '@/lib/auth/permissoes'
 import { verificarLimite } from '@/lib/plans/access'
 import { urlDoApp } from '@/lib/appUrl'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export async function POST(req: Request) {
   const sb = await createClient()
@@ -33,8 +34,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, erro: `Seu plano permite até ${limite.limite} usuário(s). Inative alguém ou fale com a gente pra ampliar.` }, { status: 400 })
   }
 
-  const { data: quemConvidou } = await sb.from('profiles')
-    .select('empresa_id, tenant_id, grupo_id').eq('id', guarda.userId).single()
+  const quemConvidou = await perfilDaSessao(sb, guarda.userId, 'empresa_id, tenant_id, grupo_id')
 
   const { data: convite, error: erroConvite } = await admin.auth.admin.inviteUserByEmail(email, {
     // O Supabase cria a conta do convidado SEM senha. Sem mandar ele pra

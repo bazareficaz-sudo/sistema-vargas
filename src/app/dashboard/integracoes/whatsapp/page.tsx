@@ -1,12 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import WhatsAppConfigClient from '@/components/integracoes/WhatsAppConfigClient'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
 export default async function WhatsAppPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('empresa_id, nome').eq('id', user!.id).single()
+  const profile = await perfilDaSessao(supabase, user!.id, 'empresa_id, nome')
   const empresaId = profile?.empresa_id ?? ''
 
   const { data: empresa } = await supabase.from('empresas').select('nome, telefone').eq('id', empresaId).single()

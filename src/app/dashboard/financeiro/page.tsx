@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,7 @@ export default async function FinanceiroPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase.from('profiles').select('empresa_id').eq('id', user.id).single()
+  const profile = await perfilDaSessao(supabase, user.id)
   const empresaId = profile?.empresa_id ?? ''
 
   const hoje = new Date().toISOString().split('T')[0]
