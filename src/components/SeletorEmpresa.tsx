@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import type { EmpresaDoUsuario } from '@/lib/auth/empresaAtiva'
 
@@ -27,12 +27,32 @@ function corDaEmpresa(nome: string): string {
   return cores[soma % cores.length]
 }
 
-export default function SeletorEmpresa({ empresas, ativaId }: {
+export default function SeletorEmpresa({ empresas, ativaId, compacto = false }: {
   empresas: EmpresaDoUsuario[]
   ativaId: string
+  /** Barra lateral recolhida: só cabe a faixa de cor. */
+  compacto?: boolean
 }) {
   const router = useRouter()
   const [aberto, setAberto] = useState(false)
+  // A barra lateral tem `overflow-hidden`: um menu posicionado dentro dela
+  // seria recortado e simplesmente não apareceria. Por isso o painel é
+  // `fixed`, com a posição medida a partir do botão.
+  const botaoRef = useRef<HTMLButtonElement>(null)
+  const [posicao, setPosicao] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+
+  function alternar() {
+    const r = botaoRef.current?.getBoundingClientRect()
+    if (r) {
+      const largura = 256
+      setPosicao({
+        top: r.bottom + 6,
+        // Não deixa passar da borda direita da janela.
+        left: Math.min(r.left, window.innerWidth - largura - 8),
+      })
+    }
+    setAberto(a => !a)
+  }
   const [trocando, setTrocando] = useState(false)
   const [erro, setErro] = useState('')
 
@@ -59,18 +79,21 @@ export default function SeletorEmpresa({ empresas, ativaId }: {
 
   return (
     <div className="relative">
-      <button onClick={() => setAberto(a => !a)} disabled={trocando}
-        title="Trocar de empresa"
-        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 max-w-[220px]">
+      <button ref={botaoRef} onClick={alternar} disabled={trocando}
+        title={`${ativa.nome} — clique para trocar de empresa`}
+        className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 ${
+          compacto ? 'px-1.5 py-1 justify-center' : 'px-2.5 py-1.5 max-w-[220px] w-full'
+        }`}>
         <span className="w-1.5 h-5 rounded-full shrink-0" style={{ background: corDaEmpresa(ativa.nome) }} />
-        <span className="text-xs font-semibold text-slate-800 truncate">{ativa.nome}</span>
+        {!compacto && <span className="text-xs font-semibold text-slate-800 truncate">{ativa.nome}</span>}
         <span className="text-[10px] text-slate-400 shrink-0">{trocando ? '…' : '▾'}</span>
       </button>
 
       {aberto && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setAberto(false)} />
-          <div className="absolute right-0 mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
+          <div className="fixed inset-0 z-[60]" onClick={() => setAberto(false)} />
+          <div className="fixed w-64 bg-white border border-slate-200 rounded-xl shadow-lg z-[61] overflow-hidden"
+            style={{ top: posicao.top, left: posicao.left }}>
             <p className="px-3 py-2 text-[11px] text-slate-400 border-b border-slate-100">
               Trabalhando em
             </p>

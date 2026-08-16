@@ -210,7 +210,16 @@ export default function Sidebar({ empresa, empresas = [], empresaAtivaId = '' }:
           </Link>
           {expandido && <span className="text-sm font-semibold text-slate-700 truncate">Sistema Vargas</span>}
         </div>
-        <p className={`text-[9px] text-slate-400 px-1 mb-2 leading-tight truncate w-full ${expandido ? 'text-left px-3' : 'text-center'}`} title={empresa}>{empresa}</p>
+        {/* Aqui é onde o nome da empresa aparece na barra do desktop — foi
+            por isso que o seletor precisou vir para cá: a primeira versão
+            entrou no cabeçalho do celular, que no computador fica oculto. */}
+        {empresas.length > 1 ? (
+          <div className={`w-full mb-2 ${expandido ? 'px-3' : 'px-1 flex justify-center'}`}>
+            <SeletorEmpresa empresas={empresas} ativaId={empresaAtivaId} compacto={!expandido} />
+          </div>
+        ) : (
+          <p className={`text-[9px] text-slate-400 px-1 mb-2 leading-tight truncate w-full ${expandido ? 'text-left px-3' : 'text-center'}`} title={empresa}>{empresa}</p>
+        )}
 
         <div className="flex-1 w-full overflow-y-auto overflow-x-hidden flex flex-col items-center gap-1 px-2 pb-2">
           <RailButton icon={<IconSearch className="w-5 h-5" />} label="Buscar" active={painel === 'busca'} expanded={expandido}
