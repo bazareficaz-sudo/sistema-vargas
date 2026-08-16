@@ -10,7 +10,7 @@ import type { PlanData } from '@/lib/plans/types'
 import { provisionarEmpresaEUsuario } from '@/lib/signup/provisionar'
 import PlanProvider from '@/components/plan/PlanProvider'
 import DashboardShell from '@/components/DashboardShell'
-import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { perfilDaSessao, empresasDoUsuario } from '@/lib/auth/empresaAtiva'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -42,6 +42,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   const empresaId = profile?.empresa_id ?? ''
+  // Empresas que este usuário pode operar. Com uma só — o caso da maioria —
+  // o seletor nem aparece.
+  const empresasDoOperador = await empresasDoUsuario(supabase, user.id)
   const empresaNome = (profile?.empresas as unknown as { nome: string } | null)?.nome ?? 'Minha Empresa'
 
   // Acesso de suporte — pega a sessão mais recente pra esse usuário. Se
@@ -103,7 +106,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     const tela = telaDoPathname(pathname)
     return (
       <PlanProvider data={planData}>
-        <DashboardShell empresa={empresaNome}>
+        <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId}>
           <div className="p-6 max-w-lg">
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
               <span className="text-3xl block mb-2">🔒</span>
@@ -127,7 +130,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <PlanProvider data={planData}>
-      <DashboardShell empresa={empresaNome}>{children}</DashboardShell>
+      <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId}>{children}</DashboardShell>
     </PlanProvider>
   )
 }

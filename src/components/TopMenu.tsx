@@ -7,8 +7,14 @@ import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { usePlan } from '@/contexts/PlanContext'
 import { NAV, ALL_ITEMS, temModulo as temModuloBase, filtrarItens as filtrarItensBase, isActive as isActiveBase, telaBloqueada } from '@/components/nav-config'
+import SeletorEmpresa from '@/components/SeletorEmpresa'
+import type { EmpresaDoUsuario } from '@/lib/auth/empresaAtiva'
 
-export default function TopMenu({ empresa }: { empresa: string }) {
+export default function TopMenu({ empresa, empresas = [], empresaAtivaId = '' }: {
+  empresa: string
+  empresas?: EmpresaDoUsuario[]
+  empresaAtivaId?: string
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const plan = usePlan()
@@ -110,7 +116,9 @@ export default function TopMenu({ empresa }: { empresa: string }) {
           </div>
           <div className="hidden sm:block min-w-0">
             <p className="text-white font-semibold text-xs leading-tight truncate">Sistema Vargas</p>
-            <p className="text-slate-400 truncate" style={{ fontSize: 10 }}>{empresa}</p>
+            {empresas.length > 1
+              ? <SeletorEmpresa empresas={empresas} ativaId={empresaAtivaId} />
+              : <p className="text-slate-400 truncate" style={{ fontSize: 10 }}>{empresa}</p>}
           </div>
         </div>
 

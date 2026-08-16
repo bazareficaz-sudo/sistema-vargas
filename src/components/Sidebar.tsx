@@ -12,6 +12,8 @@ import {
   NAV, ALL_ITEMS, temModulo as temModuloBase, filtrarItens as filtrarItensBase, isActive as isActiveBase,
   telaBloqueada, type NavItem,
 } from '@/components/nav-config'
+import SeletorEmpresa from '@/components/SeletorEmpresa'
+import type { EmpresaDoUsuario } from '@/lib/auth/empresaAtiva'
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 // Rail claro e fixo (sempre estreito) + painel lateral (flyout) que abre ao
@@ -21,7 +23,11 @@ import {
 
 type PainelId = string | null // group.id | 'busca' | 'favoritos' | 'recentes' | null
 
-export default function Sidebar({ empresa }: { empresa: string }) {
+export default function Sidebar({ empresa, empresas = [], empresaAtivaId = '' }: {
+  empresa: string
+  empresas?: EmpresaDoUsuario[]
+  empresaAtivaId?: string
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const plan = usePlan()
@@ -176,7 +182,9 @@ export default function Sidebar({ empresa }: { empresa: string }) {
           <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#3b82f6,#6366f1)' }}>
             <span className="text-white font-bold text-xs">V</span>
           </div>
-          <span className="text-sm font-medium text-slate-700 truncate">{empresa}</span>
+          {empresas.length > 1
+            ? <SeletorEmpresa empresas={empresas} ativaId={empresaAtivaId} />
+            : <span className="text-sm font-medium text-slate-700 truncate">{empresa}</span>}
         </Link>
       </div>
 

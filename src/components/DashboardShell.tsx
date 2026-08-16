@@ -5,6 +5,7 @@ import Sidebar from '@/components/Sidebar'
 import TopMenu from '@/components/TopMenu'
 import { PlanAlertBanner } from '@/components/plan/PlanBanner'
 import SupportModeBanner from '@/components/plan/SupportModeBanner'
+import type { EmpresaDoUsuario } from '@/lib/auth/empresaAtiva'
 
 export type LayoutMenu = 'sidebar' | 'topbar'
 export const LAYOUT_MENU_KEY = 'layout_menu'
@@ -15,7 +16,12 @@ function readLayoutPreference(): LayoutMenu {
   return document.documentElement.dataset.layoutMenu === 'topbar' ? 'topbar' : 'sidebar'
 }
 
-export default function DashboardShell({ empresa, children }: { empresa: string; children: React.ReactNode }) {
+export default function DashboardShell({ empresa, empresas = [], empresaAtivaId = '', children }: {
+  empresa: string
+  empresas?: EmpresaDoUsuario[]
+  empresaAtivaId?: string
+  children: React.ReactNode
+}) {
   const [layout, setLayout] = useState<LayoutMenu>(() => readLayoutPreference())
 
   useEffect(() => {
@@ -27,7 +33,7 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
   if (layout === 'topbar') {
     return (
       <div className="min-h-screen flex flex-col" style={{ background: '#ffffff' }} suppressHydrationWarning>
-        <TopMenu empresa={empresa} />
+        <TopMenu empresa={empresa} empresas={empresas} empresaAtivaId={empresaAtivaId} />
         <main
           id="main-content"
           className="flex-1 overflow-auto min-h-screen flex flex-col"
@@ -43,7 +49,7 @@ export default function DashboardShell({ empresa, children }: { empresa: string;
 
   return (
     <div className="min-h-screen flex" style={{ background: '#ffffff' }} suppressHydrationWarning>
-      <Sidebar empresa={empresa} />
+      <Sidebar empresa={empresa} empresas={empresas} empresaAtivaId={empresaAtivaId} />
       {/* No celular o trilho do menu vira gaveta (ver Sidebar), então o
           conteúdo começa colado na borda e ganha espaço no topo pra barra
           com o botão. De md pra cima nada muda: continua deslocado pelos
