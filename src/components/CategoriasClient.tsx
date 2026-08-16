@@ -12,6 +12,11 @@ export default function CategoriasClient({ categorias: inicial, empresaId, conta
   const router = useRouter()
   const [categorias, setCategorias] = useState(inicial)
   const [movendo, setMovendo] = useState<string | null>(null)
+  const [busca, setBusca] = useState('')
+  const [tipo, setTipo] = useState<'' | 'raiz' | 'sub' | 'vazias' | 'usadas'>('')
+  const [marcadas, setMarcadas] = useState<string[]>([])
+  const [destino, setDestino] = useState('')
+  const [unificando, setUnificando] = useState(false)
   const [aviso, setAviso] = useState('')
   const [novoNome, setNovoNome] = useState('')
   const [novoPai, setNovoPai] = useState('')
@@ -120,6 +125,71 @@ export default function CategoriasClient({ categorias: inicial, empresaId, conta
     router.refresh()
   }
 
+  // Filtro por texto: casa no nome da categoria E no nome do pai, para
+  // "hidra" trazer também as subcategorias de MATERIAL HIDRÁULICO.
+  const semAcento = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  const filtradas = categorias.filter(c => {
+    const termo = semAcento(busca.trim())
+    if (termo) {
+      const pai = c.pai_id ? categorias.find(x => x.id === c.pai_id)?.nome ?? '' : ''
+      if (!semAcento(`${c.nome} ${pai}`).includes(termo)) return false
+    }
+    const usos = contagem[c.nome] ?? 0
+    if (tipo === 'raiz' && c.pai_id) return false
+    if (tipo === 'sub' && !c.pai_id) return false
+    if (tipo === 'vazias' && usos > 0) return false
+    if (tipo === 'usadas' && usos === 0) return false
+    return true
+  })
+
+  function alternarMarca(id: string) {
+    setMarcadas(m => m.includes(id) ? m.filter(x => x !== id) : [...m, id])
+  }
+
+  /**
+   * Junta as categorias marcadas numa só.
+   *
+   * É o que resolve as duplicatas de acento e caixa (MATERIAL HIDRÁULICO ×4).
+   * Os produtos de todas elas passam para o destino e as origens são
+   * excluídas — tudo no servidor, para não ficar pela metade.
+   */
+  async function unificar() {
+    const alvo = categorias.find(c => c.id === destino)
+    if (!alvo || marcadas.length === 0) return
+
+    const nomes = marcadas.map(id => categorias.find(c => c.id === id)?.nome).filter(Boolean)
+    const totalProdutos = nomes.reduce((s, n) => s + (contagem[n as string] ?? 0), 0)
+    const paiAlvo = alvo.pai_id ? categorias.find(c => c.id === alvo.pai_id)?.nome : null
+    const nomeDestino = paiAlvo ? `${paiAlvo} → ${alvo.nome}` : alvo.nome
+
+    if (!confirm(
+      `Unificar ${marcadas.length} categoria(s) em "${nomeDestino}"?
+
+` +
+      `${nomes.join(', ')}
+
+` +
+      `Cerca de ${totalProdutos} produto(s) serão reclassificados e as categorias acima serão EXCLUÍDAS. Não há como desfazer.`
+    )) return
+
+    setUnificando(true); setErro(''); setAviso('')
+    try {
+      const d = await fetch('/api/categorias/unificar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origemIds: marcadas, destinoId: destino }),
+      }).then(r => r.json())
+      if (!d.ok) { setErro(d.erro ?? 'Não foi possível unificar'); return }
+      setCategorias(prev => prev.filter(c => !marcadas.includes(c.id)))
+      setMarcadas([]); setDestino('')
+      setAviso(d.aviso ?? `${d.migrados} produto(s) migrados para ${d.destino} · ${d.excluidas} categoria(s) excluída(s).`)
+      router.refresh()
+    } catch {
+      setErro('Falha de rede')
+    } finally {
+      setUnificando(false)
+    }
+  }
+
   function nomePai(paiId: string | null) {
     if (!paiId) return null
     return categorias.find(c => c.id === paiId)?.nome ?? null
@@ -168,11 +238,63 @@ export default function CategoriasClient({ categorias: inicial, empresaId, conta
         </p>
       </div>
 
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-2 items-center mb-3">
+        <input value={busca} onChange={e => setBusca(e.target.value)}
+          placeholder="Buscar categoria ou subcategoria..."
+          className="flex-1 min-w-[220px] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+        <select value={tipo} onChange={e => setTipo(e.target.value as typeof tipo)}
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white">
+          <option value="">Todas ({categorias.length})</option>
+          <option value="raiz">Só categorias principais ({raizes.length})</option>
+          <option value="sub">Só subcategorias ({subs.length})</option>
+          <option value="usadas">Só com produtos</option>
+          <option value="vazias">Só vazias</option>
+        </select>
+        {(busca || tipo) && (
+          <button onClick={() => { setBusca(''); setTipo('') }}
+            className="text-xs text-gray-500 hover:text-gray-800">limpar</button>
+        )}
+        <span className="text-xs text-gray-400">{filtradas.length} de {categorias.length}</span>
+      </div>
+
+      {/* Unificação — só aparece com alguma marcada */}
+      {marcadas.length > 0 && (
+        <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-blue-900 font-medium">
+              {marcadas.length} marcada(s) — unificar em:
+            </span>
+            <select value={destino} onChange={e => setDestino(e.target.value)}
+              className="border border-blue-300 rounded-lg px-3 py-1.5 text-sm bg-white min-w-[240px]">
+              <option value="">Escolha a categoria que fica...</option>
+              {categorias.filter(c => !marcadas.includes(c.id)).map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.pai_id ? `${nomePai(c.pai_id)} → ${c.nome}` : c.nome}
+                  {(contagem[c.nome] ?? 0) > 0 ? ` (${contagem[c.nome]})` : ''}
+                </option>
+              ))}
+            </select>
+            <button onClick={unificar} disabled={!destino || unificando}
+              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg">
+              {unificando ? 'Unificando...' : 'Unificar'}
+            </button>
+            <button onClick={() => { setMarcadas([]); setDestino('') }}
+              className="text-xs text-blue-700 hover:underline">desmarcar</button>
+          </div>
+          <p className="text-xs text-blue-800 mt-2">
+            Os produtos das marcadas passam para o destino e as marcadas são excluídas. O destino pode ser
+            uma subcategoria — nesse caso o produto fica com a categoria do pai e a subcategoria escolhida.
+          </p>
+        </div>
+      )}
+
       {/* Lista */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="w-10 px-3 py-3"></th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Nome</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Fica dentro de</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Uso</th>
@@ -181,8 +303,13 @@ export default function CategoriasClient({ categorias: inicial, empresaId, conta
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {categorias.map(c => (
-              <tr key={c.id} className="hover:bg-gray-50 transition-colors group">
+            {filtradas.map(c => (
+              <tr key={c.id} className={`hover:bg-gray-50 transition-colors group ${marcadas.includes(c.id) ? 'bg-blue-50' : ''}`}>
+                <td className="px-3 py-3">
+                  <input type="checkbox" checked={marcadas.includes(c.id)}
+                    onChange={() => alternarMarca(c.id)}
+                    title="Marcar para unificar" />
+                </td>
                 <td className="px-4 py-3 text-gray-900 font-medium">
                   {editando?.id === c.id ? (
                     <div className="flex gap-2">
@@ -237,7 +364,7 @@ export default function CategoriasClient({ categorias: inicial, empresaId, conta
               </tr>
             ))}
             {categorias.length === 0 && (
-              <tr><td colSpan={5} className="py-10 text-center text-gray-400">Nenhuma categoria cadastrada.</td></tr>
+              <tr><td colSpan={6} className="py-10 text-center text-gray-400">Nenhuma categoria encontrada com esses filtros.</td></tr>
             )}
           </tbody>
         </table>
