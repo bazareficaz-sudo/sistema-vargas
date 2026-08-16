@@ -167,15 +167,35 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const buscarRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const sb = createClient()
 
+  // Colunas que este modal grava e que nem toda tela carrega antes de abrir.
+  // Se alguma faltar no objeto recebido, o formulário a trataria como vazia e
+  // o "Salvar alterações" a gravaria como null — apagando em silêncio peso,
+  // medidas, dados fiscais, código do fornecedor. Por isso o modal confere e,
+  // se faltar, busca a linha inteira ele mesmo, em vez de confiar em quem o
+  // chamou.
+  const COLUNAS_SO_DO_MODAL = ['peso_kg', 'csosn', 'codigo_fornecedor', 'subcategoria', 'precos_quantidade']
+
   useEffect(() => {
     if (produto) {
-      setForm({ ...produto })
+      // Estado derivado do produto — chamado de novo quando a linha completa
+      // chega, senão as faixas de quantidade e a data de promoção ficariam
+      // com o que veio da lista (ou seja, vazias).
+      const aplicar = (p: any) => {
+        setForm({ ...p })
+        setPromocaoInfinita(!p.promocao_fim)
+        const salvas = faixasDoProduto(p)
+        setFaixas([0, 1, 2].map(i => salvas[i]
+          ? { qtd: String(salvas[i].qtd), preco: String(salvas[i].preco) }
+          : { qtd: '', preco: '' }))
+      }
+      aplicar(produto)
+
+      const faltando = COLUNAS_SO_DO_MODAL.filter(c => !(c in produto))
+      if (faltando.length > 0) {
+        sb.from('produtos').select('*').eq('id', produto.id).maybeSingle()
+          .then(({ data }: any) => { if (data && data.id === produto.id) aplicar(data) })
+      }
       setAba(abaInicial ?? 'geral')
-      setPromocaoInfinita(!produto.promocao_fim)
-      const salvas = faixasDoProduto(produto as any)
-      setFaixas([0, 1, 2].map(i => salvas[i]
-        ? { qtd: String(salvas[i].qtd), preco: String(salvas[i].preco) }
-        : { qtd: '', preco: '' }))
       if (produto.tipo === 'kit') carregarKitItens(produto.id)
       carregarImagens(produto.id)
       carregarAnunciosVinculados(produto.id)

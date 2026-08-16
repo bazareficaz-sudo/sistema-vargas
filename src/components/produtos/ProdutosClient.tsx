@@ -126,6 +126,28 @@ export default function ProdutosClient({
   // o link vindo de Vendas leva para Fiscal.
   const [abaModal, setAbaModal] = useState<'fiscal' | 'anuncios' | undefined>(undefined)
 
+  // Abre o cadastro SEMPRE com a linha completa do banco.
+  //
+  // A listagem seleciona 26 colunas; o modal grava 45. Abrir com a linha da
+  // lista deixava 19 campos sem valor no formulário — e o "Salvar alterações"
+  // os gravava como null. Peso, medidas, código do fornecedor, CSOSN, CFOP,
+  // ICMS/PIS/COFINS, markup, descrição de marketplace: tudo apagado em
+  // silêncio a cada edição feita pela lista. Foi assim que a subcategoria
+  // recém-criada "não surtia efeito": ela era salva e apagada na edição
+  // seguinte.
+  //
+  // Buscar antes de abrir custa uma consulta por id (instantânea) e elimina
+  // a classe inteira do problema — inclusive para a próxima coluna que
+  // alguém adicionar ao modal sem lembrar de mexer na listagem.
+  async function abrirProduto(p: Produto) {
+    const sb = createClient()
+    const { data } = await sb.from('produtos').select('*')
+      .eq('id', p.id).eq('empresa_id', empresaId).maybeSingle()
+    // Sem o registro completo, abre com o que veio da lista: melhor editar
+    // com o formulário incompleto do que não abrir.
+    setEditando((data as Produto) ?? p)
+  }
+
   // Chegou por link com ?editar=<id>: abre o cadastro daquele produto na
   // hora. Busca por id em vez de procurar na página atual — o produto pode
   // estar em qualquer página, ou nem passar pelos filtros vigentes.
@@ -133,8 +155,6 @@ export default function ProdutosClient({
     if (!abrirProdutoId) return
     let cancelado = false
     ;(async () => {
-      const naPagina = produtos.find(p => p.id === abrirProdutoId)
-      if (naPagina) { setEditando(naPagina); return }
       const sb = createClient()
       const { data } = await sb.from('produtos').select('*')
         .eq('id', abrirProdutoId).eq('empresa_id', empresaId).maybeSingle()
@@ -737,7 +757,7 @@ export default function ProdutosClient({
                   <div className="flex items-center gap-2.5 flex-wrap">
                     {imagensMap[p.id] ? (
                       <img src={imagensMap[p.id]} alt={p.nome}
-                        onClick={() => setEditando(p)}
+                        onClick={() => abrirProduto(p)}
                         className="w-9 h-9 rounded-lg object-cover border border-gray-200 flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity" />
                     ) : (
                       <div className="w-9 h-9 rounded-lg border border-dashed border-gray-200 flex items-center justify-center flex-shrink-0 text-gray-300 text-sm select-none">
@@ -772,7 +792,7 @@ export default function ProdutosClient({
                         {/* Em quais canais o produto está anunciado. Clicar
                             abre a lista de anúncios, onde dá para pausar. */}
                         <SeloCanais contagem={anunciosMap?.[p.id]}
-                          onAbrir={() => { setAbaModal('anuncios'); setEditando(p) }} />
+                          onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }} />
                       </>
                     )}
                     {p.promocao_ativa && (
@@ -844,7 +864,7 @@ export default function ProdutosClient({
                 <td className="px-2 py-2.5">
                   <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
                     <button
-                      onClick={() => setEditando(p)}
+                      onClick={() => abrirProduto(p)}
                       className="text-gray-400 hover:text-gray-600 text-lg leading-none"
                       title="Editar"
                     >
