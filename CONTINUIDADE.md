@@ -3,14 +3,74 @@
 Anotações para retomar o trabalho numa sessão nova. Não é documentação do
 sistema: é o estado de quem estava com a mão na massa.
 
-Última atualização: 14/08/2026
+Última atualização: 17/08/2026
 
 Tudo que está descrito aqui como pronto está **no ar** (último deploy:
-`f9986a4`, com as três migrações do dia já rodadas).
+`79c82c8`, com as migrações do dia já rodadas).
 
 ---
 
 ## Em andamento
+
+### Auxiliar de Compras — motor de reposição
+
+Auditoria completa da estrutura em
+[`docs/auxiliar-de-compras-auditoria.md`](docs/auxiliar-de-compras-auditoria.md),
+medida no banco de produção em 17/08. Vale reler antes de mexer aqui: ela
+explica por que o módulo não pode se comportar como um "abaixo do mínimo".
+
+**O número que governa tudo:** 13.284 dos 14.281 produtos ativos estão com
+estoque **zero** no cadastro e 586 **negativo**. Só 411 positivos. A loja
+tem mercadoria; o sistema não sabe. Enquanto isso não for corrigido
+(inventário ou importação do saldo antigo), o Auxiliar vai continuar
+dizendo "em ruptura" para item que está na prateleira.
+
+**Fatia 0 — captura da falta (pronto, no ar).** No `vargasnexus-pdv`
+(commit `eec126c`): a tela mandava `quantidade` e `cliente_whatsapp`, o
+gravador lia `quantidade_solicitada` e `cliente_telefone` — os dois campos
+eram descartados em silêncio. As 11 faltas anteriores estão todas com
+quantidade 1 e sem contato por causa disso. `usuario_nome` nunca era
+enviado. Agora existe `tipo` (falta × encomenda), com prazo prometido e
+preço combinado. **O PDV instalado nos terminais precisa ser atualizado
+para o conserto valer.**
+
+**Fatia 1 — tela Faltas e Encomendas (pronto, no ar).**
+`/dashboard/auxiliar-compras/faltas`. Agrupada por produto, com o estoque
+atual do lado. O agrupamento é só na leitura — cada solicitação continua
+inteira, senão se perde "5 clientes diferentes desde 03/08".
+Marcar "recebido" no painel volta ao balcão pelo sync que já existia.
+
+**Fatia 2 — motor (pronto, no ar).** `reposicao_metricas` +
+`reposicao_config`, cron às 6h (`/api/cron/reposicao`) e botão
+"Recalcular agora". Rodada real: **1.214 produtos gravados em 4,7s**,
+13.066 fora por não haver sinal nenhum de demanda.
+
+Quatro armadilhas que o ensaio sobre os dados reais revelou, e que valem
+para qualquer cálculo novo neste módulo:
+
+1. **A loja inteira acelerou 4,42×** (396 vendas em julho → 1.035 em
+   agosto: o PDV entrando em uso). Sem dividir por esse fator, TODO
+   produto aparece "vendendo 400% mais".
+2. **Tendência precisa de piso de volume.** 1 unidade em 15 dias contra 1
+   em 90 dá "500% mais" — ruído aritmético.
+3. **ABC só pelo acumulado de 80% classifica quase tudo como A** quando a
+   venda é espalhada. Precisa exigir também posição no ranking.
+4. **799 produtos caem em "crítico"** porque quase todo item que vende tem
+   estoque zero/negativo. Score com base alta empata todos perto de 100 —
+   o que separa um crítico do outro é o tamanho (volume e dinheiro), em
+   escala logarítmica.
+
+**Faltam:** fatia 3 (fornecedor × produto: lead time, quantidade mínima,
+múltiplo de caixa, vínculo pedido↔entrada), fatia 4 (lista de compra →
+agrupar por fornecedor → pedido), fatia 5 (IA sobre o que a regra não vê),
+fatia 6 (histórico de ruptura e das decisões do comprador).
+
+**A reconciliar:** `automacoes → RegrasReposicao` já cria rascunho de
+pedido de compra sozinha, a cada 5 minutos, e já tem noção de curva ABC.
+Se ficar como está, vai criar rascunhos concorrentes com o Auxiliar.
+E `/dashboard/relatorios/estoque` (Estoque & Giro) calcula cobertura e
+giro por conta própria, relendo 14 mil produtos a cada abertura — ou é
+absorvida, ou vira link.
 
 ### Nuvemshop — módulo de escrita
 
