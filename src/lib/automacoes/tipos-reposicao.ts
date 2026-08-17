@@ -28,8 +28,26 @@ export async function executarReposicaoMinimo(sb: any, a: any): Promise<Resultad
 // nunca envia nada pro fornecedor sozinho. O rascunho fica em Compras >
 // Pedido ao Fornecedor esperando revisão humana (escolher fornecedor,
 // ajustar quantidades, confirmar) antes de virar um pedido de verdade.
+//
+// Desde que o Auxiliar de Compras passou a gerar pedido pela mesma via
+// (origem='auxiliar'), os dois caminhos disputam os mesmos produtos sem
+// se falar. Este é o único ponto de todas as automações de reposição que
+// de fato grava um `pedidos_compra` — as outras três só mandam alerta por
+// WhatsApp. Por isso a correção mora só aqui: produto que já tem pedido
+// em aberto (de qualquer origem) sai da lista antes de criar outro, e o
+// que for criado carrega `origem='automacao'` para não se confundir com o
+// que o comprador montou à mão.
 export async function executarPedidoAutomatico(sb: any, a: any): Promise<ResultadoExecucao> {
-  const baixos = await produtosAbaixoMinimo(sb, a)
+  const baixos0 = await produtosAbaixoMinimo(sb, a)
+  if (baixos0.length === 0) return { status: 'sem_acao' }
+
+  const { data: itensEmAberto } = await sb.from('pedidos_compra_itens')
+    .select('produto_id, pedidos_compra!inner(empresa_id, status)')
+    .eq('pedidos_compra.empresa_id', a.empresa_id)
+    .not('pedidos_compra.status', 'in', '("cancelado","recebido")')
+  const jaPedido = new Set((itensEmAberto ?? []).map((i: any) => i.produto_id))
+
+  const baixos = baixos0.filter((p: any) => !jaPedido.has(p.id))
   if (baixos.length === 0) return { status: 'sem_acao' }
 
   const itens = baixos.map((p: any) => {
@@ -46,6 +64,7 @@ export async function executarPedidoAutomatico(sb: any, a: any): Promise<Resulta
   const { data: pedido, error: erroPedido } = await sb.from('pedidos_compra').insert({
     empresa_id: a.empresa_id,
     status: 'rascunho',
+    origem: 'automacao',
     observacoes: `Gerado automaticamente pela automação "${a.nome}" — revise fornecedor e quantidades antes de enviar.`,
     subtotal,
     total: subtotal,

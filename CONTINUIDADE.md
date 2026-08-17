@@ -105,11 +105,27 @@ sempre `rascunho`, nunca enviado direto: o comprador ainda revisa em
 `/dashboard/pedidos-compra/novo?id=X` antes de mandar pro fornecedor de
 verdade. Item sem fornecedor não entra em pedido nenhum, fica esperando.
 
-**Não reconciliado ainda**, como já estava anotado: as Regras de
-Reposição das automações continuam criando rascunho sozinhas, sem
-`origem`. Os dois convivem porque `origem` diferencia (`auxiliar` vs a
-ausência dela), mas nada impede hoje o mesmo produto entrar em pedidos
-duplicados vindos dos dois caminhos.
+**Reconciliado com as automações (17/08).** A pendência acima não era
+teórica: `executarPedidoAutomatico` (única automação que de fato grava
+`pedidos_compra` — as outras três só mandam WhatsApp) criou um rascunho
+NOVO todo dia, de 13 a 17/08, para os MESMOS 4 produtos abaixo do mínimo,
+sem nunca cancelar ou reaproveitar o anterior: pedidos #000002 a #000006,
+cinco rascunhos duplicados acumulados em Pedido ao Fornecedor. Achado
+rodando a função contra o banco real, não é hipótese.
+
+Corrigido em `src/lib/automacoes/tipos-reposicao.ts`: antes de criar,
+`executarPedidoAutomatico` agora consulta `pedidos_compra_itens` +
+`pedidos_compra` (join `!inner`, filtro `not(status, in, ("cancelado",
+"recebido"))`) e tira da lista todo produto que já tem pedido aberto —
+de qualquer origem, automação ou Auxiliar. O pedido criado agora carrega
+`origem='automacao'`. Testado: rodou contra a empresa real e devolveu
+`sem_acao`, porque os 4 produtos já estão cobertos pelos rascunhos
+existentes.
+
+**Pendência que ficou**: os 5 rascunhos duplicados (#000002–#000006)
+continuam no banco — não apaguei sozinho, é decisão do Silvano cancelar
+ou consolidar. `SELECT * FROM pedidos_compra WHERE observacoes ILIKE
+'%Pedido ao fornecedor%' AND status='rascunho'` acha todos.
 
 **Faltam:** fatia 5 (IA sobre o que a regra não vê), fatia 6 (histórico
 de ruptura e das decisões do comprador).
