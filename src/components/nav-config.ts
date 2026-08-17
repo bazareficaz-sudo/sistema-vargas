@@ -115,6 +115,7 @@ export const NAV: NavGroup[] = [
     badgeColor: 'bg-orange-500',
     defaultOpen: false,
     items: [
+      { href: '/dashboard/auxiliar-compras/faltas', label: 'Faltas e Encomendas', icon: '📌', modulo: 'pedidos_compra' },
       { href: '/dashboard/pedidos-compra',  label: 'Pedido ao Fornecedor', icon: '📋', modulo: 'pedidos_compra' },
       { href: '/dashboard/entradas/nova',   label: 'Nova Entrada',         icon: '➕', modulo: 'entradas' },
       { href: '/dashboard/entradas-xml',    label: 'XML / NF-e',           icon: '📄', modulo: 'entradas_xml' },
