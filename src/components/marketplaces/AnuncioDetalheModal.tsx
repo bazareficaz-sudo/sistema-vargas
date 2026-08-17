@@ -3,9 +3,14 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt, temDivergencia } from './utils'
+import { FALTAS_CATALOGO } from '@/lib/marketplace/qualidade'
 
-export default function AnuncioDetalheModal({ anuncio, canal, regras, onClose, onAtualizado }: {
+export default function AnuncioDetalheModal({ anuncio, canal, regras, onClose, onAtualizado, onEditar, onMapear }: {
   anuncio: any; canal: any; regras?: any[]; onClose: () => void; onAtualizado: (anuncio: any) => void
+  /** Abre a edição de título/descrição deste anúncio no sistema. */
+  onEditar?: () => void
+  /** Abre o vínculo com um produto do catálogo. */
+  onMapear?: () => void
 }) {
   const [variacoes, setVariacoes] = useState<any[]>([])
   const [carregandoVariacoes, setCarregandoVariacoes] = useState(false)
@@ -85,6 +90,66 @@ export default function AnuncioDetalheModal({ anuncio, canal, regras, onClose, o
               {anuncio.imagens.map((url: string, i: number) => (
                 <img key={i} src={url} alt="" className="w-full h-24 object-cover rounded-lg border border-gray-200" />
               ))}
+            </div>
+          )}
+
+          {anuncio.qualidade_em && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">Qualidade do anúncio</p>
+              <div className="flex items-center gap-4 mb-3">
+                {anuncio.qualidade_health != null && (
+                  <div>
+                    <p className="text-2xl font-semibold text-gray-800">{Math.round(Number(anuncio.qualidade_health) * 100)}%</p>
+                    <p className="text-xs text-gray-400">índice oficial do Mercado Livre</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-2xl font-semibold text-gray-800">{anuncio.qualidade_score}<span className="text-sm text-gray-400">/100</span></p>
+                  <p className="text-xs text-gray-400">checklist do sistema</p>
+                </div>
+              </div>
+
+              {(anuncio.qualidade_faltas ?? []).length === 0 ? (
+                <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  ✓ Nenhuma pendência no checklist.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {(anuncio.qualidade_faltas as string[]).map(codigo => {
+                    const f = FALTAS_CATALOGO[codigo]
+                    if (!f) return null
+                    // Ação real por tipo de pendência — nada de prometer edição
+                    // que este sistema não faz. Título/descrição são editáveis
+                    // aqui; EAN/marca dependem do produto vinculado; o resto
+                    // (fotos, vídeo, atributos) só se edita na própria plataforma.
+                    const acao =
+                      codigo === 'titulo' || codigo === 'descricao'
+                        ? { label: 'Editar no sistema', onClick: onEditar }
+                        : codigo === 'ean'
+                        ? { label: anuncio.produtos ? 'Editar produto vinculado' : 'Vincular produto', onClick: onMapear }
+                        : null
+                    return (
+                      <div key={codigo} className="flex items-start justify-between gap-3 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-sm text-amber-900">{f.titulo}</p>
+                          <p className="text-xs text-amber-700/80 mt-0.5">{f.porque}</p>
+                        </div>
+                        {acao?.onClick ? (
+                          <button onClick={acao.onClick}
+                            className="shrink-0 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg px-2.5 py-1 hover:bg-amber-100">
+                            {acao.label}
+                          </button>
+                        ) : link ? (
+                          <a href={link} target="_blank" rel="noreferrer"
+                            className="shrink-0 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-lg px-2.5 py-1 hover:bg-amber-100">
+                            Abrir na plataforma ↗
+                          </a>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 

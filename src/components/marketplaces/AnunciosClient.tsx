@@ -15,6 +15,7 @@ import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
 import { calcular as calcularPreco, saudeDaMargem, ROTULO_SAUDE } from '@/lib/precificacao/motor'
+import { FALTAS_CATALOGO } from '@/lib/marketplace/qualidade'
 
 // Saúde da precificação do anúncio: pega o preço que está no ar, desconta
 // tudo que o canal cobra (as taxas configuradas em Precificação) e mostra o
@@ -32,6 +33,42 @@ function SaudeDoAnuncio({ anuncio, cfg }: { anuncio: any; cfg: any }) {
     <p className="text-xs text-gray-400 mt-0.5" title={`Lucro estimado ${r.lucro.toFixed(2)} · deduções ${r.totalDeducoes.toFixed(2)}`}>
       {s.emoji} {r.margemLiquida.toFixed(0)}% de margem
     </p>
+  )
+}
+
+// Qualidade do anúncio — a coluna prometida no CONTINUIDADE.
+//
+// `health` (0-1) é o índice OFICIAL do Mercado Livre; só existe pra ML e vem
+// pronto na sincronização. `score` (0-100) é o checklist NOSSO, calculado
+// igual nas duas plataformas. MEDIDO contra produção: os dois números não se
+// correlacionam (health ≥0,80 dá score médio 56; abaixo de 0,80 dá 54) — por
+// isso aparecem em linhas separadas, nunca somados ou misturados numa "nota
+// única" que faria parecer que um prevê o outro.
+function faixaScore(score: number): { cor: string; label: string } {
+  if (score <= 40) return { cor: 'text-red-600', label: 'Ruim' }
+  if (score <= 60) return { cor: 'text-orange-600', label: 'Regular' }
+  if (score <= 80) return { cor: 'text-amber-600', label: 'Bom' }
+  return { cor: 'text-emerald-600', label: 'Ótimo' }
+}
+
+function QualidadeColuna({ anuncio }: { anuncio: any }) {
+  if (anuncio.qualidade_em == null) {
+    return <span className="text-xs text-gray-300">—</span>
+  }
+  const score = Number(anuncio.qualidade_score ?? 0)
+  const f = faixaScore(score)
+  const faltas: string[] = anuncio.qualidade_faltas ?? []
+  return (
+    <div className="text-xs leading-tight">
+      {anuncio.qualidade_health != null && (
+        <div className="text-gray-700" title="Índice oficial do Mercado Livre">
+          {Math.round(Number(anuncio.qualidade_health) * 100)}% <span className="text-gray-400">ML</span>
+        </div>
+      )}
+      <div className={f.cor} title={`Checklist do sistema: ${faltas.length} pendência(s)`}>
+        {score} <span className="text-gray-400">checklist</span>
+      </div>
+    </div>
   )
 }
 
@@ -108,6 +145,8 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'sem_estoque', label: 'Sem estoque' },
   { key: 'com_variacao', label: 'Com variações' },
   { key: 'divergente', label: 'Divergente' },
+  { key: 'qualidade_ruim', label: 'Qualidade ruim' },
+  { key: 'qualidade_boa', label: 'Qualidade ótima' },
 ]
 
 export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [], configPreco }: {
@@ -152,6 +191,9 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [resumoSync, setResumoSync] = useState('')
   const [facetas, setFacetas] = useState<Set<string>>(new Set())
   const [tagFiltro, setTagFiltro] = useState('')
+  // Filtro por falta específica de qualidade — separado das facetas porque é
+  // um seletor de valor (qual falta), não um interruptor liga/desliga.
+  const [faltaFiltro, setFaltaFiltro] = useState('')
   const [detalheAberto, setDetalheAberto] = useState<any | null>(null)
   const [mapeandoAberto, setMapeandoAberto] = useState<any | null>(null)
   const [enriquecendoAberto, setEnriquecendoAberto] = useState<any | null>(null)
@@ -844,7 +886,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     const matchQ = !q || a.titulo.toLowerCase().includes(q.toLowerCase())
     const matchS = !statusFiltro || a.status === statusFiltro
     const matchTag = !tagFiltro || (a.produtos?.tags ?? []).includes(tagFiltro)
-    if (!matchQ || !matchS || !matchTag) return false
+    const matchFalta = !faltaFiltro || (a.qualidade_faltas ?? []).includes(faltaFiltro)
+    if (!matchQ || !matchS || !matchTag || !matchFalta) return false
 
     for (const faceta of facetas) {
       if (faceta === 'mapeado' && !estaMapeado(a)) return false
@@ -853,6 +896,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       if (faceta === 'sem_estoque' && (a.estoque_externo ?? null) !== 0) return false
       if (faceta === 'com_variacao' && !a.tem_variacao) return false
       if (faceta === 'divergente' && !temDivergencia(a)) return false
+      if (faceta === 'qualidade_ruim' && !(a.qualidade_em != null && Number(a.qualidade_score ?? 100) <= 40)) return false
+      if (faceta === 'qualidade_boa' && !(a.qualidade_em != null && Number(a.qualidade_score ?? 0) > 80)) return false
     }
     return true
   })
@@ -860,7 +905,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // Renderizar 2000+ linhas de uma vez deixa a tela pesada — pagina o que é
   // exibido, mas mantém "selecionar todos" e ações em massa operando sobre
   // `filtrados` inteiro (todas as páginas), não só a página visível.
-  useEffect(() => { setPagina(1) }, [q, statusFiltro, tagFiltro, facetas])
+  useEffect(() => { setPagina(1) }, [q, statusFiltro, tagFiltro, faltaFiltro, facetas])
   const totalPaginas = Math.max(1, Math.ceil(filtrados.length / ITENS_POR_PAGINA))
   const paginaAtual = Math.min(pagina, totalPaginas)
   const paginados = filtrados.slice((paginaAtual - 1) * ITENS_POR_PAGINA, paginaAtual * ITENS_POR_PAGINA)
@@ -975,6 +1020,14 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             {tagsDisponiveis.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         )}
+        <select value={faltaFiltro} onChange={e => setFaltaFiltro(e.target.value)}
+          title="Anúncios com esta pendência de qualidade"
+          className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-600 focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Qualidade: qualquer falta</option>
+          {Object.values(FALTAS_CATALOGO).map(f => (
+            <option key={f.codigo} value={f.codigo}>Falta: {f.titulo}</option>
+          ))}
+        </select>
       </div>
       <div className="flex items-center gap-1.5 mb-4 flex-wrap">
         <span className="text-xs text-gray-400 mr-1">Filtrar:</span>
@@ -1129,6 +1182,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                 <p className="text-xs text-gray-400 mt-0.5">
                   {a.sku_canal ? `SKU ${a.sku_canal}` : 'sem SKU no canal'} · {fmt(a.preco_venda)}
                 </p>
+                {a.qualidade_em != null && (
+                  <p className="text-xs mt-0.5">
+                    {a.qualidade_health != null && <span className="text-gray-500">{Math.round(Number(a.qualidade_health) * 100)}% ML · </span>}
+                    <span className={faixaScore(Number(a.qualidade_score ?? 0)).cor}>{a.qualidade_score} checklist</span>
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1176,6 +1235,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Título / Produto</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">SKU canal</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Qualidade</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Estoque</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Vendas</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço venda</th>
@@ -1233,6 +1293,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   </div>
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-500 font-mono">{a.sku_canal || '—'}</td>
+                <td className="px-4 py-3">
+                  <button onClick={() => setDetalheAberto(a)} className="text-left hover:opacity-70" title="Ver pendências de qualidade">
+                    <QualidadeColuna anuncio={a} />
+                  </button>
+                </td>
                 <td className="px-4 py-3 text-right">
                   <p className="text-gray-900 font-mono text-sm">{a.estoque_reservado ?? 0}</p>
                   {a.produtos && <p className="text-xs text-gray-400">estoque: {a.produtos.estoque ?? 0}</p>}
@@ -1441,6 +1506,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? anuncioAtualizado : a))
             setDetalheAberto(anuncioAtualizado)
           }}
+          // Resolver uma pendência de qualidade quase sempre significa sair
+          // deste modal e entrar noutro — editar título/descrição no sistema,
+          // ou vincular produto. Fechar aqui e abrir lá em vez de empilhar
+          // dois overlays fixos um sobre o outro.
+          onEditar={() => { const a = detalheAberto; setDetalheAberto(null); abrirEditar(a) }}
+          onMapear={() => { const a = detalheAberto; setDetalheAberto(null); setMapeandoAberto(a) }}
         />
       )}
 

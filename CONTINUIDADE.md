@@ -284,22 +284,40 @@ Cuidado que já mordeu: o sync gravava `descricao: null` explícito, o que
 apagaria no sync seguinte tudo que fosse buscado. A coluna saiu da linha do
 upsert — **omitir preserva**. Conferido rodando o sync logo depois de gravar.
 
-### Qualidade dos anúncios — parou na metade
+### Qualidade dos anúncios — tela pronta (17/08)
 
-`supabase-marketplace-qualidade.sql` **já foi rodado**. As colunas
-`qualidade_health / _score / _faltas / _em` existem e os 8.117 anúncios foram
-avaliados. O cálculo roda a cada sincronização (`src/lib/marketplace/qualidade.ts`).
+`supabase-marketplace-qualidade.sql` já tinha sido rodado antes; as colunas
+`qualidade_health / _score / _faltas / _em` já existiam e 8.975 dos 9.212
+anúncios já estavam avaliados quando a tela foi construída (confirmado ao
+vivo no banco antes de mexer em código). O cálculo roda a cada sincronização
+(`src/lib/marketplace/qualidade.ts`), continua sem mudança.
 
-**Falta a tela:** coluna Qualidade na listagem de Anúncios, filtro por falta
-("mostrar os 3.537 sem EAN") e painel por anúncio com os botões que resolvem
-cada pendência.
+**A tela foi construída, as três coisas que faltavam:**
+
+- **Coluna "Qualidade"** em `/dashboard/marketplaces/[canalId]/anuncios`
+  (`COLUNAS_LISTAGEM` em page.tsx passou a trazer as 4 colunas — leve, são
+  escalares, nada parecido com o peso de `dados_brutos`). Mostra health do
+  ML e score do checklist em linhas separadas, sempre — nunca somados numa
+  nota única, por causa do achado abaixo.
+- **Filtro por falta**: select "Falta: Sem EAN / Menos de 3 fotos / ..."
+  populado direto de `FALTAS_CATALOGO` (já exportado por qualidade.ts, não
+  duplicado). Mais duas facetas nas já existentes (`qualidade_ruim` score
+  ≤40, `qualidade_boa` score >80).
+- **Painel por anúncio** (`AnuncioDetalheModal.tsx`): lista cada falta com
+  o "porquê" (texto já existia no catálogo) e um botão de ação HONESTO por
+  tipo — só promete o que o sistema realmente faz:
+  - título/descrição → abre a edição local (`onEditar`, já existia)
+  - EAN → vincula/edita o produto (`onMapear`, já existia)
+  - fotos/vídeo/atributos/marca → link "Abrir na plataforma ↗", porque
+    este sistema não tem (e não fingiu ter) editor desses campos — eles só
+    se editam no painel do próprio ML/Shopee.
 
 **Achado importante, medido — não repetir o erro:** o checklist do sistema
 **não prevê** o `health` oficial do ML. Anúncios com health ≥0,80 dão score
-médio 56; abaixo de 0,80, 54. A tela deve mostrar **o health do ML** como a
-nota no Mercado Livre, e usar o checklist só como lista do que falta. Para
-nota itemizada de verdade no ML o caminho é o endpoint `/items/{id}/health`
-(7.692 chamadas, passada à parte).
+médio 56; abaixo de 0,80, 54. A tela mostra os dois números em linhas
+separadas, cada um rotulado — nunca um como estimativa do outro. Para nota
+itemizada de verdade no ML o caminho é o endpoint `/items/{id}/health`
+(9.212 chamadas, passada à parte, ainda não feita).
 
 Números por canal: ML Eficaz 4.986 anúncios (health 0,77), ML Ouro 2.025
 (0,70), Shp Eficaz 675, Shp Ouro 431.

@@ -35,6 +35,10 @@ const COLUNAS_LISTAGEM = [
   'frete_peso_cobravel', 'frete_logistic_type', 'frete_atualizado_em',
   // Único pedaço de dados_brutos que a tela lê, extraído sem trazer o resto.
   'listing_type:dados_brutos->>listing_type_id',
+  // Qualidade — calculada a cada sincronização (src/lib/marketplace/qualidade.ts),
+  // nunca aqui na tela. Leve: 4 colunas escalares, nada parecido com o peso
+  // de `dados_brutos`.
+  'qualidade_health', 'qualidade_score', 'qualidade_faltas', 'qualidade_em',
 ].join(', ')
 
 export default async function AnunciosPage({ params, searchParams }: {
