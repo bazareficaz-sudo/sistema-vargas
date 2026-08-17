@@ -1,4 +1,5 @@
 import { calcular, CONFIG_PADRAO, type ConfigReposicao, type EntradaProduto } from './motor'
+import { atualizarRupturas } from './rupturas'
 
 // Recalcula as métricas de reposição de uma empresa.
 //
@@ -52,6 +53,8 @@ export type ResumoRodada = {
   semSinal: number
   itensDemanda: number
   diasHistorico: number
+  rupturasAbertas: number
+  rupturasFechadas: number
   duracaoMs: number
 }
 
@@ -269,6 +272,36 @@ export async function recalcularEmpresa(sb: any, empresaId: string): Promise<Res
       : 'C'
   })
 
+  // Mesma regra, por MARGEM em vez de faturamento — produto de giro alto e
+  // margem baixa (cimento, por exemplo) pode ser classe A num critério e
+  // pouco relevante no outro. As duas classificações convivem; nenhuma
+  // substitui a outra.
+  const margemTotal = produtos
+    .map((p: any) => ({
+      id: p.id,
+      valor: (vendasJanela[p.id]?.d90 ?? 0) * (Number(p.preco_venda ?? 0) - Number(p.preco_custo ?? 0)),
+    }))
+    .filter(x => x.valor > 0)
+    .sort((a, b) => b.valor - a.valor)
+  const totalMargem = margemTotal.reduce((s, x) => s + x.valor, 0)
+  const classeMargem: Record<string, 'A' | 'B' | 'C'> = {}
+  let acumuladoMargem = 0
+  margemTotal.forEach((x, i) => {
+    acumuladoMargem += x.valor
+    const pctValor = totalMargem > 0 ? acumuladoMargem / totalMargem : 1
+    const pctPosicao = (i + 1) / margemTotal.length
+    classeMargem[x.id] =
+      pctValor <= 0.8 && pctPosicao <= 0.2 ? 'A'
+      : pctValor <= 0.95 && pctPosicao <= 0.5 ? 'B'
+      : 'C'
+  })
+
+  // ── Ruptura ───────────────────────────────────────────────────
+  // Compara o retrato de ontem (última rodada) com o de hoje — nenhum
+  // outro ponto do sistema precisa avisar isto, só esta rodada, que já lê
+  // o catálogo inteiro de qualquer forma.
+  const resumoRupturas = await atualizarRupturas(sb, empresaId, produtos)
+
   // ── Cálculo ───────────────────────────────────────────────────
   const linhas: Record<string, unknown>[] = []
   let semSinal = 0
@@ -320,7 +353,7 @@ export async function recalcularEmpresa(sb: any, empresaId: string): Promise<Res
       estoque_seguranca: r.estoqueSeguranca, ponto_reposicao: r.pontoReposicao,
       sugestao_quantidade: r.sugestaoQuantidade, custo_estimado: r.custoEstimado,
       score: r.score, prioridade: r.prioridade,
-      classe_abc: classe[p.id] ?? null, giro: r.giro,
+      classe_abc: classe[p.id] ?? null, classe_abc_margem: classeMargem[p.id] ?? null, giro: r.giro,
       motivos: r.motivos,
       calculado_em: inicioRodada,
     })
@@ -346,6 +379,8 @@ export async function recalcularEmpresa(sb: any, empresaId: string): Promise<Res
     semSinal,
     itensDemanda,
     diasHistorico,
+    rupturasAbertas: resumoRupturas.abertas,
+    rupturasFechadas: resumoRupturas.fechadas,
     duracaoMs: Date.now() - t0,
   }
 }

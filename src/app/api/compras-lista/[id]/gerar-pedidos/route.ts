@@ -34,7 +34,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!lista) return NextResponse.json({ ok: false, erro: 'Lista não encontrada.' }, { status: 404 })
 
   let query = sb.from('compras_lista_itens')
-    .select('id, produto_id, quantidade, fornecedor_id, custo_unitario_estimado, observacao')
+    .select('id, produto_id, quantidade, fornecedor_id, custo_unitario_estimado, observacao, quantidade_sugerida_original')
     .eq('lista_id', listaId).is('pedido_compra_id', null)
   if (Array.isArray(itemIds) && itemIds.length > 0) query = query.in('id', itemIds)
   const { data: itens } = await query
@@ -80,6 +80,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     await sb.from('compras_lista_itens')
       .update({ pedido_compra_id: pedido.id })
       .in('id', itensDoFornecedor.map(i => i.id))
+
+    // O que o motor sugeriu contra o que virou pedido de verdade — item 31.
+    // Só entra quem passou pelo Auxiliar (tem sugestão registrada); item
+    // digitado à mão do zero não tem "sugestão" para comparar.
+    const decisoes = itensDoFornecedor
+      .filter(i => i.quantidade_sugerida_original)
+      .map(i => ({
+        empresa_id: empresaId, produto_id: i.produto_id, evento: 'pedido_gerado',
+        quantidade_sugerida: i.quantidade_sugerida_original, quantidade_decidida: i.quantidade,
+        pedido_compra_id: pedido.id, lista_item_id: i.id,
+      }))
+    if (decisoes.length > 0) await sb.from('reposicao_decisoes').insert(decisoes)
 
     pedidosCriados.push({ pedidoId: pedido.id, fornecedorId, itens: itensDoFornecedor.length, total })
   }

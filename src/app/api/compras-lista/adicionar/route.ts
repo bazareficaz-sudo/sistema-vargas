@@ -72,6 +72,10 @@ export async function POST(req: Request) {
     const { fornecedorId, custoEstimado } = await resolverFornecedorSugerido(sb, empresaId, item.produtoId)
     const { error } = await sb.from('compras_lista_itens').insert({
       lista_id: lista.id, produto_id: item.produtoId, quantidade: item.quantidade,
+      // Retrato imutável do que o motor sugeriu neste instante — é contra
+      // isto, não contra `quantidade` (que o comprador pode ajustar
+      // depois), que o histórico de decisões mede.
+      quantidade_sugerida_original: item.quantidade,
       fornecedor_id: fornecedorId, custo_unitario_estimado: custoEstimado,
       origem: 'auxiliar', motivo: item.motivo ?? null,
     })

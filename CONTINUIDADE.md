@@ -148,7 +148,39 @@ misturados —, porque um é conta que dá pra conferir e o outro é
 interpretação. A explicabilidade determinística das fatias 2-4 continua
 sem IA nenhuma.
 
-**Faltam:** fatia 6 (histórico de ruptura e das decisões do comprador).
+**Fatia 6 — memória (pronto, aguardando
+`supabase-reposicao-memoria.sql`). Fecha o plano original inteiro.**
+
+Duas coisas que não têm como nascer com histórico — começam vazias no dia
+em que entram no ar:
+
+- `reposicao_rupturas`: quanto tempo cada produto ficou com estoque <= 0.
+  Detectado dentro do próprio cron noturno (`src/lib/reposicao/rupturas.ts`),
+  comparando o estoque de ontem com o de hoje — não instrumenta os vários
+  pontos que escrevem `produtos.estoque` (PDV, entrada manual, XML,
+  ajuste, marketplace, kit), que seria tocar demais pelo mesmo ganho. Ao
+  fechar uma ruptura, conta quantas faltas/encomendas caíram na janela —
+  é a medida de demanda perdida do item 34, agora com número em vez de
+  impressão.
+- `reposicao_decisoes`: o que o motor sugeriu × o que virou pedido de
+  verdade, ou foi rejeitado. Instrumentado nas rotas da Lista de Compra
+  (adicionar grava `quantidade_sugerida_original`, imutável; gerar-pedidos
+  grava `pedido_gerado` com sugerido×decidido; remover item grava
+  `removido_sem_comprar`). Não cobre os pedidos criados pela automação
+  (esses não passam pela Lista de Compra) nem pedidos manuais do zero.
+
+`classe_abc_margem` — ABC por margem, ao lado do já existente por
+faturamento (fatia 2). Produto de giro alto e margem baixa pode ser A num
+critério e irrelevante no outro.
+
+Tela nova: `/dashboard/auxiliar-compras/historico`, com aviso explícito
+de que os números começam do zero — nada foi reconstruído do passado. Com
+poucas amostras (menos de 5 decisões comparáveis) a tela avisa que ainda
+é cedo para tirar padrão, em vez de mostrar uma média de duas observações
+como se fosse confiável.
+
+**Não faltam mais fatias do plano original.** As seis rodaram, foram
+verificadas contra o banco de produção (não só compiladas) e estão no ar.
 
 **A reconciliar:** `automacoes → RegrasReposicao` já cria rascunho de
 pedido de compra sozinha, a cada 5 minutos, e já tem noção de curva ABC.
