@@ -117,6 +117,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/dashboard/auxiliar-compras',        label: 'Auxiliar de Compras',  icon: '🧭', modulo: 'pedidos_compra' },
       { href: '/dashboard/auxiliar-compras/faltas', label: 'Faltas e Encomendas', icon: '📌', modulo: 'pedidos_compra' },
+      { href: '/dashboard/compras-lista',           label: 'Lista de Compra',      icon: '🧾', modulo: 'pedidos_compra' },
       { href: '/dashboard/pedidos-compra',  label: 'Pedido ao Fornecedor', icon: '📋', modulo: 'pedidos_compra' },
       { href: '/dashboard/entradas/nova',   label: 'Nova Entrada',         icon: '➕', modulo: 'entradas' },
       { href: '/dashboard/entradas-xml',    label: 'XML / NF-e',           icon: '📄', modulo: 'entradas_xml' },

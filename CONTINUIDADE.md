@@ -88,9 +88,31 @@ Compras, carregada sob demanda quando a linha é expandida.
 Tela nova: `/dashboard/fornecedores/[id]/produtos`, link "Produtos" na
 listagem de fornecedores.
 
-**Faltam:** fatia 4 (lista de compra → agrupar por fornecedor → pedido),
-fatia 5 (IA sobre o que a regra não vê), fatia 6 (histórico de ruptura e
-das decisões do comprador).
+**Fatia 4 — lista de compra → pedido (pronto, aguardando
+`supabase-compras-lista.sql`).** `compras_listas` + `compras_lista_itens`:
+a bancada entre "o Auxiliar sugeriu" e "o pedido foi para o fornecedor".
+
+No Auxiliar de Compras, seleção múltipla (checkbox) + "Adicionar à Lista
+de Compra" — usa a quantidade sugerida por padrão, editável depois. Sem
+`listaId`, a rota usa a lista aberta da empresa ou cria uma; item repetido
+soma quantidade em vez de duplicar linha.
+
+`/dashboard/compras-lista/[id]` agrupa por fornecedor (resolvido por
+`fornecedor_padrao_id` do produto > sugestão do histórico >
+`sem fornecedor`, sempre trocável). Cada grupo tem "Gerar pedido deste
+fornecedor" — cria um `pedidos_compra` com `origem='auxiliar'` e status
+sempre `rascunho`, nunca enviado direto: o comprador ainda revisa em
+`/dashboard/pedidos-compra/novo?id=X` antes de mandar pro fornecedor de
+verdade. Item sem fornecedor não entra em pedido nenhum, fica esperando.
+
+**Não reconciliado ainda**, como já estava anotado: as Regras de
+Reposição das automações continuam criando rascunho sozinhas, sem
+`origem`. Os dois convivem porque `origem` diferencia (`auxiliar` vs a
+ausência dela), mas nada impede hoje o mesmo produto entrar em pedidos
+duplicados vindos dos dois caminhos.
+
+**Faltam:** fatia 5 (IA sobre o que a regra não vê), fatia 6 (histórico
+de ruptura e das decisões do comprador).
 
 **A reconciliar:** `automacoes → RegrasReposicao` já cria rascunho de
 pedido de compra sozinha, a cada 5 minutos, e já tem noção de curva ABC.

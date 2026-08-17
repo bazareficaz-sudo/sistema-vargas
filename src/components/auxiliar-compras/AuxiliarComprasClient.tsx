@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import BotaoRecalcular from './BotaoRecalcular'
 
 // A lista do que comprar.
@@ -103,10 +104,14 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
   lista: Metrica[]
   calculadoEm: string | null
 }) {
+  const router = useRouter()
   const [visao, setVisao] = useState<Visao>('comprar')
   const [busca, setBusca] = useState('')
   const [categoria, setCategoria] = useState('')
   const [aberto, setAberto] = useState<string | null>(null)
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [enviando, setEnviando] = useState(false)
+  const [avisoLista, setAvisoLista] = useState('')
 
   const categorias = useMemo(
     () => [...new Set(lista.map(m => m.categoria).filter(Boolean))].sort() as string[],
@@ -143,6 +148,52 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
   }, [lista])
 
   const valorDaVisao = filtrada.reduce((s, m) => s + Number(m.custo_estimado), 0)
+
+  function alternarSelecao(produtoId: string) {
+    setSelecionados(prev => {
+      const n = new Set(prev)
+      if (n.has(produtoId)) n.delete(produtoId); else n.add(produtoId)
+      return n
+    })
+  }
+
+  function alternarSelecaoTodos() {
+    const idsVisiveis = filtrada.map(m => m.produto_id)
+    const todosDentro = idsVisiveis.every(id => selecionados.has(id))
+    setSelecionados(prev => {
+      const n = new Set(prev)
+      for (const id of idsVisiveis) { if (todosDentro) n.delete(id); else n.add(id) }
+      return n
+    })
+  }
+
+  // A quantidade que vai para a lista é a sugestão calculada — o comprador
+  // ainda pode mudar depois, na própria lista. 1 é só um piso para produto
+  // sem sugestão numérica (ex.: adicionado manualmente pela seleção, sem
+  // prioridade de compra) não entrar com quantidade zero.
+  async function adicionarALista() {
+    const itensSelecionados = lista.filter(m => selecionados.has(m.produto_id))
+    if (itensSelecionados.length === 0) return
+    setEnviando(true); setAvisoLista('')
+    try {
+      const d = await fetch('/api/compras-lista/adicionar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itens: itensSelecionados.map(m => ({
+            produtoId: m.produto_id,
+            quantidade: m.sugestao_quantidade > 0 ? m.sugestao_quantidade : 1,
+            motivo: PRIORIDADE[m.prioridade]?.label ?? m.prioridade,
+          })),
+        }),
+      }).then(r => r.json())
+      if (!d.ok) { setAvisoLista(d.erro ?? 'Não foi possível adicionar à lista.'); return }
+      setAvisoLista(`${d.adicionados + d.atualizados} produto(s) na lista de compra.`)
+      setSelecionados(new Set())
+      router.refresh()
+    } finally {
+      setEnviando(false)
+    }
+  }
 
   return (
     <div>
@@ -222,6 +273,26 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
         </span>
       </div>
 
+      {avisoLista && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+          <span>{avisoLista}</span>
+          <Link href="/dashboard/compras-lista" className="underline font-medium">ver lista de compra →</Link>
+        </div>
+      )}
+
+      {selecionados.size > 0 && (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm">
+          <span className="font-medium text-slate-700">{selecionados.size} selecionado(s)</span>
+          <button onClick={adicionarALista} disabled={enviando}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-medium hover:bg-slate-700 disabled:opacity-50">
+            {enviando ? 'Adicionando…' : 'Adicionar à Lista de Compra'}
+          </button>
+          <button onClick={() => setSelecionados(new Set())} className="ml-auto text-xs text-slate-400 hover:text-slate-600">
+            limpar seleção
+          </button>
+        </div>
+      )}
+
       {/* ── Lista ───────────────────────────────────────────────── */}
       {filtrada.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
@@ -232,6 +303,11 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
+                <th className="w-8 px-3 py-2">
+                  <input type="checkbox"
+                    checked={filtrada.length > 0 && filtrada.every(m => selecionados.has(m.produto_id))}
+                    onChange={alternarSelecaoTodos} />
+                </th>
                 <th className="text-left px-3 py-2 font-medium">Produto</th>
                 <th className="text-center px-2 py-2 font-medium">Prioridade</th>
                 <th className="text-right px-2 py-2 font-medium">Estoque</th>
@@ -251,6 +327,10 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
                 return (
                   <Fragment key={m.produto_id}>
                     <tr className="border-t border-slate-100 hover:bg-slate-50/60">
+                      <td className="px-3 py-2">
+                        <input type="checkbox" checked={selecionados.has(m.produto_id)}
+                          onChange={() => alternarSelecao(m.produto_id)} />
+                      </td>
                       <td className="px-3 py-2 max-w-[280px]">
                         <div className="flex items-center gap-2">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${pr.ponto}`} />
@@ -329,7 +409,7 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
 
                     {expandido && (
                       <tr className="bg-slate-50/80">
-                        <td colSpan={10} className="px-5 py-4">
+                        <td colSpan={11} className="px-5 py-4">
                           <p className="text-sm text-slate-700 mb-3">{narrativa(m)}</p>
 
                           {m.motivos.length > 0 && (
