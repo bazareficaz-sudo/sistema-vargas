@@ -297,10 +297,25 @@ export async function recalcularEmpresa(sb: any, empresaId: string): Promise<Res
   })
 
   // ── Ruptura ───────────────────────────────────────────────────
-  // Compara o retrato de ontem (última rodada) com o de hoje — nenhum
-  // outro ponto do sistema precisa avisar isto, só esta rodada, que já lê
-  // o catálogo inteiro de qualquer forma.
-  const resumoRupturas = await atualizarRupturas(sb, empresaId, produtos)
+  //
+  // SÓ para produtos com algum sinal de demanda — o mesmo recorte que
+  // decide se o produto vira linha em `reposicao_metricas` (ver
+  // `temAlgoADizer` abaixo). A primeira rodada, testada sem este filtro,
+  // abriu 13.863 rupturas de uma vez: o catálogo inteiro, incluindo
+  // milhares de produtos cujo estoque zerado é erro de cadastro nunca
+  // corrigido, não ruptura de verdade. "Sem venda, sem falta, sem mínimo,
+  // estoque zerado há meses" não é uma ruptura acontecendo agora — é
+  // exatamente o produto que o resto do módulo já decidiu não ter base
+  // para opinar. Rastrear ruptura nele produziria 13 mil linhas datadas de
+  // hoje sem significado nenhum, afogando o sinal real.
+  const produtosComSinal = produtos.filter((p: any) => {
+    const j = vendasJanela[p.id] ?? janelasVazias()
+    const f = faltas[p.id] ?? { faltas: 0, encomendas: 0, unidades: 0 }
+    const estoque = Number(p.estoque ?? 0)
+    const minimo = Number(p.estoque_minimo ?? 0)
+    return j.d180 > 0 || f.faltas > 0 || f.encomendas > 0 || estoque !== 0 || minimo > 0
+  })
+  const resumoRupturas = await atualizarRupturas(sb, empresaId, produtosComSinal)
 
   // ── Cálculo ───────────────────────────────────────────────────
   const linhas: Record<string, unknown>[] = []
