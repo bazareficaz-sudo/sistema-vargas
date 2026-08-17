@@ -44,6 +44,17 @@ type Metrica = {
   classe_abc: string | null
   giro: string
   motivos: string[]
+  sinaisIA: { tipo: string; texto: string }[]
+}
+
+type ResumoIA = { texto: string; produtosAnalisados: number; geradoEm: string } | null
+
+const TIPO_SINAL_IA: Record<string, { label: string; icone: string }> = {
+  aceleracao:        { label: 'Acelerando',        icone: '📈' },
+  queda_demanda:      { label: 'Demanda caindo',    icone: '📉' },
+  demanda_perdida:    { label: 'Demanda perdida',   icone: '👻' },
+  minimo_inadequado:  { label: 'Mínimo desatualizado', icone: '⚖️' },
+  excesso_a_liquidar: { label: 'Liquidar',          icone: '🏷️' },
 }
 
 const PRIORIDADE: Record<string, { label: string; cor: string; ponto: string }> = {
@@ -100,9 +111,10 @@ function narrativa(m: Metrica): string {
   return p.join(' ')
 }
 
-export default function AuxiliarComprasClient({ lista, calculadoEm }: {
+export default function AuxiliarComprasClient({ lista, calculadoEm, resumoIA }: {
   lista: Metrica[]
   calculadoEm: string | null
+  resumoIA: ResumoIA
 }) {
   const router = useRouter()
   const [visao, setVisao] = useState<Visao>('comprar')
@@ -224,6 +236,8 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
         <Cartao valor={brl(kpi.valor)} label="Reposição estimada" />
       </div>
 
+      <AnaliseInteligente resumo={resumoIA} />
+
       {/* O aviso mais importante desta tela hoje. A conta só é tão boa
           quanto o estoque que a alimenta, e o estoque não está bom. */}
       {kpi.rupturaPorCadastro > kpi.criticos * 0.5 && kpi.criticos > 20 && (
@@ -338,6 +352,12 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
                           {m.classe_abc === 'A' && (
                             <span className="text-[10px] font-bold text-violet-700 bg-violet-100 px-1 rounded">A</span>
                           )}
+                          {m.sinaisIA.length > 0 && (
+                            <span title={m.sinaisIA.map(s => TIPO_SINAL_IA[s.tipo]?.label ?? s.tipo).join(', ')}
+                              className="text-[10px] shrink-0">
+                              {m.sinaisIA.map(s => TIPO_SINAL_IA[s.tipo]?.icone ?? '🤖').join('')}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[11px] text-slate-400 pl-3.5">
                           {m.sku ?? '—'}{m.categoria ? ` · ${m.categoria}` : ''}
@@ -418,6 +438,21 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
                               <ul className="space-y-0.5">
                                 {m.motivos.map((mo, i) => (
                                   <li key={i} className="text-[12px] text-slate-600">✓ {mo}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {m.sinaisIA.length > 0 && (
+                            <div className="mb-3 rounded-lg bg-violet-50 border border-violet-100 px-3 py-2">
+                              <p className="text-[11px] font-medium text-violet-700 mb-1">
+                                🤖 O cálculo não vê isto sozinho — a IA achou
+                              </p>
+                              <ul className="space-y-0.5">
+                                {m.sinaisIA.map((s, i) => (
+                                  <li key={i} className="text-[12px] text-violet-900">
+                                    {TIPO_SINAL_IA[s.tipo]?.icone ?? '🤖'} <strong>{TIPO_SINAL_IA[s.tipo]?.label ?? s.tipo}:</strong> {s.texto}
+                                  </li>
                                 ))}
                               </ul>
                             </div>
@@ -580,6 +615,65 @@ function FornecedoresDoProduto({ produtoId }: { produtoId: string }) {
           {fornecedores.find(f => f.fornecedor_id === recomendado.fornecedorId)?.nome}: {recomendado.motivos.join(' · ')}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Item 37 do pedido original: um card que resume o dia para o comprador
+ * ler em 10 segundos. Único lugar da tela onde a IA fala em prosa — em
+ * todo o resto (motivos, narrativa) o texto é montado por regra, sem
+ * modelo nenhum.
+ */
+function AnaliseInteligente({ resumo }: { resumo: ResumoIA }) {
+  const router = useRouter()
+  const [gerando, setGerando] = useState(false)
+  const [erro, setErro] = useState('')
+
+  async function gerar() {
+    setGerando(true); setErro('')
+    try {
+      const d = await fetch('/api/reposicao/ia/recalcular', { method: 'POST' }).then(r => r.json())
+      if (!d.ok) { setErro(d.erro ?? 'Não foi possível gerar a análise.'); return }
+      router.refresh()
+    } catch {
+      setErro('Falha de rede.')
+    } finally {
+      setGerando(false)
+    }
+  }
+
+  if (!resumo) {
+    return (
+      <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 flex items-center justify-between gap-3">
+        <p className="text-sm text-violet-800">
+          🤖 A análise inteligente ainda não rodou para esta empresa — ela olha para os produtos de
+          maior score em busca de padrões que o cálculo sozinho não vê (aceleração, demanda perdida, mínimo desatualizado).
+        </p>
+        <button onClick={gerar} disabled={gerando}
+          className="shrink-0 px-3 py-1.5 rounded-lg bg-violet-700 text-white text-xs font-medium hover:bg-violet-800 disabled:opacity-50">
+          {gerando ? 'Gerando…' : 'Gerar agora'}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold text-violet-700 mb-1">🤖 Análise Inteligente</p>
+          <p className="text-sm text-violet-900">{resumo.texto}</p>
+        </div>
+        <button onClick={gerar} disabled={gerando}
+          className="shrink-0 px-2.5 py-1 rounded-lg border border-violet-300 bg-white text-violet-700 text-[11px] font-medium hover:bg-violet-100 disabled:opacity-50">
+          {gerando ? 'Gerando…' : 'Atualizar'}
+        </button>
+      </div>
+      <p className="text-[10px] text-violet-500 mt-1.5">
+        {resumo.produtosAnalisados} produtos analisados · {new Date(resumo.geradoEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+      </p>
+      {erro && <p className="text-[11px] text-red-600 mt-1">{erro}</p>}
     </div>
   )
 }

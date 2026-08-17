@@ -55,6 +55,19 @@ export default async function AuxiliarComprasPage() {
     }
   }
 
+  // Sinais de IA e o resumo do dia — ausência de qualquer um dos dois não é
+  // erro, só quer dizer que a rodada de IA (fatia 5) ainda não rodou para
+  // esta empresa, ou que o produto não estava entre os de maior score.
+  const { data: sinaisIA } = await sb.from('reposicao_ia_sinais')
+    .select('produto_id, sinais, gerado_em').eq('empresa_id', empresaId)
+  const sinaisPorProduto: Record<string, { tipo: string; texto: string }[]> = {}
+  for (const s of sinaisIA ?? []) {
+    if (Array.isArray(s.sinais)) sinaisPorProduto[s.produto_id] = s.sinais
+  }
+
+  const { data: resumoIA } = await sb.from('reposicao_ia_resumo')
+    .select('texto, produtos_analisados, gerado_em').eq('empresa_id', empresaId).maybeSingle()
+
   const lista = linhas.map(m => ({
     ...m,
     nome: produtos[m.produto_id]?.nome ?? '(produto removido)',
@@ -63,6 +76,7 @@ export default async function AuxiliarComprasPage() {
     marca: produtos[m.produto_id]?.marca ?? null,
     unidade: produtos[m.produto_id]?.unidade ?? null,
     motivos: Array.isArray(m.motivos) ? m.motivos as string[] : [],
+    sinaisIA: sinaisPorProduto[m.produto_id] ?? [],
   }))
 
   const calculadoEm = linhas[0]?.calculado_em ?? null
@@ -85,5 +99,11 @@ export default async function AuxiliarComprasPage() {
     )
   }
 
-  return <AuxiliarComprasClient lista={lista} calculadoEm={calculadoEm} />
+  return (
+    <AuxiliarComprasClient
+      lista={lista}
+      calculadoEm={calculadoEm}
+      resumoIA={resumoIA ? { texto: resumoIA.texto, produtosAnalisados: resumoIA.produtos_analisados, geradoEm: resumoIA.gerado_em } : null}
+    />
+  )
 }

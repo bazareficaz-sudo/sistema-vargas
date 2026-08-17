@@ -127,8 +127,28 @@ continuam no banco — não apaguei sozinho, é decisão do Silvano cancelar
 ou consolidar. `SELECT * FROM pedidos_compra WHERE observacoes ILIKE
 '%Pedido ao fornecedor%' AND status='rascunho'` acha todos.
 
-**Faltam:** fatia 5 (IA sobre o que a regra não vê), fatia 6 (histórico
-de ruptura e das decisões do comprador).
+**Fatia 5 — IA (pronto, aguardando `supabase-reposicao-ia.sql`).**
+`reposicao_ia_sinais` + `reposicao_ia_resumo`, calculados por
+`src/lib/reposicao/ia.ts`. Cron às 6h30, depois de fornecedores (5h30) e
+reposição (6h) — precisa das métricas frescas antes de escolher os
+produtos.
+
+UMA chamada de IA por empresa por dia, não uma por produto: os 40 de
+maior score entram todos no mesmo prompt, e a resposta traz o resumo do
+comprador (item 37, card "Análise Inteligente" no topo do Auxiliar) e os
+sinais por produto na mesma passada. Cinco tipos, só os que a dados de
+hoje sustentam: aceleração, queda de demanda, demanda perdida (faltas ou
+encomendas com estoque zerado — item 34), mínimo desatualizado, excesso a
+liquidar. Sazonalidade e ruptura recorrente ficaram de fora de propósito
+— exigem histórico que não existe ainda (fatia 6); o prompt proíbe
+explicitamente a IA de inventar padrão sazonal com seis semanas de dado.
+
+`motivos` (regra) e `sinaisIA` (IA) aparecem separados na tela — nunca
+misturados —, porque um é conta que dá pra conferir e o outro é
+interpretação. A explicabilidade determinística das fatias 2-4 continua
+sem IA nenhuma.
+
+**Faltam:** fatia 6 (histórico de ruptura e das decisões do comprador).
 
 **A reconciliar:** `automacoes → RegrasReposicao` já cria rascunho de
 pedido de compra sozinha, a cada 5 minutos, e já tem noção de curva ABC.
