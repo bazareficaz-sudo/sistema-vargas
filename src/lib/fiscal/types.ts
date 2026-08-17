@@ -14,6 +14,15 @@ export type TipoManifesto = 'ciencia' | 'confirmacao' | 'desconhecimento' | 'nao
 export type DfeListaResultado = {
   ultimaVersao: string | null
   documentos: any[]
+  // Quantos documentos a consulta encontrou para este CNPJ mas descartou por
+  // não serem NF-e de mercadoria (ex.: CT-e de frete, nota de serviço de
+  // marketplace). Opcional — só a Brasil NFe filtra assim hoje. Sem isto,
+  // "nenhum documento novo" e "70 documentos, nenhum de mercadoria" chegam
+  // exatamente iguais na tela, e o operador não tem como distinguir "a
+  // SEFAZ não tem nada" de "a SEFAZ tem coisa, só não é o que este módulo
+  // trata" — foi exatamente essa ambiguidade que fez a mesma pergunta
+  // voltar, sobre o mesmo CNPJ, depois de já ter sido investigada uma vez.
+  documentosIgnorados?: number
 }
 
 export type EmissaoNFCeItem = {

@@ -108,10 +108,17 @@ export async function listarDfe(creds: BrasilNFeCredentials, cnpj: string, _ulti
   }
 
   const lista: any[] = Array.isArray(json) ? json : (Array.isArray(json?.Notas) ? json.Notas : (Array.isArray(json?.NotasFiscais) ? json.NotasFiscais : []))
-  const entradas = lista.filter(d =>
-    (d?.CnpjDestinatario ?? '').replace(/\D/g, '') === cnpjLimpo && Number(d?.ModeloDocumento) === MODELO_NFE
-  )
-  return { ultimaVersao: agora.toISOString(), documentos: entradas.map(normalizarDocumento) }
+  const paraEstaEmpresa = lista.filter(d => (d?.CnpjDestinatario ?? '').replace(/\D/g, '') === cnpjLimpo)
+  const entradas = paraEstaEmpresa.filter(d => Number(d?.ModeloDocumento) === MODELO_NFE)
+
+  // A diferença entre estes dois números é o que vira aviso na tela: "a
+  // SEFAZ não tem nada" e "a SEFAZ tem coisa, só não é NF-e de mercadoria"
+  // não podem chegar iguais — já causaram a mesma investigação duas vezes.
+  return {
+    ultimaVersao: agora.toISOString(),
+    documentos: entradas.map(normalizarDocumento),
+    documentosIgnorados: paraEstaEmpresa.length - entradas.length,
+  }
 }
 
 export async function manifestar(creds: BrasilNFeCredentials, chave: string, tipo: TipoManifesto, justificativa?: string): Promise<void> {

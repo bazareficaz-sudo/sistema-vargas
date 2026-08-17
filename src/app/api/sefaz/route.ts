@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       if (resultado.ultimaVersao) {
         await sb.from('nfe_config').update({ ultimo_nsu: resultado.ultimaVersao, updated_at: new Date().toISOString() }).eq('empresa_id', empresaId)
       }
-      return NextResponse.json({ documentos: resultado.documentos })
+      return NextResponse.json({ documentos: resultado.documentos, documentosIgnorados: resultado.documentosIgnorados ?? 0 })
     }
 
     if (acao in ACOES_MANIFESTO) {

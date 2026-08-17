@@ -82,6 +82,11 @@ export default function EntradasXmlClient({
   const [modalSefaz, setModalSefaz] = useState(false)
   const [consultandoSefaz, setConsultandoSefaz] = useState(false)
   const [nfesSefaz, setNfesSefaz] = useState<any[]>([])
+  // Quantos documentos a consulta achou pra este CNPJ mas descartou por não
+  // serem NF-e de mercadoria (nota de serviço de marketplace, CT-e de
+  // frete). Sem isto, "a SEFAZ não tem nada" e "a SEFAZ tem 70 documentos,
+  // nenhum de mercadoria" mostravam a mesma tela vazia.
+  const [documentosIgnoradosSefaz, setDocumentosIgnoradosSefaz] = useState(0)
   const [erroSefaz, setErroSefaz] = useState('')
   const [importandoSefaz, setImportandoSefaz] = useState<string | null>(null)
   const [importadosSefaz, setImportadosSefaz] = useState<Record<string, { ok: boolean; msg: string }>>({})
@@ -437,6 +442,7 @@ export default function EntradasXmlClient({
       const data = await resp.json()
       if (!resp.ok) throw new Error(data.error ?? 'Erro na consulta')
       setNfesSefaz(data.documentos ?? data.nfes ?? [])
+      setDocumentosIgnoradosSefaz(data.documentosIgnorados ?? 0)
     } catch (e: any) { setErroSefaz(e.message) }
     finally { setConsultandoSefaz(false) }
   }
@@ -762,7 +768,18 @@ export default function EntradasXmlClient({
                 </div>
               )}
               {!consultandoSefaz && !erroSefaz && nfesSefaz.length === 0 && (
-                <p className="text-slate-400 text-center py-8">Nenhuma NF-e nova encontrada.</p>
+                documentosIgnoradosSefaz > 0 ? (
+                  <div className="text-center py-8 px-4">
+                    <p className="text-slate-500">Nenhuma NF-e de compra encontrada.</p>
+                    <p className="text-slate-400 text-sm mt-2 max-w-md mx-auto">
+                      A SEFAZ tem {documentosIgnoradosSefaz} documento{documentosIgnoradosSefaz > 1 ? 's' : ''} fiscal{documentosIgnoradosSefaz > 1 ? 'is' : ''} associado{documentosIgnoradosSefaz > 1 ? 's' : ''} a este
+                      CNPJ no período, mas nenhum é NF-e de mercadoria (modelo 55) — são notas de serviço
+                      (frete, comissão de marketplace) que este módulo não trata como compra.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-slate-400 text-center py-8">Nenhuma NF-e nova encontrada.</p>
+                )
               )}
               {nfesSefaz.length > 0 && (
                 <table className="w-full text-sm">
