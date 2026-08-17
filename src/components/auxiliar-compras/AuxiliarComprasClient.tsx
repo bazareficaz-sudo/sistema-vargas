@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import BotaoRecalcular from './BotaoRecalcular'
 
@@ -364,6 +364,8 @@ export default function AuxiliarComprasClient({ lista, calculadoEm }: {
                               ver as {m.faltas_abertas + m.encomendas_abertas} solicitação(ões) do balcão
                             </Link>
                           )}
+
+                          <FornecedoresDoProduto produtoId={m.produto_id} />
                         </td>
                       </tr>
                     )}
@@ -412,6 +414,92 @@ function Dado({ rotulo, valor }: { rotulo: string; valor: string }) {
     <div>
       <div className="text-slate-400">{rotulo}</div>
       <div className="text-slate-800 font-medium">{valor}</div>
+    </div>
+  )
+}
+
+type OpcaoFornecedor = {
+  fornecedor_id: string
+  nome: string
+  custo_ultimo: number | null
+  ultima_compra_em: string | null
+  compras_contadas: number
+  prazo_entrega_real_dias: number | null
+  prazo_entrega_dias: number | null
+  quantidade_minima: number | null
+  preferencial: boolean
+}
+
+/**
+ * Fornecedores históricos deste produto, carregados só quando a linha é
+ * expandida — item 19 e 20 do pedido original. Recomendação vem do
+ * servidor (src/lib/fornecedores/sugestao.ts); esta tela só mostra o
+ * porquê, nunca escolhe sozinha.
+ */
+function FornecedoresDoProduto({ produtoId }: { produtoId: string }) {
+  const [estado, setEstado] = useState<'carregando' | 'pronto' | 'erro'>('carregando')
+  const [fornecedores, setFornecedores] = useState<OpcaoFornecedor[]>([])
+  const [recomendado, setRecomendado] = useState<{ fornecedorId: string; motivos: string[] } | null>(null)
+
+  useEffect(() => {
+    let vivo = true
+    fetch(`/api/produtos/${produtoId}/fornecedores`)
+      .then(r => r.json())
+      .then(d => {
+        if (!vivo) return
+        if (!d.ok) { setEstado('erro'); return }
+        setFornecedores(d.fornecedores ?? [])
+        setRecomendado(d.recomendado ?? null)
+        setEstado('pronto')
+      })
+      .catch(() => { if (vivo) setEstado('erro') })
+    return () => { vivo = false }
+  }, [produtoId])
+
+  if (estado === 'carregando') {
+    return <p className="mt-3 text-[11px] text-slate-400">Carregando fornecedores…</p>
+  }
+  if (estado === 'erro') {
+    return <p className="mt-3 text-[11px] text-red-500">Não foi possível carregar os fornecedores.</p>
+  }
+  if (fornecedores.length === 0) {
+    return <p className="mt-3 text-[11px] text-slate-400">Sem histórico de compra deste produto ainda.</p>
+  }
+
+  return (
+    <div className="mt-3">
+      <p className="text-[11px] font-medium text-slate-500 mb-1.5">Fornecedores deste produto</p>
+      <div className="space-y-1.5">
+        {fornecedores.map(f => {
+          const ganhador = recomendado?.fornecedorId === f.fornecedor_id
+          const prazo = f.prazo_entrega_real_dias ?? f.prazo_entrega_dias
+          return (
+            <div key={f.fornecedor_id}
+              className={`text-[12px] rounded-lg px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 ${
+                ganhador ? 'bg-emerald-50 border border-emerald-200' : 'bg-slate-50 border border-slate-100'
+              }`}>
+              <span className="font-medium text-slate-800">{f.nome}</span>
+              {ganhador && <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">recomendado</span>}
+              {f.preferencial && <span className="text-[10px] text-orange-700">★ preferencial</span>}
+              {f.custo_ultimo != null && <span className="text-slate-600">{brl(f.custo_ultimo)}</span>}
+              {prazo != null && (
+                <span className="text-slate-500">
+                  ~{prazo}d{f.prazo_entrega_real_dias != null ? ' (medido)' : ' (cadastrado)'}
+                </span>
+              )}
+              <span className="text-slate-400">{f.compras_contadas} compra(s)</span>
+              {f.ultima_compra_em && (
+                <span className="text-slate-400">última {new Date(f.ultima_compra_em).toLocaleDateString('pt-BR')}</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {recomendado && (
+        <p className="mt-1.5 text-[11px] text-slate-400">
+          {fornecedores.find(f => f.fornecedor_id === recomendado.fornecedorId)?.nome}: {recomendado.motivos.join(' · ')}
+        </p>
+      )}
     </div>
   )
 }

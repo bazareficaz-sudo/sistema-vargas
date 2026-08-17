@@ -66,11 +66,50 @@ export async function recalcularEmpresa(sb: any, empresaId: string): Promise<Res
 
   // ── Catálogo ──────────────────────────────────────────────────
   const produtos = await paginar<any>(sb, 'produtos',
-    'id, nome, sku, categoria, marca, estoque, estoque_minimo, preco_custo, preco_venda',
+    'id, nome, sku, categoria, marca, estoque, estoque_minimo, preco_custo, preco_venda, fornecedor_padrao_id',
     q => q.eq('empresa_id', empresaId).eq('ativo', true))
 
   const porSku = new Map<string, string>()
   for (const p of produtos) if (p.sku) porSku.set(String(p.sku).trim(), p.id)
+
+  // ── Lead time por produto ────────────────────────────────────
+  //
+  // Preferência: prazo REAL medido em fornecedor_produto (diferença entre
+  // pedido e entrada) > prazo cadastrado nesse par > prazo cadastrado no
+  // fornecedor > padrão da empresa. Cada nível só existe quando o de cima
+  // falta — não há "média" entre eles, porque misturar um número medido
+  // com um chutado produz um terceiro número que não é nem uma coisa nem
+  // outra.
+  const leadTimePorProduto: Record<string, number> = {}
+  {
+    const comFornecedor = produtos.filter((p: any) => p.fornecedor_padrao_id)
+    if (comFornecedor.length > 0) {
+      const fornecedorIds = [...new Set(comFornecedor.map((p: any) => p.fornecedor_padrao_id))]
+      const prazoFornecedor = new Map<string, number>()
+      for (let i = 0; i < fornecedorIds.length; i += 200) {
+        const { data } = await sb.from('fornecedores')
+          .select('id, prazo_entrega_dias').in('id', fornecedorIds.slice(i, i + 200))
+        for (const f of data ?? []) if (f.prazo_entrega_dias > 0) prazoFornecedor.set(f.id, f.prazo_entrega_dias)
+      }
+
+      const produtoIds = comFornecedor.map((p: any) => p.id)
+      const prazoPar = new Map<string, number>()
+      for (let i = 0; i < produtoIds.length; i += 200) {
+        const { data } = await sb.from('fornecedor_produto')
+          .select('produto_id, prazo_entrega_real_dias, prazo_entrega_dias')
+          .eq('empresa_id', empresaId).in('produto_id', produtoIds.slice(i, i + 200))
+        for (const fp of data ?? []) {
+          const v = fp.prazo_entrega_real_dias ?? fp.prazo_entrega_dias
+          if (v > 0) prazoPar.set(fp.produto_id, v)
+        }
+      }
+
+      for (const p of comFornecedor) {
+        const v = prazoPar.get(p.id) ?? prazoFornecedor.get(p.fornecedor_padrao_id)
+        if (v) leadTimePorProduto[p.id] = v
+      }
+    }
+  }
 
   // ── Demanda ───────────────────────────────────────────────────
   const desde = new Date(Date.now() - 180 * DIA).toISOString()
@@ -255,8 +294,7 @@ export async function recalcularEmpresa(sb: any, empresaId: string): Promise<Res
       unidadesSolicitadas: f.unidades,
       pedidoAbertoQtd: pedidoAberto[p.id] ?? 0,
       estoqueOutrosDepositos: outrosDepositos[p.id] ?? 0,
-      // Prazo por fornecedor entra na fatia 3; até lá, o padrão da empresa.
-      leadTimeDias: cfg.lead_time_padrao_dias,
+      leadTimeDias: leadTimePorProduto[p.id] ?? cfg.lead_time_padrao_dias,
       classeAbc: classe[p.id] ?? null,
       diasHistorico,
       fatorLoja,

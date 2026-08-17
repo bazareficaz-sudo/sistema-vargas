@@ -60,10 +60,37 @@ para qualquer cálculo novo neste módulo:
    o que separa um crítico do outro é o tamanho (volume e dinheiro), em
    escala logarítmica.
 
-**Faltam:** fatia 3 (fornecedor × produto: lead time, quantidade mínima,
-múltiplo de caixa, vínculo pedido↔entrada), fatia 4 (lista de compra →
-agrupar por fornecedor → pedido), fatia 5 (IA sobre o que a regra não vê),
-fatia 6 (histórico de ruptura e das decisões do comprador).
+**Fatia 3 — fornecedor × produto (pronto, aguardando
+`supabase-fornecedor-produto.sql`).** Tabela `fornecedor_produto`
+(último custo, custo médio, última compra, prazo real — calculados toda
+noite; prazo cadastrado, quantidade mínima, múltiplo de embalagem,
+preferencial — só o comprador edita, a rodada nunca sobrescreve).
+`fornecedores` ganhou `prazo_entrega_dias`, `pedido_minimo_valor`,
+`condicao_pagamento_padrao`. `produtos.fornecedor_padrao_id` resolve os
+127 `codigo_fornecedor` soltos.
+
+O motor de reposição (fatia 2) passou a usar o lead time real por produto
+em vez do padrão único da empresa — preferência: prazo medido no par
+fornecedor×produto > prazo cadastrado nesse par > prazo do fornecedor >
+padrão da empresa. Nunca mistura os níveis.
+
+`entradas.pedido_compra_id` e `nfe_entradas.pedido_compra_id` (só entrada
+manual tem UI de vínculo por ora — XML fica pendente). Ao confirmar uma
+entrada vinculada, `atualizarStatusPedidoAposEntrada` marca o pedido como
+recebido ou parcialmente recebido, comparando o que já entrou com o que
+foi pedido. É esse vínculo que alimenta o prazo real — antes da primeira
+entrada vinculada, `prazo_entrega_real_dias` fica vazio de propósito.
+
+Sugestão de fornecedor (`src/lib/fornecedores/sugestao.ts`) nunca escolhe
+sozinha — só ordena e explica; aparece no painel "entender" do Auxiliar de
+Compras, carregada sob demanda quando a linha é expandida.
+
+Tela nova: `/dashboard/fornecedores/[id]/produtos`, link "Produtos" na
+listagem de fornecedores.
+
+**Faltam:** fatia 4 (lista de compra → agrupar por fornecedor → pedido),
+fatia 5 (IA sobre o que a regra não vê), fatia 6 (histórico de ruptura e
+das decisões do comprador).
 
 **A reconciliar:** `automacoes → RegrasReposicao` já cria rascunho de
 pedido de compra sozinha, a cada 5 minutos, e já tem noção de curva ABC.

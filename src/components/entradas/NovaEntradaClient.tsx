@@ -9,6 +9,7 @@ import { ajustarDepositoPrincipal, definirContagemNoDeposito } from '@/lib/produ
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { gerarProximoSku } from '@/components/produtos/sku'
+import { atualizarStatusPedidoAposEntrada } from '@/lib/pedidosCompra/vincularEntrada'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -109,6 +110,11 @@ export default function NovaEntradaClient({
   // Cabeçalho NF — inicializa do rascunho se disponível
   const _r = rascunhoInicial?.entrada
   const [fornecedorId, setFornecedorId] = useState(_r?.fornecedor_id ?? '')
+  // Qual pedido de compra esta entrada atende — opcional. Sem isso não há
+  // como saber que a mercadoria que chegou é a de um pedido específico:
+  // nem prazo real de entrega, nem marcar o pedido como recebido sozinho.
+  const [pedidoCompraId, setPedidoCompraId] = useState<string>((_r as any)?.pedido_compra_id ?? '')
+  const [pedidosAbertos, setPedidosAbertos] = useState<{ id: string; numero: string; data_pedido: string; total: number }[]>([])
   const [numeroNf, setNumeroNf] = useState(_r?.numero_nf ?? '')
   const [serie, setSerie] = useState(_r?.serie ?? '')
   const [dataEmissao, setDataEmissao] = useState(_r?.data_emissao ?? '')
@@ -125,6 +131,22 @@ export default function NovaEntradaClient({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Pedidos de compra em aberto deste fornecedor, para vincular à entrada.
+  // Sem vínculo a entrada continua funcionando exatamente como antes —
+  // isto é um "a mais", nunca um passo obrigatório.
+  useEffect(() => {
+    if (!fornecedorId) { setPedidosAbertos([]); setPedidoCompraId(''); return }
+    let vivo = true
+    const sb = createClient()
+    sb.from('pedidos_compra')
+      .select('id, numero, data_pedido, total')
+      .eq('empresa_id', empresaId).eq('fornecedor_id', fornecedorId)
+      .in('status', ['enviado', 'aguardando_aprovacao', 'em_cotacao', 'parcialmente_recebido'])
+      .order('data_pedido', { ascending: false })
+      .then(({ data }) => { if (vivo) setPedidosAbertos(data ?? []) })
+    return () => { vivo = false }
+  }, [fornecedorId, empresaId])
 
   // Etapa 2: Itens — inicializa do rascunho
   const [itens, setItens] = useState<ItemEntrada[]>(
@@ -507,6 +529,7 @@ export default function NovaEntradaClient({
         valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
         valor_outros: outros, valor_total: totalGeral,
         observacoes: observacoes || null, status: 'rascunho',
+        pedido_compra_id: pedidoCompraId || null,
       }
 
       let entradaId = rascunhoId
@@ -557,6 +580,7 @@ export default function NovaEntradaClient({
           valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
           valor_outros: outros, valor_total: totalGeral,
           observacoes: observacoes || null, status: 'confirmada',
+          pedido_compra_id: pedidoCompraId || null,
         }).eq('id', rascunhoId).select().single()
         if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao confirmar.'); return }
         entrada = data
@@ -569,6 +593,7 @@ export default function NovaEntradaClient({
           valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
           valor_outros: outros, valor_total: totalGeral,
           observacoes: observacoes || null, status: 'confirmada',
+          pedido_compra_id: pedidoCompraId || null,
         }).select().single()
         if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao salvar.'); return }
         entrada = data
@@ -581,6 +606,16 @@ export default function NovaEntradaClient({
         atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
         subtotal: i.preco_custo_novo * i.quantidade,
       })))
+
+      // Fecha o laço com o pedido de compra: marca recebido/parcialmente
+      // recebido e passa a alimentar o prazo real do fornecedor. Erro aqui
+      // não pode travar a entrada — o estoque já está confirmado e é o que
+      // importa primeiro.
+      if (pedidoCompraId) {
+        try {
+          await atualizarStatusPedidoAposEntrada(sb, empresaId, pedidoCompraId)
+        } catch { /* a entrada já foi salva; o vínculo pode ser revisto depois */ }
+      }
 
       // Atualiza estoque: busca valores atuais e soma a quantidade recebida
       const produtosComId = itens.filter(i => i.produto_id)
@@ -761,6 +796,25 @@ export default function NovaEntradaClient({
                   ✓ {fornecedores.find(f => f.id === fornecedorId)?.nome_fantasia ?? fornecedores.find(f => f.id === fornecedorId)?.razao_social}
                 </span>
                 <button onClick={() => { setFornecedorId(''); setBuscaForn('') }} className="text-xs text-gray-400 hover:text-gray-600">trocar</button>
+              </div>
+            )}
+            {fornecedorId && pedidosAbertos.length > 0 && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Esta entrada atende um pedido de compra? (opcional)
+                </label>
+                <select value={pedidoCompraId} onChange={e => setPedidoCompraId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500">
+                  <option value="">Não vincular</option>
+                  {pedidosAbertos.map(p => (
+                    <option key={p.id} value={p.id}>
+                      Pedido #{p.numero} — {new Date(p.data_pedido + 'T00:00:00').toLocaleDateString('pt-BR')} — {p.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Vincular marca o pedido como recebido e ajuda o Auxiliar de Compras a aprender o prazo real deste fornecedor.
+                </p>
               </div>
             )}
           </div>

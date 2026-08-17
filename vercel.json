@@ -21,6 +21,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/fornecedores",
+      "schedule": "30 5 * * *"
+    },
+    {
       "path": "/api/cron/reposicao",
       "schedule": "0 6 * * *"
     }

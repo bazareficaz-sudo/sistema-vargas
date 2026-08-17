@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
 type Fornecedor = {
@@ -10,12 +11,15 @@ type Fornecedor = {
   contato: string | null; endereco: string | null; numero: string | null
   complemento: string | null; bairro: string | null; cidade: string | null
   estado: string | null; cep: string | null; observacoes: string | null; ativo: boolean
+  prazo_entrega_dias: number | null; pedido_minimo_valor: number | null
+  condicao_pagamento_padrao: string | null
 }
 
 const EMPTY: Omit<Fornecedor, 'id' | 'empresa_id'> = {
   razao_social: '', nome_fantasia: '', cnpj: '', ie: '', telefone: '', email: '',
   contato: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '',
   estado: '', cep: '', observacoes: '', ativo: true,
+  prazo_entrega_dias: null, pedido_minimo_valor: null, condicao_pagamento_padrao: '',
 }
 
 const ESTADOS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
@@ -39,11 +43,13 @@ export default function FornecedoresClient({
       ie: f.ie ?? '', telefone: f.telefone ?? '', email: f.email ?? '', contato: f.contato ?? '',
       endereco: f.endereco ?? '', numero: f.numero ?? '', complemento: f.complemento ?? '',
       bairro: f.bairro ?? '', cidade: f.cidade ?? '', estado: f.estado ?? '', cep: f.cep ?? '',
-      observacoes: f.observacoes ?? '', ativo: f.ativo })
+      observacoes: f.observacoes ?? '', ativo: f.ativo,
+      prazo_entrega_dias: f.prazo_entrega_dias, pedido_minimo_valor: f.pedido_minimo_valor,
+      condicao_pagamento_padrao: f.condicao_pagamento_padrao ?? '' })
     setEditando(f); setAba('dados'); setErro(''); setModal(true)
   }
 
-  function set(k: keyof typeof EMPTY, v: string | boolean) {
+  function set(k: keyof typeof EMPTY, v: string | boolean | number | null) {
     setForm(prev => ({ ...prev, [k]: v }))
   }
 
@@ -56,7 +62,8 @@ export default function FornecedoresClient({
       email: form.email || null, contato: form.contato || null, endereco: form.endereco || null,
       numero: form.numero || null, complemento: form.complemento || null, bairro: form.bairro || null,
       cidade: form.cidade || null, estado: form.estado || null, cep: form.cep || null,
-      observacoes: form.observacoes || null }
+      observacoes: form.observacoes || null,
+      condicao_pagamento_padrao: form.condicao_pagamento_padrao || null }
 
     if (editando) {
       const { error } = await sb.from('fornecedores').update(payload).eq('id', editando.id)
@@ -154,6 +161,7 @@ export default function FornecedoresClient({
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Link href={`/dashboard/fornecedores/${f.id}/produtos`} className="text-xs text-slate-600 hover:text-slate-900">Produtos</Link>
                     <button onClick={() => abrirEditar(f)} className="text-xs text-blue-600 hover:text-blue-800">Editar</button>
                     <button onClick={() => excluir(f)} className="text-xs text-red-500 hover:text-red-700">Excluir</button>
                   </div>
@@ -203,6 +211,31 @@ export default function FornecedoresClient({
                     <Field label="E-mail" value={form.email ?? ''} onChange={v => set('email', v)} type="email" />
                   </div>
                   <Field label="Nome do Contato" value={form.contato ?? ''} onChange={v => set('contato', v)} />
+                  <div className="grid grid-cols-3 gap-4 pt-2 border-t border-gray-100">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1 mt-3">Prazo de entrega (dias)</label>
+                      <input type="number" min={0} value={form.prazo_entrega_dias ?? ''}
+                        onChange={e => set('prazo_entrega_dias', e.target.value === '' ? null : Number(e.target.value))}
+                        placeholder="ex: 7"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1 mt-3">Pedido mínimo (R$)</label>
+                      <input type="number" min={0} step="0.01" value={form.pedido_minimo_valor ?? ''}
+                        onChange={e => set('pedido_minimo_valor', e.target.value === '' ? null : Number(e.target.value))}
+                        placeholder="0,00"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1 mt-3">Condição de pagamento</label>
+                      <input value={form.condicao_pagamento_padrao ?? ''} onChange={e => set('condicao_pagamento_padrao', e.target.value)}
+                        placeholder="ex: 30/60/90"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500" />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Usados pelo Auxiliar de Compras para calcular quando comprar. O prazo real, medido pelas entregas, sobrepõe este valor assim que houver histórico suficiente.
+                  </p>
                   <div className="flex items-center gap-3 pt-2">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={form.ativo} onChange={e => set('ativo', e.target.checked)} className="w-4 h-4 accent-blue-600" />
