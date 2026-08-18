@@ -12,6 +12,7 @@ type Conta = {
 type ClienteMap = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
   saldo_devedor: number; valor_vencido: number; bloqueado_fiado: boolean
+  cobranca_whatsapp_ativa: boolean
 }
 type Historico = {
   id: string; cliente_id: string; tipo: string; descricao: string | null
@@ -193,7 +194,7 @@ export default function CobrancaClient({
                   <p className="text-slate-400 text-xs">{g.maior_atraso}d de atraso</p>
                 </div>
                 <div className="flex gap-2">
-                  {g.telefone && (
+                  {g.telefone && cli?.cobranca_whatsapp_ativa !== false && (
                     <a href={whatsappLink(g.telefone, g.cliente_nome, g.total_vencido)}
                       target="_blank" rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
@@ -201,12 +202,18 @@ export default function CobrancaClient({
                       WhatsApp
                     </a>
                   )}
-                  {g.cliente_id && (
+                  {g.cliente_id && cli?.cobranca_whatsapp_ativa !== false && (
                     <button onClick={e => { e.stopPropagation(); setModalAtualizacao(g) }}
                       title="Enviar a situação da conta em PDF pelo WhatsApp"
                       className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs rounded-lg font-medium">
                       📄 Situação da conta
                     </button>
+                  )}
+                  {g.cliente_id && cli?.cobranca_whatsapp_ativa === false && (
+                    <span title="Este cliente desativou a cobrança automática via WhatsApp"
+                      className="px-3 py-1.5 bg-gray-100 text-gray-400 text-xs rounded-lg font-medium">
+                      🔕 Cobrança desativada
+                    </span>
                   )}
                   <button onClick={e => { e.stopPropagation(); setModalCob(g) }}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg font-medium">

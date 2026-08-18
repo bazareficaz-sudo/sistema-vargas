@@ -7,6 +7,7 @@ import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integra
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
   limite_credito: number; bloqueado_fiado: boolean; status_credito: string; permite_fiado: boolean
+  cobranca_whatsapp_ativa: boolean
 }
 type Conta = {
   id: string; cliente_id: string | null; valor_aberto: number; status: string
@@ -249,9 +250,10 @@ export default function CarteiraClientesClient({
               </div>
 
               <div className="flex gap-2 mt-1">
-                <button onClick={() => abrirExtrato(w)}
-                  className="flex-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs rounded-lg font-medium">
-                  Extrato WPP
+                <button onClick={() => abrirExtrato(w)} disabled={!w.cliente.cobranca_whatsapp_ativa}
+                  title={w.cliente.cobranca_whatsapp_ativa ? undefined : 'Este cliente desativou a cobrança automática via WhatsApp'}
+                  className="flex-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white text-xs rounded-lg font-medium">
+                  {w.cliente.cobranca_whatsapp_ativa ? 'Extrato WPP' : '🔕 Extrato WPP'}
                 </button>
                 <Link href={`/dashboard/clientes/${w.cliente.id}`}
                   className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg font-medium text-center">

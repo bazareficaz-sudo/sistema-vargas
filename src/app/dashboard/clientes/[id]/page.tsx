@@ -58,6 +58,7 @@ export default async function ClienteDetalhePage({ params }: { params: Promise<{
     data_ultimo_pagamento: null,
     saldo_credito: 0,
     status_credito: 'liberado',
+    cobranca_whatsapp_ativa: true,
     ...cliente,
   }
 

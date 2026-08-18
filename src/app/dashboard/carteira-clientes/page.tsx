@@ -15,7 +15,7 @@ export default async function CarteiraClientesPage() {
 
   const [clientesRes, contasRes, creditosRes, recebimentosRes] = await Promise.all([
     sb.from('clientes')
-      .select('id, nome, cpf_cnpj, telefone, limite_credito, bloqueado_fiado, status_credito, permite_fiado')
+      .select('id, nome, cpf_cnpj, telefone, limite_credito, bloqueado_fiado, status_credito, permite_fiado, cobranca_whatsapp_ativa')
       .eq('empresa_id', empresaId)
       .eq('ativo', true)
       .order('nome')

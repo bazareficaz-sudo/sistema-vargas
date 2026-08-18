@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { zapiSendText, zapiSendDocument } from '@/lib/zapi'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { ehTipoCobranca } from '@/lib/whatsapp/tiposCobranca'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -27,15 +28,19 @@ export async function POST(request: NextRequest) {
   if (!telefone || !mensagem)
     return NextResponse.json({ error: 'Telefone e mensagem são obrigatórios' }, { status: 400 })
 
-  // Verifica opt-out
+  // Verifica opt-out (tudo) e, se for mensagem de cobrança, o toggle
+  // específico de cobrança (extrato/situação da conta) — um cliente pode
+  // continuar recebendo confirmação de pedido mas não lembrete de dívida.
   if (cliente_id) {
     const { data: cli } = await supabase
       .from('clientes')
-      .select('opt_out_whatsapp')
+      .select('opt_out_whatsapp, cobranca_whatsapp_ativa')
       .eq('id', cliente_id)
       .single()
     if (cli?.opt_out_whatsapp)
       return NextResponse.json({ error: 'Cliente optou por não receber mensagens via WhatsApp' }, { status: 400 })
+    if (ehTipoCobranca(tipo) && cli?.cobranca_whatsapp_ativa === false)
+      return NextResponse.json({ error: 'Cliente desativou o recebimento de mensagens de cobrança' }, { status: 400 })
   }
 
   // Registra na fila

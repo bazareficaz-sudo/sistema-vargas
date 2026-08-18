@@ -27,7 +27,7 @@ export default async function CobrancaPage() {
       .order('created_at', { ascending: false })
       .limit(200),
     sb.from('clientes')
-      .select('id, nome, cpf_cnpj, telefone, saldo_devedor, valor_vencido, bloqueado_fiado')
+      .select('id, nome, cpf_cnpj, telefone, saldo_devedor, valor_vencido, bloqueado_fiado, cobranca_whatsapp_ativa')
       .eq('empresa_id', empresaId),
   ])
 

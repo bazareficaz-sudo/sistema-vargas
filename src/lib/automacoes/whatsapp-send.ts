@@ -1,4 +1,5 @@
 import { zapiSendText, type ZAPIConfig } from '@/lib/zapi'
+import { ehTipoCobranca } from '@/lib/whatsapp/tiposCobranca'
 
 // Cache simples por empresa dentro de uma mesma execução do cron — evita
 // buscar whatsapp_config repetidas vezes quando várias regras da mesma
@@ -22,6 +23,19 @@ export async function enviarWhatsappAutomacao(
   meta: { tipo: string; cliente_id?: string | null; cliente_nome?: string | null; referencia_tipo?: string; referencia_id?: string }
 ): Promise<{ ok: boolean; erro?: string }> {
   if (!telefone) return { ok: false, erro: 'Sem número de destino' }
+
+  // Mesmo portão de src/app/api/whatsapp/enviar/route.ts, pro caso de uma
+  // automação futura mandar cobrança direto pro cliente (hoje nenhuma
+  // manda — os tipos atuais de automação de cobrança resumem pro número da
+  // própria loja, não pro cliente).
+  if (meta.cliente_id) {
+    const { data: cli } = await sb.from('clientes')
+      .select('opt_out_whatsapp, cobranca_whatsapp_ativa').eq('id', meta.cliente_id).maybeSingle()
+    if (cli?.opt_out_whatsapp) return { ok: false, erro: 'Cliente optou por não receber mensagens via WhatsApp' }
+    if (ehTipoCobranca(meta.tipo) && cli?.cobranca_whatsapp_ativa === false) {
+      return { ok: false, erro: 'Cliente desativou o recebimento de mensagens de cobrança' }
+    }
+  }
 
   const cfg = await carregarConfig(sb, empresaId)
   if (!cfg) return { ok: false, erro: 'WhatsApp não configurado ou inativo para esta empresa' }

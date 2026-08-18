@@ -12,6 +12,7 @@ type Cliente = {
   motivo_bloqueio: string | null; observacoes_financeiras: string | null
   data_ultima_compra_fiada: string | null; data_ultimo_pagamento: string | null
   saldo_credito: number; status_credito: string
+  cobranca_whatsapp_ativa: boolean
 }
 type Conta = {
   id: string; numero_doc: string | null; parcela_numero: number; total_parcelas: number
@@ -52,6 +53,7 @@ export default function ClienteDetalheClient({
         bloqueado_fiado: cli.bloqueado_fiado,
         motivo_bloqueio: cli.motivo_bloqueio,
         observacoes_financeiras: cli.observacoes_financeiras,
+        cobranca_whatsapp_ativa: cli.cobranca_whatsapp_ativa,
         status_credito: cli.bloqueado_fiado ? 'bloqueado' : cli.permite_fiado ? 'liberado' : 'restrito',
       }).eq('id', cli.id)
       if (error) throw error
@@ -144,6 +146,17 @@ export default function ClienteDetalheClient({
             <button onClick={() => setCli(p => ({ ...p, bloqueado_fiado: !p.bloqueado_fiado }))}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${cli.bloqueado_fiado ? 'bg-red-600' : 'bg-gray-300'}`}>
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cli.bloqueado_fiado ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-gray-900 text-sm font-medium">Cobrança automática via WhatsApp</label>
+              <p className="text-gray-500 text-xs">Extrato e situação da conta. Desligar não afeta outras mensagens (pedido, promoção).</p>
+            </div>
+            <button onClick={() => setCli(p => ({ ...p, cobranca_whatsapp_ativa: !p.cobranca_whatsapp_ativa }))}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${cli.cobranca_whatsapp_ativa ? 'bg-blue-600' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cli.cobranca_whatsapp_ativa ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
 
