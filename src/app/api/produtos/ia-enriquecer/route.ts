@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
 import { buscarCandidatosCest, resolverCest, type CandidatoCest } from '@/lib/fiscal/cest'
+import { fiscalPadraoDoRegime } from '@/lib/fiscal/regimeDefault'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 // Sugestão por IA pra completar campos vazios do cadastro de produto, com
@@ -34,30 +35,6 @@ function percentualOuNull(v: unknown): number | null {
 function origemOuNull(v: unknown): number | null {
   const n = typeof v === 'number' ? v : parseInt(String(v), 10)
   return Number.isInteger(n) && n >= 0 && n <= 8 ? n : null
-}
-
-// Campos que dependem do REGIME da empresa, não do produto — são iguais pra
-// todo item do catálogo, então derivar da configuração fiscal já cadastrada
-// é mais confiável (e mais barato) do que perguntar pra IA item a item.
-// CSOSN só existe no Simples; CST de ICMS só no regime normal — mandar o do
-// regime errado a SEFAZ rejeita na hora (mesma regra de emitirParaVenda.ts).
-function fiscalDoRegime(crt: string, regime: string | null, cfopPadrao: string | null) {
-  const simples = crt === '1' || crt === '2'
-  // Lucro Real apura PIS/COFINS pelo não-cumulativo (1,65 / 7,60); os demais
-  // regimes normais (presumido, arbitrado) usam o cumulativo (0,65 / 3,00).
-  const naoCumulativo = regime === 'lucro_real'
-  return {
-    cfop: cfopPadrao || '5102',
-    csosn: simples ? '102' : null,
-    icms_cst: simples ? null : '00',
-    pis_cst: simples ? '49' : '01',
-    cofins_cst: simples ? '49' : '01',
-    // No Simples o PIS/COFINS está dentro do DAS — não há alíquota destacada
-    // por item, então deixa vazio em vez de preencher um número que não existe.
-    pis_percentual: simples ? null : (naoCumulativo ? 1.65 : 0.65),
-    cofins_percentual: simples ? null : (naoCumulativo ? 7.6 : 3),
-    simples,
-  }
 }
 
 export async function POST(req: Request) {
@@ -99,7 +76,7 @@ export async function POST(req: Request) {
     .select('uf, estado, regime_tributario').eq('id', empresaFiscalId).maybeSingle()
 
   const uf = empresaFiscal?.uf || empresaFiscal?.estado || null
-  const regime = fiscalDoRegime(
+  const regime = fiscalPadraoDoRegime(
     String(configFiscal?.crt ?? '1'),
     empresaFiscal?.regime_tributario ?? null,
     configFiscal?.cfop_venda_dentro ?? null,

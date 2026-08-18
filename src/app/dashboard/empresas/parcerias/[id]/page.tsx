@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
-import RevisarVinculosClient from '@/components/empresas/RevisarVinculosClient'
+import ParceriaDetalheTabsClient from '@/components/empresas/ParceriaDetalheTabsClient'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,13 +36,19 @@ export default async function ParceriaDetalhePage({ params }: { params: Promise<
   const empresaParceiraId = parceria.empresa_id_a === guarda.empresaId ? parceria.empresa_id_b : parceria.empresa_id_a
   const { data: empresaParceira } = await sb.from('empresas').select('nome, nome_fantasia').eq('id', empresaParceiraId).maybeSingle()
 
+  // Categorias da PRÓPRIA empresa — usadas só como filtro na aba "Duplicar
+  // catálogo", pra restringir quais produtos entram na leva de clonagem.
+  const { data: categorias } = await sb.from('categorias')
+    .select('id, nome, pai_id').eq('empresa_id', guarda.empresaId).eq('ativo', true).order('nome')
+
   return (
-    <RevisarVinculosClient
+    <ParceriaDetalheTabsClient
       parceriaId={id}
       empresaId={guarda.empresaId}
       empresaParceiraId={empresaParceiraId}
       empresaParceiraNome={empresaParceira?.nome_fantasia ?? empresaParceira?.nome ?? 'Empresa parceira'}
       minhaEmpresaEhA={parceria.empresa_id_a === guarda.empresaId}
+      categorias={categorias ?? []}
     />
   )
 }
