@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 type ProdEst = {
   id: string; quantidade: number; estoque_minimo: number; estoque_maximo: number
@@ -305,6 +306,10 @@ export default function DetalheDepositoClient({ deposito, estoqueInicial, movime
                             {e.localizacao ?? '+ localização'}
                           </button>
                         )}
+                        <Link href={`/dashboard/enderecamento/consulta-produto?depositoId=${deposito.id}`}
+                          className="block text-[10px] text-blue-500 hover:underline mt-0.5">
+                          Ver endereços →
+                        </Link>
                       </td>
                       <td className="px-3 py-2.5 text-right text-xs text-gray-400">{fmtDT(e.ultima_movimentacao)}</td>
                     </tr>

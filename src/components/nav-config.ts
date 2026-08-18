@@ -100,6 +100,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/depositos',              label: 'Depósitos',           icon: '🏭', modulo: 'depositos' },
       { href: '/dashboard/movimentacoes-estoque',  label: 'Movimentação de Estoque', icon: '📑', modulo: 'depositos' },
       { href: '/dashboard/transferencia-estoque',  label: 'Transferência de Estoque', icon: '🔀', modulo: 'depositos' },
+      { href: '/dashboard/enderecamento',          label: 'Endereçamento',       icon: '🗺️', modulo: 'depositos' },
       { href: '/dashboard/inventarios',            label: 'Inventário',          icon: '🔢', modulo: 'inventario' },
       { href: '/dashboard/entradas',               label: 'Entradas',            icon: '📥', modulo: 'entradas' },
       { href: '/dashboard/entradas/produtos',      label: 'Produtos Comprados',  icon: '🛍', modulo: 'entradas' },

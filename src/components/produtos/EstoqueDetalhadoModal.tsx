@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { ajustarDepositoPrincipal, definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
@@ -409,6 +410,10 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                 {avisoDeposito && (
                   <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">{avisoDeposito}</p>
                 )}
+                <Link href={`/dashboard/enderecamento/consulta-produto?busca=${encodeURIComponent(produto.sku ?? produto.nome)}`}
+                  className="inline-block text-xs text-blue-600 hover:underline mt-2">
+                  Ver endereços dentro do depósito →
+                </Link>
               </div>
             )}
 
