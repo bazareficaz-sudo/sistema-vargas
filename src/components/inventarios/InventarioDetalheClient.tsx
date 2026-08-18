@@ -178,6 +178,25 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
       const novoEstoque = item.qtd_contada!
       const anterior = item.estoque_sistema
       await sb.from('produtos').update({ estoque: novoEstoque }).eq('id', item.produto_id)
+      // Espelha no quadro por depósito — sem isso, a contagem física corrige
+      // o total mas o quadro por depósito (Estoque Detalhado) fica parado,
+      // desatualizado a partir do dia do inventário. O depósito já é
+      // conhecido (o inventário inteiro é de um depósito só), então grava
+      // direto nele em vez de assumir o principal.
+      if (inv.deposito_id) {
+        const { data: pe } = await sb.from('produto_estoque').select('id')
+          .eq('deposito_id', inv.deposito_id).eq('produto_id', item.produto_id).maybeSingle()
+        if (pe) {
+          await sb.from('produto_estoque').update({
+            quantidade: novoEstoque, ultima_movimentacao: new Date().toISOString(),
+          }).eq('id', pe.id)
+        } else {
+          await sb.from('produto_estoque').insert({
+            empresa_id: empresaId, deposito_id: inv.deposito_id, produto_id: item.produto_id,
+            quantidade: novoEstoque,
+          })
+        }
+      }
       await sb.from('estoque_movimentacoes').insert({
         empresa_id: empresaId,
         deposito_id: inv.deposito_id,

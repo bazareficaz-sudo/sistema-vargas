@@ -558,6 +558,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
               }),
             }).catch(() => {})
           }
+          // Espelha no depósito de volta — sempre, mesmo quando a empresa não
+          // configurou um depósito de devolução específico. Sem o fallback pro
+          // principal, o quadro por depósito ficava parado numa devolução (o
+          // mesmo problema que ajustarDepositoPrincipal já resolve pra venda).
           if (depositoDevolucaoId) {
             const { data: pe } = await sb.from('produto_estoque').select('quantidade')
               .eq('deposito_id', depositoDevolucaoId).eq('produto_id', item.produto_id).maybeSingle()
@@ -572,6 +576,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 quantidade: Math.abs(item.quantidade),
               })
             }
+          } else {
+            await ajustarDepositoPrincipal(sb, empresaEstoqueId, item.produto_id, Math.abs(item.quantidade))
           }
         }
         // Estoque do kit é um valor calculado e guardado (não ao vivo) —
