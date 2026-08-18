@@ -59,10 +59,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ ok: false, erro: 'Você não tem acesso à empresa de destino.' }, { status: 403 })
   }
 
+  // Paginado de propósito: acima de 1000 vínculos (catálogos grandes passam
+  // disso fácil), um .select() sem .range() volta só os primeiros 1000 —
+  // limite padrão do PostgREST. Sem paginar aqui, produtos já clonados
+  // "somem" do conjunto de já-feitos, a rota re-seleciona os mesmos como
+  // pendentes pra sempre e nunca alcança o resto do catálogo — foi
+  // exatamente isso que travou a duplicação da Ouro e Prata hoje.
   const colunaOrigem = origemEhLadoA ? 'produto_id_a' : 'produto_id_b'
-  const { data: vinculadosRows } = await sb.from('produto_vinculos')
-    .select(colunaOrigem).eq('parceria_id', parceriaId)
-  const idsJaClonados = new Set((vinculadosRows ?? []).map((v: any) => v[colunaOrigem]))
+  const idsJaClonados = new Set<string>()
+  for (let offset = 0; ; offset += 1000) {
+    const { data } = await sb.from('produto_vinculos')
+      .select(colunaOrigem).eq('parceria_id', parceriaId).range(offset, offset + 999)
+    if (!data || data.length === 0) break
+    for (const v of data) idsJaClonados.add((v as any)[colunaOrigem])
+    if (data.length < 1000) break
+  }
 
   async function proximoLotePendente(tamanho: number): Promise<string[]> {
     if (Array.isArray(body.produtoIds) && body.produtoIds.length > 0) {
