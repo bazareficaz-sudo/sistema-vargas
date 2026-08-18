@@ -13,15 +13,31 @@ import DuplicarCatalogoClient from './DuplicarCatalogoClient'
 
 type Categoria = { id: string; nome: string; pai_id: string | null }
 
-export default function ParceriaDetalheTabsClient({ parceriaId, empresaId, empresaParceiraId, empresaParceiraNome, minhaEmpresaEhA, categorias }: {
+export default function ParceriaDetalheTabsClient({ parceriaId, empresaId, empresaParceiraId, empresaParceiraNome, minhaEmpresaEhA, categorias, sincronizarPrecoInicial }: {
   parceriaId: string
   empresaId: string
   empresaParceiraId: string
   empresaParceiraNome: string
   minhaEmpresaEhA: boolean
   categorias: Categoria[]
+  sincronizarPrecoInicial: boolean
 }) {
   const [aba, setAba] = useState<'vincular' | 'duplicar'>('vincular')
+  const [sincronizarPreco, setSincronizarPreco] = useState(sincronizarPrecoInicial)
+  const [salvandoToggle, setSalvandoToggle] = useState(false)
+
+  async function alternarSincronizarPreco() {
+    const novoValor = !sincronizarPreco
+    setSalvandoToggle(true)
+    setSincronizarPreco(novoValor)
+    const r = await fetch(`/api/empresas/parcerias/${parceriaId}/sincronizar-preco`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sincronizarPreco: novoValor }),
+    }).then(r => r.json()).catch(() => ({ ok: false }))
+    if (!r.ok) setSincronizarPreco(!novoValor)
+    setSalvandoToggle(false)
+  }
 
   return (
     <div>
@@ -35,6 +51,22 @@ export default function ParceriaDetalheTabsClient({ parceriaId, empresaId, empre
             className={`px-3 py-1.5 text-xs font-medium ${aba === 'duplicar' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
             Duplicar catálogo
           </button>
+        </div>
+
+        <div className="mt-3 flex items-start gap-3 bg-white border border-slate-200 rounded-lg px-4 py-3">
+          <button onClick={alternarSincronizarPreco} disabled={salvandoToggle}
+            className={`w-10 h-5 rounded-full transition-colors relative shrink-0 mt-0.5 disabled:opacity-60 ${sincronizarPreco ? 'bg-emerald-500' : 'bg-gray-300'}`}>
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${sincronizarPreco ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+          <div>
+            <p className="text-sm font-medium text-slate-800">Sincronizar preço e custo entre produtos vinculados</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {sincronizarPreco
+                ? `Ligado: editar preço, custo ou markup de um produto vinculado atualiza o equivalente em ${empresaParceiraNome} (e vice-versa).`
+                : `Desligado: cada empresa mantém sua própria tabela de preço e custo, mesmo com produtos vinculados a ${empresaParceiraNome}.`}
+              {' '}Estoque e dados fiscais nunca são sincronizados.
+            </p>
+          </div>
         </div>
       </div>
 

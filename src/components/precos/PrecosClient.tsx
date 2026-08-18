@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recalcularKitsQueUsam, reprecificarKitsQueUsam, type KitReprecificado } from '@/lib/produtos/kit'
+import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 
 type Produto = {
   id: string
@@ -311,6 +312,12 @@ export default function PrecosClient({
       : p))
     setEditando(null)
 
+    // Propaga preço/custo pro produto vinculado, só se a parceria tiver
+    // sincronizar_preco ligado (ver vinculo.ts) — desligado, não faz nada.
+    await sincronizarProdutoVinculado(sb, produto.id, {}, {
+      preco_venda: novoPreco, preco_custo: novoCusto, markup: novoMarkup,
+    })
+
     const kits = await propagarParaKits(sb, [{
       id: produto.id, precoAntes: produto.preco_venda, custoMudou: novoCusto !== produto.preco_custo,
     }])
@@ -369,6 +376,7 @@ export default function PrecosClient({
       }))
     for (const u of updates) {
       await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() }).eq('id', u.id)
+      await sincronizarProdutoVinculado(sb, u.id, {}, { preco_venda: u.preco_venda, markup: u.markup })
     }
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
@@ -409,6 +417,7 @@ export default function PrecosClient({
       })
     for (const u of updates) {
       await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() }).eq('id', u.id)
+      await sincronizarProdutoVinculado(sb, u.id, {}, { preco_venda: u.preco_venda, markup: u.markup })
     }
     const precosAntes = new Map(produtos.map(p => [p.id, p.preco_venda]))
     setProdutos(prev => prev.map(p => {

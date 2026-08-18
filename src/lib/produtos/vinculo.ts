@@ -1,13 +1,20 @@
 // Sincronização de produtos vinculados entre empresas parceiras (mesmo
 // tenant). Cada empresa mantém sua própria linha em `produtos` — este
-// helper só propaga campos de IDENTIDADE (nome/descrição/categoria/marca/
-// EAN) pro produto vinculado quando um deles é editado. Nunca propaga
-// preço, estoque ou campos fiscais — cada empresa mantém os seus, sempre.
+// helper propaga campos de IDENTIDADE (nome/descrição/categoria/marca/EAN)
+// pro produto vinculado sempre que um deles é editado. Nunca propaga
+// estoque ou campos fiscais — isso é fato físico e depende do regime
+// tributário de cada empresa, então cada empresa mantém os seus, sempre.
+//
+// Preço (preco_venda/preco_custo/markup) é a exceção: propaga SÓ quando a
+// parceria específica tem `empresa_parcerias.sincronizar_preco = true` —
+// desligado por padrão. Existe pra quem gerencia várias lojas com o mesmo
+// produto e não quer manter uma tabela de preço/custo por loja; quem não
+// liga o toggle continua com o comportamento de sempre (preço independente).
 //
 // Chamado depois que o UPDATE original já foi confirmado com sucesso, nos
-// 3 pontos de edição mais usados (EditarProdutoModal, renomear inline em
-// ProdutosClient, edição em massa em AcoesEmMassaModal) — não em todos os
-// fluxos secundários que também tocam esses campos (ver plano).
+// pontos de edição mais usados (EditarProdutoModal, renomear inline em
+// ProdutosClient, edição em massa em AcoesEmMassaModal, PrecosClient) — não
+// em todos os fluxos secundários que também tocam esses campos (ver plano).
 
 export type CamposSincronizaveis = Partial<{
   nome: string
@@ -20,21 +27,48 @@ export type CamposSincronizaveis = Partial<{
   ean: string | null
 }>
 
-export async function sincronizarProdutoVinculado(sb: any, produtoId: string, campos: CamposSincronizaveis): Promise<void> {
-  if (Object.keys(campos).length === 0) return
+export type CamposPreco = Partial<{
+  preco_venda: number
+  preco_custo: number | null
+  markup: number | null
+}>
+
+export async function sincronizarProdutoVinculado(
+  sb: any,
+  produtoId: string,
+  campos: CamposSincronizaveis,
+  precos?: CamposPreco,
+): Promise<void> {
+  const temIdentidade = Object.keys(campos).length > 0
+  const temPreco = !!precos && Object.keys(precos).length > 0
+  if (!temIdentidade && !temPreco) return
 
   const [vinculosA, vinculosB] = await Promise.all([
-    sb.from('produto_vinculos').select('id, produto_id_b').eq('produto_id_a', produtoId),
-    sb.from('produto_vinculos').select('id, produto_id_a').eq('produto_id_b', produtoId),
+    sb.from('produto_vinculos').select('id, produto_id_b, parceria_id').eq('produto_id_a', produtoId),
+    sb.from('produto_vinculos').select('id, produto_id_a, parceria_id').eq('produto_id_b', produtoId),
   ])
 
-  const parceiros = [
-    ...(vinculosA.data ?? []).map((v: any) => v.produto_id_b),
-    ...(vinculosB.data ?? []).map((v: any) => v.produto_id_a),
+  const vinculos: { parceiroId: string; parceriaId: string }[] = [
+    ...(vinculosA.data ?? []).map((v: any) => ({ parceiroId: v.produto_id_b as string, parceriaId: v.parceria_id as string })),
+    ...(vinculosB.data ?? []).map((v: any) => ({ parceiroId: v.produto_id_a as string, parceriaId: v.parceria_id as string })),
   ]
-  if (parceiros.length === 0) return
+  if (vinculos.length === 0) return
 
-  await Promise.all(parceiros.map((parceiroId: string) =>
-    sb.from('produtos').update(campos).eq('id', parceiroId)
-  ))
+  let parceriasComSyncPreco = new Set<string>()
+  if (temPreco) {
+    const parceriaIds = Array.from(new Set(vinculos.map(v => v.parceriaId)))
+    const { data: parcerias } = await sb.from('empresa_parcerias')
+      .select('id, sincronizar_preco').in('id', parceriaIds)
+    parceriasComSyncPreco = new Set<string>(
+      (parcerias ?? []).filter((p: any) => p.sincronizar_preco).map((p: any) => p.id as string)
+    )
+  }
+
+  await Promise.all(vinculos.map(({ parceiroId, parceriaId }) => {
+    const camposParaEste = temPreco && parceriasComSyncPreco.has(parceriaId)
+      ? { ...campos, ...precos }
+      : campos
+    if (Object.keys(camposParaEste).length === 0) return Promise.resolve()
+    return sb.from('produtos').update(camposParaEste).eq('id', parceiroId)
+  }))
 }

@@ -21,7 +21,7 @@ export default async function ParceriaDetalhePage({ params }: { params: Promise<
     )
   }
 
-  const { data: parceria } = await sb.from('empresa_parcerias').select('id, empresa_id_a, empresa_id_b, status').eq('id', id).maybeSingle()
+  const { data: parceria } = await sb.from('empresa_parcerias').select('id, empresa_id_a, empresa_id_b, status, sincronizar_preco').eq('id', id).maybeSingle()
   if (!parceria || (parceria.empresa_id_a !== guarda.empresaId && parceria.empresa_id_b !== guarda.empresaId)) {
     return (
       <div className="p-8">
@@ -49,6 +49,7 @@ export default async function ParceriaDetalhePage({ params }: { params: Promise<
       empresaParceiraNome={empresaParceira?.nome_fantasia ?? empresaParceira?.nome ?? 'Empresa parceira'}
       minhaEmpresaEhA={parceria.empresa_id_a === guarda.empresaId}
       categorias={categorias ?? []}
+      sincronizarPrecoInicial={parceria.sincronizar_preco ?? false}
     />
   )
 }
