@@ -5,8 +5,17 @@
 // src/lib/produtos/estoque.ts, transferência em DetalheDepositoClient.tsx e
 // ajuste_entrada/ajuste_saida por inventário em InventarioDetalheClient.tsx)
 // não foram alterados — este helper só padroniza os pontos novos.
+//
+// `transferencia_saida`/`transferencia_entrada` entraram na união porque o
+// motor novo de transferência (src/lib/estoque/transferencia.ts) passou a
+// usar ESTE helper em vez de escrever em estoque_movimentacoes por conta
+// própria como o código antigo de DetalheDepositoClient.tsx fazia — a tela
+// de Movimentações já esperava esses dois valores (TIPO_MOV já os tinha),
+// só o tipo TypeScript é que ainda não os reconhecia.
 
-export type TipoMovimento = 'venda' | 'devolucao' | 'entrada_compra' | 'entrada_nfe' | 'ajuste_entrada' | 'ajuste_saida'
+export type TipoMovimento =
+  | 'venda' | 'devolucao' | 'entrada_compra' | 'entrada_nfe' | 'ajuste_entrada' | 'ajuste_saida'
+  | 'transferencia_saida' | 'transferencia_entrada'
 
 export async function registrarMovimentoEstoque(sb: any, params: {
   empresaId: string
