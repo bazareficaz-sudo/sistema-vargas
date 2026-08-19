@@ -8,6 +8,7 @@ import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 import { ajustarDepositoPrincipal, definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { atualizarStatusPedidoAposEntrada } from '@/lib/pedidosCompra/vincularEntrada'
 
@@ -673,7 +674,18 @@ export default function NovaEntradaClient({
         const upd: any = { updated_at: new Date().toISOString() }
         if (r.atualizar_custo && !r.is_kit) upd.preco_custo = r.preco_custo_novo
         if (r.atualizar_preco) { upd.preco_venda = r.preco_venda_novo; upd.markup = r.markup }
-        if (Object.keys(upd).length > 1) await sb.from('produtos').update(upd).eq('id', r.produto_id)
+        if (Object.keys(upd).length > 1) {
+          await sb.from('produtos').update(upd).eq('id', r.produto_id)
+          // Entrada é onde o custo realmente muda no dia a dia: chega a nota,
+          // o fornecedor subiu o preço, o markup recalcula a venda. Sem
+          // propagar aqui, a empresa parceira ficaria com o custo velho e o
+          // "um custo só pro grupo" não valeria justamente no caso que mais
+          // importa. Só age se a parceria tiver sincronizar_preco ligado.
+          await sincronizarProdutoVinculado(sb, r.produto_id, {}, {
+            ...(upd.preco_custo !== undefined ? { preco_custo: upd.preco_custo } : {}),
+            ...(upd.preco_venda !== undefined ? { preco_venda: upd.preco_venda, markup: upd.markup } : {}),
+          })
+        }
       }
 
       const parcelasFinais = parcelasGeradas ? parcelas : [{ numero: 1, vencimento: primeiroVenc, valor: totalGeral }]

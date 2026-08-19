@@ -261,6 +261,14 @@ export default function PrecosClient({
 
       if (error) { showMsg(`Erro ao salvar promoção: ${error.message}`); setEditando(null); return }
 
+      // Promoção é o preço que o cliente paga quando ativa — propaga junto
+      // com o preço normal pro produto vinculado (ver vinculo.ts).
+      await sincronizarProdutoVinculado(sbP, produto.id, {}, {
+        preco_promocional: limpando ? null : novoPrecoPromo,
+        promocao_ativa: ativa,
+        ...(limpando ? { promocao_inicio: null, promocao_fim: null } : {}),
+      })
+
       setProdutos(prev => prev.map(x => x.id === produto.id
         ? {
             ...x,
@@ -457,6 +465,10 @@ export default function PrecosClient({
       })
     for (const u of updates) {
       await sb.from('produtos').update({ ...u, updated_at: new Date().toISOString() }).eq('id', u.id)
+      await sincronizarProdutoVinculado(sb, u.id, {}, {
+        preco_promocional: u.preco_promocional, promocao_ativa: u.promocao_ativa,
+        promocao_inicio: u.promocao_inicio, promocao_fim: u.promocao_fim,
+      })
     }
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
@@ -480,6 +492,11 @@ export default function PrecosClient({
       promocao_inicio: null, promocao_fim: null,
       updated_at: new Date().toISOString()
     }).in('id', [...selecionados])
+    for (const id of selecionados) {
+      await sincronizarProdutoVinculado(sb, id, {}, {
+        promocao_ativa: false, preco_promocional: null, promocao_inicio: null, promocao_fim: null,
+      })
+    }
     setProdutos(prev => prev.map(p => selecionados.has(p.id)
       ? { ...p, promocao_ativa: false, preco_promocional: null, promocao_inicio: null, promocao_fim: null }
       : p))
@@ -493,6 +510,7 @@ export default function PrecosClient({
     const sb = createClient()
     const novoEstado = !produto.promocao_ativa
     await sb.from('produtos').update({ promocao_ativa: novoEstado, updated_at: new Date().toISOString() }).eq('id', produto.id)
+    await sincronizarProdutoVinculado(sb, produto.id, {}, { promocao_ativa: novoEstado })
     setProdutos(prev => prev.map(p => p.id === produto.id ? { ...p, promocao_ativa: novoEstado } : p))
   }
 

@@ -27,10 +27,21 @@ export type CamposSincronizaveis = Partial<{
   ean: string | null
 }>
 
+// Promoção entra aqui junto com o preço normal, e não como "decisão tática
+// de cada loja" (que foi a primeira leitura, e estava errada): quando a
+// promoção está ativa, é `preco_promocional` que o PDV cobra do cliente.
+// Sincronizar só `preco_venda` deixaria a loja parceira cobrando o preço
+// cheio enquanto a outra cobra o promocional — uma sincronização pela
+// metade, que engana mais do que ajuda. Medido numa entrada real: 35 de 36
+// produtos tinham promoção ativa numa empresa e nenhuma na outra.
 export type CamposPreco = Partial<{
   preco_venda: number
   preco_custo: number | null
   markup: number | null
+  preco_promocional: number | null
+  promocao_ativa: boolean
+  promocao_inicio: string | null
+  promocao_fim: string | null
 }>
 
 export async function sincronizarProdutoVinculado(

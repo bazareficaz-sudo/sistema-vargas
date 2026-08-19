@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -271,6 +272,14 @@ export default function EditarEntradaClient({
         preco_custo: r.custo_novo,
         updated_at: new Date().toISOString(),
       }).eq('id', r.produto_id)
+
+      // Propaga pro produto vinculado na empresa parceira (só age se a
+      // parceria tiver sincronizar_preco ligado) — mesmo motivo da entrada
+      // nova: custo de compra é o que mais muda, e é o que mais importa
+      // manter igual entre lojas do grupo.
+      await sincronizarProdutoVinculado(sb, r.produto_id, {}, {
+        preco_venda: r.novo_preco, preco_custo: r.custo_novo,
+      })
 
       // Cria histórico
       const { data: hist } = await sb.from('historico_precos').insert({

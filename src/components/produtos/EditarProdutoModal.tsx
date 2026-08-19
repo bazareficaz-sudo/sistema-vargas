@@ -636,6 +636,12 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       if (resultado) { precoCusto = resultado.custo; estoque = resultado.estoque }
     }
     const precoMudou = form.preco_venda !== produto.preco_venda || precoCusto !== produto.preco_custo
+    // Promoção conta como mudança de preço pra sincronização: é ela que o
+    // PDV cobra quando está ativa (ver vinculo.ts).
+    const promocaoMudou = (form.preco_promocional ?? null) !== (produto.preco_promocional ?? null)
+      || (form.promocao_ativa ?? false) !== (produto.promocao_ativa ?? false)
+      || (form.promocao_inicio ?? null) !== (produto.promocao_inicio ?? null)
+      || (form.promocao_fim ?? null) !== (produto.promocao_fim ?? null)
 
     const { error } = await sb.from('produtos').update({
       nome: form.nome,
@@ -698,10 +704,18 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       subcategoria: form.subcategoria || null,
       marca: form.marca || null,
       ean: form.ean || null,
-    }, precoMudou ? {
-      preco_venda: form.preco_venda,
-      preco_custo: precoCusto,
-      markup: isKit ? null : (form.markup ?? null),
+    }, (precoMudou || promocaoMudou) ? {
+      ...(precoMudou ? {
+        preco_venda: form.preco_venda,
+        preco_custo: precoCusto,
+        markup: isKit ? null : (form.markup ?? null),
+      } : {}),
+      ...(promocaoMudou ? {
+        preco_promocional: form.preco_promocional ?? null,
+        promocao_ativa: form.promocao_ativa ?? false,
+        promocao_inicio: form.promocao_inicio ?? null,
+        promocao_fim: promocaoInfinita ? null : (form.promocao_fim ?? null),
+      } : {}),
     } : undefined)
 
     // Estoque editado direto no cadastro (não-kit — kit é recalculado a

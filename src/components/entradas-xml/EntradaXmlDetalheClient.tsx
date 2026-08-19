@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { calcularCustoItem, type NFeItem as NFeItemParser } from '@/lib/nfe-parser'
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 
@@ -742,6 +743,24 @@ export default function EntradaXmlDetalheClient({
       // até alguém abrir o produto e clicar em "Recalcular" manualmente.
       for (const produtoId of produtoIdsAfetados) {
         await recalcularKitsQueUsam(sb, produtoId)
+      }
+
+      // 1c. Propagar o preço novo pro produto vinculado na empresa parceira
+      // (só age se a parceria tiver sincronizar_preco ligado). Lê o valor
+      // já gravado em vez de recalcular: o custo pode ter vindo da RPC
+      // `incrementar_estoque` ou do update de fallback, e ler depois é o
+      // único jeito de pegar o mesmo número nos dois caminhos.
+      if (produtoIdsAfetados.size > 0) {
+        const { data: precosFinais } = await sb.from('produtos')
+          .select('id, preco_custo, preco_venda, markup, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim')
+          .in('id', [...produtoIdsAfetados])
+        for (const p of precosFinais ?? []) {
+          await sincronizarProdutoVinculado(sb, p.id, {}, {
+            preco_custo: p.preco_custo, preco_venda: p.preco_venda, markup: p.markup,
+            preco_promocional: p.preco_promocional, promocao_ativa: p.promocao_ativa,
+            promocao_inicio: p.promocao_inicio, promocao_fim: p.promocao_fim,
+          })
+        }
       }
 
       // 2. Gerar contas a pagar
