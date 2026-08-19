@@ -13,6 +13,7 @@ type Cliente = {
   data_ultima_compra_fiada: string | null; data_ultimo_pagamento: string | null
   saldo_credito: number; status_credito: string
   cobranca_whatsapp_ativa: boolean
+  alerta_pedido_whatsapp: boolean; alerta_pedido_telefone: string | null
 }
 type Conta = {
   id: string; numero_doc: string | null; parcela_numero: number; total_parcelas: number
@@ -54,6 +55,12 @@ export default function ClienteDetalheClient({
         motivo_bloqueio: cli.motivo_bloqueio,
         observacoes_financeiras: cli.observacoes_financeiras,
         cobranca_whatsapp_ativa: cli.cobranca_whatsapp_ativa,
+        alerta_pedido_whatsapp: cli.alerta_pedido_whatsapp,
+        // Só dígitos — o Z-API não aceita máscara, e é comum colar o número
+        // formatado direto do WhatsApp.
+        alerta_pedido_telefone: cli.alerta_pedido_telefone
+          ? cli.alerta_pedido_telefone.replace(/\D/g, '') || null
+          : null,
         status_credito: cli.bloqueado_fiado ? 'bloqueado' : cli.permite_fiado ? 'liberado' : 'restrito',
       }).eq('id', cli.id)
       if (error) throw error
@@ -159,6 +166,31 @@ export default function ClienteDetalheClient({
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cli.cobranca_whatsapp_ativa ? 'translate-x-6' : 'translate-x-1'}`} />
             </button>
           </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-gray-900 text-sm font-medium">Avisar cada compra por WhatsApp</label>
+              <p className="text-gray-500 text-xs">Manda uma mensagem a cada compra feita em nome deste cliente, com itens e total.</p>
+            </div>
+            <button onClick={() => setCli(p => ({ ...p, alerta_pedido_whatsapp: !p.alerta_pedido_whatsapp }))}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${cli.alerta_pedido_whatsapp ? 'bg-emerald-600' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cli.alerta_pedido_whatsapp ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {cli.alerta_pedido_whatsapp && (
+            <div>
+              <label className="text-gray-500 text-xs">Número que recebe o aviso (opcional)</label>
+              <input value={cli.alerta_pedido_telefone ?? ''}
+                onChange={e => setCli(p => ({ ...p, alerta_pedido_telefone: e.target.value }))}
+                placeholder="Ex: 21999998888 — vazio usa o telefone do cadastro"
+                className="w-full mt-1 bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+              <p className="text-gray-400 text-xs mt-1">
+                Serve para quando quem recebe o aviso não é quem compra — por exemplo, o dono no celular dele
+                enquanto os funcionários compram em nome da firma.
+              </p>
+            </div>
+          )}
 
           {cli.bloqueado_fiado && (
             <div>
