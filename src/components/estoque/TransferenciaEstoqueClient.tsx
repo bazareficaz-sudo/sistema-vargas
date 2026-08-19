@@ -286,15 +286,27 @@ export default function TransferenciaEstoqueClient({ empresaId, depositosProprio
           entradaOrigem: entradaEscolhida?.origem,
         }),
       })
-      const d = await resp.json()
+      // Resposta que não é JSON (timeout da função, erro 5xx da plataforma)
+      // fazia o .json() estourar e cair no catch como "falha de rede", sem
+      // dizer o que aconteceu de verdade. Aqui o motivo real aparece.
+      const bruto = await resp.text()
+      let d: any = null
+      try { d = JSON.parse(bruto) } catch {
+        setErroGeral(
+          resp.status === 504 || resp.status === 408
+            ? 'A transferência demorou demais e foi interrompida pelo servidor. Tente com menos produtos por vez.'
+            : `O servidor respondeu ${resp.status} sem detalhe. ${bruto.slice(0, 200)}`
+        )
+        return
+      }
       if (!d.ok) { setErroGeral(d.erro ?? 'Não foi possível transferir.'); return }
       setResultado(d)
       setSelecionados(new Map())
       setEntradaEscolhida(null)
       setObservacao('')
       router.refresh()
-    } catch {
-      setErroGeral('Falha de rede.')
+    } catch (e: any) {
+      setErroGeral(`Não foi possível falar com o servidor: ${e?.message ?? 'erro desconhecido'}`)
     } finally {
       setEnviando(false)
     }

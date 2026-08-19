@@ -62,13 +62,57 @@ async function saldoNoDeposito(sb: any, depositoId: string, produtoId: string): 
   return Number(data?.quantidade ?? 0)
 }
 
-async function gravarSaldoNoDeposito(sb: any, empresaId: string, depositoId: string, produtoId: string, novoSaldo: number): Promise<void> {
-  const { data: existente } = await sb.from('produto_estoque')
-    .select('id').eq('deposito_id', depositoId).eq('produto_id', produtoId).maybeSingle()
-  if (existente) {
+/**
+ * Lê de uma vez tudo que o laço precisa: produtos dos dois lados e saldos
+ * dos dois depósitos. Antes cada item fazia essas 4 consultas por conta
+ * própria — numa transferência de 36 produtos eram ~150 idas ao banco só
+ * de leitura, em fila, e a rota estourava o tempo antes de gravar nada.
+ *
+ * `.in()` vai pela URL, então lê em blocos pra não estourar o tamanho.
+ */
+async function carregarContexto(sb: any, p: ParametrosTransferencia, produtoDestinoIds: string[]) {
+  const BLOCO = 100
+  const produtoOrigemIds = p.itens.map(i => i.produtoId)
+
+  async function lerEmBlocos(tabela: string, colunas: string, coluna: string, ids: string[], filtros: (q: any) => any) {
+    const out: any[] = []
+    for (let i = 0; i < ids.length; i += BLOCO) {
+      const q = filtros(sb.from(tabela).select(colunas).in(coluna, ids.slice(i, i + BLOCO)))
+      const { data } = await q
+      out.push(...(data ?? []))
+    }
+    return out
+  }
+
+  const [origens, destinos, saldosOrigem, saldosDestino] = await Promise.all([
+    lerEmBlocos('produtos', 'id, nome, estoque', 'id', produtoOrigemIds, (q: any) => q.eq('empresa_id', p.empresaOrigemId)),
+    lerEmBlocos('produtos', 'id, nome, estoque', 'id', produtoDestinoIds, (q: any) => q.eq('empresa_id', p.empresaDestinoId)),
+    lerEmBlocos('produto_estoque', 'id, produto_id, quantidade', 'produto_id', produtoOrigemIds, (q: any) => q.eq('deposito_id', p.depositoOrigemId)),
+    lerEmBlocos('produto_estoque', 'id, produto_id, quantidade', 'produto_id', produtoDestinoIds, (q: any) => q.eq('deposito_id', p.depositoDestinoId)),
+  ])
+
+  return {
+    origemPorId: new Map<string, any>(origens.map(x => [x.id, x])),
+    destinoPorId: new Map<string, any>(destinos.map(x => [x.id, x])),
+    saldoOrigemPorProduto: new Map<string, { id: string; quantidade: number }>(
+      saldosOrigem.map(x => [x.produto_id, { id: x.id, quantidade: Number(x.quantidade ?? 0) }])),
+    saldoDestinoPorProduto: new Map<string, { id: string; quantidade: number }>(
+      saldosDestino.map(x => [x.produto_id, { id: x.id, quantidade: Number(x.quantidade ?? 0) }])),
+  }
+}
+
+// `linhaId` vem pré-carregado por carregarContexto — quando existe, pula a
+// consulta de "já tem linha?", que antes acontecia duas vezes por item.
+async function gravarSaldoNoDeposito(
+  sb: any, empresaId: string, depositoId: string, produtoId: string, novoSaldo: number, linhaId?: string,
+): Promise<void> {
+  const id = linhaId ?? (await sb.from('produto_estoque')
+    .select('id').eq('deposito_id', depositoId).eq('produto_id', produtoId).maybeSingle()).data?.id
+
+  if (id) {
     await sb.from('produto_estoque')
       .update({ quantidade: novoSaldo, ultima_movimentacao: new Date().toISOString() })
-      .eq('id', existente.id)
+      .eq('id', id)
   } else {
     await sb.from('produto_estoque')
       .insert({ empresa_id: empresaId, deposito_id: depositoId, produto_id: produtoId, quantidade: novoSaldo })
@@ -83,6 +127,11 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
   const mesmaEmpresa = p.empresaOrigemId === p.empresaDestinoId
   const resultados: ResultadoItemTransferencia[] = []
 
+  const produtoDestinoIds = p.itens
+    .map(i => mesmaEmpresa ? i.produtoId : p.produtoDestinoPorOrigem?.[i.produtoId])
+    .filter((x): x is string => !!x)
+  const ctx = await carregarContexto(sb, p, produtoDestinoIds)
+
   for (const item of p.itens) {
     const produtoDestinoId = mesmaEmpresa ? item.produtoId : p.produtoDestinoPorOrigem?.[item.produtoId]
 
@@ -95,15 +144,13 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
       continue
     }
 
-    const { data: origem } = await sb.from('produtos')
-      .select('id, nome, estoque').eq('id', item.produtoId).eq('empresa_id', p.empresaOrigemId).maybeSingle()
+    const origem = ctx.origemPorId.get(item.produtoId)
     if (!origem) {
       resultados.push({ produtoId: item.produtoId, produtoNome: item.produtoId, ok: false, erro: 'Produto não encontrado na empresa de origem.' })
       continue
     }
 
-    const { data: destinoProduto } = await sb.from('produtos')
-      .select('id, nome, estoque').eq('id', produtoDestinoId).eq('empresa_id', p.empresaDestinoId).maybeSingle()
+    const destinoProduto = ctx.destinoPorId.get(produtoDestinoId)
     if (!destinoProduto) {
       resultados.push({ produtoId: item.produtoId, produtoNome: origem.nome, ok: false, erro: 'Produto de destino não encontrado.' })
       continue
@@ -113,7 +160,7 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
     // `produtos.estoque` (que é o total da empresa inteira, somando todos
     // os depósitos). Transferir "o que tem nesta prateleira" só faz
     // sentido medido nesta prateleira.
-    const saldoOrigem = await saldoNoDeposito(sb, p.depositoOrigemId, item.produtoId)
+    const saldoOrigem = ctx.saldoOrigemPorProduto.get(item.produtoId)?.quantidade ?? 0
     if (item.quantidade > saldoOrigem) {
       resultados.push({
         produtoId: item.produtoId, produtoNome: origem.nome, ok: false,
@@ -122,7 +169,7 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
       continue
     }
 
-    const saldoDestinoAtual = await saldoNoDeposito(sb, p.depositoDestinoId, produtoDestinoId)
+    const saldoDestinoAtual = ctx.saldoDestinoPorProduto.get(produtoDestinoId)?.quantidade ?? 0
 
     // Grava o documento da transferência ANTES de mexer em estoque —
     // ver nota no topo do arquivo sobre por que a ordem é essa.
@@ -147,36 +194,47 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
       continue
     }
 
-    // Origem: sai do depósito. Fora da mesma empresa, sai também do total.
-    await gravarSaldoNoDeposito(sb, p.empresaOrigemId, p.depositoOrigemId, item.produtoId, saldoOrigem - item.quantidade)
-    if (!mesmaEmpresa) {
-      await sb.from('produtos').update({ estoque: Number(origem.estoque ?? 0) - item.quantidade }).eq('id', item.produtoId)
-    }
+    // As quatro escritas de saldo são independentes entre si (linhas
+    // diferentes, produtos diferentes) — esperar uma pela outra só somava
+    // latência. A ORDEM que importa (documento antes do saldo) continua
+    // garantida: o insert acima já foi confirmado antes de chegar aqui.
+    const linhaOrigem = ctx.saldoOrigemPorProduto.get(item.produtoId)
+    const linhaDestino = ctx.saldoDestinoPorProduto.get(produtoDestinoId)
+    const novoSaldoOrigem = saldoOrigem - item.quantidade
+    const novoSaldoDestino = saldoDestinoAtual + item.quantidade
 
-    // Destino: entra no depósito. Fora da mesma empresa, entra também no total.
-    await gravarSaldoNoDeposito(sb, p.empresaDestinoId, p.depositoDestinoId, produtoDestinoId, saldoDestinoAtual + item.quantidade)
-    if (!mesmaEmpresa) {
-      await sb.from('produtos').update({ estoque: Number(destinoProduto.estoque ?? 0) + item.quantidade }).eq('id', produtoDestinoId)
-    }
+    await Promise.all([
+      // Origem: sai do depósito. Fora da mesma empresa, sai também do total.
+      gravarSaldoNoDeposito(sb, p.empresaOrigemId, p.depositoOrigemId, item.produtoId, novoSaldoOrigem, linhaOrigem?.id),
+      // Destino: entra no depósito. Fora da mesma empresa, entra no total.
+      gravarSaldoNoDeposito(sb, p.empresaDestinoId, p.depositoDestinoId, produtoDestinoId, novoSaldoDestino, linhaDestino?.id),
+      ...(mesmaEmpresa ? [] : [
+        sb.from('produtos').update({ estoque: Number(origem.estoque ?? 0) - item.quantidade }).eq('id', item.produtoId),
+        sb.from('produtos').update({ estoque: Number(destinoProduto.estoque ?? 0) + item.quantidade }).eq('id', produtoDestinoId),
+      ]),
+      registrarMovimentoEstoque(sb, {
+        empresaId: p.empresaOrigemId, depositoId: p.depositoOrigemId,
+        produtoId: item.produtoId, produtoNome: origem.nome,
+        tipo: 'transferencia_saida', quantidade: item.quantidade,
+        estoqueAnterior: saldoOrigem, estoqueNovo: novoSaldoOrigem,
+        referenciaTipo: 'transferencia', referenciaId: transf.id,
+        usuario: p.usuario, observacao: p.observacao,
+        motivo: mesmaEmpresa ? 'Transferência entre depósitos' : 'Transferência para outra empresa do grupo',
+      }),
+      registrarMovimentoEstoque(sb, {
+        empresaId: p.empresaDestinoId, depositoId: p.depositoDestinoId,
+        produtoId: produtoDestinoId, produtoNome: destinoProduto.nome,
+        tipo: 'transferencia_entrada', quantidade: item.quantidade,
+        estoqueAnterior: saldoDestinoAtual, estoqueNovo: novoSaldoDestino,
+        referenciaTipo: 'transferencia', referenciaId: transf.id,
+        usuario: p.usuario, observacao: p.observacao,
+        motivo: mesmaEmpresa ? 'Transferência entre depósitos' : 'Transferência recebida de outra empresa do grupo',
+      }),
+    ])
 
-    await registrarMovimentoEstoque(sb, {
-      empresaId: p.empresaOrigemId, depositoId: p.depositoOrigemId,
-      produtoId: item.produtoId, produtoNome: origem.nome,
-      tipo: 'transferencia_saida', quantidade: item.quantidade,
-      estoqueAnterior: saldoOrigem, estoqueNovo: saldoOrigem - item.quantidade,
-      referenciaTipo: 'transferencia', referenciaId: transf.id,
-      usuario: p.usuario, observacao: p.observacao,
-      motivo: mesmaEmpresa ? 'Transferência entre depósitos' : 'Transferência para outra empresa do grupo',
-    })
-    await registrarMovimentoEstoque(sb, {
-      empresaId: p.empresaDestinoId, depositoId: p.depositoDestinoId,
-      produtoId: produtoDestinoId, produtoNome: destinoProduto.nome,
-      tipo: 'transferencia_entrada', quantidade: item.quantidade,
-      estoqueAnterior: saldoDestinoAtual, estoqueNovo: saldoDestinoAtual + item.quantidade,
-      referenciaTipo: 'transferencia', referenciaId: transf.id,
-      usuario: p.usuario, observacao: p.observacao,
-      motivo: mesmaEmpresa ? 'Transferência entre depósitos' : 'Transferência recebida de outra empresa do grupo',
-    })
+    // Mantém o contexto coerente caso o mesmo produto apareça duas vezes.
+    ctx.saldoOrigemPorProduto.set(item.produtoId, { id: linhaOrigem?.id ?? '', quantidade: novoSaldoOrigem })
+    ctx.saldoDestinoPorProduto.set(produtoDestinoId, { id: linhaDestino?.id ?? '', quantidade: novoSaldoDestino })
 
     resultados.push({ produtoId: item.produtoId, produtoNome: origem.nome, ok: true, quantidadeTransferida: item.quantidade })
   }

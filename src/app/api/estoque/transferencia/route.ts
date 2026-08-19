@@ -4,7 +4,10 @@ import { perfilDaSessao, empresasDoUsuario } from '@/lib/auth/empresaAtiva'
 import { executarTransferencia, type ItemTransferencia } from '@/lib/estoque/transferencia'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+// 300s como nas outras rotas de lote (clonar-produtos, qualidade/recalcular).
+// Com 60s uma transferência de algumas dezenas de produtos era cortada pela
+// metade do caminho, e o navegador só via "falha de rede".
+export const maxDuration = 300
 
 // Executa uma transferência de estoque — sempre no servidor, nunca direto
 // do navegador. A validação de que a empresa destino é permitida (mesmo

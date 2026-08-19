@@ -4,7 +4,18 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recalcularKitsQueUsam, reprecificarKitsQueUsam, type KitReprecificado } from '@/lib/produtos/kit'
-import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { sincronizarProdutoVinculado, sincronizarProdutosVinculadosEmLote } from '@/lib/produtos/vinculo'
+
+// Os updates em massa eram feitos um a um, esperando cada resposta antes de
+// mandar o próximo: com 100 produtos selecionados são 100 idas e voltas em
+// fila. Cada linha tem valores diferentes (não dá pra fazer um UPDATE só),
+// mas nada obriga a esperar em fila — vão em blocos paralelos. O bloco
+// existe pra não abrir centenas de conexões de uma vez.
+async function aplicarEmBloco<T>(itens: T[], acao: (item: T) => PromiseLike<unknown>, tamanho = 20) {
+  for (let i = 0; i < itens.length; i += tamanho) {
+    await Promise.all(itens.slice(i, i + tamanho).map(acao))
+  }
+}
 
 type Produto = {
   id: string
@@ -382,10 +393,12 @@ export default function PrecosClient({
         preco_venda: parseFloat((p.preco_custo * (1 + mk / 100)).toFixed(2)),
         markup: mk,
       }))
-    for (const u of updates) {
-      await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() }).eq('id', u.id)
-      await sincronizarProdutoVinculado(sb, u.id, {}, { preco_venda: u.preco_venda, markup: u.markup })
-    }
+    await aplicarEmBloco(updates, u => sb.from('produtos')
+      .update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() })
+      .eq('id', u.id))
+    await sincronizarProdutosVinculadosEmLote(sb, updates.map(u => ({
+      produtoId: u.id, precos: { preco_venda: u.preco_venda, markup: u.markup },
+    })))
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
       return u ? { ...p, preco_venda: u.preco_venda, markup: u.markup } : p
@@ -423,10 +436,12 @@ export default function PrecosClient({
         novoPreco = Math.max(0, parseFloat(novoPreco.toFixed(2)))
         return { id: p.id, preco_venda: novoPreco, markup: p.preco_custo > 0 ? calcMarkup(p.preco_custo, novoPreco) : p.markup }
       })
-    for (const u of updates) {
-      await sb.from('produtos').update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() }).eq('id', u.id)
-      await sincronizarProdutoVinculado(sb, u.id, {}, { preco_venda: u.preco_venda, markup: u.markup })
-    }
+    await aplicarEmBloco(updates, u => sb.from('produtos')
+      .update({ preco_venda: u.preco_venda, markup: u.markup, updated_at: new Date().toISOString(), preco_atualizado_em: new Date().toISOString() })
+      .eq('id', u.id))
+    await sincronizarProdutosVinculadosEmLote(sb, updates.map(u => ({
+      produtoId: u.id, precos: { preco_venda: u.preco_venda, markup: u.markup },
+    })))
     const precosAntes = new Map(produtos.map(p => [p.id, p.preco_venda]))
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
@@ -463,13 +478,15 @@ export default function PrecosClient({
           promocao_fim: promoInfinito ? null : (promoFim || null),
         }
       })
-    for (const u of updates) {
-      await sb.from('produtos').update({ ...u, updated_at: new Date().toISOString() }).eq('id', u.id)
-      await sincronizarProdutoVinculado(sb, u.id, {}, {
+    await aplicarEmBloco(updates, u => sb.from('produtos')
+      .update({ ...u, updated_at: new Date().toISOString() }).eq('id', u.id))
+    await sincronizarProdutosVinculadosEmLote(sb, updates.map(u => ({
+      produtoId: u.id,
+      precos: {
         preco_promocional: u.preco_promocional, promocao_ativa: u.promocao_ativa,
         promocao_inicio: u.promocao_inicio, promocao_fim: u.promocao_fim,
-      })
-    }
+      },
+    })))
     setProdutos(prev => prev.map(p => {
       const u = updates.find(x => x.id === p.id)
       return u ? { ...p, ...u } : p
@@ -492,11 +509,10 @@ export default function PrecosClient({
       promocao_inicio: null, promocao_fim: null,
       updated_at: new Date().toISOString()
     }).in('id', [...selecionados])
-    for (const id of selecionados) {
-      await sincronizarProdutoVinculado(sb, id, {}, {
-        promocao_ativa: false, preco_promocional: null, promocao_inicio: null, promocao_fim: null,
-      })
-    }
+    await sincronizarProdutosVinculadosEmLote(sb, [...selecionados].map(id => ({
+      produtoId: id,
+      precos: { promocao_ativa: false, preco_promocional: null, promocao_inicio: null, promocao_fim: null },
+    })))
     setProdutos(prev => prev.map(p => selecionados.has(p.id)
       ? { ...p, promocao_ativa: false, preco_promocional: null, promocao_inicio: null, promocao_fim: null }
       : p))

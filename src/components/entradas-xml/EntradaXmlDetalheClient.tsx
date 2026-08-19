@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { calcularCustoItem, type NFeItem as NFeItemParser } from '@/lib/nfe-parser'
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
-import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { sincronizarProdutosVinculadosEmLote } from '@/lib/produtos/vinculo'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 
@@ -754,13 +754,14 @@ export default function EntradaXmlDetalheClient({
         const { data: precosFinais } = await sb.from('produtos')
           .select('id, preco_custo, preco_venda, markup, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim')
           .in('id', [...produtoIdsAfetados])
-        for (const p of precosFinais ?? []) {
-          await sincronizarProdutoVinculado(sb, p.id, {}, {
+        await sincronizarProdutosVinculadosEmLote(sb, (precosFinais ?? []).map((p: any) => ({
+          produtoId: p.id,
+          precos: {
             preco_custo: p.preco_custo, preco_venda: p.preco_venda, markup: p.markup,
             preco_promocional: p.preco_promocional, promocao_ativa: p.promocao_ativa,
             promocao_inicio: p.promocao_inicio, promocao_fim: p.promocao_fim,
-          })
-        }
+          },
+        })))
       }
 
       // 2. Gerar contas a pagar

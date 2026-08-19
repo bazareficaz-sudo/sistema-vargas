@@ -83,3 +83,75 @@ export async function sincronizarProdutoVinculado(
     return sb.from('produtos').update(camposParaEste).eq('id', parceiroId)
   }))
 }
+
+/**
+ * Versão em lote — para quando muitos produtos mudam de uma vez (markup em
+ * massa, reajuste, promoção em massa, confirmação de entrada).
+ *
+ * A versão de um produto só custa 3 consultas + 1 update. Chamada dentro de
+ * um laço, isso vira 3N consultas em sequência: medido em ~125ms por
+ * produto, ou seja +12s numa seleção de 100 produtos — a tela parecia
+ * travada. Aqui os vínculos e as parcerias são lidos UMA vez para o lote
+ * inteiro, e só os updates continuam sendo por produto (valores diferentes
+ * em cada), disparados em paralelo por blocos.
+ */
+export async function sincronizarProdutosVinculadosEmLote(
+  sb: any,
+  itens: { produtoId: string; campos?: CamposSincronizaveis; precos?: CamposPreco }[],
+): Promise<void> {
+  const relevantes = itens.filter(i =>
+    Object.keys(i.campos ?? {}).length > 0 || Object.keys(i.precos ?? {}).length > 0)
+  if (relevantes.length === 0) return
+
+  const ids = Array.from(new Set(relevantes.map(i => i.produtoId)))
+
+  // `.in()` vira query string na URL — em lotes grandes isso estoura o
+  // limite do servidor, então vai em blocos.
+  const BLOCO_IN = 150
+  const vinculosBrutos: any[] = []
+  for (let i = 0; i < ids.length; i += BLOCO_IN) {
+    const fatia = ids.slice(i, i + BLOCO_IN)
+    const [a, b] = await Promise.all([
+      sb.from('produto_vinculos').select('produto_id_a, produto_id_b, parceria_id').in('produto_id_a', fatia),
+      sb.from('produto_vinculos').select('produto_id_a, produto_id_b, parceria_id').in('produto_id_b', fatia),
+    ])
+    vinculosBrutos.push(...(a.data ?? []), ...(b.data ?? []))
+  }
+  if (vinculosBrutos.length === 0) return
+
+  const idsSet = new Set(ids)
+  const porProduto = new Map<string, { parceiroId: string; parceriaId: string }[]>()
+  for (const v of vinculosBrutos) {
+    // O vínculo não tem lado fixo: o produto do lote pode estar em A ou B.
+    const [origem, parceiro] = idsSet.has(v.produto_id_a)
+      ? [v.produto_id_a, v.produto_id_b]
+      : [v.produto_id_b, v.produto_id_a]
+    const lista = porProduto.get(origem) ?? []
+    if (!lista.some(x => x.parceiroId === parceiro)) lista.push({ parceiroId: parceiro, parceriaId: v.parceria_id })
+    porProduto.set(origem, lista)
+  }
+
+  const parceriaIds = Array.from(new Set(vinculosBrutos.map(v => v.parceria_id)))
+  const { data: parcerias } = await sb.from('empresa_parcerias')
+    .select('id, sincronizar_preco').in('id', parceriaIds)
+  const comSyncPreco = new Set<string>(
+    (parcerias ?? []).filter((p: any) => p.sincronizar_preco).map((p: any) => p.id as string)
+  )
+
+  const updates: { parceiroId: string; campos: Record<string, unknown> }[] = []
+  for (const item of relevantes) {
+    for (const { parceiroId, parceriaId } of porProduto.get(item.produtoId) ?? []) {
+      const temPreco = Object.keys(item.precos ?? {}).length > 0
+      const campos = temPreco && comSyncPreco.has(parceriaId)
+        ? { ...(item.campos ?? {}), ...(item.precos ?? {}) }
+        : { ...(item.campos ?? {}) }
+      if (Object.keys(campos).length > 0) updates.push({ parceiroId, campos })
+    }
+  }
+
+  const BLOCO_UPDATE = 20
+  for (let i = 0; i < updates.length; i += BLOCO_UPDATE) {
+    await Promise.all(updates.slice(i, i + BLOCO_UPDATE)
+      .map(u => sb.from('produtos').update(u.campos).eq('id', u.parceiroId)))
+  }
+}
