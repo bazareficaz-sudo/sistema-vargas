@@ -1,4 +1,6 @@
 {
+  "//": "Funções em São Paulo (gru1). O padrão da Vercel é iad1 (Washington), e o Supabase deste projeto está em São Paulo: medido ~40ms daqui do Brasil contra ~140ms atravessando o continente. Como cada tela do painel faz várias consultas em sequência no servidor, essa distância aparecia como lentidão em tudo — o login sozinho encadeia 7 idas ao banco.",
+  "regions": ["gru1"],
   "crons": [
     {
       "path": "/api/cron/anuncios-sync",

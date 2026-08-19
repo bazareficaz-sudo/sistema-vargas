@@ -42,22 +42,28 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   const empresaId = profile?.empresa_id ?? ''
-  // Empresas que este usuário pode operar. Com uma só — o caso da maioria —
-  // o seletor nem aparece.
-  const empresasDoOperador = await empresasDoUsuario(supabase, user.id)
   const empresaNome = (profile?.empresas as unknown as { nome: string } | null)?.nome ?? 'Minha Empresa'
 
-  // Acesso de suporte — pega a sessão mais recente pra esse usuário. Se
-  // estiver ativa mas vencida, encerra e desloga (mesma lógica do bloqueio
-  // acima). Se estiver ativa e válida, ou foi encerrada há menos de 24h,
-  // vira o aviso mostrado no dashboard (SupportModeBanner).
-  const { data: suporteRow } = await supabase
-    .from('suporte_acessos')
-    .select('id, motivo, status, expira_em, encerrado_em, empresas(nome, nome_fantasia)')
-    .eq('usuario_alvo_id', user.id)
-    .order('iniciado_em', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  // Estas quatro leituras não dependem uma da outra — só do usuário e da
+  // empresa, que já temos. Em sequência eram quatro idas ao banco somadas
+  // em TODA carga de tela do painel; juntas, custam o tempo da mais lenta.
+  //
+  //  · empresas que este usuário pode operar (com uma só, o seletor nem aparece)
+  //  · acesso de suporte mais recente (vira o aviso do SupportModeBanner)
+  //  · exceções de permissão configuradas em Usuários → Permissões
+  //  · plano/assinatura da empresa
+  const [empresasDoOperador, { data: suporteRow }, excecoes, planoBase] = await Promise.all([
+    empresasDoUsuario(supabase, user.id),
+    supabase
+      .from('suporte_acessos')
+      .select('id, motivo, status, expira_em, encerrado_em, empresas(nome, nome_fantasia)')
+      .eq('usuario_alvo_id', user.id)
+      .order('iniciado_em', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    buscarExcecoes(supabase, user.id),
+    loadPlanData(empresaId, user.id),
+  ])
 
   let suporte: PlanData['suporte'] = null
   if (suporteRow?.status === 'ativa') {
@@ -86,11 +92,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   // Permissoes efetivas resolvidas uma vez por carga do dashboard: papel do
   // usuario mais as excecoes configuradas em Usuarios -> Permissoes.
-  const excecoes = await buscarExcecoes(supabase, user.id)
   const permissoes = permissoesEfetivas((profile?.role ?? null) as Papel | null, excecoes)
   const bloqueadas = telasBloqueadas(excecoes)
   const planData = {
-    ...(await loadPlanData(empresaId, user.id)),
+    ...planoBase,
     role: profile?.role ?? null, permissoes, suporte, telasBloqueadas: bloqueadas,
   }
 
