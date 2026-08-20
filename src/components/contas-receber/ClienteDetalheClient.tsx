@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import ClienteFormDrawer from '@/components/clientes/ClienteFormDrawer'
 
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
@@ -34,16 +36,25 @@ const STATUS_COR: Record<string,string> = {
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 function fmtDt(d: string) { const s = d.split('T')[0].split('-'); return `${s[2]}/${s[1]}/${s[0]}` }
 
+type Compra = {
+  id: string; numero: number | null; total: number; created_at: string
+  operador_nome: string | null; vendedor_nome: string | null; qtdItens: number
+}
+type ProdutoComprado = { nome: string; sku: string | null; quantidade: number; valor: number; ultima: string }
+
 export default function ClienteDetalheClient({
-  cliente, contasIniciais, creditosIniciais, historicoIniciais, empresaId, operador
+  cliente, contasIniciais, creditosIniciais, historicoIniciais, compras = [], produtosComprados = [], empresaId, operador
 }: {
   cliente: Cliente; contasIniciais: Conta[]; creditosIniciais: Credito[]
-  historicoIniciais: Historico[]; empresaId: string; operador: string
+  historicoIniciais: Historico[]; compras?: Compra[]; produtosComprados?: ProdutoComprado[]
+  empresaId: string; operador: string
 }) {
   const sb = createClient()
-  const [tab, setTab] = useState<'financeiro'|'contas'|'creditos'|'historico'>('financeiro')
+  const router = useRouter()
+  const [tab, setTab] = useState<'financeiro'|'compras'|'produtos'|'contas'|'creditos'|'historico'>('financeiro')
   const [cli, setCli] = useState(cliente)
   const [salvando, setSalvando] = useState(false)
+  const [editando, setEditando] = useState(false)
 
   async function salvarFinanceiro() {
     setSalvando(true)
@@ -84,13 +95,17 @@ export default function ClienteDetalheClient({
           <h1 className="text-gray-900 text-xl font-semibold mt-1">{cli.nome}</h1>
           <p className="text-gray-500 text-sm">{cli.cpf_cnpj ?? ''} {cli.telefone ? `· ${cli.telefone}` : ''}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <span className={`text-xs px-2 py-1 rounded-full border ${
             cli.bloqueado_fiado ? 'bg-red-100 text-red-600 border-red-200' :
             cli.permite_fiado   ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'
           }`}>
             {cli.bloqueado_fiado ? 'Bloqueado' : cli.permite_fiado ? 'Fiado Liberado' : 'Sem Fiado'}
           </span>
+          <button onClick={() => setEditando(true)}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+            Editar cadastro
+          </button>
         </div>
       </div>
 
@@ -116,10 +131,13 @@ export default function ClienteDetalheClient({
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {(['financeiro','contas','creditos','historico'] as const).map(t => (
+        {(['financeiro','compras','produtos','contas','creditos','historico'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm capitalize transition-colors ${tab === t ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>
-            {t === 'financeiro' ? 'Configuração Financeira' : t === 'contas' ? 'Contas a Receber' : t === 'creditos' ? 'Créditos' : 'Histórico'}
+            className={`px-4 py-2 text-sm capitalize whitespace-nowrap transition-colors ${tab === t ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}>
+            {t === 'financeiro' ? 'Configuração Financeira'
+              : t === 'compras' ? `Compras${compras.length ? ` (${compras.length})` : ''}`
+              : t === 'produtos' ? `Produtos${produtosComprados.length ? ` (${produtosComprados.length})` : ''}`
+              : t === 'contas' ? 'Contas a Receber' : t === 'creditos' ? 'Créditos' : 'Histórico'}
           </button>
         ))}
       </div>
@@ -221,6 +239,80 @@ export default function ClienteDetalheClient({
         </div>
       )}
 
+      {/* Tab Compras — o que o cliente comprou, venda a venda */}
+      {tab === 'compras' && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {compras.length === 0 ? (
+            <p className="px-4 py-8 text-center text-gray-400 text-sm">Nenhuma compra registrada para este cliente.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-2.5 font-medium">Data</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Pedido</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Atendido por</th>
+                  <th className="text-center px-4 py-2.5 font-medium">Itens</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {compras.map(v => (
+                  <tr key={v.id} className="text-gray-600 hover:bg-gray-50">
+                    <td className="px-4 py-2.5">{new Date(v.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs">#{v.numero ?? v.id.slice(-6).toUpperCase()}</td>
+                    <td className="px-4 py-2.5">{v.vendedor_nome || v.operador_nome || '—'}</td>
+                    <td className="px-4 py-2.5 text-center">{v.qtdItens}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-gray-900">{fmt(v.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-gray-50 border-t border-gray-200">
+                  <td className="px-4 py-2.5 font-medium text-gray-600" colSpan={4}>
+                    Total de {compras.length} compra(s)
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-gray-900">
+                    {fmt(compras.reduce((s, v) => s + Number(v.total ?? 0), 0))}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Tab Produtos — o que ele mais compra, somando todas as vendas */}
+      {tab === 'produtos' && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {produtosComprados.length === 0 ? (
+            <p className="px-4 py-8 text-center text-gray-400 text-sm">Nenhum produto comprado ainda.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-500 bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-2.5 font-medium">Produto</th>
+                  <th className="text-left px-4 py-2.5 font-medium">SKU</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Quantidade</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Total gasto</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Última compra</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {produtosComprados.map((p, i) => (
+                  <tr key={i} className="text-gray-600 hover:bg-gray-50">
+                    <td className="px-4 py-2.5 text-gray-900">{p.nome}</td>
+                    <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{p.sku ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-right">{p.quantidade.toLocaleString('pt-BR')}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-gray-900">{fmt(p.valor)}</td>
+                    <td className="px-4 py-2.5 text-gray-400">{p.ultima ? new Date(p.ultima).toLocaleDateString('pt-BR') : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {/* Tab Contas */}
       {tab === 'contas' && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -314,6 +406,14 @@ export default function ClienteDetalheClient({
           }
         </div>
       )}
+
+      <ClienteFormDrawer
+        empresaId={empresaId}
+        clienteId={cli.id}
+        aberto={editando}
+        onFechar={() => setEditando(false)}
+        onSalvo={() => router.refresh()}
+      />
     </div>
   )
 }

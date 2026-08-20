@@ -71,6 +71,21 @@ export async function enviarAlertasDePedido(sb: any): Promise<{ avisados: number
     itensPorVenda.set(i.venda_id, lista)
   }
 
+  // Contatos que pediram para receber o aviso — o dono quer no celular
+  // dele, mas o gerente da obra também pode querer. Cada um recebe uma
+  // cópia da mesma mensagem.
+  const { data: contatos } = await sb.from('cliente_contatos')
+    .select('cliente_id, nome, telefone')
+    .in('cliente_id', clientes.map((c: any) => c.id))
+    .eq('recebe_avisos', true).eq('ativo', true)
+  const contatosPorCliente = new Map<string, any[]>()
+  for (const c of contatos ?? []) {
+    if (!c.telefone) continue
+    const lista = contatosPorCliente.get(c.cliente_id) ?? []
+    lista.push(c)
+    contatosPorCliente.set(c.cliente_id, lista)
+  }
+
   const clientePorId = new Map<string, any>(clientes.map((c: any) => [c.id, c]))
   let avisados = 0, semTelefone = 0, falhas = 0
 
@@ -79,7 +94,8 @@ export async function enviarAlertasDePedido(sb: any): Promise<{ avisados: number
     if (!cli || cli.opt_out_whatsapp) continue
 
     const telefone = telefoneDoAviso(cli)
-    if (!telefone) { semTelefone++; continue }
+    const extras = contatosPorCliente.get(cli.id) ?? []
+    if (!telefone && extras.length === 0) { semTelefone++; continue }
 
     // Só o que foi comprado — devolução dentro da mesma venda não entra na
     // lista, senão a mensagem diria que compraram algo que voltou.
@@ -97,14 +113,22 @@ export async function enviarAlertasDePedido(sb: any): Promise<{ avisados: number
       (linhas.length > 30 ? `\n… e mais ${linhas.length - 30} item(ns)` : '') +
       `\n\n*Total: ${fmtMoeda(venda.total)}*`
 
-    const r = await enviarWhatsappAutomacao(sb, venda.empresa_id ?? cli.empresa_id, telefone, mensagem, {
-      tipo: TIPO_MENSAGEM,
-      cliente_id: cli.id,
-      cliente_nome: cli.nome,
-      referencia_tipo: REFERENCIA_TIPO,
-      referencia_id: venda.id,
-    })
-    if (r.ok) avisados++
+    // Número principal + contatos marcados, sem repetir o mesmo número.
+    const destinos = Array.from(new Set([telefone, ...extras.map((c: any) => c.telefone)]
+      .filter((t): t is string => !!t)))
+
+    let algumOk = false
+    for (const destino of destinos) {
+      const r = await enviarWhatsappAutomacao(sb, venda.empresa_id ?? cli.empresa_id, destino, mensagem, {
+        tipo: TIPO_MENSAGEM,
+        cliente_id: cli.id,
+        cliente_nome: cli.nome,
+        referencia_tipo: REFERENCIA_TIPO,
+        referencia_id: venda.id,
+      })
+      if (r.ok) algumOk = true
+    }
+    if (algumOk) avisados++
     else falhas++
   }
 

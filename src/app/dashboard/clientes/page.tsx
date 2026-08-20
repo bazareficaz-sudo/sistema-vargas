@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import NovoClienteBotao from '@/components/clientes/NovoClienteBotao'
 
 export default async function ClientesPage({
   searchParams,
@@ -21,10 +22,24 @@ export default async function ClientesPage({
     .from('clientes')
     .select('id, nome, cpf_cnpj, telefone, cidade, estado, saldo_credito, saldo_devedor, status_credito, ativo', { count: 'exact' })
     .eq('empresa_id', empresaId)
+    // Cadastro unificado noutro não aparece: continua no banco pelo
+    // histórico, mas listá-lo faz o mesmo cliente surgir duas vezes — foi
+    // o que aconteceu com o ESCRITORIO ROCHA RANGEL depois de unificado
+    // (ver supabase-cliente-mesclado-redirecionar.sql).
+    .is('mesclado_em', null)
     .order('nome')
     .range(offset, offset + POR_PAGINA - 1)
 
-  if (q) query = query.ilike('nome', `%${q}%`)
+  // Buscar só por nome obrigava a saber como o cliente foi cadastrado.
+  // Documento e telefone são o que o balconista tem na mão.
+  if (q) {
+    const digitos = q.replace(/\D/g, '')
+    const alvos = [`nome.ilike.%${q}%`]
+    if (digitos.length >= 3) {
+      alvos.push(`cpf_cnpj.ilike.%${digitos}%`, `telefone.ilike.%${digitos}%`)
+    }
+    query = query.or(alvos.join(','))
+  }
 
   const { data: clientes, count } = await query
   const totalPaginas = Math.ceil((count ?? 0) / POR_PAGINA)
@@ -36,13 +51,14 @@ export default async function ClientesPage({
           <h1 className="text-gray-900 text-xl font-semibold">Clientes</h1>
           <p className="text-gray-500 text-sm mt-0.5">{count?.toLocaleString('pt-BR')} clientes cadastrados</p>
         </div>
+        <NovoClienteBotao empresaId={empresaId ?? ''} />
       </div>
 
       <form className="mb-4">
         <input
           name="q"
           defaultValue={q}
-          placeholder="Buscar por nome..."
+          placeholder="Buscar por nome, CPF/CNPJ ou telefone..."
           className="bg-white border border-gray-300 text-gray-800 rounded-lg px-4 py-2 text-sm w-72 focus:outline-none focus:border-blue-500 placeholder-gray-400"
         />
         <button type="submit" className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">

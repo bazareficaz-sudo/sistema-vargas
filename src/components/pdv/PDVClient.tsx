@@ -128,6 +128,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [entrega, setEntrega] = useState(false)
   const [modalEntrega, setModalEntrega] = useState(false)
   const [endEntrega, setEndEntrega] = useState({ logradouro: '', numero: '', bairro: '', cidade: '', obs: '' })
+  // Endereços cadastrados do cliente escolhido, e qual deles foi usado.
+  // Antes o endereço digitado aqui não ia pra lugar nenhum: a venda gravava
+  // só `entrega_solicitada` (sim/não) e quem ia entregar ficava sem saber
+  // para onde. Agora o texto é congelado na venda.
+  const [enderecosCliente, setEnderecosCliente] = useState<any[]>([])
+  const [enderecoEntregaId, setEnderecoEntregaId] = useState<string | null>(null)
+  const [contatosCliente, setContatosCliente] = useState<any[]>([])
 
   const [modalPag, setModalPag] = useState(false)
   const [formas, setFormas] = useState<FormaPag[]>([{ tipo: 'dinheiro', valor: 0 }])
@@ -372,8 +379,44 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     } catch (e: any) { alert('Erro ao salvar orçamento: ' + e.message); setSalvandoOrc(false) }
   }
 
+  function textoEntrega() {
+    const partes = [
+      [endEntrega.logradouro, endEntrega.numero].filter(Boolean).join(', '),
+      endEntrega.bairro, endEntrega.cidade,
+    ].filter(Boolean).join(' — ')
+    return [partes, endEntrega.obs && `Obs: ${endEntrega.obs}`].filter(Boolean).join(' | ') || null
+  }
+
+  // Carrega endereços de entrega e pessoas autorizadas do cliente escolhido.
+  // Os autorizados são só informação pro balconista — nada aqui bloqueia a
+  // venda de quem não está na lista.
+  useEffect(() => {
+    if (!clienteSelecionado) { setEnderecosCliente([]); setContatosCliente([]); setEnderecoEntregaId(null); return }
+    let vivo = true
+    ;(async () => {
+      const [{ data: ends }, { data: cts }] = await Promise.all([
+        sb.from('cliente_enderecos_entrega').select('*').eq('cliente_id', clienteSelecionado.id).eq('ativo', true),
+        sb.from('cliente_contatos').select('nome, cargo, telefone, autorizado_compra')
+          .eq('cliente_id', clienteSelecionado.id).eq('ativo', true).eq('autorizado_compra', true),
+      ])
+      if (!vivo) return
+      setEnderecosCliente(ends ?? [])
+      setContatosCliente(cts ?? [])
+      const padrao = (ends ?? []).find((e: any) => e.padrao)
+      if (padrao) {
+        setEnderecoEntregaId(padrao.id)
+        setEndEntrega({
+          logradouro: padrao.logradouro ?? '', numero: padrao.numero ?? '',
+          bairro: padrao.bairro ?? '', cidade: padrao.cidade ?? '', obs: padrao.referencia ?? '',
+        })
+      }
+    })()
+    return () => { vivo = false }
+  }, [clienteSelecionado, sb])
+
   function limparTudo() {
     setItens([]); setBusca(''); setClienteSelecionado(null)
+    setEnderecoEntregaId(null); setEndEntrega({ logradouro: '', numero: '', bairro: '', cidade: '', obs: '' })
     setDescontoGlobal(0); setObs(''); setEntrega(false); setModoDevol(false)
     setCpfNota(''); setNomeNota('')
     setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null)
@@ -473,6 +516,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         troco: tipoOp === 'troca' ? 0 : isFiado ? 0 : troco2,
         observacao: obs || null,
         entrega_solicitada: entrega,
+        // Texto congelado: o endereço cadastrado pode ser corrigido depois,
+        // mas a venda tem que continuar mostrando para onde foi naquele dia.
+        endereco_entrega_id: entrega ? enderecoEntregaId : null,
+        endereco_entrega_texto: entrega ? textoEntrega() : null,
         tipo_operacao: operacaoFinal,
         tem_devolucao: hasDevolucao,
         total_devolucoes: totalDevolucoes,
@@ -1136,6 +1183,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             <span>{itens.length} {itens.length === 1 ? 'item' : 'itens'}</span>
             {!hasDevolucao && descontoGlobal > 0 && <span className="text-orange-600">Desc: −{fmt(descontoGlobal)}</span>}
             {clienteSelecionado && <span className="text-blue-600">👤 {clienteSelecionado.nome.split(' ')[0]}</span>}
+            {/* Quem pode comprar em nome deste cliente. É lembrete pro
+                balconista conferir — não trava a venda de quem não está
+                na lista, que costuma estar desatualizada. */}
+            {contatosCliente.length > 0 && (
+              <span className="text-violet-600" title={contatosCliente.map(c => c.nome + (c.cargo ? ` (${c.cargo})` : '')).join(' · ')}>
+                ✅ Autorizados: {contatosCliente.map(c => c.nome.split(' ')[0]).slice(0, 3).join(', ')}
+                {contatosCliente.length > 3 ? ` +${contatosCliente.length - 3}` : ''}
+              </span>
+            )}
             {entrega && <span className="text-orange-600">🛵 Entrega</span>}
             {hasDevolucao && itensDevol.length > 0 && (
               <span className="text-red-500">🔄 {itensDevol.length} dev.</span>
@@ -1493,6 +1549,36 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       {modalEntrega && (
         <Modal titulo="Dados de Entrega" onClose={() => setModalEntrega(false)} largura="max-w-md">
           <div className="space-y-3">
+            {enderecosCliente.length > 0 && (
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Endereços de {clienteSelecionado?.nome}</label>
+                <div className="space-y-1">
+                  {enderecosCliente.map(e => (
+                    <button key={e.id}
+                      onClick={() => {
+                        setEnderecoEntregaId(e.id)
+                        setEndEntrega({
+                          logradouro: e.logradouro ?? '', numero: e.numero ?? '',
+                          bairro: e.bairro ?? '', cidade: e.cidade ?? '', obs: e.referencia ?? '',
+                        })
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                        enderecoEntregaId === e.id ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:bg-gray-50'
+                      }`}>
+                      <span className="font-medium text-gray-800">{e.apelido || 'Endereço'}</span>
+                      {e.padrao && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">padrão</span>}
+                      <span className="block text-xs text-gray-500">
+                        {[e.logradouro, e.numero, e.bairro, e.cidade].filter(Boolean).join(', ') || 'sem endereço preenchido'}
+                      </span>
+                    </button>
+                  ))}
+                  <button onClick={() => { setEnderecoEntregaId(null); setEndEntrega({ logradouro: '', numero: '', bairro: '', cidade: '', obs: '' }) }}
+                    className="w-full text-left px-3 py-2 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 hover:bg-gray-50">
+                    Outro endereço (digitar abaixo)
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2">
               <div className="col-span-2">
                 <label className="text-xs text-gray-500 mb-1 block">Logradouro</label>
