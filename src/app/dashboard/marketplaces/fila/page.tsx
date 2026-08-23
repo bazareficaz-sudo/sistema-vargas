@@ -19,7 +19,7 @@ export default async function FilaPage() {
     .from('marketplace_fila')
     .select('id, produto_id, sujo_em, motivo, prioridade, enviado_em, produtos(nome, sku, estoque)')
     .eq('empresa_id', empresaId)
-    .or('enviado_em.is.null,sujo_em.gt.enviado_em')
+    .is('enviado_em', null)
     .order('prioridade', { ascending: false })
     .order('sujo_em', { ascending: true })
     .limit(100)
@@ -28,7 +28,7 @@ export default async function FilaPage() {
     .from('marketplace_fila')
     .select('id', { count: 'exact', head: true })
     .eq('empresa_id', empresaId)
-    .or('enviado_em.is.null,sujo_em.gt.enviado_em')
+    .is('enviado_em', null)
 
   // Últimas simulações — o que a fila TERIA enviado.
   const { data: simulacoes } = await supabase

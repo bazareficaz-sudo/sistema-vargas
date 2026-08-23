@@ -68,14 +68,19 @@ export async function processarFilaDaEmpresa(
   if (!cfg.ativo) return { ...base, executou: false, motivo: 'fila desligada' }
   if (!devidoExecutar(cfg)) return { ...base, executou: false, motivo: 'intervalo ainda não venceu' }
 
-  // Pendente = sujou depois do último envio. Urgente primeiro; dentro da mesma
-  // prioridade, o que está sujo há mais tempo — assim nada fica para trás
-  // eternamente enquanto produtos novos furam a fila.
+  // Pendente = `enviado_em IS NULL`. Quem enfileira limpa esse campo (ver
+  // supabase-fila-pendente-consertar.sql), então não é preciso comparar
+  // `sujo_em > enviado_em` aqui — comparação entre COLUNAS que o PostgREST
+  // não faz: ele lia "enviado_em" como texto e estourava
+  // (`invalid input syntax for type timestamp`), derrubando toda rodada.
+  //
+  // Urgente primeiro; dentro da mesma prioridade, o que está sujo há mais
+  // tempo — assim nada fica para trás enquanto produtos novos furam a fila.
   const { data: pendentes, error: erroFila } = await sb
     .from('marketplace_fila')
     .select('id, produto_id, sujo_em, motivo, prioridade, enviado_em, tentativas')
     .eq('empresa_id', cfg.empresa_id)
-    .or('enviado_em.is.null,sujo_em.gt.enviado_em')
+    .is('enviado_em', null)
     .order('prioridade', { ascending: false })
     .order('sujo_em', { ascending: true })
     .limit(cfg.max_produtos_rodada)
