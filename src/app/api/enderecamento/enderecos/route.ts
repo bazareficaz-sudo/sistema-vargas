@@ -55,16 +55,17 @@ export async function POST(req: Request) {
   if (!deposito) return NextResponse.json({ ok: false, erro: 'Depósito inválido.' }, { status: 400 })
 
   const { data: config } = await sb.from('deposito_enderecamento_config')
-    .select('niveis, separador, padding_por_nivel').eq('deposito_id', depositoId).maybeSingle()
+    .select('niveis, separador, padding_por_nivel, prefixos_por_nivel').eq('deposito_id', depositoId).maybeSingle()
   const niveis = (config?.niveis as string[] | undefined) ?? ['zona', 'corredor', 'estante', 'nivel', 'posicao']
   const separador = config?.separador ?? '-'
   const padding = (config?.padding_por_nivel as Record<string, number> | undefined) ?? {}
+  const prefixos = (config?.prefixos_por_nivel as Record<string, string> | undefined) ?? {}
 
   const valoresNivel = {
     zona: body.zona || undefined, corredor: body.corredor || undefined, estante: body.estante || undefined,
     modulo: body.modulo || undefined, nivel: body.nivel || undefined, posicao: body.posicao || undefined,
   }
-  const codigoLegivel = montarCodigoEndereco(niveis, valoresNivel, separador, padding)
+  const codigoLegivel = montarCodigoEndereco(niveis, valoresNivel, separador, padding, prefixos)
   if (!codigoLegivel) return NextResponse.json({ ok: false, erro: 'Preencha ao menos um nível de localização.' }, { status: 400 })
 
   const codigoInterno = body.codigoInterno || codigoLegivel

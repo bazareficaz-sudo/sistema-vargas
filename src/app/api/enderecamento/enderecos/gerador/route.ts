@@ -59,10 +59,11 @@ export async function POST(req: Request) {
   if (!deposito) return NextResponse.json({ ok: false, erro: 'Depósito inválido.' }, { status: 400 })
 
   const { data: config } = await sb.from('deposito_enderecamento_config')
-    .select('niveis, separador, padding_por_nivel').eq('deposito_id', depositoId).maybeSingle()
+    .select('niveis, separador, padding_por_nivel, prefixos_por_nivel').eq('deposito_id', depositoId).maybeSingle()
   const niveis = (config?.niveis as string[] | undefined) ?? ['zona', 'corredor', 'estante', 'nivel', 'posicao']
   const separador = config?.separador ?? '-'
   const padding = (config?.padding_por_nivel as Record<string, number> | undefined) ?? {}
+  const prefixos = (config?.prefixos_por_nivel as Record<string, string> | undefined) ?? {}
 
   const niveisComFaixa = (Object.keys(faixas) as (keyof typeof faixas)[]).filter(n => faixas[n])
   const expandidas = niveisComFaixa.map(n => ({ nivel: n, valores: expandirFaixa(faixas[n]!) }))
@@ -84,7 +85,7 @@ export async function POST(req: Request) {
   const codigosExistentes = new Set((existentes ?? []).map((e: any) => e.codigo_interno))
 
   const paraCriar = combinacoes
-    .map(combo => ({ combo, codigo: montarCodigoEndereco(niveis, combo, separador, padding) }))
+    .map(combo => ({ combo, codigo: montarCodigoEndereco(niveis, combo, separador, padding, prefixos) }))
     .filter(x => x.codigo && !codigosExistentes.has(x.codigo))
 
   if (paraCriar.length === 0) {

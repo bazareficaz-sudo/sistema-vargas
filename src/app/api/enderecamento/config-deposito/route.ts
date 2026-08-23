@@ -22,7 +22,8 @@ export async function GET(req: Request) {
     ok: true,
     config: config ?? {
       deposito_id: depositoId, modo: 'desativado', separador: '-',
-      niveis: ['zona', 'corredor', 'estante', 'nivel', 'posicao'], padding_por_nivel: {},
+      niveis: ['zona', 'corredor', 'estante', 'nivel', 'posicao'],
+      padding_por_nivel: {}, prefixos_por_nivel: {},
     },
   })
 }
@@ -32,6 +33,7 @@ type Corpo = {
   niveis?: string[]
   separador?: string
   paddingPorNivel?: Record<string, number>
+  prefixosPorNivel?: Record<string, string>
   modo?: 'desativado' | 'opcional' | 'obrigatorio'
 }
 
@@ -51,6 +53,13 @@ export async function PATCH(req: Request) {
   if (body.niveis) campos.niveis = body.niveis
   if (body.separador !== undefined) campos.separador = body.separador
   if (body.paddingPorNivel) campos.padding_por_nivel = body.paddingPorNivel
+  // Prefixo vazio é escolha válida ("sem prefixo neste nível"), então
+  // limpa as chaves em branco em vez de gravar string vazia.
+  if (body.prefixosPorNivel) {
+    campos.prefixos_por_nivel = Object.fromEntries(
+      Object.entries(body.prefixosPorNivel).filter(([, v]) => (v ?? '').trim() !== '')
+    )
+  }
   if (body.modo) campos.modo = body.modo
 
   const { data: existente } = await sb.from('deposito_enderecamento_config').select('id').eq('deposito_id', depositoId).maybeSingle()

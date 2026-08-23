@@ -6,6 +6,7 @@ type Deposito = { id: string; nome: string; principal: boolean }
 type Config = {
   deposito_id: string; modo: 'desativado' | 'opcional' | 'obrigatorio'
   niveis: string[]; separador: string; padding_por_nivel: Record<string, number>
+  prefixos_por_nivel: Record<string, string>
 }
 type ValorLocalizacao = { valor: string; produtos: number; unidades: number }
 
@@ -44,6 +45,21 @@ export default function ConfigDepositoEnderecamentoClient({ depositos, depositoI
 
   useEffect(() => { carregar() }, [carregar])
 
+  // Prévia com valores de exemplo, para o gestor ver o formato antes de
+  // gerar centenas de endereços com o padrão errado — foi assim que saíram
+  // 60 endereços "E-01-1-02" que não diziam nada e tiveram que ser apagados.
+  function previaCodigo() {
+    if (!config) return ''
+    const exemplo: Record<string, string> = {
+      zona: 'A', corredor: '01', estante: '1', modulo: '2', nivel: '3', posicao: '02',
+    }
+    const ordem = ['zona', 'corredor', 'estante', 'modulo', 'nivel', 'posicao']
+    return ordem
+      .filter(n => config.niveis.includes(n))
+      .map(n => `${config.prefixos_por_nivel?.[n] ?? ''}${exemplo[n]}`)
+      .join(config.separador) || '(nenhum nível ativo)'
+  }
+
   function toggleNivel(chave: string) {
     if (!config) return
     const ativo = config.niveis.includes(chave)
@@ -55,7 +71,10 @@ export default function ConfigDepositoEnderecamentoClient({ depositos, depositoI
     setSalvando(true)
     const r = await fetch('/api/enderecamento/config-deposito', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ depositoId, niveis: config.niveis, separador: config.separador, modo: config.modo }),
+      body: JSON.stringify({
+        depositoId, niveis: config.niveis, separador: config.separador,
+        prefixosPorNivel: config.prefixos_por_nivel, modo: config.modo,
+      }),
     }).then(r => r.json()).catch(() => ({ ok: false }))
     setSalvando(false)
     setMsg(r.ok ? 'Configuração salva.' : (r.erro ?? 'Erro ao salvar.'))
@@ -125,6 +144,31 @@ export default function ConfigDepositoEnderecamentoClient({ depositos, depositoI
               <input value={config.separador} onChange={e => setConfig({ ...config, separador: e.target.value })}
                 className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-20" maxLength={3} />
               <span className="text-xs text-slate-400 ml-2">Ex: A{config.separador}01{config.separador}03</span>
+            </div>
+
+            <div>
+              <p className="text-sm font-medium text-slate-700 mb-1">Prefixo de cada nível</p>
+              <p className="text-xs text-slate-400 mb-2">
+                Sem prefixo o código sai só com números e não diz o que é cada parte — quem separa o pedido
+                lê &quot;01-1-02&quot; e não sabe se aquilo é gaveta ou prateleira. Com prefixo vira
+                &quot;EST1-GAV02&quot;. O texto é colado no valor: <b>GAV</b> gera GAV02, <b>GAV-</b> gera GAV-02.
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {NIVEIS_DISPONIVEIS.filter(n => config.niveis.includes(n.chave)).map(n => (
+                  <div key={n.chave}>
+                    <label className="block text-[10px] font-medium text-slate-500 uppercase mb-0.5">{n.label}</label>
+                    <input value={config.prefixos_por_nivel?.[n.chave] ?? ''} placeholder="sem prefixo"
+                      onChange={e => setConfig({
+                        ...config,
+                        prefixos_por_nivel: { ...(config.prefixos_por_nivel ?? {}), [n.chave]: e.target.value },
+                      })}
+                      className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                Vai ficar assim: <span className="font-mono font-medium text-slate-800">{previaCodigo()}</span>
+              </p>
             </div>
 
             <div>

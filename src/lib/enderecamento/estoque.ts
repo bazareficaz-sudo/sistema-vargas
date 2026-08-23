@@ -18,9 +18,24 @@ export type NiveisHierarquia = Partial<{
 
 const ORDEM_NIVEIS = ['zona', 'corredor', 'estante', 'modulo', 'nivel', 'posicao'] as const
 
-/** Monta "A-01-03" a partir dos níveis configurados no depósito, na ordem certa, com padding opcional. */
+/**
+ * Monta o código do endereço a partir dos níveis configurados no depósito.
+ *
+ * O prefixo por nível existe porque um código só de números não diz nada a
+ * quem está separando: "E-01-1-02" não conta que aquilo é uma gaveta. Com
+ * prefixo, o mesmo endereço vira "E-01-EST1-GAV02" e a expedição entende o
+ * que procurar sem consultar o sistema.
+ *
+ * O prefixo é colado no valor exatamente como foi digitado — quem quiser
+ * "GAV-02" põe "GAV-" no prefixo, quem quiser "GAV02" põe "GAV". Fica a
+ * critério de quem conhece o galpão, em vez de o sistema impor um formato.
+ */
 export function montarCodigoEndereco(
-  niveisAtivos: string[], valores: NiveisHierarquia, separador: string, paddingPorNivel: Record<string, number>,
+  niveisAtivos: string[],
+  valores: NiveisHierarquia,
+  separador: string,
+  paddingPorNivel: Record<string, number>,
+  prefixosPorNivel: Record<string, string> = {},
 ): string {
   return ORDEM_NIVEIS
     .filter(n => niveisAtivos.includes(n))
@@ -28,7 +43,8 @@ export function montarCodigoEndereco(
       const v = valores[n]
       if (!v) return ''
       const pad = paddingPorNivel[n]
-      return pad ? String(v).padStart(pad, '0') : String(v)
+      const valor = pad ? String(v).padStart(pad, '0') : String(v)
+      return `${prefixosPorNivel[n] ?? ''}${valor}`
     })
     .filter(Boolean)
     .join(separador)
