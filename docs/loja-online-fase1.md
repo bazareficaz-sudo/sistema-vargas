@@ -445,16 +445,31 @@ subconsultas correlacionadas por linha candidata. Materializada em
 
 **Precisa de você (não é código):**
 
-1. **Domínio — é o que falta para a loja ter endereço.** Dois passos:
-   - `NEXT_PUBLIC_LOJA_DOMINIO_RAIZ=sistemavargas.com.br` nas variáveis da
-     Vercel (e no `.env.local`, para desenvolvimento);
-   - domínio curinga `*.sistemavargas.com.br` no projeto da Vercel — uma vez
-     só, vale para todas as lojas; o certificado é emitido automaticamente.
+1. **DNS — é a única coisa que falta para a loja ter endereço.** Medido em
+   24/08 com `vercel domains inspect`:
 
-   O endereço passa a ser **`bazareficaz.sistemavargas.com.br`**. Enquanto os
-   dois passos não forem dados, a loja abre só em desenvolvimento
-   (`bazareficaz.localhost:3000`) — e, pelo conserto acima, o ERP em produção
-   segue intacto.
+   | item | estado |
+   |---|---|
+   | `*.sistemavargas.com.br` atribuído ao projeto | ✅ já estava |
+   | `NEXT_PUBLIC_LOJA_DOMINIO_RAIZ` (produção, preview, dev) | ✅ `sistemavargas.com.br` |
+   | Nameservers do domínio | `a.sec.dns.br`, `b.sec.dns.br` — **Registro.br**, não Vercel |
+   | Registro para o curinga | ❌ não existe |
+
+   A zona fica no **Registro.br**, então o curinga precisa de um registro lá.
+   O apex e o `www` já apontam para a Vercel pelo mesmo caminho — é só
+   repetir o padrão:
+
+   ```
+   Tipo: A     Nome: *     Valor: 76.76.21.21
+   ```
+
+   (A alternativa é delegar os nameservers para `ns1.vercel-dns.com` e
+   `ns2.vercel-dns.com`, mas isso move a zona INTEIRA — e-mail incluído —
+   e não vale o risco só pela loja.)
+
+   Enquanto o registro não existir, `bazareficaz.sistemavargas.com.br`
+   responde `ENOTFOUND`. Propagação costuma levar de minutos a algumas horas.
+
 2. **A loja está `ativo=true`, `em_manutencao=false` e `indexavel=false`** —
    no ar para quem souber o endereço, invisível para o Google. Ligar
    `indexavel` é decisão sua, e só depois de revisar o catálogo.
