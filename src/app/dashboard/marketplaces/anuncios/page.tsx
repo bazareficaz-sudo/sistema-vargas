@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import AnunciosLandingClient from '@/components/marketplaces/AnunciosLandingClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { PLATAFORMA_LOJA_ONLINE } from '@/lib/marketplace/canais'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +17,8 @@ export default async function AnunciosLandingPage() {
   const { data: canais } = await supabase
     .from('marketplace_canais')
     .select('id, nome')
+    // Loja Online não tem anúncio para listar — ver src/lib/marketplace/canais.ts.
+    .neq('plataforma', PLATAFORMA_LOJA_ONLINE)
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: true })
 

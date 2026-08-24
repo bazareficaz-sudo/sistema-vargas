@@ -4,6 +4,7 @@ import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
 import { atualizarPrecoEstoque as atualizarPrecoEstoqueNuvemshop, publicarProduto } from '@/lib/nuvemshop/write'
 import type { NuvemshopChannel } from '@/lib/nuvemshop/types'
+import { ehCanalMarketplace } from './canais'
 
 // Envio de preço/estoque para o canal, escolhendo a plataforma.
 //
@@ -128,5 +129,11 @@ export async function enviarParaAnuncio(
  * como planejado, sem precisar de tela nova.
  */
 export function canalAceitaEnvio(canal: CanalEnvio): boolean {
+  // A Loja Online é um canal de venda, mas não tem API para receber envio:
+  // ela lê o estoque do ERP na hora de renderizar. Recusar aqui, e não
+  // confiar nos interruptores, porque um clique errado em Configurar → canal
+  // colocaria a fila para tentar publicar num destino que não existe — e a
+  // fila só desiste depois de 5 tentativas por produto.
+  if (!ehCanalMarketplace(canal.plataforma)) return false
   return !!canal.sincronizar_estoque && !!canal.atualizar_estoque_canal
 }

@@ -28,6 +28,7 @@ export const SYSTEM_MODULES = {
   relatorios:           { label: 'Relatórios',               routes: ['/dashboard/relatorios'] },
   relatorios_avancados: { label: 'Relatórios Avançados / BI', routes: ['/dashboard/relatorios/vendas', '/dashboard/relatorios/produtos', '/dashboard/relatorios/estoque', '/dashboard/relatorios/financeiro', '/dashboard/relatorios/clientes'] },
   marketplace:          { label: 'Marketplace',              routes: ['/dashboard/marketplaces'] },
+  loja_online:          { label: 'Loja Online',              routes: ['/dashboard/loja-online'] },
   whatsapp:             { label: 'WhatsApp / CRM',           routes: ['/dashboard/whatsapp', '/dashboard/crm'] },
   usuarios:             { label: 'Usuários e Permissões',    routes: ['/dashboard/usuarios'] },
   multiempresa:         { label: 'Multi-empresa',            routes: ['/dashboard/empresas'] },

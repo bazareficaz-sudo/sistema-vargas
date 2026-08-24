@@ -13,7 +13,7 @@
 
 import type { Etapa } from './etapas'
 
-export type OrigemPedido = 'pdv' | 'app' | 'shopee' | 'mercadolivre' | 'manual' | 'outro'
+export type OrigemPedido = 'pdv' | 'app' | 'loja' | 'shopee' | 'mercadolivre' | 'manual' | 'outro'
 
 export type StatusFiscal = 'emitida' | 'rejeitada' | 'informada' | 'nao_emitida'
 
@@ -45,7 +45,7 @@ export type PedidoUnificado = {
 }
 
 export const ORIGEM_ROTULO: Record<OrigemPedido, string> = {
-  pdv: 'PDV', app: 'Aplicativo', shopee: 'Shopee',
+  pdv: 'PDV', app: 'Aplicativo', loja: 'Loja Online', shopee: 'Shopee',
   mercadolivre: 'Mercado Livre', manual: 'Manual', outro: 'Outro',
 }
 
@@ -54,6 +54,7 @@ export const ORIGEM_ROTULO: Record<OrigemPedido, string> = {
 export const ORIGEM_COR: Record<OrigemPedido, string> = {
   pdv: 'bg-blue-100 text-blue-700',
   app: 'bg-cyan-100 text-cyan-700',
+  loja: 'bg-indigo-100 text-indigo-700',
   shopee: 'bg-orange-100 text-orange-700',
   mercadolivre: 'bg-yellow-100 text-yellow-800',
   manual: 'bg-gray-100 text-gray-600',
@@ -64,6 +65,7 @@ function origemDoCanalVenda(canal: string | null): OrigemPedido {
   const c = (canal ?? '').toLowerCase()
   if (c === 'pdv') return 'pdv'
   if (c === 'app') return 'app'
+  if (c === 'loja' || c === 'loja_online') return 'loja'
   if (c === 'shopee') return 'shopee'
   if (c === 'mercadolivre' || c === 'mercado livre') return 'mercadolivre'
   if (c === 'manual' || c === 'marketplace') return 'manual'
@@ -110,7 +112,13 @@ export function vendaParaPedido(v: any): PedidoUnificado {
 
 export function marketplaceParaPedido(p: any, plataformaPorCanal: Map<string, string>, nomePorCanal: Map<string, string>): PedidoUnificado {
   const plataforma = (plataformaPorCanal.get(p.canal_id) ?? '').toLowerCase()
-  const origem: OrigemPedido = plataforma === 'shopee' ? 'shopee' : plataforma === 'mercadolivre' ? 'mercadolivre' : 'outro'
+  const origem: OrigemPedido =
+    plataforma === 'shopee' ? 'shopee'
+    : plataforma === 'mercadolivre' ? 'mercadolivre'
+    // Pedido da Loja Online nasce em marketplace_pedidos, num canal com
+    // plataforma='loja_online' — por isso ele passa por aqui (Fase 3).
+    : plataforma === 'loja_online' ? 'loja'
+    : 'outro'
   const cancelado = p.status === 'cancelado'
 
   return {

@@ -1,5 +1,7 @@
 {
-  "regions": ["gru1"],
+  "regions": [
+    "gru1"
+  ],
   "crons": [
     {
       "path": "/api/cron/anuncios-sync",
@@ -32,6 +34,10 @@
     {
       "path": "/api/cron/reposicao-ia",
       "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/cron/loja-manutencao",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -1,0 +1,140 @@
+/* Design system da Loja Online.
+ *
+ * Escopo em `.loja` de propósito: o globals.css do ERP continua carregado
+ * (é o layout raiz), e o tema dele é de painel administrativo — fundo
+ * #f1f5f9, sidebar escura. Sem escopo, a vitrine herdaria a aparência que
+ * este projeto inteiro quer evitar.
+ *
+ * Poucas variáveis, decididas uma vez. `--loja-primaria` e `--loja-destaque`
+ * são injetadas em tempo de execução pelo layout, a partir de loja_config —
+ * é a personalização controlada: o lojista escolhe duas cores, não um
+ * construtor de sites.
+ */
+
+.loja {
+  --loja-primaria: #1d4ed8;
+  --loja-destaque: #0f766e;
+
+  /* Tinta. Três níveis bastam; o quarto sempre vira contraste ruim. */
+  --tinta-forte: #0b1220;
+  --tinta:       #33415580;
+  --tinta-media: #475569;
+  --tinta-fraca: #94a3b8;
+
+  /* Superfície */
+  --fundo:       #ffffff;
+  --fundo-suave: #f8fafc;
+  --borda:       #e9edf3;
+
+  /* Sinal — só dois, e nenhum decorativo */
+  --sucesso: #047857;
+  --alerta:  #b45309;
+
+  /* Escala tipográfica */
+  --t-xs: 0.75rem;
+  --t-sm: 0.8125rem;
+  --t-base: 0.9375rem;
+  --t-lg: 1.0625rem;
+  --t-xl: 1.375rem;
+  --t-2xl: 1.75rem;
+  --t-3xl: 2.25rem;
+
+  --raio: 12px;
+  --raio-sm: 8px;
+
+  /* Duas sombras. A terceira nunca é necessária e sempre polui. */
+  --sombra: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
+  --sombra-alta: 0 4px 12px rgb(15 23 42 / 0.08), 0 2px 4px rgb(15 23 42 / 0.04);
+
+  /* Largura de leitura confortável, não a largura da tela. */
+  --container: 1200px;
+
+  color: var(--tinta-forte);
+  background: var(--fundo);
+  font-size: var(--t-base);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.loja-container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  /* Respiro maior no celular do que a régua costuma sugerir: texto colado na
+   * borda é a queixa mais comum de leitura em tela pequena. */
+  padding-inline: 16px;
+}
+@media (min-width: 768px) { .loja-container { padding-inline: 24px } }
+
+/* Foco visível SEMPRE. Acessibilidade não é acabamento — e o contorno
+ * padrão do navegador some em fundo claro com alguns temas. */
+.loja :focus-visible {
+  outline: 2px solid var(--loja-primaria);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Alvo de toque mínimo de 44px em tudo que é ação. A maior parte do tráfego
+ * chega do WhatsApp, ou seja, do polegar. */
+.loja button, .loja a[role="button"], .loja input, .loja select {
+  min-height: 44px;
+}
+.loja button.compacto { min-height: 32px }
+
+/* Nome de produto em duas linhas, com reticências. Sem isso, um card com
+ * nome longo estica e quebra o alinhamento da grade inteira. */
+.loja-linhas-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Grade de produtos — DOIS por linha no celular, não um.
+ * Card de largura total obriga a rolar demais para comparar preço, que é o
+ * que o cliente está fazendo. */
+.loja-grade {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (min-width: 640px)  { .loja-grade { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px } }
+@media (min-width: 1024px) { .loja-grade { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 20px } }
+@media (min-width: 1280px) { .loja-grade { grid-template-columns: repeat(5, minmax(0,1fr)) } }
+
+/* Carrossel horizontal dos blocos da home no celular. */
+.loja-trilho {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 45%;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.loja-trilho::-webkit-scrollbar { display: none }
+.loja-trilho > * { scroll-snap-align: start }
+@media (min-width: 640px)  { .loja-trilho { grid-auto-columns: 30% } }
+@media (min-width: 1024px) {
+  .loja-trilho { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0,1fr)); overflow: visible }
+}
+@media (min-width: 1280px) {
+  .loja-trilho { grid-template-columns: repeat(5, minmax(0,1fr)) }
+}
+
+/* Esqueleto de carregamento. Animação discreta: pulso forte numa lista
+ * inteira cansa mais do que informa. */
+@keyframes loja-pulso { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
+.loja-esqueleto {
+  background: var(--fundo-suave);
+  border-radius: var(--raio-sm);
+  animation: loja-pulso 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loja *, .loja *::before, .loja *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
