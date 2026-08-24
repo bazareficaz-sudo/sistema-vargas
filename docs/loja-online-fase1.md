@@ -450,25 +450,35 @@ subconsultas correlacionadas por linha candidata. Materializada em
 
    | item | estado |
    |---|---|
-   | `*.sistemavargas.com.br` atribuído ao projeto | ✅ já estava |
    | `NEXT_PUBLIC_LOJA_DOMINIO_RAIZ` (produção, preview, dev) | ✅ `sistemavargas.com.br` |
-   | Nameservers do domínio | `a.sec.dns.br`, `b.sec.dns.br` — **Registro.br**, não Vercel |
-   | Registro para o curinga | ❌ não existe |
+   | `*.sistemavargas.com.br` atribuído ao projeto | ✅ já estava |
+   | `bazareficaz.sistemavargas.com.br` atribuído ao projeto | ✅ acrescentado |
+   | Nameservers do domínio | `a.sec.dns.br`, `b.sec.dns.br` — **Registro.br** |
+   | Registro DNS apontando para a Vercel | ❌ falta criar |
 
-   A zona fica no **Registro.br**, então o curinga precisa de um registro lá.
-   O apex e o `www` já apontam para a Vercel pelo mesmo caminho — é só
-   repetir o padrão:
+   **O DNS do Registro.br não aceita `*` no campo Nome.** É limitação
+   conhecida do serviço gerenciado deles, não erro de preenchimento — o
+   curinga simplesmente não existe ali.
+
+   Para o piloto isso não importa: uma loja precisa de um subdomínio, não de
+   um curinga. No painel do Registro.br, em **DNS → Editar zona**:
 
    ```
-   Tipo: A     Nome: *     Valor: 76.76.21.21
+   Tipo: A     Nome: bazareficaz     Valor: 76.76.21.21
    ```
 
-   (A alternativa é delegar os nameservers para `ns1.vercel-dns.com` e
-   `ns2.vercel-dns.com`, mas isso move a zona INTEIRA — e-mail incluído —
-   e não vale o risco só pela loja.)
+   O campo Nome é relativo à zona — só `bazareficaz`, sem o domínio no fim.
+   É o mesmo caminho que o apex e o `www` já usam. Propagação: de minutos a
+   algumas horas.
 
-   Enquanto o registro não existir, `bazareficaz.sistemavargas.com.br`
-   responde `ENOTFOUND`. Propagação costuma levar de minutos a algumas horas.
+   **Cada loja nova = mais um registro A** e mais um `vercel domains add`.
+   Funciona bem para um punhado de lojas e não tem risco nenhum.
+
+   **Quando o SaaS abrir**, aí o curinga passa a valer a pena, e o caminho é
+   mover a HOSPEDAGEM do DNS para um provedor que o suporte (Cloudflare,
+   Vercel), mantendo o REGISTRO no Registro.br — que permite apontar
+   nameservers externos. É troca de zona inteira, e-mail incluído: exige
+   planejamento próprio e não deve ser feita junto com o lançamento da loja.
 
 2. **A loja está `ativo=true`, `em_manutencao=false` e `indexavel=false`** —
    no ar para quem souber o endereço, invisível para o Google. Ligar
