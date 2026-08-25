@@ -16,6 +16,12 @@ type Movimento = {
   tipo: 'venda' | 'venda_marketplace' | 'devolucao' | 'entrada' | 'ajuste_entrada' | 'ajuste_saida' | 'transferencia_entrada' | 'transferencia_saida' | 'inventario' | 'avaria' | 'compra'
   quantidade: number
   detalhe: string
+  // Valor negociado no movimento: preço de venda na saída, custo na
+  // entrada. Nulo em ajuste e inventário, que mexem em quantidade sem
+  // dinheiro envolvido — melhor a coluna ficar vazia do que mostrar zero,
+  // que se confunde com "vendido de graça".
+  valorUnitario: number | null
+  valorTotal: number | null
 }
 
 const TIPO_MOV: Record<Movimento['tipo'], { label: string; cor: string; sinal: string }> = {
@@ -41,6 +47,7 @@ const FILTROS: { key: string; label: string }[] = [
 ]
 
 function fmtDT(s: string) { return new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }
+function fmtMoeda(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 
 export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onAtualizado }: {
   produto: Produto
@@ -133,6 +140,8 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
       tipo: delta > 0 ? 'ajuste_entrada' : 'ajuste_saida',
       quantidade: Math.abs(delta),
       detalhe: motivoAjuste.trim(),
+      valorUnitario: null,
+      valorTotal: null,
     }, ...prev])
     await carregarPorDeposito()
     onAtualizado?.(nova)
@@ -150,7 +159,7 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
       // nesta base (erro "Could not find a relationship..."), o que fazia a
       // consulta inteira falhar e a movimentação sumir por completo. A
       // junção com vendas é feita manualmente abaixo.
-      const vendaItensSelect = 'id, quantidade, tipo, created_at, venda_id'
+      const vendaItensSelect = 'id, quantidade, tipo, created_at, venda_id, preco_unitario, desconto, total'
 
       const [estoqueRes, vendasRes, devolucoesRes, entradasRes, entradasXmlRes, movRes] = await Promise.all([
         sb.from('produto_estoque').select('deposito_id, quantidade, estoque_minimo, localizacao, depositos(nome, ativo)')
@@ -163,11 +172,11 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
         sb.from('venda_itens').select(vendaItensSelect)
           .eq('produto_id', produto.id).eq('tipo', 'devolucao').order('created_at', { ascending: false }).limit(100),
         // Sem embed de "entradas"/"fornecedores" pelo mesmo motivo do venda_itens acima.
-        sb.from('entrada_itens').select('id, quantidade, entrada_id, created_at')
+        sb.from('entrada_itens').select('id, quantidade, entrada_id, created_at, preco_custo_novo, subtotal')
           .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(100),
         // Compra entra por duas portas — lançamento manual e nota por XML.
         // Ler só a primeira escondia metade do histórico de entrada do produto.
-        sb.from('nfe_itens').select('id, quantidade_entrada, quantidade_xml, entrada_id, created_at')
+        sb.from('nfe_itens').select('id, quantidade_entrada, quantidade_xml, entrada_id, created_at, custo_unitario, custo_total, valor_unitario_xml, valor_produto')
           .eq('produto_id', produto.id).order('created_at', { ascending: false }).limit(100),
         sb.from('estoque_movimentacoes').select('id, tipo, quantidade, motivo, observacao, created_at')
           .eq('empresa_id', empresaId).eq('produto_id', produto.id)
@@ -190,6 +199,11 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
       const itensEntradaXml = (entradasXmlRes.data ?? []).map((e: any) => ({
         id: e.id, entrada_id: e.entrada_id, created_at: e.created_at,
         quantidade: e.quantidade_entrada ?? e.quantidade_xml,
+        // O custo que interessa é o unitário já rateado (frete, seguro,
+        // desconto da nota). Quando a nota ainda não foi custeada, cai no
+        // valor bruto que o fornecedor declarou no XML.
+        preco_custo_novo: e.custo_unitario ?? e.valor_unitario_xml,
+        subtotal: e.custo_total ?? e.valor_produto,
         origemXml: true,
       }))
       const itensEntrada = [...(entradasRes.data ?? []), ...itensEntradaXml] as any[]
@@ -236,12 +250,22 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
         const data = venda?.created_at ?? v.created_at
         const quem = venda?.vendedor_nome || venda?.operador_nome || ''
         const numero = venda?.numero ? `#${venda.numero}` : ''
+        const qtd = Number(v.quantidade) || 0
+        // `total` já vem líquido do desconto dado na hora. O unitário é
+        // recalculado a partir dele para o preço mostrado ser o que o
+        // cliente pagou de fato, e não a tabela antes da negociação.
+        const totalItem = v.total != null ? Number(v.total) : null
+        const unitario = totalItem != null && qtd > 0
+          ? totalItem / qtd
+          : (v.preco_unitario != null ? Number(v.preco_unitario) : null)
         return {
           id: `venda-${v.id}`,
           data,
           tipo: v.tipo === 'devolucao' ? 'devolucao' : 'venda',
-          quantidade: Number(v.quantidade) || 0,
+          quantidade: qtd,
           detalhe: [numero, quem].filter(Boolean).join(' · ') || (v.tipo === 'devolucao' ? 'Devolução no PDV' : 'Venda no PDV'),
+          valorUnitario: unitario,
+          valorTotal: totalItem,
         }
       }
       const movVendas: Movimento[] = itensVenda.map(mapVendaItem)
@@ -251,14 +275,20 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
         const forn = ent?.fornecedor_id ? fornecedoresMap.get(ent.fornecedor_id) : undefined
         const fornecedor = forn?.nome_fantasia || forn?.razao_social || (ent as any)?.nomeFornecedorXml || ''
         const numero = ent?.numero_entrada || (ent?.numero_nf ? `NF ${ent.numero_nf}` : '')
+        const qtd = Number(e.quantidade) || 0
+        const unitario = e.preco_custo_novo != null ? Number(e.preco_custo_novo) : null
+        const total = e.subtotal != null ? Number(e.subtotal)
+          : (unitario != null ? unitario * qtd : null)
         return {
           id: `entrada-${e.id}`,
           data: ent?.data_entrada ?? e.created_at ?? new Date().toISOString(),
           tipo: 'entrada',
-          quantidade: Number(e.quantidade) || 0,
+          quantidade: qtd,
           // Marca a origem: as duas são "entrada de mercadoria", mas quem
           // confere precisa saber se veio de nota importada ou de lançamento.
           detalhe: [numero, fornecedor, e.origemXml ? '(XML)' : ''].filter(Boolean).join(' · ') || 'Entrada de mercadoria',
+          valorUnitario: unitario,
+          valorTotal: total,
         }
       })
 
@@ -268,6 +298,10 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
         tipo: (TIPO_MOV[m.tipo as Movimento['tipo']] ? m.tipo : 'ajuste_entrada') as Movimento['tipo'],
         quantidade: Number(m.quantidade) || 0,
         detalhe: m.motivo || m.observacao || TIPO_MOV[m.tipo as Movimento['tipo']]?.label || m.tipo,
+        // Ajuste, inventário e transferência mexem em quantidade sem preço
+        // negociado — a coluna fica vazia de propósito.
+        valorUnitario: null,
+        valorTotal: null,
       }))
 
       const todos = [...movVendas, ...movEntradas, ...movAjustes].sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime())
@@ -297,6 +331,16 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
     if (filtro === 'venda') return m.tipo === 'venda' || m.tipo === 'venda_marketplace'
     return m.tipo === filtro
   })
+
+  // Quanto esse produto rendeu e quanto custou, dentro do que está filtrado
+  // na tela. Devolução abate da receita — foi venda que voltou.
+  const resumoValores = movimentosFiltrados.reduce((acc, m) => {
+    if (m.valorTotal == null) return acc
+    if (m.tipo === 'venda' || m.tipo === 'venda_marketplace') acc.saidas += m.valorTotal
+    else if (m.tipo === 'devolucao') acc.saidas -= m.valorTotal
+    else if (m.tipo === 'entrada' || m.tipo === 'compra') acc.entradas += m.valorTotal
+    return acc
+  }, { saidas: 0, entradas: 0 })
 
   const totalDepositos = porDeposito.reduce((s, d) => s + d.quantidade, 0)
 
@@ -461,6 +505,8 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                         <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">Tipo</th>
                         <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">Detalhe</th>
                         <th className="text-right px-3 py-2 font-medium text-gray-500 text-xs">Qtd.</th>
+                        <th className="text-right px-3 py-2 font-medium text-gray-500 text-xs">Unitário</th>
+                        <th className="text-right px-3 py-2 font-medium text-gray-500 text-xs">Total</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -474,10 +520,38 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                             </td>
                             <td className="px-3 py-2 text-gray-700 text-xs">{m.detalhe}</td>
                             <td className={`px-3 py-2 text-right font-medium ${info.cor.split(' ')[0]}`}>{info.sinal} {m.quantidade}</td>
+                            <td className="px-3 py-2 text-right text-xs text-gray-600 whitespace-nowrap">
+                              {m.valorUnitario != null ? fmtMoeda(m.valorUnitario) : <span className="text-gray-300">—</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs font-medium text-gray-700 whitespace-nowrap">
+                              {m.valorTotal != null ? fmtMoeda(m.valorTotal) : <span className="text-gray-300">—</span>}
+                            </td>
                           </tr>
                         )
                       })}
                     </tbody>
+                    {(resumoValores.saidas !== 0 || resumoValores.entradas !== 0) && (
+                      <tfoot className="bg-gray-50 border-t border-gray-200">
+                        <tr>
+                          <td colSpan={4} className="px-3 py-2 text-xs text-gray-500">
+                            Total no que está sendo exibido
+                          </td>
+                          <td colSpan={2} className="px-3 py-2 text-right text-xs whitespace-nowrap">
+                            {resumoValores.entradas !== 0 && (
+                              <span className="text-blue-600 font-medium">
+                                Comprado {fmtMoeda(resumoValores.entradas)}
+                              </span>
+                            )}
+                            {resumoValores.entradas !== 0 && resumoValores.saidas !== 0 && <span className="text-gray-300 mx-2">·</span>}
+                            {resumoValores.saidas !== 0 && (
+                              <span className="text-green-700 font-medium">
+                                Vendido {fmtMoeda(resumoValores.saidas)}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
               )}

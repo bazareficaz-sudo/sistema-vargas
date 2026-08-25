@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { produtosDaEntrada } from '@/lib/produtos/filtroEntrada'
+import { aplicarBuscaPorTermos } from '@/lib/busca/termos'
 import ProdutosClient from '@/components/produtos/ProdutosClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
@@ -82,7 +83,7 @@ export default async function ProdutosPage({
   function aplicarFiltros(qb: any): any {
     let out = qb
     if (apenasAtivos) out = out.eq('ativo', true)
-    if (q) out = out.or(`nome.ilike.%${q}%,sku.ilike.%${q}%,ean.ilike.%${q}%`)
+    if (q) out = aplicarBuscaPorTermos(out, q, ['nome', 'sku', 'ean'])
     if (promoFiltro) out = out.eq('promocao_ativa', true)
     if (marca) out = out.eq('marca', marca)
     if (categoriaNomes) out = out.in('categoria', categoriaNomes)
