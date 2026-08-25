@@ -11,7 +11,11 @@ import { revalidateTag } from 'next/cache'
 //      reserva que não expira é pior que não ter reserva: some do estoque
 //      para sempre e ninguém liga uma coisa à outra meses depois.
 //
-//   2. Recalcular o cache de disponibilidade das lojas ativas. É o que
+//   2. Reindexar as publicações cujo produto mudou no ERP. É o que faz uma
+//      foto adicionada no cadastro aparecer na vitrine, e o que mantém a
+//      busca indexada pelo nome atual.
+//
+//   3. Recalcular o cache de disponibilidade das lojas ativas. É o que
 //      mantém a listagem coerente sem calcular estoque ao vivo a cada busca.
 //      A página do produto e o carrinho continuam usando o número ao vivo —
 //      só a lista usa cache.
@@ -47,6 +51,15 @@ export async function GET(req: Request) {
   }
 
   for (const loja of (lojas ?? []) as { id: string; nome: string }[]) {
+    // Reindexação ANTES do cache: ela recalcula imagem, busca e categoria a
+    // partir do cadastro, e é barata porque só toca no que mudou.
+    const { data: reindexados, error: erroReindex } = await sb.rpc('loja_reindexar_pendentes', {
+      p_loja_id: loja.id,
+    })
+    if (erroReindex) {
+      console.error('[cron/loja] reindexação falhou', { lojaId: loja.id, erro: erroReindex.message })
+    }
+
     const { data, error } = await sb.rpc('loja_atualizar_estoque_cache', {
       p_loja_id: loja.id, p_produto_ids: null,
     })
@@ -56,8 +69,13 @@ export async function GET(req: Request) {
       resultados.push({ loja: loja.nome, ok: false, erro: error.message })
       continue
     }
-    resultados.push({ loja: loja.nome, ok: true, produtos: Number(data ?? 0) })
-    revalidateTag(`loja:${loja.id}`, 'max')
+
+    const n = Number(reindexados ?? 0)
+    resultados.push({ loja: loja.nome, ok: true, produtos: Number(data ?? 0), reindexados: n })
+
+    // Só invalida o cache da vitrine quando algo REALMENTE mudou de conteúdo.
+    // Invalidar a cada 15 minutos sem motivo joga fora trabalho já feito.
+    if (n > 0) revalidateTag(`loja:${loja.id}`, 'max')
   }
 
   return NextResponse.json({

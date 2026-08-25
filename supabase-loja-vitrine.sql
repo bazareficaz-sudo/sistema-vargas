@@ -231,6 +231,50 @@ END;
 $$;
 
 
+-- Reindexação INCREMENTAL — a que o cron chama.
+--
+-- Sem ela, `loja_produtos` guardava espelhos do cadastro que NUNCA se
+-- atualizavam: o gatilho acima só dispara em INSERT/UPDATE da própria linha,
+-- e `loja_reindexar` só era chamada pelos botões da aba Categorias. Produto
+-- que ganhava foto no ERP não passava a mostrá-la na vitrine, e a busca
+-- continuava indexada pelo nome antigo. Foi um buraco real da primeira
+-- entrega, achado ao perguntarem justamente isso.
+--
+-- Só entra a linha cujo produto mudou: a cada 15 minutos, reprocessar o
+-- catálogo publicado inteiro é desperdício que cresce com a loja.
+--
+-- `>=` e não `>`, e o motivo apareceu num teste: `now()` é o timestamp da
+-- TRANSAÇÃO. Alteração e reindexação dentro da mesma transação carimbam o
+-- mesmo instante, e a mudança ficaria para trás em silêncio. Não cria laço —
+-- depois de reindexar, `lp.updated_at` é estritamente maior, porque as
+-- transações são outras.
+CREATE OR REPLACE FUNCTION loja_reindexar_pendentes(p_loja_id UUID DEFAULT NULL)
+RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_n INTEGER;
+BEGIN
+  UPDATE loja_produtos lp
+     SET updated_at = now()
+    FROM produtos p
+   WHERE p.id = lp.produto_id
+     AND (p_loja_id IS NULL OR lp.loja_id = p_loja_id)
+     AND (
+       -- `produtos.updated_at` é mantido por trg_produtos_updated_at, e
+       -- definir a foto principal grava `produtos.foto_url` — então o caso
+       -- da foto cai aqui.
+       p.updated_at >= lp.updated_at
+       -- Rede de segurança: imagem que entrou só em produto_imagens.
+       OR EXISTS (SELECT 1 FROM produto_imagens pi
+                   WHERE pi.produto_id = lp.produto_id AND pi.created_at >= lp.updated_at)
+     );
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END;
+$$;
+
+COMMENT ON FUNCTION loja_reindexar_pendentes(UUID) IS
+  'Reindexa só as publicações cujo produto mudou desde a última indexação. Chamada pelo cron de manutenção.';
+
+
 -- ============================================================
 -- 6. Cache de estoque
 --
@@ -575,6 +619,7 @@ REVOKE ALL ON FUNCTION loja_buscar(UUID, TEXT, UUID, TEXT, NUMERIC, NUMERIC, BOO
 REVOKE ALL ON FUNCTION loja_sugerir(UUID, TEXT, INTEGER)          FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION loja_saude_catalogo(UUID)                  FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION loja_reindexar(UUID)                       FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION loja_reindexar_pendentes(UUID)             FROM PUBLIC, anon;
 -- Gatilho, e SECURITY DEFINER: não fica alcançável pelo anônimo nem por
 -- omissão. Ficou de fora da primeira rodada.
 REVOKE ALL ON FUNCTION loja_produtos_indexar()                    FROM PUBLIC, anon;
@@ -584,6 +629,7 @@ GRANT EXECUTE ON FUNCTION loja_buscar(UUID, TEXT, UUID, TEXT, NUMERIC, NUMERIC, 
 GRANT EXECUTE ON FUNCTION loja_sugerir(UUID, TEXT, INTEGER)          TO authenticated;
 GRANT EXECUTE ON FUNCTION loja_saude_catalogo(UUID)                  TO authenticated;
 GRANT EXECUTE ON FUNCTION loja_reindexar(UUID)                       TO authenticated;
+GRANT EXECUTE ON FUNCTION loja_reindexar_pendentes(UUID)             TO authenticated;
 GRANT EXECUTE ON FUNCTION loja_atualizar_estoque_cache(UUID, UUID[]) TO authenticated;
 
 
