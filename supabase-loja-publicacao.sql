@@ -132,13 +132,46 @@ $$;
 
 
 -- ============================================================
--- 3. Privilégios — nada para o anônimo
+-- 3. Atualização sob demanda de um produto já publicado
+--
+-- Diferente de `loja_reindexar_pendentes()`, que o cron chama e que só toca
+-- no que mudou: aqui é o operador dizendo "atualiza ESTE agora", direto da
+-- listagem de Produtos do ERP. Força, sem perguntar se mudou — porque quem
+-- clica acabou de mexer no cadastro e não quer esperar os 15 minutos do cron
+-- só para conferir se a foto entrou.
+--
+-- Faz as duas coisas que o cron faz, para o produto ficar coerente de uma vez.
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION loja_sincronizar_produtos(p_loja_id UUID, p_produto_ids UUID[])
+RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_n INTEGER;
+BEGIN
+  IF p_produto_ids IS NULL OR array_length(p_produto_ids, 1) IS NULL THEN RETURN 0; END IF;
+
+  -- Tocar em updated_at faz o gatilho recalcular imagem, busca, marca e
+  -- categoria a partir do cadastro.
+  UPDATE loja_produtos
+     SET updated_at = now()
+   WHERE loja_id = p_loja_id AND produto_id = ANY(p_produto_ids);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+
+  PERFORM loja_atualizar_estoque_cache(p_loja_id, p_produto_ids);
+  RETURN v_n;
+END;
+$$;
+
+
+-- ============================================================
+-- 4. Privilégios — nada para o anônimo
 -- ============================================================
 
 REVOKE ALL ON FUNCTION loja_semear_categorias(UUID)                     FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION loja_publicar_produtos(UUID, UUID[], TEXT, UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION loja_sincronizar_produtos(UUID, UUID[])          FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION loja_semear_categorias(UUID)                     TO authenticated;
 GRANT EXECUTE ON FUNCTION loja_publicar_produtos(UUID, UUID[], TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION loja_sincronizar_produtos(UUID, UUID[])          TO authenticated;
 
 
 -- ============================================================

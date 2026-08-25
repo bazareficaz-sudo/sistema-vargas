@@ -16,7 +16,6 @@ import GerenciarTagsModal from './GerenciarTagsModal'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import EstoqueDetalhadoModal from './EstoqueDetalhadoModal'
 import UnificarProdutosModal from './UnificarProdutosModal'
-import CriarAnuncioShopeeModal from '@/components/marketplaces/CriarAnuncioShopeeModal'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { botao, SEPARADOR } from '@/components/ui/botao'
 
@@ -87,7 +86,11 @@ type Props = {
   entradaFiltro: string
   entradasCasadas?: { rotulo: string; origem: 'manual' | 'xml' }[]
   tagsDisponiveis: string[]
-  canaisShopee?: { id: string; nome: string }[]
+  /**
+   * A empresa tem loja online? Decide se a linha ganha o botão de publicar.
+   * Sem loja, o botão não teria para onde levar.
+   */
+  temLoja?: boolean
 }
 
 function calcMarkup(produto: Produto): number | null {
@@ -111,7 +114,7 @@ export default function ProdutosClient({
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
-  tagFiltro: tagInicial, entradaFiltro: entradaInicial, entradasCasadas = [], tagsDisponiveis, canaisShopee = [],
+  tagFiltro: tagInicial, entradaFiltro: entradaInicial, entradasCasadas = [], tagsDisponiveis, temLoja = false,
 }: Props) {
   const router = useRouter()
   const [produtos, setProdutos] = useState(inicial)
@@ -165,7 +168,45 @@ export default function ProdutosClient({
   }, [abrirProdutoId])
   const [duplicando, setDuplicando] = useState<Produto | null>(null)
   const [criandoKit, setCriandoKit] = useState<Produto | null>(null)
-  const [criandoAnuncioShopee, setCriandoAnuncioShopee] = useState<Produto | null>(null)
+  // Publicação na Loja Online, direto da linha. `null` = ocioso; o id do
+  // produto = requisição em andamento naquela linha.
+  const [publicandoLoja, setPublicandoLoja] = useState<string | null>(null)
+
+  async function acaoLoja(p: Produto, acao: 'publicar' | 'atualizar') {
+    setPublicandoLoja(p.id)
+    setAvisoLoja(null)
+    try {
+      const r = await fetch('/api/loja-admin/sincronizar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ produtoId: p.id, acao }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.erro ?? 'não deu certo')
+      setAvisoLoja({
+        texto: acao === 'publicar'
+          ? `"${p.nome}" está na Loja Online.`
+          : `"${p.nome}" atualizado na Loja Online.`,
+        erro: false,
+      })
+      // Recarrega para o selo LO refletir o novo estado. router.refresh()
+      // mantém o que o operador digitou nos filtros.
+      router.refresh()
+    } catch (e) {
+      setAvisoLoja({ texto: e instanceof Error ? e.message : 'não deu certo', erro: true })
+    } finally {
+      setPublicandoLoja(null)
+    }
+  }
+  const [avisoLoja, setAvisoLoja] = useState<{ texto: string; erro: boolean } | null>(null)
+
+  // O aviso some sozinho. Erro fica mais tempo: quem precisa ler uma falha
+  // costuma estar olhando para outro lugar quando ela aparece.
+  useEffect(() => {
+    if (!avisoLoja) return
+    const t = setTimeout(() => setAvisoLoja(null), avisoLoja.erro ? 8000 : 4000)
+    return () => clearTimeout(t)
+  }, [avisoLoja])
   const [criandoNovo, setCriandoNovo] = useState(false)
   const [importandoUrl, setImportandoUrl] = useState(false)
   const [acoesEmMassa, setAcoesEmMassa] = useState(false)
@@ -319,6 +360,23 @@ export default function ProdutosClient({
 
   return (
     <>
+      {/* Retorno da ação de loja. Flutuante e efêmero: a linha some da tela
+          quando o operador continua rolando a lista, e prender um banner no
+          topo obrigaria a rolar de volta para ler. */}
+      {avisoLoja && (
+        <div
+          role="status"
+          aria-live="polite"
+          onClick={() => setAvisoLoja(null)}
+          className={`fixed bottom-4 left-1/2 z-50 -translate-x-1/2 cursor-pointer rounded-lg px-4 py-2.5 text-sm font-medium shadow-lg ${
+            avisoLoja.erro
+              ? 'bg-red-600 text-white'
+              : 'bg-gray-900 text-white'}`}
+        >
+          {avisoLoja.erro ? '⚠ ' : '✓ '}{avisoLoja.texto}
+        </div>
+      )}
+
       <EditarProdutoModal produto={editando}
         onClose={() => { setEditando(null); setAbaModal(undefined) }}
         onSaved={onSaved} empresaId={empresaId}
@@ -337,15 +395,6 @@ export default function ProdutosClient({
           empresaId={empresaId}
           onClose={() => setCriandoKit(null)}
           onCriado={() => { setCriandoKit(null); router.refresh() }}
-        />
-      )}
-      {criandoAnuncioShopee && (
-        <CriarAnuncioShopeeModal
-          canais={canaisShopee}
-          empresaId={empresaId}
-          produtoIdInicial={criandoAnuncioShopee.id}
-          onClose={() => setCriandoAnuncioShopee(null)}
-          onCriado={() => router.refresh()}
         />
       )}
       {criandoNovo && (
@@ -891,15 +940,29 @@ export default function ProdutosClient({
                         📦
                       </button>
                     )}
-                    {p.tipo !== 'kit' && canaisShopee.length > 0 && (
-                      <button
-                        onClick={() => setCriandoAnuncioShopee(p)}
-                        className="text-gray-400 hover:text-orange-600 text-sm leading-none"
-                        title="Publicar este produto como anúncio na Shopee"
-                      >
-                        🛍
-                      </button>
-                    )}
+                    {temLoja && (() => {
+                      // O selo LO já diz se o produto está na vitrine — o
+                      // mesmo dado decide o que este botão faz. Publicado:
+                      // atualizar. Fora: publicar.
+                      const naLoja = anunciosMap?.[p.id]?.loja
+                      const publicado = naLoja?.estado === 'publicado'
+                      const ocupado = publicandoLoja === p.id
+                      return (
+                        <button
+                          onClick={() => acaoLoja(p, publicado ? 'atualizar' : 'publicar')}
+                          disabled={ocupado}
+                          className={`text-sm leading-none disabled:opacity-40 ${
+                            publicado ? 'text-indigo-500 hover:text-indigo-700' : 'text-gray-400 hover:text-indigo-600'}`}
+                          title={publicado
+                            ? 'Atualizar na Loja Online — relê foto, preço e estoque do cadastro agora, sem esperar a rotina'
+                            : naLoja
+                              ? 'Publicar na Loja Online (está pausado)'
+                              : 'Publicar este produto na Loja Online'}
+                        >
+                          {ocupado ? '⏳' : publicado ? '↻' : '🛒'}
+                        </button>
+                      )
+                    })()}
                   </div>
                 </td>
               </tr>

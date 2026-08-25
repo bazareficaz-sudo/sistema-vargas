@@ -39,15 +39,17 @@ export default async function ProdutosPage({
   // resolução de hierarquia categoria → subcategorias (produtos.categoria é
   // um TEXT com o nome escolhido, raiz ou filha; não há coluna própria de
   // subcategoria — ver plano).
-  const [{ data: categoriasRows }, { data: marcasRows }, { data: canaisShopeeRows }] = await Promise.all([
+  const [{ data: categoriasRows }, { data: marcasRows }, { data: lojaRow }] = await Promise.all([
     supabase.from('categorias').select('id, nome, pai_id').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     supabase.from('marcas').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
-    supabase.from('marketplace_canais').select('id, nome').eq('empresa_id', empresaId).eq('plataforma', 'shopee'),
+    // A empresa tem loja online? É o que decide se a linha ganha o botão de
+    // publicar. Sem loja, o botão não apareceria para lugar nenhum.
+    supabase.from('loja_config').select('id').eq('empresa_id', empresaId).maybeSingle(),
   ])
   const categoriasTodas = categoriasRows ?? []
   const categoriasRaiz = categoriasTodas.filter(c => !c.pai_id)
   const marcasTodas = marcasRows ?? []
-  const canaisShopee = canaisShopeeRows ?? []
+  const temLoja = !!lojaRow?.id
 
   // Ids-com-imagem — só busca quando o filtro de imagem está ativo.
   let idsComImagem: string[] | null = null
@@ -251,7 +253,7 @@ export default async function ProdutosPage({
       entradaFiltro={entrada}
       entradasCasadas={entradasCasadas}
       tagsDisponiveis={tagsDisponiveis}
-      canaisShopee={canaisShopee}
+      temLoja={temLoja}
     />
   )
 }
