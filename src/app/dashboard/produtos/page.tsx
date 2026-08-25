@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { produtosDaEntrada } from '@/lib/produtos/filtroEntrada'
 import { aplicarBuscaPorTermos } from '@/lib/busca/termos'
 import ProdutosClient from '@/components/produtos/ProdutosClient'
+import type { ContagemCanais } from '@/components/marketplaces/SeloCanais'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 const POR_PAGINA = 50
@@ -137,7 +138,7 @@ export default async function ProdutosPage({
   //
   // Anúncio encerrado não entra: ele não está mais à venda, e contá-lo
   // faria o selo prometer presença num canal onde o produto já saiu.
-  const anunciosMap: Record<string, Record<string, { total: number; ativos: number }>> = {}
+  const anunciosMap: Record<string, ContagemCanais> = {}
   if (produtoIds.length > 0) {
     const [{ data: diretos }, { data: variacoes }] = await Promise.all([
       supabase.from('marketplace_anuncios')
@@ -164,6 +165,34 @@ export default async function ProdutosPage({
       if (!anuncio || anuncio.status === 'encerrado') continue
       const canal = Array.isArray(anuncio.marketplace_canais) ? anuncio.marketplace_canais[0] : anuncio.marketplace_canais
       somar(v.produto_id, canal?.plataforma, anuncio.status)
+    }
+  }
+
+  // Publicação na Loja Online — entra no MESMO selo dos marketplaces.
+  //
+  // Um selo separado ao lado do outro obrigaria o operador a aprender dois
+  // lugares para responder a mesma pergunta ("onde este produto está à
+  // venda?"). A loja é mais um canal, então é mais um selo.
+  //
+  // `nao_publicado` fica de fora: só aparece quem está em algum lugar da
+  // vitrine. Uma marca cinza em 13 mil produtos não informaria nada.
+  if (produtoIds.length > 0) {
+    const { data: naLoja } = await supabase
+      .from('loja_produtos')
+      .select('produto_id, status')
+      .eq('empresa_id', empresaId)
+      .in('produto_id', produtoIds)
+      .in('status', ['publicado', 'pausado', 'rascunho'])
+
+    for (const l of (naLoja ?? []) as { produto_id: string; status: string }[]) {
+      const porProduto = anunciosMap[l.produto_id] ??= {}
+      porProduto.loja = {
+        total: 1,
+        // Só `publicado` conta como ativo — é o que deixa o selo esmaecido
+        // quando o produto está pausado ou ainda em rascunho.
+        ativos: l.status === 'publicado' ? 1 : 0,
+        estado: l.status as 'publicado' | 'pausado' | 'rascunho',
+      }
     }
   }
 

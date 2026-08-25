@@ -791,6 +791,9 @@ export default function ProdutosClient({
                         </button>
                         {/* Em quais canais o produto está anunciado. Clicar
                             abre a lista de anúncios, onde dá para pausar. */}
+                        {/* Marketplaces e Loja Online no mesmo selo — a
+                            pergunta que ele responde é "onde este produto
+                            está à venda?", e a loja é mais um canal. */}
                         <SeloCanais contagem={anunciosMap?.[p.id]}
                           onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }} />
                       </>
