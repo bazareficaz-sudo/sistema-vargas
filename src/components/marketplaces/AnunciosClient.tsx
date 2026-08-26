@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AnuncioDetalheModal from './AnuncioDetalheModal'
 import MapearAnuncioModal from './MapearAnuncioModal'
+import EditarAnuncioModal from './EditarAnuncioModal'
 import MapeamentoRapidoModal from './MapeamentoRapidoModal'
 import EnriquecerProdutoModal from './EnriquecerProdutoModal'
 import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
@@ -184,6 +185,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
   const [modal, setModal] = useState(false)
   const [editando, setEditando] = useState<any | null>(null)
+  // Editar um anúncio que já existe é outro problema de tela: fotos, ordem,
+  // ficha técnica e variações não cabem no formulário de criação manual — e
+  // precisam ir para o marketplace, não só para a tabela. Modal próprio.
+  const [editorAberto, setEditorAberto] = useState<any | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   const [buscaProd, setBuscaProd] = useState('')
@@ -732,34 +737,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setEditando(null); setForm(formVazio); setBuscaProd(''); setModal(true)
   }
 
-  async function abrirEditar(a: any) {
-    setEditando(a)
-    // A descrição NÃO vem na listagem: são 551 KB para os 789 anúncios de um
-    // canal, e ela só é usada aqui, para um anúncio de cada vez. Buscar sob
-    // demanda tira um terço do peso da tela e custa uma consulta de uma linha.
-    let descricao = a.descricao
-    if (descricao === undefined) {
-      const sb = createClient()
-      const { data } = await sb.from('marketplace_anuncios')
-        .select('descricao').eq('id', a.id).maybeSingle()
-      descricao = data?.descricao ?? ''
-    }
-    setForm({
-      produto_id: a.produto_id ?? '',
-      titulo: a.titulo,
-      descricao: descricao ?? '',
-      preco_venda: String(a.preco_venda),
-      preco_promocional: String(a.preco_promocional ?? ''),
-      promo_inicio: a.promo_inicio ?? '',
-      promo_fim: a.promo_fim ?? '',
-      estoque_reservado: String(a.estoque_reservado ?? 0),
-      id_externo: a.id_externo ?? '',
-      url_anuncio: a.url_anuncio ?? '',
-      sku_canal: a.sku_canal ?? '',
-      status: a.status,
-    })
-    setBuscaProd(a.produtos?.nome ?? '')
-    setModal(true)
+  function abrirEditar(a: any) {
+    setEditorAberto(a)
   }
 
   function selecionarProduto(p: any) {
@@ -1512,6 +1491,20 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           // dois overlays fixos um sobre o outro.
           onEditar={() => { const a = detalheAberto; setDetalheAberto(null); abrirEditar(a) }}
           onMapear={() => { const a = detalheAberto; setDetalheAberto(null); setMapeandoAberto(a) }}
+        />
+      )}
+
+      {editorAberto && (
+        <EditarAnuncioModal
+          anuncio={editorAberto}
+          canal={canal}
+          empresaId={empresaId}
+          produtos={produtos}
+          onClose={() => setEditorAberto(null)}
+          onSalvo={(anuncioAtualizado) => {
+            setAnuncios(prev => prev.map(a => a.id === anuncioAtualizado.id ? { ...a, ...anuncioAtualizado } : a))
+            setEditorAberto((atual: any) => (atual ? { ...atual, ...anuncioAtualizado } : atual))
+          }}
         />
       )}
 
