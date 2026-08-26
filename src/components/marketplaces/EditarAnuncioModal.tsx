@@ -58,6 +58,26 @@ const STATUS_LABELS: Record<string, string> = {
   rascunho: 'Rascunho', ativo: 'Ativo', pausado: 'Pausado', encerrado: 'Encerrado', erro: 'Erro',
 }
 
+/**
+ * Texto estável para comparar o mapa de valores dos atributos com o que ele
+ * era ao abrir a aba.
+ *
+ * `JSON.stringify` cru não serve: o objeto de valor montado na carga tem as
+ * chaves noutra ordem do que o montado ao editar, e a comparação acusaria
+ * mudança em atributo que ninguém tocou — que é justamente o que este
+ * retrato existe para evitar.
+ */
+function retratoAtributos(valores: Record<string | number, unknown>): string {
+  return JSON.stringify(
+    Object.keys(valores).sort().map(k => {
+      const v = valores[k]
+      if (v == null || typeof v !== 'object') return [k, v ?? null]
+      const obj = v as Record<string, unknown>
+      return [k, Object.keys(obj).sort().map(c => [c, obj[c] ?? null])]
+    }),
+  )
+}
+
 export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos, onClose, onSalvo }: {
   anuncio: any
   canal: any
@@ -150,6 +170,7 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
           skuCanal: a.skuCanal ?? '', status: a.status ?? '',
           fotos: JSON.stringify((d.imagens ?? []).map((f: Foto) => f.url)),
           peso: d.ficha.pesoKg, comprimento: d.ficha.comprimentoCm, largura: d.ficha.larguraCm, altura: d.ficha.alturaCm,
+          marcaId: d.ficha.marcaId != null ? String(d.ficha.marcaId) : '',
           variacoes: vars,
         })
       } catch (e: any) {
@@ -174,6 +195,9 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
   const [erroAtributos, setErroAtributos] = useState('')
   const [atributosCarregados, setAtributosCarregados] = useState(false)
   const [caminhoCategoria, setCaminhoCategoria] = useState<string>('')
+  // Retrato dos atributos como estavam ao abrir a aba, para saber se o
+  // operador realmente mexeu neles — ver `atributosMudaram`.
+  const [atributosOriginais, setAtributosOriginais] = useState<string | null>(null)
 
   useEffect(() => {
     if (aba !== 'ficha' || !dados || atributosCarregados || carregandoAtributos) return
@@ -205,11 +229,13 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
             }
           }
           setValoresShopee(iniciais)
+          setAtributosOriginais(retratoAtributos(iniciais))
         } else {
           setAtributosML(d.atributos ?? [])
           const iniciais: Record<string, string> = {}
           for (const a of dados.atributosML) iniciais[a.id] = a.valor
           setValoresML(iniciais)
+          setAtributosOriginais(retratoAtributos(iniciais))
         }
         setAtributosCarregados(true)
       } catch (e: any) {
@@ -337,6 +363,22 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
 
   const fotosMudaram = !!original && original.fotos !== JSON.stringify(fotos.map(f => f.url))
   const fichaMudou = mudou('peso', peso) || mudou('comprimento', comprimento) || mudou('largura', largura) || mudou('altura', altura)
+  // Atributo só vai para a plataforma se o operador tiver mexido nele.
+  //
+  // Sem isso, salvar QUALQUER coisa — trocar a ordem das fotos, corrigir uma
+  // vírgula do título — reenviava a ficha técnica inteira junto. E o que é
+  // reenviado não é o que está no anúncio: é o que a árvore da categoria
+  // conseguiu mostrar na tela. Atributo que o anúncio tem e a categoria não
+  // devolve (ou filho de um valor que não está marcado agora) simplesmente
+  // não entra na lista — e `attribute_list` chega na Shopee como substituição,
+  // não como remendo.
+  //
+  // É também o que torna possível o primeiro uso recomendado no CONTINUIDADE:
+  // mexer numa coisa de cada vez. Antes, a primeira reordenação de fotos
+  // levava a ficha técnica inteira de carona, sem ninguém ter pedido.
+  const atributosMudaram = atributosCarregados && atributosOriginais !== null && (
+    atributosOriginais !== retratoAtributos(plataforma === 'shopee' ? valoresShopee : valoresML)
+  )
   const variacoesMudaram = !!original && Object.entries(formVariacoes).some(
     ([id, v]) => original.variacoes[id]?.preco !== v.preco || original.variacoes[id]?.estoque !== v.estoque)
 
@@ -376,9 +418,9 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
               texto: v.texto, unidade: v.unidade, inputType: a.input_type,
             }
           })
-        if (preenchidos.length > 0) campos.atributosShopee = preenchidos
+        if (atributosMudaram && preenchidos.length > 0) campos.atributosShopee = preenchidos
         const marca = marcas.find(m => String(m.brand_id) === marcaId)
-        if (marca) { campos.marcaId = marca.brand_id; campos.marcaNome = marca.original_brand_name }
+        if (marca && mudou('marcaId', marcaId)) { campos.marcaId = marca.brand_id; campos.marcaNome = marca.original_brand_name }
       } else if (plataforma === 'mercadolivre') {
         const preenchidos = Object.entries(valoresML)
           .filter(([, valor]) => !!valor?.trim())
@@ -392,7 +434,9 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
           if (comprimento) preenchidos.push({ id: 'SELLER_PACKAGE_LENGTH', valueName: `${parseFloat(comprimento)} cm` })
           if (peso) preenchidos.push({ id: 'SELLER_PACKAGE_WEIGHT', valueName: `${Math.round(parseFloat(peso) * 1000)} g` })
         }
-        if (preenchidos.length > 0) campos.atributosML = preenchidos
+        // A ficha do ML viaja como atributo (SELLER_PACKAGE_*), então mudar
+        // só peso/medidas também precisa mandar a lista.
+        if ((atributosMudaram || fichaMudou) && preenchidos.length > 0) campos.atributosML = preenchidos
       }
     }
 

@@ -507,7 +507,11 @@ export async function atualizarAnuncio(
       // Mesma regra do add_item: atributo sem valor nenhum não vai, senão a
       // Shopee recusa o item inteiro por validação.
       const montados = input.atributos.map(montarAtributo).filter(a => a.attribute_value_list.length > 0)
-      body.attribute_list = montados
+      // Lista vazia NÃO vira `attribute_list: []`: aqui o campo presente é
+      // substituição, e mandar vazio seria pedir para apagar a ficha técnica
+      // do anúncio — nunca é o que "não preenchi nada" quer dizer. Mesma
+      // guarda que `criarAnuncio` já faz.
+      if (montados.length > 0) body.attribute_list = montados
     }
 
     if (input.brandId != null) body.brand = { brand_id: input.brandId, original_brand_name: input.brandNome ?? '' }
