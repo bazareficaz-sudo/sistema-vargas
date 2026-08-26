@@ -3,14 +3,182 @@
 Anotações para retomar o trabalho numa sessão nova. Não é documentação do
 sistema: é o estado de quem estava com a mão na massa.
 
-Última atualização: 17/08/2026
+Última atualização: 26/08/2026
 
 Tudo que está descrito aqui como pronto está **no ar** (último deploy:
-`79c82c8`, com as migrações do dia já rodadas).
+`7048d2e`, com as migrações já rodadas).
+
+Existe um branch com trabalho NÃO deployado: `editor-anuncios` (edição de
+anúncio de marketplace, ~2.000 linhas). Compila, mas não foi exercitado —
+ver a seção própria no fim.
 
 ---
 
 ## Em andamento
+
+### Loja Online — Fase 1 no ar
+
+Canal de venda novo, com vitrine pública própria. **Está no ar** em
+`bazareficaz.sistemavargas.com.br`, e **invisível para o Google** de
+propósito (`indexavel = false` → o robots.txt dela devolve `Disallow: /`).
+Quem tem o link acessa; buscador não entra.
+
+Auditoria completa em [`docs/loja-online-auditoria.md`](docs/loja-online-auditoria.md)
+(o que existia antes, medido no banco) e entrega em
+[`docs/loja-online-fase1.md`](docs/loja-online-fase1.md) (o que foi feito, com
+os 17 itens que o Silvano pediu). Vale reler os dois antes de mexer aqui.
+
+**A REGRA QUE GOVERNA O PROJETO INTEIRO:** a vitrine pública NÃO recebe chave
+de banco nenhuma. Ela renderiza no servidor, consulta só por
+`src/lib/commerce/db.ts` com chave de serviço, e lê da view
+`loja_vitrine_produtos` — uma lista branca onde `preco_custo`, margem,
+fornecedor, fiscal e `produtos.estoque` não existem nem como coluna.
+Conferido no HTML servido: zero campos internos, zero tokens JWT.
+
+O motivo está na seção de segurança abaixo, e é sério.
+
+**Arquitetura, em uma linha:**
+
+```
+host → src/proxy.ts → loja_config → canal → empresa → grupo → tenant
+```
+
+Nada conhece "Bazar Eficaz". Ela é só a primeira linha de `loja_config`. Loja
+nova = uma linha na tabela, um registro DNS e um `vercel domains add`.
+
+**12 migrations aditivas**, nenhum `DROP`, nenhum `ALTER` em tabela do ERP,
+**zero colunas novas em tabela existente**. Arquivos no repositório:
+`supabase-loja-fundacao.sql`, `-estoque.sql`, `-vitrine.sql`, `-publicacao.sql`.
+
+**Estoque — a resposta que não existia.** O sistema não tinha resposta única
+para "quanto posso vender". `empresa_config_estoque.reservar_em_pedido` existe
+desde sempre **sem nenhum código que o leia**, e
+`marketplace_anuncios.estoque_reservado` é o estoque PUBLICADO no canal, não
+reserva. Agora `loja_estoque_disponivel()` responde:
+
+```
+físico − reservado − segurança = disponível
+publicável = min(disponível × percentual, teto)
+```
+
+De onde vem o físico é configuração da loja, não constante: depósito único,
+selecionados, empresa ou grupo. O modo grupo **reaproveita** a unificação que
+já alimenta os marketplaces (`estoque_unificado_participantes` +
+`produto_vinculos`) para a loja não inventar um terceiro número — e acrescenta
+três travas no banco que a versão de marketplace não fazia: mesmo tenant,
+mesmo grupo, empresa ativa. Testado com uma loja temporária na Ouro e Prata
+(unificação desligada): zero empresas somadas indevidamente.
+
+`estoque_reservas` existe e nasce VAZIA. A leitura já a subtrai; a escrita é a
+Fase 2.
+
+**Busca — não existia nenhuma.** Nem `pg_trgm`, nem `unaccent`, nem
+`tsvector`, nem GIN além de `produtos.tags`. Toda busca do sistema era `ilike`
+encadeado. Agora há configuração `pt_unaccent` (acento e plural de uma vez, e
+continua indexável), `tsvector` com pesos, e trigram para erro de digitação
+com limiar **0,45** — medido nos nomes reais deste catálogo: erro legítimo cai
+entre 0,50 e 0,67 ("hidralica" 0,50, "torneria" 0,556), ruído dá 0,0. O padrão
+do pg_trgm (0,6) cortava metade dos acertos.
+
+O índice fica em `loja_produtos`, **não em `produtos`**, e **não há gatilho em
+`produtos`** — é a tabela onde o PDV escreve em toda venda, e pendurar
+trabalho ali para servir a vitrine seria cobrar do caixa o custo da loja. O
+preço dessa escolha é o cron `/api/cron/loja-manutencao`, a cada 15 min.
+
+**Categorias sem tocar no cadastro.** No ERP categoria é TEXTO, duplicado e
+com acento quebrado. `loja_semear_categorias` agrupa pelo texto normalizado e
+funde as grafias sozinha: **54 grafias viraram 48 categorias**, sem um único
+`UPDATE` em `produtos`. Não adivinha que "Hidráulica" e "MATERIAL HIDRÁULICO"
+são a mesma coisa — isso é decisão de quem conhece a loja, e o painel permite.
+
+**Publicação é decisão do usuário.** Nunca exige foto, descrição, marca ou
+preço; o sistema mede e mostra o que falta, e não bloqueia. Isso é requisito,
+não detalhe: dos 509 publicados, **284 não têm foto**, então cards com e sem
+imagem convivem na mesma grade e o vazio é desenhado (bloco tipográfico na
+paleta da loja, nunca ícone quebrado).
+
+**Números do catálogo, medidos em 25/08:**
+
+| | |
+|---|---:|
+| publicados | 509 |
+| **prontos** (foto + preço + saldo) | **193** |
+| sem foto | 284 |
+| sem saldo no depósito que a loja lê | 58 |
+| sem categoria | 68 |
+| divergem entre as duas fontes de saldo | 198 |
+
+**Armadilha do critério de publicação:** publiquei filtrando por
+`produtos.estoque > 0`, mas a loja LÊ `produto_estoque` (depósito Padrão). São
+as duas fontes que divergem em 198 produtos. Resultado: **30 produtos com
+saldo real no depósito ficaram fora da vitrine** — R$ 12.465 de mercadoria que
+a loja não oferece. Pendência do Silvano abaixo.
+
+**Painel:** `/dashboard/loja-online`, oito abas (Visão Geral com Saúde do
+Catálogo, Produtos, Categorias, Aparência, Banners/Home, Estoque, Domínio,
+Configurações). A aba Banners/Home está simplificada de propósito: a home já
+funciona sem configuração nenhuma, e editor de vitrine antes de existir
+checkout é esforço na ordem errada. As tabelas já existem.
+
+Na listagem de Produtos do ERP, o selo **LO** (índigo) diz quem está na loja —
+no MESMO selo dos marketplaces, e não num indicador separado. Sem contador
+(um produto está publicado ou não) e sem clique (a loja se gerencia em Loja
+Online → Produtos). Ao lado dele, um botão publica ou atualiza o produto
+direto da linha. **O botão de publicar na Shopee saiu dessa tela** — a Shopee
+continua em Anúncios, Mapa de Anúncios e Rascunhos, que é o lugar dela.
+
+**Quatro defeitos que os testes acharam, e que valem para o que vier:**
+
+1. Casamento por trigrama recebia `ts_rank` = 0 e empatava com casamento real,
+   caindo em ordem alfabética. "lampada led" trazia *ABRACADEIRA PARA LAMPADA*
+   antes de *LAMPADA LED BULBO*. Hoje são três faixas de relevância que nunca
+   se misturam.
+2. "Tem estoque primeiro" valia até com termo de busca, escondendo o item
+   procurado só porque acabou. Navegando, saldo manda; buscando, relevância
+   manda e o saldo só desempata.
+3. `robots.ts` só é reconhecido na RAIZ de `app/` — aninhado não gera rota
+   nenhuma. Diferente de `sitemap.ts`, que aceita. Mora em `src/app/robots.ts`
+   e decide pelo host.
+4. `slugDaLoja()` devolvia o host inteiro como slug quando
+   `NEXT_PUBLIC_LOJA_DOMINIO_RAIZ` estava vazia. Em produção sem a variável,
+   `www.sistemavargas.com.br` viraria "loja" e o ERP inteiro cairia em 404.
+   Hoje **falha fechado**: sem domínio raiz, nenhum host é loja.
+
+**Fase 2 é a reserva de estoque.** Tabela, índices e expiração já existem;
+falta o caminho de escrita — reservar ao iniciar o checkout, consumir ao
+confirmar, liberar ao cancelar. A decisão consciente que ela exige: hoje o
+sistema **absorve** overselling de propósito (ver `src/lib/produtos/estoque.ts`
+— deixa o estoque ir negativo porque prender a baixa de pedido de marketplace
+já vendido é pior). Para a vitrine isso não serve. Recomendação: reserva para
+TODOS os canais, ligada canal a canal e com modo simulação primeiro — o mesmo
+padrão de `marketplace_fila`, que já provou funcionar aqui.
+
+### SEGURANÇA — acesso anônimo do Supabase (dívida crítica, aberta)
+
+Plano completo em
+[`docs/seguranca-fechar-acesso-anon.md`](docs/seguranca-fechar-acesso-anon.md).
+
+Medido contra a produção com a chave `anon` — a chave pública, que vai dentro
+do JavaScript — e **sem nenhum login**: 28.593 produtos COM `preco_custo`, 64
+clientes com CPF, 1.863 vendas, 2.886 movimentações, 880 mensagens de WhatsApp
+e o **`senha_hash` dos operadores do PDV**.
+
+Não é novidade: está no bloco "AINDA ABERTO" de
+`supabase-fechar-acesso-publico-2.sql`. A causa é o PDV externo conectar sem
+sessão, e ligar RLS nessas tabelas derruba o caixa.
+
+**O que a Loja Online fez:** não ampliou. Todas as tabelas, views e funções
+novas negam tudo para `anon` (conferido: 401 em todas), e a vitrine não recebe
+chave. **O que ela não fez, e não podia:** fechar o que já estava aberto.
+
+**Por que virou urgente:** hoje a exposição vive atrás de um sistema que
+ninguém divulga. Uma vitrine pública é feita para atrair tráfego. O risco não
+sobe por causa do código da loja — sobe por causa da atenção que ela atrai.
+**Fechar antes de ligar `indexavel` e divulgar o endereço.**
+
+O primeiro passo é medir o que o PDV externo realmente usa, não sair rodando
+`REVOKE` — pular isso foi o que travou as tentativas anteriores.
+
 
 ### Auxiliar de Compras — motor de reposição
 
@@ -399,6 +567,28 @@ não vale passar por 99 telas.
 
 ## Pendências do Silvano (não são código)
 
+### Loja Online
+
+- **30 produtos com saldo real ficaram fora da vitrine** — R$ 12.465 de
+  mercadoria que a loja não oferece. Causa: publiquei filtrando por
+  `produtos.estoque`, e a loja lê `produto_estoque`. Publicar é um comando;
+  esperando seu aval.
+- **Ligar `indexavel`** em Loja Online → Configurações é o que abre a loja ao
+  Google. Recomendo só depois de revisar os 509 publicados **e** de fechar a
+  dívida do `anon`.
+- **Revisar o que está publicado.** Os 509 são um ponto de partida meu, não
+  uma decisão sua. A tela Loja Online → Produtos publica e pausa em massa,
+  com filtro por categoria, marca, com/sem foto e com/sem estoque.
+- **Loja nova exige DNS manual.** O DNS gerenciado do Registro.br **não
+  aceita `*`** no campo Nome — é limitação do serviço deles. Cada loja precisa
+  de um registro `A` próprio (`Nome: <subdominio>`, `Valor: 76.76.21.21`) mais
+  um `vercel domains add`. Quando isso incomodar (leia-se: quando o SaaS
+  abrir), o caminho é mover a HOSPEDAGEM do DNS para um provedor com curinga,
+  mantendo o REGISTRO no Registro.br. Move a zona inteira, e-mail incluído —
+  merece janela própria.
+
+### Do ERP
+
 - **14 produtos sem preço** no cadastro. Não é problema da Nuvemshop: afeta
   Shopee e ML também.
 - **27 produtos com estoque negativo.** A vitrine foi zerada, mas o saldo
@@ -498,5 +688,29 @@ substituída, 5405 vale para os dois modelos e basta corrigir os 49.
   menu do celular e no remover-item do pedido de compra. Sem hover no celular,
   o recurso simplesmente não existe para o operador. Se for ação, que seja
   visível.
+- **O Next 16 renomeou Middleware para Proxy.** O arquivo é `src/proxy.ts`,
+  e ele EXISTE neste projeto desde antes da loja: renova a sessão do Supabase,
+  manda o `x-pathname` que o layout do dashboard usa e faz o controle de
+  acesso por tela. Procurar por `middleware.ts`, não achar e concluir que não
+  há camada de proxy é erro fácil — eu cometi, e sobrescrevi o arquivo. O
+  `next build` passou, porque nada disso é erro de tipo.
+- **`git status` no fim de cada fatia.** Foi ele que pegou o erro acima: o
+  arquivo aparecia como *modificado* em vez de *novo*. O compilador não
+  protege contra arquivo sobrescrito.
 - **Este arquivo fica desatualizado sozinho.** Atualizar ao terminar cada
   fatia, ou ele vira mentira com aparência de verdade.
+
+---
+
+## Branch com trabalho não deployado
+
+`editor-anuncios` (`63e873f`) — 10 arquivos, ~2.000 linhas: edição de anúncio
+de marketplace (`EditarAnuncioModal`, campo de atributo da Shopee, rota
+`anuncios/[id]/editar`) mais lógica compartilhada extraída para
+`lib/marketplace/conteudoAnuncio.ts` e `edicao.ts` — daí as 223 remoções nos
+arquivos existentes: é refatoração, não exclusão.
+
+Estava sem commit no diretório de trabalho, existindo só numa máquina. Foi
+para um branch, e não para a `main`, porque a `main` faz deploy automático em
+produção: o código **compila** (`tsc` limpo, `next build` completo) mas não foi
+exercitado em tela nenhuma. Quem retomar decide quando promove.
