@@ -1,4 +1,4 @@
-import { mlGet, mlPost, refreshAccessTokenIfNeeded } from './client'
+import { mlGet, mlPost, mlPut, refreshAccessTokenIfNeeded } from './client'
 import { syncSingleItem } from './sync'
 import { MLApiError, type MLChannel } from './types'
 
@@ -186,6 +186,92 @@ export async function criarAnuncio(sb: any, canalInicial: MLChannel, input: Cria
     return { ok: true, anuncioId: syncResultado.anuncioId, itemId: String(itemId), permalink: resposta?.permalink }
   } catch (e: any) {
     const erro = e instanceof MLApiError ? e.message : (e?.message ?? 'Erro ao criar anúncio no Mercado Livre')
+    return { ok: false, erro }
+  }
+}
+
+// ── Edição de anúncio já publicado ─────────────────────────────────────────
+//
+// No Mercado Livre quase tudo cabe no mesmo `PUT /items/{id}`: título, fotos,
+// atributos e SKU do vendedor. A descrição é a exceção — sub-recurso próprio,
+// como já era na criação.
+//
+// Preço, estoque e status continuam em `write.ts`: é de lá que a fila e o
+// botão de pausar falam com o ML, e conteúdo não deve poder mexer neles.
+
+export type AtualizarAnuncioInputML = {
+  itemId: string
+  titulo?: string
+  descricao?: string
+  /** Fotos na ordem final; a que já está no ML vem com `idExterno` e não
+   *  sobe de novo (o ML só reaproveita a imagem quando recebe o id dela). */
+  imagens?: { url: string; idExterno: string | null }[]
+  atributos?: AtributoInputML[]
+  skuCanal?: string
+}
+
+export type ResultadoAtualizarAnuncioML =
+  | { ok: true; avisos: string[] }
+  | { ok: false; erro: string }
+
+export async function atualizarAnuncio(
+  sb: any, canalInicial: MLChannel, input: AtualizarAnuncioInputML,
+): Promise<ResultadoAtualizarAnuncioML> {
+  const avisos: string[] = []
+  try {
+    const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
+    const body: Record<string, any> = {}
+
+    if (input.titulo?.trim()) body.title = input.titulo.trim()
+    if (input.imagens) {
+      body.pictures = input.imagens.slice(0, 10).map(img =>
+        img.idExterno ? { id: img.idExterno } : { source: img.url })
+      if (input.imagens.length > 10) {
+        avisos.push(`O Mercado Livre aceita 10 fotos por anúncio — as ${input.imagens.length - 10} últimas ficaram de fora.`)
+      }
+    }
+    if (input.atributos) {
+      body.attributes = input.atributos.map(a => ({ id: a.id, value_name: a.valueName }))
+    }
+    if (input.skuCanal != null) body.seller_custom_field = input.skuCanal
+
+    if (Object.keys(body).length > 0) {
+      try {
+        await mlPut(`/items/${input.itemId}`, body, canal.accessToken)
+      } catch (e: any) {
+        // Anúncio publicado no modelo de família tem o título montado pelo
+        // próprio ML a partir do nome da família mais os atributos — e o PUT
+        // é recusado citando `title`. Salvar o resto e avisar é melhor que
+        // perder a edição inteira por causa de um campo que aquele anúncio
+        // não deixa mudar por fora.
+        const msg = e?.message ?? ''
+        if (body.title && /title/i.test(msg)) {
+          delete body.title
+          avisos.push('O título não pôde ser alterado por aqui: este anúncio usa o modelo de família do Mercado Livre, em que o título é montado por eles a partir do nome e dos atributos.')
+          if (Object.keys(body).length > 0) await mlPut(`/items/${input.itemId}`, body, canal.accessToken)
+        } else {
+          throw e
+        }
+      }
+    }
+
+    if (input.descricao != null) {
+      try {
+        // PUT atualiza a descrição existente; POST é para quem ainda não tem
+        // nenhuma — e devolve erro de recurso já existente se a houver.
+        await mlPut(`/items/${input.itemId}/description`, { plain_text: input.descricao }, canal.accessToken)
+      } catch {
+        try {
+          await mlPost(`/items/${input.itemId}/description`, { plain_text: input.descricao }, canal.accessToken)
+        } catch (e2: any) {
+          avisos.push(`A descrição não foi salva no Mercado Livre: ${e2?.message ?? 'recusada pela API'}`)
+        }
+      }
+    }
+
+    return { ok: true, avisos }
+  } catch (e: any) {
+    const erro = e instanceof MLApiError ? e.message : (e?.message ?? 'Erro ao atualizar o anúncio no Mercado Livre')
     return { ok: false, erro }
   }
 }

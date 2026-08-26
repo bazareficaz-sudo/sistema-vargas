@@ -427,3 +427,105 @@ export async function criarAnuncio(sb: any, canal: ShopeeChannel, input: CriarAn
     return { ok: false, erro }
   }
 }
+
+// ── Edição de anúncio já publicado ─────────────────────────────────────────
+//
+// `update_item` é o mesmo endpoint para tudo que é conteúdo: nome, descrição,
+// fotos, atributos, marca, peso, medidas e SKU. Preço e estoque NÃO passam
+// por aqui de propósito — quem cuida deles é `write.ts` (update_price e
+// update_stock), que a fila já usa e que sabe lidar com variação. Misturar as
+// duas coisas faria uma edição de texto arriscar o preço do anúncio.
+//
+// Campo ausente = campo não alterado. Isso não é detalhe de implementação: é
+// o que permite salvar só a ordem das fotos sem reenviar a descrição inteira.
+
+export type AtualizarAnuncioInput = {
+  itemId: number
+  titulo?: string
+  descricao?: string
+  /** Fotos na ordem final. A que já está na Shopee vem com `idExterno`; a
+   *  nova vem só com `url` e sobe agora. A primeira da lista é a capa. */
+  imagens?: { url: string; idExterno: string | null }[]
+  atributos?: AtributoInput[]
+  brandId?: number
+  brandNome?: string
+  pesoKg?: number
+  comprimentoCm?: number
+  larguraCm?: number
+  alturaCm?: number
+  skuCanal?: string
+  /** `description_type` do anúncio. A Shopee recusa `description` em item
+   *  com descrição estendida (a de blocos, com imagem no meio) — nesse caso
+   *  o texto é ignorado e o aviso volta para a tela, em vez de a edição
+   *  inteira ser recusada por causa de um campo. */
+  tipoDescricao?: string | null
+}
+
+export type ResultadoAtualizarAnuncio =
+  | { ok: true; avisos: string[] }
+  | { ok: false; erro: string }
+
+export async function atualizarAnuncio(
+  sb: any, canal: ShopeeChannel, input: AtualizarAnuncioInput,
+): Promise<ResultadoAtualizarAnuncio> {
+  const ctx = { sb, canal }
+  const avisos: string[] = []
+
+  try {
+    const callOptions = await callOpts(ctx)
+    const body: Record<string, any> = { item_id: input.itemId }
+
+    if (input.titulo?.trim()) body.item_name = input.titulo.trim()
+
+    if (input.descricao != null) {
+      if (input.tipoDescricao === 'extended') {
+        avisos.push('A descrição não foi enviada: este anúncio usa descrição estendida na Shopee, que só pode ser editada lá.')
+      } else {
+        body.description = input.descricao
+      }
+    }
+
+    if (input.imagens) {
+      const imageIdList: string[] = []
+      for (const img of input.imagens.slice(0, 9)) {
+        // Foto que já está na Shopee só muda de posição — reenviá-la geraria
+        // um id novo, um arquivo duplicado no media_space e uma chamada de
+        // upload por foto a cada troca de capa.
+        if (img.idExterno) { imageIdList.push(img.idExterno); continue }
+        imageIdList.push(await uploadImageFromUrl(ctx, img.url))
+      }
+      if (imageIdList.length === 0) {
+        return { ok: false, erro: 'O anúncio precisa de pelo menos uma foto.' }
+      }
+      body.image = { image_id_list: imageIdList }
+      if (input.imagens.length > 9) {
+        avisos.push(`A Shopee aceita 9 fotos por anúncio — as ${input.imagens.length - 9} últimas ficaram de fora.`)
+      }
+    }
+
+    if (input.atributos) {
+      // Mesma regra do add_item: atributo sem valor nenhum não vai, senão a
+      // Shopee recusa o item inteiro por validação.
+      const montados = input.atributos.map(montarAtributo).filter(a => a.attribute_value_list.length > 0)
+      body.attribute_list = montados
+    }
+
+    if (input.brandId != null) body.brand = { brand_id: input.brandId, original_brand_name: input.brandNome ?? '' }
+    if (input.pesoKg != null && input.pesoKg > 0) body.weight = input.pesoKg
+    if (input.comprimentoCm && input.larguraCm && input.alturaCm) {
+      body.dimension = {
+        package_length: input.comprimentoCm, package_width: input.larguraCm, package_height: input.alturaCm,
+      }
+    }
+    if (input.skuCanal != null) body.item_sku = input.skuCanal
+
+    // Só `item_id` significa que nada mudou — não gasta chamada.
+    if (Object.keys(body).length === 1) return { ok: true, avisos }
+
+    await shopeePost('/api/v2/product/update_item', body, callOptions)
+    return { ok: true, avisos }
+  } catch (e: any) {
+    const erro = e instanceof ShopeeApiError ? e.message : (e?.message ?? 'Erro ao atualizar o anúncio na Shopee')
+    return { ok: false, erro }
+  }
+}
