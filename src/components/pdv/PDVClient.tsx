@@ -633,6 +633,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         await recalcularKitsQueUsam(sb, item.produto_id)
       }
 
+      // Erro daqui para baixo não aborta a venda — ela já foi gravada e o
+      // estoque já baixou —, mas precisa ficar visível. Foi exatamente um
+      // insert falhando calado que deixou a carteira sem cobrar 87 vendas
+      // (ver o comentário do gatilho, mais abaixo): o cliente fica devendo
+      // e ninguém fica sabendo.
+      let erroContasReceber: string | null = null
+
       // Fiado
       if (isFiado && clienteSelecionado) {
         const n = Math.max(1, parseInt(fiadoParcelas) || 1)
@@ -651,11 +658,17 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             valor_recebido: 0, status: 'aberto', observacao: fiadoObs || null, operador_nome: operadorNome,
           }
         })
-        await sb.from('contas_receber').insert(parcelas)
-        await sb.from('clientes').update({
-          saldo_devedor: (clienteSelecionado.saldo_devedor ?? 0) + total,
-          data_ultima_compra_fiada: new Date().toISOString(),
-        }).eq('id', clienteSelecionado.id)
+        const { error: erroFiadoCR } = await sb.from('contas_receber').insert(parcelas)
+        if (erroFiadoCR) {
+          // Sem as parcelas não existe dívida a cobrar — somar ao
+          // saldo_devedor aqui só criaria um saldo que nenhuma conta explica.
+          erroContasReceber = `Fiado: ${erroFiadoCR.message}`
+        } else {
+          await sb.from('clientes').update({
+            saldo_devedor: (clienteSelecionado.saldo_devedor ?? 0) + total,
+            data_ultima_compra_fiada: new Date().toISOString(),
+          }).eq('id', clienteSelecionado.id)
+        }
       }
 
       // Carteira (cobrança na conta do cliente)
@@ -713,6 +726,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       const capVendaId = venda.id
 
       limparTudo()
+
+      if (erroContasReceber) {
+        alert(`⚠️ Venda concluída, mas a conta a receber do cliente NÃO foi criada (${erroContasReceber}).\n\nAvise o financeiro para lançar manualmente — até lá o cliente não aparece como devedor.`)
+      }
 
       // Mostra modal pós-venda em vez de alert
       setWppTel(capClienteTel ?? '')
