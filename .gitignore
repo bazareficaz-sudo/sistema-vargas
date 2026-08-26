@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Exceção: o exemplo é só a LISTA de chaves, sem valor nenhum. Versioná-lo é
+# o que permite montar uma máquina nova sem adivinhar o que falta preencher.
+!.env.example
 
 # vercel
 .vercel

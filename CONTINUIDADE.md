@@ -6,11 +6,11 @@ sistema: é o estado de quem estava com a mão na massa.
 Última atualização: 26/08/2026
 
 Tudo que está descrito aqui como pronto está **no ar** (último deploy:
-`7048d2e`, com as migrações já rodadas).
+`16b3ff0`, com as migrações já rodadas).
 
-Existe um branch com trabalho NÃO deployado: `editor-anuncios` (edição de
-anúncio de marketplace, ~2.000 linhas). Compila, mas não foi exercitado —
-ver a seção própria no fim.
+O editor de anúncios de marketplace foi promovido para a `main` em 26/08 e
+está em produção **sem nunca ter sido exercitado** contra as APIs reais — ver
+a seção própria no fim antes de usá-lo no catálogo em geral.
 
 ---
 
@@ -702,15 +702,57 @@ substituída, 5405 vale para os dois modelos e basta corrigir os 49.
 
 ---
 
-## Branch com trabalho não deployado
+## Editor de anúncios — no ar, e ainda não exercitado
 
-`editor-anuncios` (`63e873f`) — 10 arquivos, ~2.000 linhas: edição de anúncio
-de marketplace (`EditarAnuncioModal`, campo de atributo da Shopee, rota
+`editor-anuncios` (`63e873f`) virou `16b3ff0` na `main` em 26/08, a pedido do
+Silvano. 10 arquivos, ~2.000 linhas: edição de anúncio de marketplace
+(`EditarAnuncioModal`, campo de atributo da Shopee, rota
 `anuncios/[id]/editar`) mais lógica compartilhada extraída para
 `lib/marketplace/conteudoAnuncio.ts` e `edicao.ts` — daí as 223 remoções nos
 arquivos existentes: é refatoração, não exclusão.
 
-Estava sem commit no diretório de trabalho, existindo só numa máquina. Foi
-para um branch, e não para a `main`, porque a `main` faz deploy automático em
-produção: o código **compila** (`tsc` limpo, `next build` completo) mas não foi
-exercitado em tela nenhuma. Quem retomar decide quando promove.
+O modal antigo tinha sete campos e gravava direto na tabela. O problema não era
+o tamanho: `marketplace_anuncios` é um **espelho**, e o sync sobrescreve
+título, descrição, fotos e preço a cada rodada. Editar só aqui era escrever na
+areia, e a tela não avisava. O editor novo manda a alteração para a plataforma
+e relê o resultado.
+
+**O que ainda não aconteceu: um `update_item` de verdade na Shopee e um
+`PUT /items` de verdade no ML.** `tsc` limpo e `next build` completo não
+provam nada sobre o que a API aceita — a montagem do `attribute_list`, o
+reaproveitamento de `image_id` na reordenação e o limite de 9 fotos só serão
+testados no primeiro salvamento real.
+
+Primeiro uso recomendado: um anúncio **pausado ou de pouca saída**, mudando
+uma coisa de cada vez (só a ordem das fotos; depois só um atributo), conferindo
+no painel da plataforma entre uma e outra. O que a plataforma recusar aparece
+como aviso na tela, com a mensagem original dela.
+
+Fora do escopo, de propósito e escrito na tela: **trocar a categoria** (zera os
+atributos e o ML só permite em condições específicas) e **criar ou remover
+variação** (a API pede o conjunto inteiro de uma vez; mexer nisso pelo lado
+errado zera o estoque das existentes).
+
+---
+
+## Continuar noutro computador
+
+O repositório é a única coisa que atravessa. `README.md` tem o passo a passo
+(clone, `npm install`, `vercel env pull .env.local`) e `.env.example` lista
+**todas** as chaves de ambiente — ele estava desatualizado com duas, agora tem
+as nove que o código realmente lê.
+
+O que **não** atravessa, e vale conferir antes de trocar de máquina:
+
+- **A sessão do Claude Code é local** (`~/.claude/projects/`). Noutro
+  computador se começa do zero — este arquivo e o `docs/` são o repasse.
+- **`.env.local` nunca é versionado.** Sem ele a aplicação sobe e não acha
+  dado nenhum. É o erro mais provável no primeiro dia da máquina nova.
+- **Duas pastas irmãs não estão em git nenhum**, medido em 26/08:
+  `extensao-chrome/` (5 arquivos — o leitor de anúncios do ML) e
+  `vargas-entrada-agent/` (33 arquivos — o bot de WhatsApp da entrada de
+  mercadoria). Existem só neste computador. Trocar de máquina sem versioná-las
+  é perdê-las.
+- `vargasnexus-pdv/` tem um `PROMPT-CORRECOES.md` sem commit; os outros repos
+  da casa (`sistemavargas`, `vargas_app`, `vargasnexus-pdv`) estão em dia com o
+  GitHub.

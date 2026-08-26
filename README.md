@@ -1,37 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sistema Vargas — ERP, PDV, marketplaces e Loja Online
 
-## Getting Started
+Aplicação Next.js (App Router) sobre Supabase, publicada na Vercel. Um único
+repositório atende quatro frentes:
 
-First, run the development server:
+- **ERP** (`/dashboard`) — produtos, estoque, vendas, compras, financeiro, fiscal.
+- **PDV** (`/pdv`) — frente de caixa.
+- **Marketplaces** — Shopee, Mercado Livre e Nuvemshop: catálogo, anúncios,
+  pedidos, preço e estoque nos dois sentidos.
+- **Loja Online** (`/loja`, servida por subdomínio) — vitrine própria, lendo o
+  mesmo catálogo, sem duplicar produto nem saldo.
+
+Onde o trabalho parou, e por quê, fica em [`CONTINUIDADE.md`](CONTINUIDADE.md).
+Auditorias e decisões de arquitetura ficam em [`docs/`](docs).
+
+---
+
+## Rodar numa máquina nova
+
+Requisitos: **Node 20+** e Git. Nada mais precisa ser instalado globalmente.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/bazareficaz-sudo/sistema-vargas.git
+cd sistema-vargas
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+(Neste computador a pasta se chama `pdv-vargas-web` e mora ao lado dos outros
+projetos da casa; o clone cria uma pasta com o nome do repositório. É a mesma
+coisa — a raiz do repositório é onde está o `package.json`.)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Depois as variáveis de ambiente. Com a CLI da Vercel logada no projeto, o
+caminho curto traz tudo já preenchido:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npx vercel link
+npx vercel env pull .env.local
+```
 
-## Learn More
+Sem acesso à Vercel, copie [`.env.example`](.env.example) para `.env.local` e
+preencha à mão — o arquivo diz para que serve cada chave. **`.env.local` nunca
+é versionado**, então ele não vem no clone: é sempre o primeiro passo numa
+máquina nova, e é o motivo mais comum de a aplicação subir e não achar dado
+nenhum.
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run dev     # http://localhost:3000
+npm run build   # o mesmo build que a Vercel roda
+npx tsc --noEmit
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+`localhost` nunca é tratado como loja: o proxy só reconhece uma vitrine quando
+`NEXT_PUBLIC_LOJA_DOMINIO_RAIZ` está preenchida, e falha fechado quando não
+está. Em desenvolvimento, a loja abre em `/loja`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Banco
 
-## Deploy on Vercel
+Projeto Supabase `ntwfkmwprjciucydedku` (o id não é segredo; as chaves são).
+As migrações são arquivos `supabase-*.sql` na raiz, executados **à mão** no SQL
+Editor do Supabase, em ordem de necessidade — não há `migrate` automático. Cada
+arquivo abre dizendo o que faz e termina dizendo como desfazer.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Regra que já custou caro: **rodar o SQL antes de publicar o código que lê a
+coluna nova.** Um `select` de coluna inexistente derruba a consulta inteira, e
+com ela a tela.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-"# sistema-vargas" 
+## Deploy
+
+Push na `main` publica em produção pela Vercel. Não há ambiente de homologação:
+o que entra na `main` vai ao ar. Trabalho que ainda não deve ir ao ar vive numa
+branch própria.
+
+## Antes de escrever código
+
+Leia [`AGENTS.md`](AGENTS.md). Este Next tem mudanças de contratos em relação ao
+que se costuma assumir — a mais traiçoeira: *Middleware* virou **Proxy**, o
+arquivo é `src/proxy.ts` e ele já existe.
