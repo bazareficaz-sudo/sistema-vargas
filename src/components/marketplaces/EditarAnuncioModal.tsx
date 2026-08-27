@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
 import { formatarTituloAnuncio } from '@/lib/texto/titulo'
 import PainelDimensoesImagens from './PainelDimensoesImagens'
+import { useDimensoes, CORES_NIVEL } from '@/lib/imagens/useDimensoes'
 import CampoAtributo, {
   atributosVisiveis, atributoPreenchido,
   type AtributoShopee, type ValorEscolhidoShopee,
@@ -276,6 +277,16 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
   const [erroImagem, setErroImagem] = useState('')
   const [urlNova, setUrlNova] = useState('')
   const [arrastando, setArrastando] = useState<number | null>(null)
+
+  // Identidade da foto para a medição. A da plataforma tem `idExterno`; a que
+  // ainda não subiu se identifica pela posição. É a MESMA regra usada ao
+  // montar a lista do painel logo abaixo da grade — se as duas divergissem,
+  // o selo da miniatura mostraria o tamanho de outra foto.
+  function idDaFoto(f: Foto, i: number) {
+    return f.idExterno ?? `nova-${i}`
+  }
+  const fotosMediveis = fotos.map((f, i) => ({ id: idDaFoto(f, i), url: f.url }))
+  const { medidas: medidasFotos, esquecer: esquecerMedida } = useDimensoes(fotosMediveis, plataforma)
 
   function moverFoto(de: number, para: number) {
     if (para < 0 || para >= fotos.length || de === para) return
@@ -688,6 +699,30 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-600 text-white font-semibold" title="Ainda não está no marketplace — sobe ao salvar">nova</span>
                           )}
                         </div>
+                        {/* Tamanho sempre à vista, e no topo: a barra de baixo
+                            só aparece no hover, e no celular não existe hover
+                            nenhum — o número simplesmente não existiria para
+                            quem trabalha no telefone. */}
+                        {(() => {
+                          const m = medidasFotos[idDaFoto(f, i)]
+                          if (!m) {
+                            return (
+                              <span className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded-full bg-black/40 text-white font-medium">…</span>
+                            )
+                          }
+                          if ('erro' in m) {
+                            return (
+                              <span className="absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-500/80 text-white font-medium"
+                                title="Não foi possível ler o tamanho — o endereço da imagem pode estar fora do ar.">?</span>
+                            )
+                          }
+                          return (
+                            <span className={`absolute top-1 right-1 text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${CORES_NIVEL[m.avaliacao.nivel]}`}
+                              title={m.avaliacao.mensagem}>
+                              {m.largura}×{m.altura}
+                            </span>
+                          )
+                        })()}
                         <div className="absolute inset-x-0 bottom-0 bg-white/95 border-t border-gray-200 px-1 py-1 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
                           <div className="flex gap-0.5">
                             <button onClick={() => moverFoto(i, i - 1)} disabled={i === 0}
@@ -732,11 +767,13 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
                   {erroImagem && <p className="text-xs text-red-600">{erroImagem}</p>}
 
                   <PainelDimensoesImagens
-                    imagens={fotos.map((f, i) => ({ id: f.idExterno ?? `nova-${i}`, url: f.url, principal: i === 0 }))}
+                    imagens={fotos.map((f, i) => ({ id: idDaFoto(f, i), url: f.url, principal: i === 0 }))}
                     plataforma={plataforma}
                     produtoId={produtoId || null}
+                    medidas={medidasFotos}
+                    esquecer={esquecerMedida}
                     onImagemAjustada={(imagemId, novaUrl) => {
-                      setFotos(atual => atual.map((f, i) => ((f.idExterno ?? `nova-${i}`) === imagemId ? { url: novaUrl, idExterno: null } : f)))
+                      setFotos(atual => atual.map((f, i) => (idDaFoto(f, i) === imagemId ? { url: novaUrl, idExterno: null } : f)))
                     }}
                   />
                 </>
