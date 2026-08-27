@@ -70,6 +70,9 @@ type AnuncioVinculado = {
   // isolada, e mandar o id da variação daria erro sem explicação.
   canalId: string | null
   anuncioId: string
+  // Id do anúncio DENTRO da plataforma. É o que as rotas de sincronização
+  // pedem — o id daqui não significa nada para o marketplace.
+  idExterno: string | null
 }
 
 type Props = {
@@ -206,10 +209,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     setCarregandoAnuncios(true)
     const [{ data: diretos }, { data: variacoes }] = await Promise.all([
       sb.from('marketplace_anuncios')
-        .select('id, canal_id, titulo, preco_venda, status, url_anuncio, marketplace_canais(nome, plataforma)')
+        .select('id, canal_id, titulo, preco_venda, status, url_anuncio, id_externo, marketplace_canais(nome, plataforma)')
         .eq('produto_id', produtoId).eq('tem_variacao', false),
       sb.from('marketplace_anuncio_variacoes')
-        .select('id, nome_variacao, preco, anuncio_id, marketplace_anuncios!inner(id, canal_id, titulo, status, url_anuncio, marketplace_canais(nome, plataforma))')
+        .select('id, nome_variacao, preco, anuncio_id, marketplace_anuncios!inner(id, canal_id, titulo, status, url_anuncio, id_externo, marketplace_canais(nome, plataforma))')
         .eq('produto_id', produtoId),
     ])
 
@@ -219,7 +222,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       lista.push({
         id: a.id, canalNome: canal?.nome ?? '—', plataforma: canal?.plataforma ?? '',
         titulo: a.titulo, preco: a.preco_venda ?? 0, status: a.status, urlAnuncio: a.url_anuncio,
-        canalId: a.canal_id ?? null, anuncioId: a.id,
+        canalId: a.canal_id ?? null, anuncioId: a.id, idExterno: a.id_externo ?? null,
       })
     }
     for (const v of (variacoes ?? []) as any[]) {
@@ -230,6 +233,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         titulo: anuncio?.titulo ?? '—', variacaoNome: v.nome_variacao,
         preco: v.preco ?? 0, status: anuncio?.status ?? 'rascunho', urlAnuncio: anuncio?.url_anuncio ?? null,
         canalId: anuncio?.canal_id ?? null, anuncioId: anuncio?.id ?? v.anuncio_id,
+        idExterno: anuncio?.id_externo ?? null,
       })
     }
     setAnunciosVinculados(lista)
@@ -286,6 +290,94 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       `${ok} anúncio(s) ${verbo}.` + (falhas.length > 0 ? ` Falhas: ${falhas.join('; ')}` : ''))
     setMexendoAnuncios(false)
     if (produto) carregarAnunciosVinculados(produto.id)
+  }
+
+  // Relê cada anúncio na plataforma e regrava o espelho.
+  //
+  // A coluna "Situação" mostra o que `marketplace_anuncios` guarda, e essa
+  // tabela só é atualizada pela varredura (a cada 20 min) ou por quem
+  // sincroniza à mão. Um anúncio pausado no painel do marketplace continua
+  // aparecendo como Ativo aqui até isso acontecer — e "pausar/reativar" em
+  // cima de uma situação errada tem resultado imprevisível.
+  //
+  // Por anúncio, não por variação: variações da mesma peça compartilham o
+  // anúncio-pai, e sincronizá-lo uma vez já traz todas.
+  async function puxarSituacaoDosCanais() {
+    const porAnuncio = new Map<string, { plataforma: string; canalId: string; idExterno: string }>()
+    for (const a of anunciosVinculados) {
+      if (!a.canalId || !a.idExterno || porAnuncio.has(a.anuncioId)) continue
+      porAnuncio.set(a.anuncioId, { plataforma: a.plataforma, canalId: a.canalId, idExterno: a.idExterno })
+    }
+
+    const semId = anunciosVinculados.filter(a => !a.idExterno).length
+    if (porAnuncio.size === 0) {
+      setResumoAnuncios(semId > 0
+        ? 'Nenhum anúncio tem ID no canal — estes foram cadastrados à mão e nunca vieram de sincronização.'
+        : 'Nenhum anúncio para consultar.')
+      return
+    }
+
+    setMexendoAnuncios(true); setResumoAnuncios('')
+    let ok = 0
+    const falhas: string[] = []
+    for (const [, item] of porAnuncio) {
+      const rota = item.plataforma === 'shopee'
+        ? '/api/marketplace/shopee/sync-item'
+        : item.plataforma === 'mercadolivre'
+          ? '/api/marketplace/mercadolivre/sync-item'
+          : null
+      if (!rota) { falhas.push(`${item.plataforma || 'canal desconhecido'}: sem integração para consultar`); continue }
+      try {
+        const d = await fetch(rota, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ canalId: item.canalId, idExterno: item.idExterno }),
+        }).then(r => r.json())
+        if (d.ok) ok++
+        else falhas.push(d.erro ?? 'falha desconhecida')
+      } catch (e: any) {
+        falhas.push(e.message)
+      }
+    }
+
+    setResumoAnuncios(
+      `${ok} anúncio(s) relido(s) na plataforma.`
+      + (semId > 0 ? ` ${semId} sem ID no canal, fora da consulta.` : '')
+      + (falhas.length > 0 ? ` Falhas: ${falhas.join('; ')}` : ''))
+    setMexendoAnuncios(false)
+    if (produto) carregarAnunciosVinculados(produto.id)
+  }
+
+  // Manda o estoque do ERP para os anúncios deste produto, agora.
+  //
+  // A conta de QUAL número enviar é do servidor (`estoqueDoSistema`), a mesma
+  // que a fila automática usa — a tela não recalcula nada por conta própria,
+  // senão os dois caminhos divergem e ninguém sabe qual está certo.
+  async function enviarEstoqueAosCanais() {
+    if (!produto) return
+    setMexendoAnuncios(true); setResumoAnuncios('')
+    try {
+      const d = await fetch('/api/marketplaces/produto/enviar-estoque', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ produtoId: produto.id }),
+      }).then(r => r.json())
+
+      if (!d.ok) {
+        setResumoAnuncios(`Não foi possível enviar: ${d.erro ?? 'falha desconhecida'}`)
+      } else {
+        // O detalhe de cada anúncio vai junto: "3 enviados" não responde
+        // por que os outros dois ficaram de fora, e essa é a pergunta.
+        const detalhes = (d.resultados ?? [])
+          .filter((r: any) => r.situacao !== 'enviado')
+          .map((r: any) => `${r.canalNome}: ${r.detalhe}`)
+        setResumoAnuncios(
+          `Estoque ${d.estoque} (${d.origem}) enviado a ${d.enviados} anúncio(s).`
+          + (detalhes.length > 0 ? ` ${detalhes.join(' · ')}` : ''))
+      }
+    } catch (e: any) {
+      setResumoAnuncios(`Não foi possível enviar: ${e.message}`)
+    }
+    setMexendoAnuncios(false)
+    carregarAnunciosVinculados(produto.id)
   }
 
   useEffect(() => {
@@ -1850,7 +1942,23 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                       {anunciosVinculados.filter(a => a.status === 'pausado').length} pausado(s)
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
+                    {/* Ler o canal e escrever no canal ficam juntos e antes
+                        dos de pausar: é a ordem em que o operador precisa
+                        deles — conferir a situação de verdade antes de agir
+                        sobre ela. */}
+                    <button type="button" disabled={mexendoAnuncios}
+                      onClick={puxarSituacaoDosCanais}
+                      title="Relê cada anúncio na plataforma e atualiza a coluna Situação. A varredura automática só passa a cada 20 minutos."
+                      className="px-3 py-1.5 text-xs rounded-lg border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 disabled:opacity-40">
+                      ↻ Puxar situação dos canais
+                    </button>
+                    <button type="button" disabled={mexendoAnuncios}
+                      onClick={enviarEstoqueAosCanais}
+                      title="Envia o estoque do sistema para os anúncios deste produto agora, sem esperar a fila. Não mexe no preço."
+                      className="px-3 py-1.5 text-xs rounded-lg border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-40">
+                      ⇧ Enviar estoque aos canais
+                    </button>
                     <button type="button" disabled={mexendoAnuncios}
                       onClick={() => mudarStatusAnuncios('pausar', anunciosVinculados.filter(a => a.status === 'ativo'))}
                       title="Tira o produto do ar em todos os canais de uma vez"
