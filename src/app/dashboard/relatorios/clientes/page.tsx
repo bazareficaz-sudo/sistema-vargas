@@ -1,8 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import ClientesBIClient from '@/components/relatorios/ClientesBIClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { buscarTudo } from '@/lib/supabase/paginar'
 
 export const dynamic = 'force-dynamic'
+
+type VendaRFM = { id: string; total: number | null; status: string; created_at: string; cliente_id: string | null }
 
 export default async function RelatorioClientesPage() {
   const supabase = await createClient()
@@ -15,15 +18,25 @@ export default async function RelatorioClientesPage() {
 
   const [clientesRes, vendasRes] = await Promise.all([
     supabase.from('clientes').select('id, nome, telefone, created_at').eq('empresa_id', empresaId),
-    supabase.from('vendas')
-      .select('id, total, status, created_at, cliente_id')
-      .eq('empresa_id', empresaId)
-      .eq('status', 'concluida')
-      .order('created_at', { ascending: false }),
+    // Paginado: o RFM classifica cliente por quanto e quando comprou, e as
+    // 2.120 vendas nao cabem numa resposta do PostgREST (teto de 1.000). Com
+    // o corte, quem compra ha mais tempo aparecia gastando menos do que gasta.
+    // Aqui as linhas sao necessarias mesmo — a tela cruza venda com cliente,
+    // hora e frequencia —, entao a correcao e paginar, nao agregar.
+    buscarTudo<VendaRFM>(
+      (de, ate) => supabase.from('vendas')
+        .select('id, total, status, created_at, cliente_id')
+        .eq('empresa_id', empresaId)
+        .eq('status', 'concluida')
+        .order('created_at', { ascending: false })
+        .order('id')
+        .range(de, ate),
+      { rotulo: 'vendas (RFM de clientes)' },
+    ),
   ])
 
   const clientes = clientesRes.data ?? []
-  const vendas = vendasRes.data ?? []
+  const vendas = vendasRes
 
   // RFM por cliente
   const rfm: Record<string, {

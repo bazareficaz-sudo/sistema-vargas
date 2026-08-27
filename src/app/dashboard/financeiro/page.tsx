@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { inicioDoMes } from '@/lib/datas'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +19,6 @@ export default async function FinanceiroPage() {
   const hoje = new Date().toISOString().split('T')[0]
   const em7 = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
   const em30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-  const inicioMes = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]
 
   try { await supabase.rpc('atualizar_contas_vencidas') } catch {}
 
@@ -31,11 +31,9 @@ export default async function FinanceiroPage() {
       .select('valor, status, vencimento')
       .eq('empresa_id', empresaId)
       .neq('status', 'cancelado'),
-    supabase.from('vendas')
-      .select('total')
-      .eq('empresa_id', empresaId)
-      .eq('status', 'concluida')
-      .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+    // Somado no banco: buscar as linhas e reduzi-las aqui trazia so as 1.000
+    // primeiras vendas do mes, teto do PostgREST, sem aviso nenhum.
+    supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioDoMes().toISOString() }),
   ])
 
   const cr = crRes.data ?? []
@@ -58,7 +56,7 @@ export default async function FinanceiroPage() {
   const cpVence7 = cp.filter(c => c.status === 'pendente' && c.vencimento >= hoje && c.vencimento <= em7).reduce((s, c) => s + Number(c.valor ?? 0), 0)
   const cpHoje = cp.filter(c => c.vencimento === hoje && c.status === 'pendente').reduce((s, c) => s + Number(c.valor ?? 0), 0)
 
-  const faturamentoMes = (vendasMesRes.data ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
+  const faturamentoMes = Number((vendasMesRes.data ?? [])[0]?.faturamento ?? 0)
   const saldoLiquido = (crPendente + crVencido) - (cpPendente + cpVencido)
 
   return (

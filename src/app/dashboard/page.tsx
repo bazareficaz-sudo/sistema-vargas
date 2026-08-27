@@ -4,6 +4,7 @@ import { permissoesEfetivas, buscarExcecoes, type Papel } from '@/lib/auth/permi
 import FiltroMes from '@/components/dashboard/FiltroMes'
 import Link from 'next/link'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { inicioDoDia, inicioDoMes, diaISO } from '@/lib/datas'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,9 +40,12 @@ export default async function DashboardPage({
 
   const hoje = new Date()
   hoje.setHours(0, 0, 0, 0)
-  const inicioHoje = hoje.toISOString()
-  const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString()
-  const todayStr = ymd(hoje)
+  // Recortes de tempo no fuso da loja, não no do servidor. A Vercel roda em
+  // UTC: `setHours(0,0,0,0)` aqui é 21h de ontem em São Paulo, e "vendas de
+  // hoje" vinha começando três horas cedo demais.
+  const inicioHoje = inicioDoDia().toISOString()
+  const inicioMes = inicioDoMes().toISOString()
+  const todayStr = diaISO()
 
   // ── Mês selecionado pro widget de compras ──────────────────────────────
   const { mes: mesParam } = await searchParams
@@ -67,8 +71,14 @@ export default async function DashboardPage({
     entradasCompraRes, nfeEntradasCompraRes,
     fornecedoresListRes,
   ] = await Promise.all([
-    temVendas ? supabase.from('vendas').select('total').eq('empresa_id', empresaId).eq('status', 'concluida').gte('created_at', inicioHoje) : Promise.resolve({ data: [] as any[] }),
-    temVendas ? supabase.from('vendas').select('total').eq('empresa_id', empresaId).eq('status', 'concluida').gte('created_at', inicioMes) : Promise.resolve({ data: [] as any[] }),
+    // Soma no banco, não aqui. Buscar as linhas e reduzi-las em JavaScript
+    // parecia inocente e não era: o PostgREST devolve no máximo 1.000 linhas,
+    // então o "faturamento do mês" virava o faturamento das 1.000 primeiras
+    // vendas do mês. Em agosto/26 isso escondeu R$ 18.397,59 de R$ 45.012,53,
+    // sem erro nenhum na tela. `vendas_resumo` está em
+    // supabase-relatorios-agregados.sql.
+    temVendas ? supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioHoje }) : Promise.resolve({ data: [] as any[] }),
+    temVendas ? supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioMes }) : Promise.resolve({ data: [] as any[] }),
     tem('produtos') ? supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).eq('ativo', true) : Promise.resolve({ count: null }),
     tem('clientes') ? supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId) : Promise.resolve({ count: null }),
     tem('fornecedores') ? supabase.from('fornecedores').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId) : Promise.resolve({ count: null }),
@@ -86,9 +96,12 @@ export default async function DashboardPage({
     (temCompras && tem('fornecedores')) ? supabase.from('fornecedores').select('id, razao_social, nome_fantasia').eq('empresa_id', empresaId) : Promise.resolve({ data: [] as any[] }),
   ])
 
-  const totalHoje = (vendasHojeRes.data ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
-  const qtdHoje = vendasHojeRes.data?.length ?? 0
-  const totalMes = (vendasMesRes.data ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
+  // `vendas_resumo` devolve uma linha só: faturamento, quantidade, desconto.
+  const resumoHoje = (vendasHojeRes.data ?? [])[0] ?? { faturamento: 0, quantidade: 0 }
+  const resumoMes = (vendasMesRes.data ?? [])[0] ?? { faturamento: 0, quantidade: 0 }
+  const totalHoje = Number(resumoHoje.faturamento ?? 0)
+  const qtdHoje = Number(resumoHoje.quantidade ?? 0)
+  const totalMes = Number(resumoMes.faturamento ?? 0)
 
   const canaisConectados = canaisRes.data ?? []
   const pedidosMarketplaceHoje = pedidosMarketplaceHojeRes.data ?? []

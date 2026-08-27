@@ -1,8 +1,15 @@
 import { createClient } from '@/lib/supabase/server'
 import AlertasBIClient from '@/components/relatorios/AlertasBIClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { buscarTudo } from '@/lib/supabase/paginar'
+import { inicioDoMes, inicioDoMesAnterior, inicioDeDiasAtras } from '@/lib/datas'
 
 export const dynamic = 'force-dynamic'
+
+type ProdutoAlerta = {
+  id: string; nome: string; estoque: number | null; estoque_minimo: number | null
+  preco_custo: number | null; preco_venda: number | null; ativo: boolean; categoria: string | null
+}
 
 export default async function RelatorioAlertasPage() {
   const supabase = await createClient()
@@ -11,14 +18,13 @@ export default async function RelatorioAlertasPage() {
   const empresaId = profile?.empresa_id ?? ''
 
   const hoje = new Date()
-  const inicio30 = new Date(hoje); inicio30.setDate(inicio30.getDate() - 30); inicio30.setHours(0,0,0,0)
-  const inicio7 = new Date(hoje); inicio7.setDate(inicio7.getDate() - 7); inicio7.setHours(0,0,0,0)
-  const inicio90 = new Date(hoje); inicio90.setDate(inicio90.getDate() - 90)
+  const inicio30 = inicioDeDiasAtras(30, hoje)
+  const inicio7 = inicioDeDiasAtras(7, hoje)
 
   const [
-    produtosRes,
-    vendasIds30Res,
-    vendasIds7Res,
+    produtos,
+    vendidos30Res,
+    vendidos7Res,
     contasPagarRes,
     contasReceberRes,
     vendasMesAtualRes,
@@ -26,59 +32,53 @@ export default async function RelatorioAlertasPage() {
     clientesRes,
     entradasRes,
     entradasXmlRes,
+    vendasPorClienteRes,
   ] = await Promise.all([
-    supabase.from('produtos').select('id, nome, estoque, estoque_minimo, preco_custo, preco_venda, ativo, categoria').eq('empresa_id', empresaId).eq('ativo', true),
-    supabase.from('vendas').select('id').eq('empresa_id', empresaId).eq('status', 'concluida').gte('created_at', inicio30.toISOString()),
-    supabase.from('vendas').select('id').eq('empresa_id', empresaId).eq('status', 'concluida').gte('created_at', inicio7.toISOString()),
+    // 14.263 produtos ativos, e o PostgREST entrega 1.000 por vez: sem
+    // paginar, todo alerta de estoque desta tela falava de 7% do catalogo.
+    buscarTudo<ProdutoAlerta>(
+      (de, ate) => supabase.from('produtos')
+        .select('id, nome, estoque, estoque_minimo, preco_custo, preco_venda, ativo, categoria')
+        .eq('empresa_id', empresaId).eq('ativo', true).order('id').range(de, ate),
+      { rotulo: 'produtos ativos (alertas)' },
+    ),
+    // Antes: buscar os ids das vendas e mandar todos num `.in('venda_id',...)`.
+    // Quebrado em dois lugares — os ids ja vinham truncados em 1.000, e 2.016
+    // UUIDs numa URL passam de qualquer limite de servidor. O agrupamento
+    // pertence ao banco.
+    supabase.rpc('produtos_vendidos', { p_empresa: empresaId, p_inicio: inicio30.toISOString() }),
+    supabase.rpc('produtos_vendidos', { p_empresa: empresaId, p_inicio: inicio7.toISOString() }),
     supabase.from('contas_pagar').select('valor, status, vencimento, descricao').eq('empresa_id', empresaId).in('status', ['pendente', 'vencido']),
     supabase.from('contas_receber').select('valor, status, vencimento').eq('empresa_id', empresaId).in('status', ['pendente', 'vencido']),
-    supabase.from('vendas').select('total').eq('empresa_id', empresaId).eq('status', 'concluida')
-      .gte('created_at', new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString()),
-    supabase.from('vendas').select('total').eq('empresa_id', empresaId).eq('status', 'concluida')
-      .gte('created_at', new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1).toISOString())
-      .lte('created_at', new Date(hoje.getFullYear(), hoje.getMonth(), 0, 23, 59, 59).toISOString()),
-    supabase.from('clientes').select('id').eq('empresa_id', empresaId),
+    supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioDoMes(hoje).toISOString() }),
+    supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioDoMesAnterior(hoje).toISOString(), p_fim: inicioDoMes(hoje).toISOString() }),
+    supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId),
     supabase.from('entradas').select('id, status, valor_total').eq('empresa_id', empresaId).eq('status', 'confirmada').is('total_contas', null),
     // A mesma compra entra por duas portas. Contar só o lançamento manual
     // escondia as notas importadas que também ficaram sem conta a pagar.
     supabase.from('nfe_entradas').select('id, status, valor_total').eq('empresa_id', empresaId).eq('status', 'finalizada').is('dados_financeiro', null),
+    supabase.rpc('vendas_por_cliente', { p_empresa: empresaId }),
   ])
 
-  const produtos = produtosRes.data ?? []
-  const ids30 = (vendasIds30Res.data ?? []).map(v => v.id)
-  const ids7 = (vendasIds7Res.data ?? []).map(v => v.id)
-
-  // Itens vendidos por produto nos últimos 30 e 7 dias
-  const vendidos30: Record<string, number> = {}
-  const vendidos7: Record<string, number> = {}
-
-  if (ids30.length > 0) {
-    const { data: itens30 } = await supabase.from('venda_itens').select('produto_id, quantidade').in('venda_id', ids30)
-    for (const it of itens30 ?? []) vendidos30[it.produto_id] = (vendidos30[it.produto_id] ?? 0) + Number(it.quantidade ?? 0)
+  const somaPorProduto = (linhas: { produto_id: string; quantidade: number }[] | null) => {
+    const mapa: Record<string, number> = {}
+    for (const l of linhas ?? []) mapa[l.produto_id] = Number(l.quantidade ?? 0)
+    return mapa
   }
-  if (ids7.length > 0) {
-    const { data: itens7 } = await supabase.from('venda_itens').select('produto_id, quantidade').in('venda_id', ids7)
-    for (const it of itens7 ?? []) vendidos7[it.produto_id] = (vendidos7[it.produto_id] ?? 0) + Number(it.quantidade ?? 0)
-  }
+  const vendidos30 = somaPorProduto(vendidos30Res.data)
+  const vendidos7 = somaPorProduto(vendidos7Res.data)
 
-  // Clientes inativos VIP (alta compra, sem comprar há 60+ dias)
-  const { data: vendasClientes } = await supabase
-    .from('vendas').select('cliente_id, total, created_at')
-    .eq('empresa_id', empresaId).eq('status', 'concluida')
-  const clienteMap: Record<string, { total: number; ultima: string }> = {}
-  for (const v of vendasClientes ?? []) {
-    if (!v.cliente_id) continue
-    if (!clienteMap[v.cliente_id]) clienteMap[v.cliente_id] = { total: 0, ultima: v.created_at }
-    clienteMap[v.cliente_id].total += Number(v.total ?? 0)
-    if (v.created_at > clienteMap[v.cliente_id].ultima) clienteMap[v.cliente_id].ultima = v.created_at
-  }
-  const totalsByCliente = Object.values(clienteMap).map(c => c.total).sort((a, b) => b - a)
+  // Clientes VIP inativos (alta compra, sem comprar ha 60+ dias). O total e a
+  // ultima compra de cada cliente vem agrupados do banco — antes saiam das
+  // 1.000 primeiras vendas, o que rebaixava o gasto de quem compra ha mais
+  // tempo e escondia a compra recente de quem ficou fora do corte.
+  const clientes = (vendasPorClienteRes.data ?? []) as { cliente_id: string; total: number; ultima_compra: string }[]
+  const totalsByCliente = clientes.map(c => Number(c.total ?? 0)).sort((a, b) => b - a)
   const limiteVip = totalsByCliente[Math.floor(totalsByCliente.length * 0.1)] ?? 0
-  const clientesVipInativos = Object.entries(clienteMap)
-    .filter(([, c]) => {
-      const dias = Math.floor((hoje.getTime() - new Date(c.ultima).getTime()) / 86400000)
-      return c.total >= limiteVip && dias >= 60
-    }).length
+  const clientesVipInativos = clientes.filter(c => {
+    const dias = Math.floor((hoje.getTime() - new Date(c.ultima_compra).getTime()) / 86400000)
+    return Number(c.total ?? 0) >= limiteVip && dias >= 60
+  }).length
 
   // Gera alertas
   const alertas: {
@@ -134,8 +134,8 @@ export default async function RelatorioAlertasPage() {
   })
 
   // Queda de faturamento
-  const fatMesAtual = (vendasMesAtualRes.data ?? []).reduce((s, v) => s + Number(v.total ?? 0), 0)
-  const fatMesAnt = (vendasMesAnteriorRes.data ?? []).reduce((s, v) => s + Number(v.total ?? 0), 0)
+  const fatMesAtual = Number((vendasMesAtualRes.data ?? [])[0]?.faturamento ?? 0)
+  const fatMesAnt = Number((vendasMesAnteriorRes.data ?? [])[0]?.faturamento ?? 0)
   if (fatMesAnt > 0 && fatMesAtual < fatMesAnt * 0.8) {
     const queda = ((fatMesAnt - fatMesAtual) / fatMesAnt) * 100
     alertas.push({
@@ -185,5 +185,5 @@ export default async function RelatorioAlertasPage() {
     quantidade: altaMargem.length, link: '/dashboard/relatorios/produtos',
   })
 
-  return <AlertasBIClient alertas={alertas} totalProdutos={produtos.length} totalClientes={clientesRes.data?.length ?? 0} />
+  return <AlertasBIClient alertas={alertas} totalProdutos={produtos.length} totalClientes={clientesRes.count ?? 0} />
 }

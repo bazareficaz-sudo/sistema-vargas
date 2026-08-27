@@ -1,8 +1,18 @@
 import { createClient } from '@/lib/supabase/server'
 import VendasBIClient from '@/components/relatorios/VendasBIClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { buscarTudo } from '@/lib/supabase/paginar'
 
 export const dynamic = 'force-dynamic'
+
+type VendaRelatorio = {
+  id: string; total: number | null; desconto: number | null; status: string; created_at: string
+  // O tipo gerado do PostgREST descreve relacao embutida como ARRAY, mesmo
+  // quando ela e um-para-um. A tela ja lia esses dois campos com `as any` por
+  // causa disso; aqui as duas formas sao aceitas em vez de fingir uma so.
+  clientes: { nome: string } | { nome: string }[] | null
+  vendedores: { nome: string } | { nome: string }[] | null
+}
 
 export default async function RelatorioVendasPage({
   searchParams,
@@ -21,29 +31,31 @@ export default async function RelatorioVendasPage({
   const inicioISO = `${inicio}T00:00:00`
   const fimISO = `${fim}T23:59:59`
 
-  const [vendasRes, itensRes, vendedoresRes] = await Promise.all([
-    supabase.from('vendas')
-      .select('id, total, desconto, status, created_at, clientes(nome), vendedores(nome)')
-      .eq('empresa_id', empresaId)
-      .gte('created_at', inicioISO)
-      .lte('created_at', fimISO)
-      .order('created_at', { ascending: true }),
-    supabase.from('venda_itens')
-      .select('produto_id, quantidade, preco_unitario, custo_unitario, produtos(nome, categoria, marca)')
-      .in('venda_id',
-        (await supabase.from('vendas').select('id')
-          .eq('empresa_id', empresaId)
-          .gte('created_at', inicioISO)
-          .lte('created_at', fimISO)
-          .eq('status', 'concluida')
-        ).data?.map(v => v.id) ?? []
-      ),
-    supabase.from('vendedores').select('id, nome').eq('empresa_id', empresaId),
+  const [vendas, vendidosRes, produtosRes] = await Promise.all([
+    // Paginado: a tela precisa das vendas uma a uma (venda por hora do dia,
+    // por vendedor, por periodo), e o PostgREST entrega no maximo 1.000 por
+    // requisicao. Com 1.701 vendas no mes, todo numero desta tela vinha menor.
+    buscarTudo<VendaRelatorio>(
+      (de, ate) => supabase.from('vendas')
+        .select('id, total, desconto, status, created_at, clientes(nome), vendedores(nome)')
+        .eq('empresa_id', empresaId)
+        .gte('created_at', inicioISO)
+        .lte('created_at', fimISO)
+        .order('created_at', { ascending: true })
+        .order('id')
+        .range(de, ate),
+      { rotulo: 'vendas (relatorio de vendas)' },
+    ),
+    // Categoria mais vendida: agrupado no banco. O caminho antigo montava um
+    // `.in('venda_id', [...])` com todos os ids do periodo — alem de ja vir
+    // truncado, era uma URL grande demais para ser respondida.
+    supabase.rpc('produtos_vendidos', { p_empresa: empresaId, p_inicio: inicioISO, p_fim: fimISO }),
+    buscarTudo<{ id: string; categoria: string | null }>(
+      (de, ate) => supabase.from('produtos').select('id, categoria')
+        .eq('empresa_id', empresaId).order('id').range(de, ate),
+      { rotulo: 'produtos (categoria)' },
+    ),
   ])
-
-  const vendas = vendasRes.data ?? []
-  const itens = itensRes.data ?? []
-  const vendedores = vendedoresRes.data ?? []
 
   // Agrupa por período
   const porPeriodo: Record<string, { faturamento: number; qtd: number; desconto: number }> = {}
@@ -77,13 +89,16 @@ export default async function RelatorioVendasPage({
   }
   const heatmapHora = Object.entries(porHora).map(([h, qtd]) => ({ hora: `${h}h`, qtd }))
 
-  // Por categoria
+  // Por categoria — o banco soma por produto, e aqui os produtos viram
+  // categoria. A categoria mora no cadastro (texto, nao chave), entao a
+  // juncao acontece do lado de ca mesmo.
+  const categoriaDoProduto = new Map(produtosRes.map(p => [p.id, p.categoria ?? 'Sem categoria']))
   const porCategoria: Record<string, { faturamento: number; qtd: number }> = {}
-  for (const it of itens) {
-    const cat = (it.produtos as any)?.categoria ?? 'Sem categoria'
+  for (const v of (vendidosRes.data ?? []) as { produto_id: string; quantidade: number; faturamento: number }[]) {
+    const cat = categoriaDoProduto.get(v.produto_id) ?? 'Sem categoria'
     if (!porCategoria[cat]) porCategoria[cat] = { faturamento: 0, qtd: 0 }
-    porCategoria[cat].faturamento += Number(it.preco_unitario ?? 0) * Number(it.quantidade ?? 0)
-    porCategoria[cat].qtd += Number(it.quantidade ?? 0)
+    porCategoria[cat].faturamento += Number(v.faturamento ?? 0)
+    porCategoria[cat].qtd += Number(v.quantidade ?? 0)
   }
   const topCategorias = Object.entries(porCategoria)
     .map(([cat, val]) => ({ cat, ...val }))
@@ -94,8 +109,8 @@ export default async function RelatorioVendasPage({
   const porVendedor: Record<string, { nome: string; faturamento: number; qtd: number }> = {}
   for (const v of vendas) {
     if (v.status !== 'concluida') continue
-    const vend = v.vendedores as any
-    const nome = vend?.nome ?? 'Sem vendedor'
+    const vend = v.vendedores
+    const nome = (Array.isArray(vend) ? vend[0]?.nome : vend?.nome) ?? 'Sem vendedor'
     if (!porVendedor[nome]) porVendedor[nome] = { nome, faturamento: 0, qtd: 0 }
     porVendedor[nome].faturamento += Number(v.total ?? 0)
     porVendedor[nome].qtd++

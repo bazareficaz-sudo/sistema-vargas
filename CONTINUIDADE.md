@@ -624,6 +624,40 @@ substituída, 5405 vale para os dois modelos e basta corrigir os 49.
 
 ## Consertos recentes que vale conhecer
 
+- **Todo relatório somava 1.000 linhas e chamava aquilo de total** (27/08).
+  O Silvano viu "Faturamento do mês R$ 26.614,94" na Visão Geral e perguntou.
+  Agosto tinha R$ 45.012,53 em 1.701 vendas: o card mostrava exatamente a soma
+  das **1.000 vendas mais antigas** do mês. O PostgREST devolve no máximo
+  1.000 linhas por requisição, e quem busca as linhas e soma em JavaScript
+  soma o pedaço — sem erro, sem aviso, com status 200.
+
+  Em julho, com 395 vendas, o mesmo código acertava. **É um defeito que só
+  aparece quando o movimento cresce**, ou seja, exatamente quando o número
+  passa a valer alguma coisa. Estava em oito telas: Visão Geral, Relatórios
+  BI (faturamento, ticket, desconto, evolução de 30 dias e capital em estoque
+  — este calculado sobre 1.000 dos 14.263 produtos), Alertas, Financeiro,
+  Estoque, Produtos, Vendas e Clientes.
+
+  Dois consertos, conforme o caso. Onde a tela quer UM número, a soma foi para
+  o banco (`supabase-relatorios-agregados.sql`: `vendas_resumo`,
+  `vendas_por_dia`, `produtos_vendidos`, `vendas_por_cliente`,
+  `estoque_resumo`). Onde a tela precisa das linhas (curva ABC, venda por hora,
+  RFM), entrou `buscarTudo()` em `src/lib/supabase/paginar.ts`, que percorre em
+  páginas de 1.000 — **e exige `.order()` por coluna estável**, senão a
+  paginação repete e perde linha, que é um erro pior porque é intermitente.
+
+  Achado de brinde, no mesmo caminho: o ranking de produtos pegava os ids das
+  vendas e os mandava num `.in('venda_id', [...])`. Com 2.016 vendas isso é uma
+  URL de dezenas de kilobytes — não era só truncado, provavelmente nem chegava
+  a ser respondido. Agora o join é do banco.
+
+  E os recortes de tempo passaram a ser calculados no fuso de São Paulo
+  (`src/lib/datas.ts`). A Vercel roda em UTC: `setHours(0,0,0,0)` no servidor é
+  21h de ontem na loja, então "vendas de hoje" começava três horas cedo demais.
+
+  **Nada disso muda o dado, só a leitura dele.** Os números do dia 26 — R$
+  126.837,42 acumulados, R$ 75.201,33 em agosto somando PDV e marketplaces —
+  vieram de `SELECT` direto no banco e continuam valendo.
 - **NFC-e — desconto rateado.** O PDV grava o desconto no cabeçalho da venda,
   e a emissão só lia o desconto por item. Toda venda com desconto era
   rejeitada (Rejeição 865). Corrigido com rateio proporcional, último item

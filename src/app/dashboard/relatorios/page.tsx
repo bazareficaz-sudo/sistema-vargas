@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import DashboardBIClient from '@/components/relatorios/DashboardBIClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { inicioDoMes, inicioDoMesAnterior, inicioDoProximoMes, inicioDeDiasAtras } from '@/lib/datas'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,71 +12,69 @@ export default async function RelatorioDashboardPage() {
   const empresaId = profile?.empresa_id ?? ''
 
   const hoje = new Date()
-  const inicioMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString()
-  const fimMesAtual = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 23, 59, 59).toISOString()
-  const inicioMesAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1).toISOString()
-  const fimMesAnterior = new Date(hoje.getFullYear(), hoje.getMonth(), 0, 23, 59, 59).toISOString()
+  // Limites no fuso da loja, com fim EXCLUSIVO (>= inicio, < fim). O
+  // "23:59:59" de antes perdia as vendas do ultimo segundo do mes e, pior,
+  // marcava a virada em UTC — tres horas antes da virada em Sao Paulo.
+  const inicioMesAtual = inicioDoMes(hoje).toISOString()
+  const fimMesAtual = inicioDoProximoMes(hoje).toISOString()
+  const inicioMesAnterior = inicioDoMesAnterior(hoje).toISOString()
+  const fimMesAnterior = inicioMesAtual
 
   // Últimos 30 dias para o gráfico de evolução
-  const inicio30 = new Date(hoje)
-  inicio30.setDate(inicio30.getDate() - 29)
-  inicio30.setHours(0, 0, 0, 0)
+  const inicio30 = inicioDeDiasAtras(29, hoje)
 
   const [
     vendasMesAtual,
     vendasMesAnterior,
     vendas30dias,
-    produtos,
+    resumoEstoqueRes,
     contasPagar,
     contasReceber,
   ] = await Promise.all([
-    supabase.from('vendas').select('total, desconto, status, created_at')
-      .eq('empresa_id', empresaId).gte('created_at', inicioMesAtual).lte('created_at', fimMesAtual),
-    supabase.from('vendas').select('total, status')
-      .eq('empresa_id', empresaId).gte('created_at', inicioMesAnterior).lte('created_at', fimMesAnterior),
-    supabase.from('vendas').select('total, status, created_at')
-      .eq('empresa_id', empresaId).gte('created_at', inicio30.toISOString()),
-    supabase.from('produtos').select('preco_custo, estoque, ativo').eq('empresa_id', empresaId),
+    // Tudo que e soma vem somado do banco. Este bloco buscava as linhas e as
+    // reduzia aqui — e o PostgREST corta em 1.000 linhas, calado. Com 1.701
+    // vendas no mes e 14.263 produtos ativos, TODOS os numeros desta tela
+    // estavam menores que a verdade: o faturamento do mes por 41%, o capital
+    // em estoque por uma ordem de grandeza.
+    supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioMesAtual, p_fim: fimMesAtual }),
+    supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioMesAnterior, p_fim: fimMesAnterior }),
+    supabase.rpc('vendas_por_dia', { p_empresa: empresaId, p_inicio: inicio30.toISOString() }),
+    supabase.rpc('estoque_resumo', { p_empresa: empresaId }),
     supabase.from('contas_pagar').select('valor, status, vencimento').eq('empresa_id', empresaId).in('status', ['pendente', 'vencido']),
     supabase.from('contas_receber').select('valor, status, vencimento').eq('empresa_id', empresaId).in('status', ['pendente', 'vencido']),
   ])
 
-  // Agrega vendas dos últimos 30 dias por data
-  const evolucaoMap: Record<string, { faturamento: number; qtd: number }> = {}
-  for (let i = 0; i < 30; i++) {
+  // Evolucao dos ultimos 30 dias. O banco devolve so os dias COM venda; a
+  // grade de 30 posicoes continua sendo montada aqui para o grafico nao pular
+  // dia parado — dia sem venda tambem e informacao.
+  const porDia = new Map<string, { faturamento: number; qtd: number }>(
+    (vendas30dias.data ?? []).map((d: { dia: string; faturamento: number; quantidade: number }) => [
+      d.dia, { faturamento: Number(d.faturamento ?? 0), qtd: Number(d.quantidade ?? 0) },
+    ])
+  )
+  const evolucao = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(inicio30)
     d.setDate(d.getDate() + i)
-    evolucaoMap[d.toISOString().slice(0, 10)] = { faturamento: 0, qtd: 0 }
-  }
-  for (const v of vendas30dias.data ?? []) {
-    if (v.status !== 'concluida') continue
-    const dia = v.created_at.slice(0, 10)
-    if (evolucaoMap[dia]) {
-      evolucaoMap[dia].faturamento += Number(v.total ?? 0)
-      evolucaoMap[dia].qtd++
-    }
-  }
-  const evolucao = Object.entries(evolucaoMap).map(([data, val]) => ({
-    data: data.slice(5), // MM-DD
-    ...val,
-  }))
+    const chave = d.toISOString().slice(0, 10)
+    const val = porDia.get(chave) ?? { faturamento: 0, qtd: 0 }
+    return { data: chave.slice(5), ...val } // MM-DD
+  })
 
-  // KPIs mês atual
-  const vendasOk = (vendasMesAtual.data ?? []).filter(v => v.status === 'concluida')
-  const faturamento = vendasOk.reduce((s, v) => s + Number(v.total ?? 0), 0)
-  const qtdVendas = vendasOk.length
+  // KPIs mes atual e anterior — uma linha cada, ja somada no banco.
+  const resumoAtual = (vendasMesAtual.data ?? [])[0] ?? { faturamento: 0, quantidade: 0, desconto: 0 }
+  const faturamento = Number(resumoAtual.faturamento ?? 0)
+  const qtdVendas = Number(resumoAtual.quantidade ?? 0)
   const ticketMedio = qtdVendas ? faturamento / qtdVendas : 0
-  const totalDesconto = vendasOk.reduce((s, v) => s + Number(v.desconto ?? 0), 0)
+  const totalDesconto = Number(resumoAtual.desconto ?? 0)
 
-  // KPIs mês anterior
-  const vendasOkAnt = (vendasMesAnterior.data ?? []).filter(v => v.status === 'concluida')
-  const faturamentoAnt = vendasOkAnt.reduce((s, v) => s + Number(v.total ?? 0), 0)
-  const qtdVendasAnt = vendasOkAnt.length
+  const resumoAnterior = (vendasMesAnterior.data ?? [])[0] ?? { faturamento: 0, quantidade: 0 }
+  const faturamentoAnt = Number(resumoAnterior.faturamento ?? 0)
+  const qtdVendasAnt = Number(resumoAnterior.quantidade ?? 0)
 
   // Estoque
-  const prods = produtos.data ?? []
-  const capitalEstoque = prods.filter(p => p.ativo).reduce((s, p) => s + Number(p.preco_custo ?? 0) * Number(p.estoque ?? 0), 0)
-  const produtosSemEstoque = prods.filter(p => p.ativo && Number(p.estoque ?? 0) <= 0).length
+  const resumoEstoque = (resumoEstoqueRes.data ?? [])[0] ?? { capital: 0, sem_estoque: 0 }
+  const capitalEstoque = Number(resumoEstoque.capital ?? 0)
+  const produtosSemEstoque = Number(resumoEstoque.sem_estoque ?? 0)
 
   // Contas
   const totalPagar = (contasPagar.data ?? []).reduce((s, c) => s + Number(c.valor ?? 0), 0)

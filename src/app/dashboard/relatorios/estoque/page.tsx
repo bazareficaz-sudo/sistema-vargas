@@ -1,8 +1,16 @@
 import { createClient } from '@/lib/supabase/server'
 import EstoqueBIClient from '@/components/relatorios/EstoqueBIClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { buscarTudo } from '@/lib/supabase/paginar'
+import { inicioDeDiasAtras } from '@/lib/datas'
 
 export const dynamic = 'force-dynamic'
+
+type ProdutoEstoque = {
+  id: string; nome: string; sku: string | null; categoria: string | null; marca: string | null
+  estoque: number | null; estoque_minimo: number | null
+  preco_custo: number | null; preco_venda: number | null; ativo: boolean
+}
 
 export default async function RelatorioEstoquePage() {
   const supabase = await createClient()
@@ -11,30 +19,27 @@ export default async function RelatorioEstoquePage() {
   const empresaId = profile?.empresa_id ?? ''
 
   // Últimos 30 dias para calcular giro
-  const inicio30 = new Date(); inicio30.setDate(inicio30.getDate() - 30); inicio30.setHours(0, 0, 0, 0)
+  const inicio30 = inicioDeDiasAtras(30)
 
-  const [produtosRes, vendasIdsRes] = await Promise.all([
-    supabase.from('produtos')
-      .select('id, nome, sku, categoria, marca, estoque, estoque_minimo, preco_custo, preco_venda, ativo')
-      .eq('empresa_id', empresaId)
-      .eq('ativo', true),
-    supabase.from('vendas').select('id')
-      .eq('empresa_id', empresaId)
-      .eq('status', 'concluida')
-      .gte('created_at', inicio30.toISOString()),
+  const [produtos, vendidosRes] = await Promise.all([
+    // Paginado: sao 14.263 produtos ativos e o PostgREST entrega 1.000 por
+    // requisicao. Sem isto, capital em estoque, ruptura e giro falavam dos
+    // 1.000 primeiros produtos e chamavam esse pedaco de "total".
+    buscarTudo<ProdutoEstoque>(
+      (de, ate) => supabase.from('produtos')
+        .select('id, nome, sku, categoria, marca, estoque, estoque_minimo, preco_custo, preco_venda, ativo')
+        .eq('empresa_id', empresaId).eq('ativo', true).order('id').range(de, ate),
+      { rotulo: 'produtos ativos (estoque)' },
+    ),
+    // O agrupamento por produto vem do banco. O caminho antigo — pegar os ids
+    // das vendas e mandar todos num `.in()` — ja nascia truncado e virava uma
+    // URL de dezenas de kilobytes.
+    supabase.rpc('produtos_vendidos', { p_empresa: empresaId, p_inicio: inicio30.toISOString() }),
   ])
 
-  const produtos = produtosRes.data ?? []
-  const vendaIds = (vendasIdsRes.data ?? []).map(v => v.id)
-
-  // Itens vendidos últimos 30 dias
   const itensVendidos: Record<string, number> = {}
-  if (vendaIds.length > 0) {
-    const { data: itens } = await supabase
-      .from('venda_itens').select('produto_id, quantidade').in('venda_id', vendaIds)
-    for (const it of itens ?? []) {
-      itensVendidos[it.produto_id] = (itensVendidos[it.produto_id] ?? 0) + Number(it.quantidade ?? 0)
-    }
+  for (const l of (vendidosRes.data ?? []) as { produto_id: string; quantidade: number }[]) {
+    itensVendidos[l.produto_id] = Number(l.quantidade ?? 0)
   }
 
   // Processa dados
