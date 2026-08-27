@@ -141,6 +141,30 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
     setSalvando(false)
   }
 
+  // Toda mudança de variação precisa chegar na LISTA, não só neste modal.
+  //
+  // A listagem decide se o anúncio está mapeado olhando o array
+  // `marketplace_anuncio_variacoes` que carregou junto com ele: anúncio com
+  // variação só conta como mapeado quando TODAS têm produto. Enquanto o
+  // resultado ficava preso aqui dentro, o operador vinculava as três
+  // variações, via o ✓ verde em cada uma, fechava — e a linha continuava
+  // dizendo "Não vinculado", com o anúncio ainda aparecendo no filtro "Não
+  // mapeado". As duas telas liam a mesma coisa em cópias diferentes.
+  //
+  // Passa por aqui em vez de cada função avisar por conta própria: eram três
+  // lugares que mexem em variação (uma a uma, produto criado na hora, e o
+  // lote), e a quarta esqueceria de novo.
+  // `anuncioAtual` também recebe o array novo, e não só a lista. Sem isso,
+  // mapear as variações e DEPOIS vincular o produto do anúncio desfaria o
+  // conserto: aquela segunda gravação emite `{...anuncioAtual}`, que ainda
+  // carregaria as variações como vieram da carga da página.
+  function aplicarVariacoes(novas: any[]) {
+    setVariacoes(novas)
+    const atualizado = { ...anuncioAtual, marketplace_anuncio_variacoes: novas }
+    setAnuncioAtual(atualizado)
+    onAtualizado(atualizado)
+  }
+
   async function mapearVariacao(variacao: any, produto: any, metodo: 'manual' | 'automatico_sku') {
     setSalvando(true); setErro(''); setAviso('')
     const sb = createClient()
@@ -156,7 +180,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       }, { onConflict: 'empresa_id,canal_id,nivel,chave' })
     }
 
-    setVariacoes(prev => prev.map(v => v.id === variacao.id ? { ...v, produto_id: produto.id, produtos: produto } : v))
+    aplicarVariacoes(variacoes.map(v => v.id === variacao.id ? { ...v, produto_id: produto.id, produtos: produto } : v))
     setAlvoBusca(null)
     setAviso(`Variação "${variacao.nome_variacao ?? variacao.sku_variacao}" vinculada a "${produto.nome}".`)
     setSalvando(false)
@@ -169,7 +193,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       setAnuncioAtual(atualizado)
       onAtualizado(atualizado)
     } else {
-      setVariacoes(prev => prev.map(v => v.id === criandoProduto.variacaoId ? { ...v, produto_id: produto.id, produtos: produto } : v))
+      aplicarVariacoes(variacoes.map(v => v.id === criandoProduto.variacaoId ? { ...v, produto_id: produto.id, produtos: produto } : v))
     }
     setAviso(`Produto "${produto.nome}" criado e vinculado.`)
     setCriandoProduto(null)
@@ -228,7 +252,7 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
     }
 
     if (criadas.length > 0) {
-      setVariacoes(prev => prev.map(v => {
+      aplicarVariacoes(variacoes.map(v => {
         const match = criadas.find(c => c.variacaoId === v.id)
         return match ? { ...v, produto_id: match.produto.id, produtos: match.produto } : v
       }))
