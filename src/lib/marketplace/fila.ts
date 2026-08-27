@@ -145,6 +145,24 @@ export async function processarFilaDaEmpresa(
     .not('access_token', 'is', null)
   const mapaCanal = new Map<string, CanalEnvio>((canaisRows ?? []).map((c: any) => [c.id, c as CanalEnvio]))
 
+  // Anúncios que estão numa campanha de desconto ATIVA.
+  //
+  // A Shopee recusa `update_price` em item com promoção no ar — está
+  // registrado no comentário de `shopee/write.ts`, com a mensagem dela. Sem
+  // saber disso, a fila trataria a recusa como falha, o produto voltaria na
+  // rodada seguinte e nas outras três até bater no teto de tentativas, e
+  // desistiria de um item que nunca teve problema nenhum.
+  //
+  // Enviar ESTOQUE continua valendo: quem está em campanha vende, e vender
+  // sem baixar o estoque no canal é o caminho para a sobrevenda.
+  const { data: itensEmCampanha } = await sb
+    .from('marketplace_promocao_itens')
+    .select('anuncio_id, marketplace_promocoes!inner(status, canal_id)')
+    .eq('marketplace_promocoes.status', 'ativa')
+    .not('anuncio_id', 'is', null)
+  const anunciosComPromocao = new Set<string>(
+    (itensEmCampanha ?? []).map((i: any) => String(i.anuncio_id)))
+
   const regrasUsadas = new Map<string, any>()
   const linhas: any[] = []
   const rodadaEm = new Date().toISOString()
@@ -290,9 +308,18 @@ export async function processarFilaDaEmpresa(
           acao = 'encerrado'
           detalheFinal = 'anuncio encerrado no canal — enviar estoque poderia reabri-lo'
         } else {
+          // Item em campanha ativa: vai estoque, nao vai preco. A Shopee
+          // recusaria o preco de qualquer jeito, e quem manda no preco de um
+          // item em promocao e a campanha (update_discount_item), nao o
+          // update_price do catalogo.
+          const emPromocao = anunciosComPromocao.has(String(a.id))
+          if (emPromocao && precoNovo != null) {
+            detalheFinal = `${detalheFinal} · preco retido: item em campanha de desconto`
+          }
+
           const r = await enviarParaAnuncio(sb, canal, String(a.id_externo), {
             estoque: estoqueNovo,
-            preco: precoNovo ?? undefined,
+            preco: emPromocao ? undefined : (precoNovo ?? undefined),
             pausar: paraPausar,
           })
           await sleep(THROTTLE_ENVIO_MS)
@@ -303,9 +330,13 @@ export async function processarFilaDaEmpresa(
             // O que o canal tem agora e o que acabamos de mandar. Guardar isso
             // evita reenviar o mesmo numero na proxima movimentacao e faz a
             // tela de anuncios refletir a realidade sem esperar a varredura.
+            // O preco so entra no espelho se tiver sido MANDADO. Gravar o
+            // preco retido faria o espelho jurar que o canal esta com um
+            // numero que ele nunca recebeu — e, pior, a rodada seguinte
+            // veria "sem mudanca" e nunca mais tentaria enviar.
             await sb.from('marketplace_anuncios').update({
               estoque_externo: estoqueNovo,
-              ...(precoNovo != null ? { preco_venda: precoNovo } : {}),
+              ...(precoNovo != null && !emPromocao ? { preco_venda: precoNovo } : {}),
             }).eq('id', a.id)
           } else {
             acao = 'erro'; falhasEnvio++

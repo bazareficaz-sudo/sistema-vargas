@@ -970,6 +970,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           )}
+          {canal.plataforma === 'shopee' && (
+            <a href={`/dashboard/marketplaces/${canal.id}/promocoes`}
+              className="px-4 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium rounded-lg">
+              🏷️ Promoções
+            </a>
+          )}
           {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre' || canal.plataforma === 'nuvemshop') && (
             <button onClick={sincronizar} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
