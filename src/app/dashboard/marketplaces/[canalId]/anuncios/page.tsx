@@ -43,10 +43,15 @@ const COLUNAS_LISTAGEM = [
 
 export default async function AnunciosPage({ params, searchParams }: {
   params: Promise<{ canalId: string }>
-  searchParams: Promise<{ q?: string; status?: string }>
+  // Os filtros da tela viajam na URL para sobreviverem à troca de canal —
+  // trocar de canal é uma navegação, e o estado do client component morre
+  // nela. `q` e `status` a consulta abaixo usa; `tag`, `falta` e `facetas`
+  // são filtrados na tela e só passam por aqui de carona, para voltarem
+  // preenchidos do outro lado.
+  searchParams: Promise<{ q?: string; status?: string; tag?: string; falta?: string; facetas?: string }>
 }) {
   const { canalId } = await params
-  const { q = '', status = '' } = await searchParams
+  const { q = '', status = '', tag = '', falta = '', facetas = '' } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const profile = await perfilDaSessao(supabase, user!.id)
@@ -83,8 +88,17 @@ export default async function AnunciosPage({ params, searchParams }: {
       .eq('canal_id', canalId)
       .order('created_at', { ascending: false })
       .range(offset, offset + TAMANHO_PAGINA - 1)
-    if (status) pagina = pagina.eq('status', status)
-    if (q) pagina = pagina.ilike('titulo', `%${q}%`)
+    // Os filtros da URL NÃO recortam esta consulta, embora recortassem antes.
+    //
+    // Eles existem hoje para atravessar a troca de canal, e são aplicados na
+    // tela. Se recortassem aqui também, a lista chegaria pela metade e o
+    // campo de busca passaria a mentir: apagar uma letra de "corrente" para
+    // procurar "corda" não acharia nada — não porque não exista, mas porque
+    // o servidor nunca mandou. O usuário veria a busca simplesmente parar de
+    // funcionar depois de trocar de canal.
+    //
+    // O custo é carregar o canal inteiro, que é o que já acontecia em toda
+    // abertura normal da tela (medição no comentário das colunas, acima).
     const { data } = await pagina
     anuncios.push(...(data ?? []))
     if (!data || data.length < TAMANHO_PAGINA) break
@@ -128,6 +142,9 @@ export default async function AnunciosPage({ params, searchParams }: {
       empresaId={empresaId}
       qInicial={q}
       statusInicial={status}
+      tagInicial={tag}
+      faltaInicial={falta}
+      facetasIniciais={facetas ? facetas.split(',').filter(Boolean) : []}
       operador={user?.email ?? ''}
       regras={regras ?? []}
       depositos={depositos ?? []}

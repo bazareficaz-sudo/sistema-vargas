@@ -150,8 +150,9 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'qualidade_boa', label: 'Qualidade ótima' },
 ]
 
-export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, operador, regras = [], depositos = [], configPreco }: {
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco }: {
   canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
+  tagInicial?: string; faltaInicial?: string; facetasIniciais?: string[]
   regras?: any[]; depositos?: { id: string; nome: string }[]
   configPreco?: any
 }) {
@@ -194,11 +195,41 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [buscaProd, setBuscaProd] = useState('')
   const [sincronizando, setSincronizando] = useState(false)
   const [resumoSync, setResumoSync] = useState('')
-  const [facetas, setFacetas] = useState<Set<string>>(new Set())
-  const [tagFiltro, setTagFiltro] = useState('')
+  const [facetas, setFacetas] = useState<Set<string>>(new Set(facetasIniciais))
+  const [tagFiltro, setTagFiltro] = useState(tagInicial)
   // Filtro por falta específica de qualidade — separado das facetas porque é
   // um seletor de valor (qual falta), não um interruptor liga/desliga.
-  const [faltaFiltro, setFaltaFiltro] = useState('')
+  const [faltaFiltro, setFaltaFiltro] = useState(faltaInicial)
+  // Os filtros como query string.
+  //
+  // Trocar de canal é uma NAVEGAÇÃO — o estado deste componente morre nela, e
+  // era por isso que a busca e os filtros voltavam do zero do outro lado.
+  // Levando-os na URL, quem escolhe outro canal continua vendo o mesmo
+  // recorte, que é o que se quer ao comparar duas contas do mesmo
+  // marketplace: "como está 'corrente' aqui, e como está lá?".
+  function filtrosNaUrl(): string {
+    const p = new URLSearchParams()
+    if (q) p.set('q', q)
+    if (statusFiltro) p.set('status', statusFiltro)
+    if (tagFiltro) p.set('tag', tagFiltro)
+    if (faltaFiltro) p.set('falta', faltaFiltro)
+    if (facetas.size > 0) p.set('facetas', [...facetas].join(','))
+    const s = p.toString()
+    return s ? `?${s}` : ''
+  }
+
+  const temFiltroAtivo = !!(q || statusFiltro || tagFiltro || faltaFiltro || facetas.size > 0)
+  const urlTemFiltro = !!(qInicial || statusInicial || tagInicial || faltaInicial || facetasIniciais.length)
+
+  function limparFiltros() {
+    setQ(''); setStatusFiltro(''); setTagFiltro(''); setFaltaFiltro(''); setFacetas(new Set())
+    // A URL também precisa esquecer, senão ela passa a contradizer a tela:
+    // recarregar a página (ou reabrir o link) traria de volta exatamente os
+    // filtros que o botão acabou de limpar. `replace` e não `push` porque
+    // limpar não é um lugar para onde voltar com o botão do navegador.
+    if (urlTemFiltro) router.replace(`/dashboard/marketplaces/${canal.id}/anuncios`)
+  }
+
   const [detalheAberto, setDetalheAberto] = useState<any | null>(null)
   const [mapeandoAberto, setMapeandoAberto] = useState<any | null>(null)
   const [enriquecendoAberto, setEnriquecendoAberto] = useState<any | null>(null)
@@ -933,7 +964,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         </div>
         <div className="flex gap-2 items-center">
           {canais.length > 1 && (
-            <select value={canal.id} onChange={e => router.push(`/dashboard/marketplaces/${e.target.value}/anuncios`)}
+            <select value={canal.id} onChange={e => router.push(`/dashboard/marketplaces/${e.target.value}/anuncios${filtrosNaUrl()}`)}
+              title="Troca de canal mantendo a busca e os filtros atuais"
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
               {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
@@ -1007,6 +1039,16 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             <option key={f.codigo} value={f.codigo}>Falta: {f.titulo}</option>
           ))}
         </select>
+        {/* Só aparece quando há o que limpar: botão morto ao lado de campo
+            vazio é ruído, e some justamente quando some a dúvida. Zera tudo
+            de uma vez — busca, status, tag, falta e as facetas de baixo. */}
+        {temFiltroAtivo && (
+          <button type="button" onClick={limparFiltros}
+            title="Zera a busca e todos os filtros desta tela"
+            className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+            ⊗ limpar filtros
+          </button>
+        )}
       </div>
       <div className="flex items-center gap-1.5 mb-4 flex-wrap">
         <span className="text-xs text-gray-400 mr-1">Filtrar:</span>
@@ -1016,8 +1058,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             {fac.label}
           </button>
         ))}
+        {/* Escopo desta linha só. Convive com o "limpar filtros" de cima,
+            que zera tudo — daí o rótulo dizer o que cada um alcança. */}
         {facetas.size > 0 && (
-          <button onClick={() => setFacetas(new Set())} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ limpar</button>
+          <button onClick={() => setFacetas(new Set())} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ limpar estes</button>
         )}
       </div>
 
