@@ -1,4 +1,4 @@
-import { calcularKit } from '@/lib/produtos/kit'
+import { estoqueDoSistema } from './estoqueDoSistema'
 import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
 import { enviarParaAnuncio, canalAceitaEnvio, sleep, THROTTLE_ENVIO_MS, type CanalEnvio } from './envio'
@@ -106,11 +106,23 @@ export async function processarFilaDaEmpresa(
 
   // Um produto pode ter anúncio em vários canais. A fila é por produto; o
   // trabalho é por anúncio.
-  const { data: anuncios } = await sb
+  //
+  // `estoque_externo` é o estoque que a plataforma tem. A coluna pedida aqui
+  // antes chamava-se `estoque` e NÃO EXISTE em marketplace_anuncios: o
+  // PostgREST recusa a consulta inteira por uma coluna desconhecida, `anuncios`
+  // voltava nulo e TODO produto caía no ramo "nenhum anúncio vinculado".
+  // Medido em 26/08/2026: 1.085 linhas em marketplace_fila_simulacao, todas
+  // com acao='sem_anuncio' — e 186 daqueles produtos tinham anúncio mapeado.
+  // A fila rodava a cada 5 minutos dizendo que não havia nada a fazer.
+  const { data: anuncios, error: erroAnuncios } = await sb
     .from('marketplace_anuncios')
-    .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque, estoque_reservado, regra_id, tem_variacao, status')
+    .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, regra_id, tem_variacao, status')
     .eq('empresa_id', cfg.empresa_id)
     .in('produto_id', produtoIds)
+
+  // Falhar alto. Foi o silêncio desta consulta que escondeu o defeito acima
+  // por rodadas inteiras: sem anúncio nenhum, a fila não erra — ela conclui.
+  if (erroAnuncios) throw new Error(`Consulta de anúncios da fila falhou: ${erroAnuncios.message}`)
 
   const porProduto = new Map<string, any[]>()
   for (const a of anuncios ?? []) {
@@ -172,25 +184,26 @@ export async function processarFilaDaEmpresa(
         linhas.push({
           empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
           anuncio_id: a.id, produto_id: produto.id, acao: 'com_variacao',
-          estoque_sistema: produto.estoque, estoque_canal: a.estoque,
+          estoque_sistema: produto.estoque, estoque_canal: a.estoque_externo,
           detalhe: 'anúncio com variação — fora do escopo da fila',
         })
         continue
       }
 
-      // Estoque unificado do grupo, quando ligado; senão o da própria empresa.
-      let estoqueBase: number = mapaUnificado?.get(produto.id) ?? Number(produto.estoque ?? 0)
+      // Unificado do grupo, kit calculado pelos componentes, ou o estoque da
+      // própria empresa — a decisão mora em `estoqueDoSistema`, o mesmo lugar
+      // que o botão "Enviar estoque" do cadastro do produto consulta.
+      const base = await estoqueDoSistema(sb, produto, mapaUnificado)
+      const estoqueBase = base.estoque
+      const kitInfo = base.kitInfo
       let precoNovo: number | null = null
 
-      // Kit: o estoque é derivado dos componentes, não do campo do produto.
-      let kitInfo: { custo: number; estoque: number } | undefined
-      if (produto.tipo === 'kit') {
-        const k = await calcularKit(sb, produto.id, null)
-        if (k) { kitInfo = k; estoqueBase = k.estoque }
-      }
-
-      let estoqueNovo = Math.max(0, estoqueBase - Number(a.estoque_reservado ?? 0))
-      let detalhe = 'espelho direto do estoque do sistema'
+      // Sem subtrair `estoque_reservado`: os sincronizadores gravam nessa
+      // coluna o estoque da própria plataforma, então a subtração mandava
+      // "sistema menos o que o canal já tem". Ver o cabeçalho de
+      // `estoqueDoSistema.ts` para os números medidos.
+      let estoqueNovo = estoqueBase
+      let detalhe = base.origem
       let paraPausar = false
 
       if (a.regra_id) {
@@ -234,7 +247,7 @@ export async function processarFilaDaEmpresa(
         }
       }
 
-      const mudouEstoque = Number(a.estoque ?? -1) !== estoqueNovo
+      const mudouEstoque = Number(a.estoque_externo ?? -1) !== estoqueNovo
       const mudouPreco = precoNovo != null && Number(a.preco_venda ?? -1) !== precoNovo
 
       if (!mudouEstoque && !mudouPreco) {
@@ -242,7 +255,7 @@ export async function processarFilaDaEmpresa(
         linhas.push({
           empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
           anuncio_id: a.id, produto_id: produto.id, acao: 'sem_mudanca',
-          estoque_sistema: estoqueBase, estoque_canal: a.estoque, estoque_enviaria: estoqueNovo,
+          estoque_sistema: estoqueBase, estoque_canal: a.estoque_externo, estoque_enviaria: estoqueNovo,
           preco_canal: a.preco_venda, preco_enviaria: precoNovo,
           detalhe: 'o canal já está com o mesmo número',
         })
@@ -269,6 +282,13 @@ export async function processarFilaDaEmpresa(
         } else if (!a.id_externo) {
           acao = 'erro'; detalheFinal = 'anuncio sem id no canal'
           comFalha.set(produto.id, detalheFinal); falhasEnvio++
+        } else if (a.status === 'encerrado') {
+          // Nao e falha: e um anuncio que acabou. Mandar quantidade para um
+          // item fechado no Mercado Livre pode recoloca-lo a venda, e a fila
+          // nao pode republicar o que alguem encerrou de proposito. Medido em
+          // 26/08/2026: 16 anuncios encerrados com id_externo.
+          acao = 'encerrado'
+          detalheFinal = 'anuncio encerrado no canal — enviar estoque poderia reabri-lo'
         } else {
           const r = await enviarParaAnuncio(sb, canal, String(a.id_externo), {
             estoque: estoqueNovo,
@@ -284,7 +304,7 @@ export async function processarFilaDaEmpresa(
             // evita reenviar o mesmo numero na proxima movimentacao e faz a
             // tela de anuncios refletir a realidade sem esperar a varredura.
             await sb.from('marketplace_anuncios').update({
-              estoque: estoqueNovo,
+              estoque_externo: estoqueNovo,
               ...(precoNovo != null ? { preco_venda: precoNovo } : {}),
             }).eq('id', a.id)
           } else {
@@ -298,7 +318,7 @@ export async function processarFilaDaEmpresa(
       linhas.push({
         empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
         anuncio_id: a.id, produto_id: produto.id, acao,
-        estoque_sistema: estoqueBase, estoque_canal: a.estoque, estoque_enviaria: estoqueNovo,
+        estoque_sistema: estoqueBase, estoque_canal: a.estoque_externo, estoque_enviaria: estoqueNovo,
         preco_canal: a.preco_venda, preco_enviaria: precoNovo,
         detalhe: detalheFinal,
       })
