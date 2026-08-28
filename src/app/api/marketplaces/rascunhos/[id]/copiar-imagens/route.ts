@@ -10,6 +10,16 @@ export const dynamic = 'force-dynamic'
 // PRODUTO (`produto_imagens`), não com as do rascunho. Sem esta ponte, o
 // operador escolheria imagens numa tela e elas não apareceriam na outra.
 //
+// A ponte era um botão, e por isso o caminho natural — escolher, salvar,
+// marcar como pronto, publicar — chegava no marketplace com zero imagem. Hoje
+// a tela de publicar chama esta rota sozinha, antes de abrir o modal; o botão
+// continua existindo para quem quer mandar as fotos antes disso.
+//
+// O corpo pode trazer `imagens`: é a escolha que está NA TELA, que pode ser
+// mais nova que a salva. Cada URL é conferida contra as que este rascunho
+// conhece (as capturadas da origem e as que o operador subiu) — sem isso a
+// rota viraria um jeito de gravar endereço arbitrário em produto_imagens.
+//
 // Guarda a URL, não uma cópia do arquivo — mesmo comportamento que o
 // enriquecimento de produto por marketplace já usa hoje. Isso tem uma
 // consequência que a tela precisa dizer: a imagem continua hospedada no site
@@ -17,15 +27,19 @@ export const dynamic = 'force-dynamic'
 
 const MAX = 20
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const corpo = await req.json().catch(() => null) as { imagens?: unknown } | null
+  const daTela = Array.isArray(corpo?.imagens)
+    ? corpo!.imagens.filter((u): u is string => typeof u === 'string' && u.length > 0)
+    : null
   const sb = await createClient()
   const guarda = await exigirPermissao(sb, 'gerenciar_marketplaces')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
   const { data: rascunho, error } = await sb
     .from('anuncio_rascunhos')
-    .select('id, produto_id, dados_editados')
+    .select('id, produto_id, dados_origem, dados_editados')
     .eq('id', id).eq('empresa_id', guarda.empresaId).maybeSingle()
 
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 500 })
@@ -34,9 +48,22 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ ok: false, erro: 'Vincule um produto antes de copiar as imagens.' }, { status: 400 })
   }
 
-  const escolhidas: string[] = Array.isArray((rascunho.dados_editados as any)?.imagens)
-    ? (rascunho.dados_editados as any).imagens.slice(0, MAX)
-    : []
+  const editados = (rascunho.dados_editados ?? {}) as Record<string, unknown>
+  const origem = (rascunho.dados_origem ?? {}) as Record<string, unknown>
+  const lista = (v: unknown): string[] => (Array.isArray(v) ? v.filter(u => typeof u === 'string') : [])
+
+  // Tudo que este rascunho legitimamente conhece: o que veio da captura e o
+  // que o operador subiu ou colou nesta tela.
+  const conhecidas = new Set([
+    ...lista(origem.imagens),
+    ...lista(editados.imagens),
+    ...lista(editados.imagensProprias),
+  ])
+
+  const pedidas = daTela ?? lista(editados.imagens)
+  const recusadas = daTela ? daTela.filter(u => !conhecidas.has(u)).length : 0
+  const escolhidas = [...new Set(pedidas.filter(u => conhecidas.has(u)))].slice(0, MAX)
+
   if (escolhidas.length === 0) {
     return NextResponse.json({ ok: false, erro: 'Nenhuma imagem escolhida neste rascunho.' }, { status: 400 })
   }
@@ -49,7 +76,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const base = existentes?.length ?? 0
 
   if (novas.length === 0) {
-    return NextResponse.json({ ok: true, adicionadas: 0, jaExistiam: escolhidas.length })
+    return NextResponse.json({ ok: true, adicionadas: 0, jaExistiam: escolhidas.length, recusadas })
   }
 
   const { error: erroInsert } = await sb.from('produto_imagens').insert(
@@ -69,5 +96,6 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     ok: true,
     adicionadas: novas.length,
     jaExistiam: escolhidas.length - novas.length,
+    recusadas,
   })
 }

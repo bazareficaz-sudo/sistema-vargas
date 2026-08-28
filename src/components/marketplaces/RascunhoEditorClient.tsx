@@ -293,24 +293,60 @@ export default function RascunhoEditorClient({
   const [copiandoImagens, setCopiandoImagens] = useState(false)
   const publicacoes: any[] = Array.isArray(editados.publicacoes) ? editados.publicacoes : []
 
-  async function copiarImagensParaProduto() {
+  // Manda a escolha que está NA TELA, e não a que está salva: o operador pode
+  // ter mexido nas imagens sem salvar, e o conteúdo do anúncio (título,
+  // descrição, preço) já sai daqui do mesmo jeito.
+  async function copiarImagensParaProduto(): Promise<{ ok: boolean; erro?: string }> {
     setCopiandoImagens(true); setMsg(null)
     try {
-      const res = await fetch(`/api/marketplaces/rascunhos/${rascunho.id}/copiar-imagens`, { method: 'POST' })
+      const res = await fetch(`/api/marketplaces/rascunhos/${rascunho.id}/copiar-imagens`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imagens: imagensEscolhidas }),
+      })
       const d = await res.json()
       if (!res.ok || !d.ok) throw new Error(d.erro || `Erro ${res.status}`)
+      // `recusadas` deve ser sempre zero — a tela só oferece imagem que o
+      // rascunho conhece. Se aparecer, é sinal de que a escolha e o rascunho
+      // saíram de sincronia, e isso precisa ser dito: imagem sumindo em
+      // silêncio foi o defeito que este caminho existe para consertar.
+      const ignoradas = d.recusadas > 0
+        ? ` ${d.recusadas} imagem(ns) fora deste rascunho foram ignoradas.`
+        : ''
       setMsg({
         tipo: 'ok',
-        texto: d.adicionadas > 0
+        texto: (d.adicionadas > 0
           ? `${d.adicionadas} imagem(ns) adicionada(s) ao produto${d.jaExistiam ? ` (${d.jaExistiam} já estavam lá)` : ''}.`
-          : 'Essas imagens já estavam no produto.',
+          : 'Essas imagens já estavam no produto.') + ignoradas,
       })
       router.refresh()
+      return { ok: true }
     } catch (e: any) {
-      setMsg({ tipo: 'erro', texto: String(e?.message ?? e) })
+      const erro = String(e?.message ?? e)
+      setMsg({ tipo: 'erro', texto: erro })
+      return { ok: false, erro }
     } finally {
       setCopiandoImagens(false)
     }
+  }
+
+  // Publicar leva as imagens escolhidas para o cadastro do produto ANTES de
+  // abrir o modal — é de lá que o anúncio as lê (produto_imagens), tanto no
+  // Mercado Livre quanto na Shopee.
+  //
+  // Enquanto essa ponte foi só um botão à parte, o caminho natural (escolher,
+  // salvar, marcar como pronto, publicar) chegava no marketplace com ZERO
+  // imagem, e o modal abria dizendo que o produto não tem foto cadastrada. A
+  // tela avisava que era assim, em letra miúda; ninguém lê letra miúda no meio
+  // de um fluxo que parece pronto.
+  //
+  // Falhou a cópia? Não abre. Publicar sem foto é erro garantido no Mercado
+  // Livre (ele exige pelo menos uma) e anúncio ruim na Shopee.
+  async function abrirPublicacao(c: { id: string; nome: string; plataforma: string }) {
+    if (imagensEscolhidas.length === 0) { setPublicandoEm(c); return }
+    const r = await copiarImagensParaProduto()
+    if (!r.ok) return
+    setPublicandoEm(c)
   }
 
   async function registrarPublicacao(canal: { id: string; nome: string }) {
@@ -1195,13 +1231,13 @@ export default function RascunhoEditorClient({
               <>
                 {imagensEscolhidas.length > 0 && (
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2">
-                    <button onClick={copiarImagensParaProduto} disabled={copiandoImagens}
+                    <button onClick={() => copiarImagensParaProduto()} disabled={copiandoImagens}
                       className="text-xs text-blue-700 hover:underline disabled:opacity-50">
                       {copiandoImagens ? 'copiando...' : `Levar as ${imagensEscolhidas.length} imagens escolhidas para o produto`}
                     </button>
                     <p className="text-[10px] text-slate-500 mt-1">
-                      O anúncio usa as imagens do <b>cadastro do produto</b>. As escolhidas aqui só
-                      chegam lá por este botão.
+                      O anúncio usa as imagens do <b>cadastro do produto</b>. Publicar já leva as
+                      escolhidas para lá — este botão serve para mandá-las antes.
                     </p>
                   </div>
                 )}
@@ -1212,11 +1248,13 @@ export default function RascunhoEditorClient({
                   return (
                     <div key={c.id} className="flex items-center gap-2">
                       <button
-                        onClick={() => setPublicandoEm(c)}
-                        disabled={!podePublicar}
+                        onClick={() => abrirPublicacao(c)}
+                        disabled={!podePublicar || copiandoImagens}
                         title={podePublicar ? '' : `O sistema ainda não cria anúncio em ${c.plataforma}.`}
                         className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-40 text-left">
-                        {jaFoi ? '↻ Publicar de novo em ' : 'Publicar em '}<b>{c.nome}</b>
+                        {copiandoImagens
+                          ? 'levando as imagens para o produto...'
+                          : <>{jaFoi ? '↻ Publicar de novo em ' : 'Publicar em '}<b>{c.nome}</b></>}
                         {!podePublicar && <span className="text-[10px] text-slate-400"> (não disponível)</span>}
                       </button>
                     </div>
