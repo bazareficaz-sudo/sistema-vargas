@@ -34,7 +34,7 @@ export default function EmitirEtiquetasClient({ empresaId, marcas, categorias, t
     setBuscando(true); setResultado(null)
     const sb = createClient()
     let q = sb.from('produtos')
-      .select('id, nome, sku, ean, preco_venda, preco_promocional, marca, unidade, categoria, estoque')
+      .select('id, nome, sku, ean, preco_venda, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, marca, unidade, categoria, estoque')
       .eq('empresa_id', empresaId).eq('ativo', true)
 
     if (marcaF) q = q.eq('marca', marcaF)

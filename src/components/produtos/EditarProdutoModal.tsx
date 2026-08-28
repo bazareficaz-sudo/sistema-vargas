@@ -2058,6 +2058,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
           produtos={[{
             id: form.id, nome: form.nome, sku: form.sku, ean: form.ean,
             preco_venda: form.preco_venda, preco_promocional: form.preco_promocional ?? null,
+            promocao_ativa: form.promocao_ativa ?? false,
+            promocao_inicio: form.promocao_inicio ?? null,
+            promocao_fim: promocaoInfinita ? null : (form.promocao_fim ?? null),
             marca: form.marca, unidade: form.unidade, categoria: form.categoria,
             estoque: form.estoque,
           }]}

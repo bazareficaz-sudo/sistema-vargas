@@ -1,6 +1,7 @@
 import { Document, Page, View, Text, Image, StyleSheet, pdf } from '@react-pdf/renderer'
 import JsBarcode from 'jsbarcode'
 import QRCode from 'qrcode'
+import { promocaoVigente } from '@/lib/produtos/promocao'
 import type { CampoEtiqueta, ModeloEtiqueta, ProdutoParaEtiqueta, TipoCampo } from './tipos'
 
 const MM_PARA_PT = 2.83464567
@@ -38,18 +39,24 @@ function fmtPreco(v: number) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-function valorCampo(campo: TipoCampo, produto: ProdutoParaEtiqueta): string {
+// `agora` vem de fora, uma vez por impressão: um lote grande demora, e a
+// etiqueta da prateleira não pode mudar de preço no meio da fila só porque a
+// promoção venceu entre a primeira folha e a última.
+function valorCampo(campo: TipoCampo, produto: ProdutoParaEtiqueta, agora: Date): string {
   switch (campo) {
     case 'nome': return produto.nome
     case 'sku': return produto.sku ?? ''
     case 'ean': return produto.ean ?? ''
     case 'preco_venda': return fmtPreco(produto.preco_venda)
-    case 'preco_promocional': return produto.preco_promocional ? fmtPreco(produto.preco_promocional) : ''
+    // Promoção vencida, desligada ou mais cara que o preço normal não
+    // imprime: a gôndola anunciaria um desconto que o caixa não dá.
+    case 'preco_promocional':
+      return promocaoVigente(produto, agora) ? fmtPreco(produto.preco_promocional!) : ''
     case 'marca': return produto.marca ?? ''
     case 'unidade': return produto.unidade ?? ''
     case 'categoria': return produto.categoria ?? ''
     case 'localizacao': return produto.localizacao ?? ''
-    case 'data_impressao': return new Date().toLocaleDateString('pt-BR')
+    case 'data_impressao': return agora.toLocaleDateString('pt-BR')
     default: return ''
   }
 }
@@ -60,9 +67,9 @@ const styles = StyleSheet.create({
   imagemBarras: { objectFit: 'contain' },
 })
 
-function EtiquetaConteudo({ modelo, produto, empresa, barcodes, qrcodes }: {
+function EtiquetaConteudo({ modelo, produto, empresa, barcodes, qrcodes, agora }: {
   modelo: ModeloEtiqueta; produto: ProdutoParaEtiqueta; empresa: Empresa
-  barcodes: Map<string, string>; qrcodes: Map<string, string>
+  barcodes: Map<string, string>; qrcodes: Map<string, string>; agora: Date
 }) {
   return (
     <View style={[styles.celula, { width: mm(modelo.largura_mm), height: mm(modelo.altura_mm), padding: 2 }]}>
@@ -87,7 +94,7 @@ function EtiquetaConteudo({ modelo, produto, empresa, barcodes, qrcodes }: {
           const tam = mm(Math.min(modelo.largura_mm, modelo.altura_mm) * 0.5)
           return <Image key={i} src={dataUrl} style={{ width: tam, height: tam, alignSelf: c.align === 'center' ? 'center' : c.align === 'right' ? 'flex-end' : 'flex-start' }} />
         }
-        const texto = valorCampo(c.campo, produto)
+        const texto = valorCampo(c.campo, produto, agora)
         if (!texto) return null
         return <Text key={i} style={[styles.linha, { fontSize: c.fontSize, fontFamily: c.bold ? 'Helvetica-Bold' : 'Helvetica', textAlign: c.align }]}>{texto}</Text>
       })}
@@ -95,9 +102,9 @@ function EtiquetaConteudo({ modelo, produto, empresa, barcodes, qrcodes }: {
   )
 }
 
-function EtiquetasDocument({ modelo, instancias, empresa, barcodes, qrcodes }: {
+function EtiquetasDocument({ modelo, instancias, empresa, barcodes, qrcodes, agora }: {
   modelo: ModeloEtiqueta; instancias: Instancia[]; empresa: Empresa
-  barcodes: Map<string, string>; qrcodes: Map<string, string>
+  barcodes: Map<string, string>; qrcodes: Map<string, string>; agora: Date
 }) {
   const larguraPt = mm(modelo.pagina_largura_mm)
   const alturaPt = mm(modelo.pagina_altura_mm)
@@ -107,7 +114,7 @@ function EtiquetasDocument({ modelo, instancias, empresa, barcodes, qrcodes }: {
       <Document>
         {instancias.map((inst, i) => (
           <Page key={i} size={[larguraPt, alturaPt]} style={{ padding: 0 }}>
-            <EtiquetaConteudo modelo={modelo} produto={inst.produto} empresa={empresa} barcodes={barcodes} qrcodes={qrcodes} />
+            <EtiquetaConteudo modelo={modelo} produto={inst.produto} empresa={empresa} barcodes={barcodes} qrcodes={qrcodes} agora={agora} />
           </Page>
         ))}
       </Document>
@@ -128,7 +135,7 @@ function EtiquetasDocument({ modelo, instancias, empresa, barcodes, qrcodes }: {
           }}>
             {pagina.map((inst, i) => (
               <View key={i} style={{ marginRight: mm(modelo.espaco_horizontal_mm), marginBottom: mm(modelo.espaco_vertical_mm) }}>
-                <EtiquetaConteudo modelo={modelo} produto={inst.produto} empresa={empresa} barcodes={barcodes} qrcodes={qrcodes} />
+                <EtiquetaConteudo modelo={modelo} produto={inst.produto} empresa={empresa} barcodes={barcodes} qrcodes={qrcodes} agora={agora} />
               </View>
             ))}
           </View>
@@ -170,7 +177,8 @@ export async function gerarEtiquetasPdfBlob(
     }
   }
 
-  const doc = <EtiquetasDocument modelo={modelo} instancias={instancias} empresa={empresa} barcodes={barcodes} qrcodes={qrcodes} />
+  const agora = new Date()
+  const doc = <EtiquetasDocument modelo={modelo} instancias={instancias} empresa={empresa} barcodes={barcodes} qrcodes={qrcodes} agora={agora} />
   return pdf(doc).toBlob()
 }
 

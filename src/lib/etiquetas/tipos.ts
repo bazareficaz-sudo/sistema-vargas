@@ -69,7 +69,14 @@ export type ProdutoParaEtiqueta = {
   sku: string | null
   ean: string | null
   preco_venda: number
+  // Preço promocional NÃO basta para imprimir promoção: a coluna continua
+  // preenchida depois que a campanha acaba. Quem decide é promocaoVigente()
+  // (src/lib/produtos/promocao.ts), a mesma regra do PDV — por isso a janela
+  // e o interruptor viajam junto com o preço até a etiqueta.
   preco_promocional: number | null
+  promocao_ativa: boolean
+  promocao_inicio: string | null
+  promocao_fim: string | null
   marca: string | null
   unidade: string
   categoria: string | null

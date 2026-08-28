@@ -448,6 +448,7 @@ export default function ProdutosClient({
           produtos={produtos.filter(p => selecionados.has(p.id)).map(p => ({
             id: p.id, nome: p.nome, sku: p.sku, ean: p.ean,
             preco_venda: p.preco_venda, preco_promocional: p.preco_promocional ?? null,
+            promocao_ativa: p.promocao_ativa, promocao_inicio: p.promocao_inicio, promocao_fim: p.promocao_fim,
             marca: p.marca, unidade: p.unidade, categoria: p.categoria,
             estoque: p.estoque,
           }))}

@@ -162,7 +162,7 @@ export default function EntradasListClient({
       if (ids.length === 0) { alert('Nenhum item desta entrada está vinculado a um produto.'); return }
 
       const { data: dadosProdutos, error: errProdutos } = await sb.from('produtos')
-        .select('id, nome, sku, ean, preco_venda, preco_promocional, marca, unidade, categoria')
+        .select('id, nome, sku, ean, preco_venda, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, marca, unidade, categoria')
         .in('id', ids)
       if (errProdutos) { alert('Erro ao buscar produtos: ' + errProdutos.message); return }
       const porId = new Map((dadosProdutos ?? []).map(p => [p.id, p]))
@@ -172,6 +172,8 @@ export default function EntradasListClient({
         return {
           id, nome: p?.nome ?? '(produto)', sku: p?.sku ?? null, ean: p?.ean ?? null,
           preco_venda: p?.preco_venda ?? 0, preco_promocional: p?.preco_promocional ?? null,
+          promocao_ativa: p?.promocao_ativa ?? false,
+          promocao_inicio: p?.promocao_inicio ?? null, promocao_fim: p?.promocao_fim ?? null,
           marca: p?.marca ?? null, unidade: p?.unidade ?? 'UN', categoria: p?.categoria ?? null,
           estoque: qtdPorProduto.get(id) ?? 0,
         } as ProdutoParaEtiqueta & { estoque: number }
