@@ -156,13 +156,22 @@ function estilos(formato: FormatoImpressao) {
   })
 }
 
-export function ComprovanteVendaDocument({ empresa, cliente, venda, itens, config }: {
+export type ComprovanteVenda = {
   empresa: EmpresaComprovante
   cliente: ClienteComprovante
   venda: VendaComprovante
   itens: ItemComprovante[]
   config?: ConfigImpressao
-}) {
+}
+
+// UMA página do documento, separada do <Document> porque a impressão em lote
+// monta um PDF só com uma página por venda selecionada.
+//
+// O tamanho da folha é calculado aqui dentro, e não uma vez para o documento:
+// na bobina cada cupom tem a sua própria altura (depende da quantidade de
+// itens), e `size` é propriedade da PÁGINA. É isso que deixa um lote misturar
+// cupons de tamanhos diferentes numa impressão só.
+export function PaginaComprovante({ empresa, cliente, venda, itens, config }: ComprovanteVenda) {
   const cfg = config ?? CONFIG_IMPRESSAO_PADRAO
   const bobina = cfg.formato !== 'a4'
   const s = estilos(cfg.formato)
@@ -184,148 +193,168 @@ export function ComprovanteVendaDocument({ empresa, cliente, venda, itens, confi
     `${i.produto_nome}${cfg.mostrar_sku && i.produto_sku ? ` (${i.produto_sku})` : ''}`
 
   return (
-    <Document>
-      <Page size={tamanhoPagina} style={s.page}>
-        <Text style={s.nomeEmpresa}>{empresa.nome}</Text>
-        {empresa.cnpj && <Text style={s.dadosEmpresa}>CNPJ: {empresa.cnpj}</Text>}
-        {endereco && <Text style={s.dadosEmpresa}>{endereco}</Text>}
-        {empresa.telefone && <Text style={s.dadosEmpresa}>{empresa.telefone}</Text>}
+    <Page size={tamanhoPagina} style={s.page}>
+      <Text style={s.nomeEmpresa}>{empresa.nome}</Text>
+      {empresa.cnpj && <Text style={s.dadosEmpresa}>CNPJ: {empresa.cnpj}</Text>}
+      {endereco && <Text style={s.dadosEmpresa}>{endereco}</Text>}
+      {empresa.telefone && <Text style={s.dadosEmpresa}>{empresa.telefone}</Text>}
 
-        <Text style={s.tituloDoc}>Comprovante de venda #{venda.numero}</Text>
-        <View style={s.separador} />
+      <Text style={s.tituloDoc}>Comprovante de venda #{venda.numero}</Text>
+      <View style={s.separador} />
 
-        {bobina ? (
-          <>
-            <Text>{new Date(venda.created_at).toLocaleString('pt-BR')}</Text>
+      {bobina ? (
+        <>
+          <Text>{new Date(venda.created_at).toLocaleString('pt-BR')}</Text>
+          <Text>Cliente: {cliente?.nome ?? 'Consumidor'}</Text>
+          {cliente?.cpf_cnpj && <Text>CPF/CNPJ: {cliente.cpf_cnpj}</Text>}
+        </>
+      ) : (
+        <>
+          <View style={s.linha}>
+            <Text>Data: {new Date(venda.created_at).toLocaleString('pt-BR')}</Text>
+            <Text>Status: {venda.status}</Text>
+          </View>
+          <View style={s.linha}>
             <Text>Cliente: {cliente?.nome ?? 'Consumidor'}</Text>
             {cliente?.cpf_cnpj && <Text>CPF/CNPJ: {cliente.cpf_cnpj}</Text>}
-          </>
-        ) : (
-          <>
-            <View style={s.linha}>
-              <Text>Data: {new Date(venda.created_at).toLocaleString('pt-BR')}</Text>
-              <Text>Status: {venda.status}</Text>
-            </View>
-            <View style={s.linha}>
-              <Text>Cliente: {cliente?.nome ?? 'Consumidor'}</Text>
-              {cliente?.cpf_cnpj && <Text>CPF/CNPJ: {cliente.cpf_cnpj}</Text>}
-            </View>
-          </>
-        )}
-
-        {bobina ? (
-          <>
-            <View style={s.separadorLeve} />
-            {itensVenda.map((i, idx) => (
-              <View key={idx} style={s.itemBobina}>
-                <Text style={s.itemNome}>{nomeItem(i)}</Text>
-                <View style={s.linha}>
-                  <Text>{fmtQtd(i.quantidade)} x {fmt(i.preco_unitario)}</Text>
-                  <Text style={s.negrito}>{fmt(i.total)}</Text>
-                </View>
-              </View>
-            ))}
-            {itensDevolvidos.length > 0 && (
-              <>
-                <View style={s.separadorLeve} />
-                <Text style={s.rotulo}>Itens devolvidos</Text>
-                {itensDevolvidos.map((i, idx) => (
-                  <View key={idx} style={s.itemBobina}>
-                    <Text style={s.itemNome}>{nomeItem(i)}</Text>
-                    <View style={s.linha}>
-                      <Text>{fmtQtd(i.quantidade)} x {fmt(i.preco_unitario)}</Text>
-                      <Text style={s.negrito}>-{fmt(i.total)}</Text>
-                    </View>
-                  </View>
-                ))}
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <View style={s.thead}>
-              <Text style={[s.colNome, s.negrito]}>Produto</Text>
-              <Text style={[s.colQtd, s.negrito]}>Qtd</Text>
-              <Text style={[s.colUnit, s.negrito]}>Unitário</Text>
-              <Text style={[s.colTotal, s.negrito]}>Total</Text>
-            </View>
-            {itensVenda.map((i, idx) => (
-              <View key={idx} style={s.trow}>
-                <Text style={s.colNome}>{nomeItem(i)}</Text>
-                <Text style={s.colQtd}>{fmtQtd(i.quantidade)}</Text>
-                <Text style={s.colUnit}>{fmt(i.preco_unitario)}</Text>
-                <Text style={s.colTotal}>{fmt(i.total)}</Text>
-              </View>
-            ))}
-            {itensDevolvidos.length > 0 && (
-              <>
-                <Text style={[s.rotulo, { marginTop: 10 }]}>Itens devolvidos</Text>
-                {itensDevolvidos.map((i, idx) => (
-                  <View key={idx} style={s.trow}>
-                    <Text style={s.colNome}>{nomeItem(i)}</Text>
-                    <Text style={s.colQtd}>{fmtQtd(i.quantidade)}</Text>
-                    <Text style={s.colUnit}>{fmt(i.preco_unitario)}</Text>
-                    <Text style={s.colTotal}>-{fmt(i.total)}</Text>
-                  </View>
-                ))}
-              </>
-            )}
-          </>
-        )}
-
-        <View style={s.totais}>
-          <View style={s.totalLinha}><Text>Subtotal</Text><Text>{fmt(venda.subtotal)}</Text></View>
-          {venda.desconto > 0 && (
-            <View style={s.totalLinha}><Text>Desconto</Text><Text>-{fmt(venda.desconto)}</Text></View>
-          )}
-
-          <View style={s.caixaTotal}>
-            <Text style={s.totalRotulo}>TOTAL</Text>
-            <Text style={s.totalValor}>{fmt(venda.total)}</Text>
           </View>
+        </>
+      )}
 
-          {venda.valor_pago != null && venda.valor_pago > 0 && (
-            <View style={s.totalLinha}><Text>Pago</Text><Text>{fmt(venda.valor_pago)}</Text></View>
+      {bobina ? (
+        <>
+          <View style={s.separadorLeve} />
+          {itensVenda.map((i, idx) => (
+            <View key={idx} style={s.itemBobina}>
+              <Text style={s.itemNome}>{nomeItem(i)}</Text>
+              <View style={s.linha}>
+                <Text>{fmtQtd(i.quantidade)} x {fmt(i.preco_unitario)}</Text>
+                <Text style={s.negrito}>{fmt(i.total)}</Text>
+              </View>
+            </View>
+          ))}
+          {itensDevolvidos.length > 0 && (
+            <>
+              <View style={s.separadorLeve} />
+              <Text style={s.rotulo}>Itens devolvidos</Text>
+              {itensDevolvidos.map((i, idx) => (
+                <View key={idx} style={s.itemBobina}>
+                  <Text style={s.itemNome}>{nomeItem(i)}</Text>
+                  <View style={s.linha}>
+                    <Text>{fmtQtd(i.quantidade)} x {fmt(i.preco_unitario)}</Text>
+                    <Text style={s.negrito}>-{fmt(i.total)}</Text>
+                  </View>
+                </View>
+              ))}
+            </>
           )}
-          {venda.troco != null && venda.troco > 0 && (
-            <View style={s.totalLinha}><Text style={s.rotulo}>Troco</Text><Text style={s.rotulo}>{fmt(venda.troco)}</Text></View>
+        </>
+      ) : (
+        <>
+          <View style={s.thead}>
+            <Text style={[s.colNome, s.negrito]}>Produto</Text>
+            <Text style={[s.colQtd, s.negrito]}>Qtd</Text>
+            <Text style={[s.colUnit, s.negrito]}>Unitário</Text>
+            <Text style={[s.colTotal, s.negrito]}>Total</Text>
+          </View>
+          {itensVenda.map((i, idx) => (
+            <View key={idx} style={s.trow}>
+              <Text style={s.colNome}>{nomeItem(i)}</Text>
+              <Text style={s.colQtd}>{fmtQtd(i.quantidade)}</Text>
+              <Text style={s.colUnit}>{fmt(i.preco_unitario)}</Text>
+              <Text style={s.colTotal}>{fmt(i.total)}</Text>
+            </View>
+          ))}
+          {itensDevolvidos.length > 0 && (
+            <>
+              <Text style={[s.rotulo, { marginTop: 10 }]}>Itens devolvidos</Text>
+              {itensDevolvidos.map((i, idx) => (
+                <View key={idx} style={s.trow}>
+                  <Text style={s.colNome}>{nomeItem(i)}</Text>
+                  <Text style={s.colQtd}>{fmtQtd(i.quantidade)}</Text>
+                  <Text style={s.colUnit}>{fmt(i.preco_unitario)}</Text>
+                  <Text style={s.colTotal}>-{fmt(i.total)}</Text>
+                </View>
+              ))}
+            </>
           )}
+        </>
+      )}
+
+      <View style={s.totais}>
+        <View style={s.totalLinha}><Text>Subtotal</Text><Text>{fmt(venda.subtotal)}</Text></View>
+        {venda.desconto > 0 && (
+          <View style={s.totalLinha}><Text>Desconto</Text><Text>-{fmt(venda.desconto)}</Text></View>
+        )}
+
+        <View style={s.caixaTotal}>
+          <Text style={s.totalRotulo}>TOTAL</Text>
+          <Text style={s.totalValor}>{fmt(venda.total)}</Text>
         </View>
 
-        <View style={s.separadorLeve} />
-        <Text style={s.rotulo}>Pagamento</Text>
-        {(venda.pagamentos ?? []).length > 0 ? (
-          venda.pagamentos!.map((p, idx) => (
-            <View key={idx} style={s.linha}><Text>{FORMA_LABEL[p.forma] ?? p.forma}</Text><Text>{fmt(p.valor)}</Text></View>
-          ))
-        ) : (
-          <Text>{FORMA_LABEL[venda.forma_pagamento] ?? venda.forma_pagamento}</Text>
+        {venda.valor_pago != null && venda.valor_pago > 0 && (
+          <View style={s.totalLinha}><Text>Pago</Text><Text>{fmt(venda.valor_pago)}</Text></View>
         )}
-
-        {temNfce && (
-          <>
-            <View style={s.separadorLeve} />
-            <Text style={s.rotulo}>NFC-e nº {venda.nfce_numero}</Text>
-            <Text style={s.chave}>{venda.nfce_chave}</Text>
-          </>
+        {venda.troco != null && venda.troco > 0 && (
+          <View style={s.totalLinha}><Text style={s.rotulo}>Troco</Text><Text style={s.rotulo}>{fmt(venda.troco)}</Text></View>
         )}
+      </View>
 
-        {venda.observacao && (
-          <>
-            <View style={s.separadorLeve} />
-            <Text style={s.rotulo}>Observação</Text>
-            <Text>{venda.observacao}</Text>
-          </>
-        )}
+      <View style={s.separadorLeve} />
+      <Text style={s.rotulo}>Pagamento</Text>
+      {(venda.pagamentos ?? []).length > 0 ? (
+        venda.pagamentos!.map((p, idx) => (
+          <View key={idx} style={s.linha}><Text>{FORMA_LABEL[p.forma] ?? p.forma}</Text><Text>{fmt(p.valor)}</Text></View>
+        ))
+      ) : (
+        <Text>{FORMA_LABEL[venda.forma_pagamento] ?? venda.forma_pagamento}</Text>
+      )}
 
-        {mensagem && <Text style={s.mensagem}>{mensagem}</Text>}
+      {temNfce && (
+        <>
+          <View style={s.separadorLeve} />
+          <Text style={s.rotulo}>NFC-e nº {venda.nfce_numero}</Text>
+          <Text style={s.chave}>{venda.nfce_chave}</Text>
+        </>
+      )}
 
-        <Text style={s.rodape}>
-          {temNfce
-            ? 'Comprovante de venda — a nota fiscal é a NFC-e informada acima.'
-            : 'Documento gerado pelo sistema — não substitui nota fiscal quando esta não for emitida.'}
-        </Text>
-      </Page>
+      {venda.observacao && (
+        <>
+          <View style={s.separadorLeve} />
+          <Text style={s.rotulo}>Observação</Text>
+          <Text>{venda.observacao}</Text>
+        </>
+      )}
+
+      {mensagem && <Text style={s.mensagem}>{mensagem}</Text>}
+
+      <Text style={s.rodape}>
+        {temNfce
+          ? 'Comprovante de venda — a nota fiscal é a NFC-e informada acima.'
+          : 'Documento gerado pelo sistema — não substitui nota fiscal quando esta não for emitida.'}
+      </Text>
+    </Page>
+  )
+}
+
+export function ComprovanteVendaDocument(args: ComprovanteVenda) {
+  return (
+    <Document>
+      <PaginaComprovante {...args} />
+    </Document>
+  )
+}
+
+// Vários comprovantes num PDF só, uma venda por página.
+//
+// Por que existe: "Imprimir selecionadas" abria UMA ABA POR VENDA. O navegador
+// barra pop-up em série, então com quatro selecionadas sobrava a última e
+// parecia que só ela tinha sido impressa. Um documento de N páginas resolve na
+// origem — uma aba, uma prévia, N folhas, na ordem da tela.
+export function ComprovantesVendaDocument({ comprovantes }: { comprovantes: ComprovanteVenda[] }) {
+  return (
+    <Document>
+      {comprovantes.map((c, i) => <PaginaComprovante key={i} {...c} />)}
     </Document>
   )
 }
@@ -344,4 +373,9 @@ export async function gerarComprovanteVendaPdfBuffer(args: Parameters<typeof Com
 export function abrirPdfEmNovaAba(blob: Blob) {
   const url = URL.createObjectURL(blob)
   window.open(url, '_blank')
+}
+
+export async function gerarComprovantesVendaPdfBuffer(comprovantes: ComprovanteVenda[]): Promise<Buffer> {
+  const blob = await pdf(<ComprovantesVendaDocument comprovantes={comprovantes} />).toBlob()
+  return Buffer.from(await blob.arrayBuffer())
 }

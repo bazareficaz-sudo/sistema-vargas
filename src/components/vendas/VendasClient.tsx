@@ -365,18 +365,59 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     setAplicandoMassa(false)
   }
 
+  // Um PDF só, com uma venda por página — e não uma aba por venda.
+  //
+  // O que havia antes: um `window.open` dentro do laço. Navegador barra
+  // pop-up em série, então de quatro selecionadas sobrava a última na tela e
+  // parecia que só ela tinha sido gerada. Além disso, quatro abas com uma
+  // folha cada não se imprimem de uma vez.
+  //
+  // A janela é aberta AQUI, ainda dentro do clique: aberta depois do `await`
+  // ela deixa de ser consequência do gesto do usuário e volta a ser pop-up.
   async function imprimirSelecionados() {
     const alvos = vendas.filter(v => selecionados.has(v.id))
     if (alvos.length === 0) return
-    setAplicandoMassa(true); setResumoMassa('')
-    let ok = 0
-    for (const v of alvos) {
-      const url = await gerarPdfUrl(v.id)
-      if (url) { window.open(url, '_blank'); ok++ }
-      await aguardar(300) // evita bloqueio de pop-up por abrir muitas abas de uma vez
+
+    const janela = window.open('', '_blank')
+    if (!janela) {
+      setResumoMassa('O navegador bloqueou a janela. Permita pop-ups pra este site e tente de novo.')
+      return
     }
-    setResumoMassa(`${ok} de ${alvos.length} comprovante(s) aberto(s) em novas abas. Se o navegador bloqueou alguma, permita pop-ups pra este site.`)
-    setAplicandoMassa(false)
+    janela.document.write(
+      '<title>Comprovantes</title>' +
+      `<p style="font:15px system-ui;padding:24px;color:#374151">Gerando ${alvos.length} comprovante(s)…</p>`
+    )
+
+    setAplicandoMassa(true); setResumoMassa('')
+    try {
+      const res = await fetch('/api/vendas/comprovantes-pdf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: alvos.map(v => v.id) }),
+      })
+      if (!res.ok) {
+        const erro = await res.json().catch(() => null)
+        janela.close()
+        setResumoMassa(erro?.erro ?? 'Falha ao gerar os comprovantes.')
+        return
+      }
+      const blobUrl = URL.createObjectURL(await res.blob())
+      janela.location.href = blobUrl
+
+      const geradas = Number(res.headers.get('X-Comprovantes')) || alvos.length
+      const faltaram = alvos.length - geradas
+      setResumoMassa(
+        `${geradas} comprovante(s) num PDF só, uma venda por página, na ordem da lista — imprima pelo botão do visualizador.` +
+        (faltaram > 0 ? ` ${faltaram} venda(s) não foram encontradas.` : '')
+      )
+      // O visualizador já leu o arquivo; soltar o blob depois evita segurar a
+      // memória da aba que ficou aberta.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
+    } catch (e: any) {
+      janela.close()
+      setResumoMassa('Erro ao gerar os comprovantes: ' + e.message)
+    } finally {
+      setAplicandoMassa(false)
+    }
   }
 
   async function enviarWhatsappSelecionados() {
@@ -623,8 +664,9 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
         <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 flex-wrap">
           <span className="text-sm text-blue-700 font-medium">{selecionados.size} selecionada(s)</span>
           <button onClick={imprimirSelecionados} disabled={aplicandoMassa}
+            title="Gera um PDF único com uma venda por página, na ordem da lista"
             className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
-            🖨️ Imprimir selecionadas
+            {aplicandoMassa ? '🖨️ Gerando…' : '🖨️ Imprimir selecionadas'}
           </button>
           <button onClick={enviarWhatsappSelecionados} disabled={aplicandoMassa}
             className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
