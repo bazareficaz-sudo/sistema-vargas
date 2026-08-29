@@ -106,6 +106,7 @@ export default function RegrasPrecificacao({ empresaId }: { empresaId: string })
                     <p className="text-xs text-gray-500 mt-0.5">
                       {r.alvo_texto && <>alvo: {r.alvo_texto} · </>}
                       {descreverObjetivo(r.objetivo_tipo, Number(r.objetivo_valor))}
+                      {r.margem_promocional_minima != null && <> · promoção até {r.margem_promocional_minima}%</>}
                       {r.margem_minima != null && <> · nunca abaixo de {r.margem_minima}%</>}
                       {canal && <> · só no canal {canal.nome}</>}
                       {r.arredondamento !== 'nenhum' && <> · arredonda {r.arredondamento === 'cima_inteiro' ? 'p/ inteiro' : `terminando em ${r.arredondamento === 'terminar_90' ? ',90' : ',99'}`}</>}
@@ -274,14 +275,35 @@ function FormRegra({ regra: inicial, dados, empresaId, onFechar, onSalvo }: {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Margem mínima (opcional)</label>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Margem mínima — o piso (opcional)</label>
             <div className="flex items-center gap-2">
               <CampoNumero valor={r.margem_minima} onChange={v => set('margem_minima', v)}
                 placeholder="sem piso" className={`${inputCls} w-24`} />
               <span className="text-xs text-gray-400">
                 % — se o objetivo acima der menos que isso, o preço sobe até respeitar o piso (e o sistema avisa).
+                É também o limite abaixo do qual nenhuma promoção é aceita.
               </span>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Margem promocional mínima (opcional)</label>
+            <div className="flex items-center gap-2">
+              <CampoNumero valor={r.margem_promocional_minima} onChange={v => set('margem_promocional_minima', v)}
+                placeholder="sem política" className={`${inputCls} w-24`} />
+              <span className="text-xs text-gray-400">
+                % — até onde uma promoção pode descer sem precisar de aprovação. Em branco significa
+                <b> sem política promocional</b>: nada é aprovado sozinho, e tudo abaixo da meta cai em
+                &quot;requer aprovação&quot;.
+              </span>
+            </div>
+            {r.margem_promocional_minima != null && r.margem_promocional_minima !== '' &&
+             r.margem_minima != null && r.margem_minima !== '' &&
+             Number(r.margem_promocional_minima) < Number(r.margem_minima) && (
+              <p className="text-xs text-red-600 mt-1">
+                A margem promocional não pode ser menor que o piso — o piso é o limite absoluto.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

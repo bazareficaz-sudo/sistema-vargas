@@ -38,7 +38,21 @@ export type Regra = {
   canalId: string | null
   objetivoTipo: Objetivo['tipo']
   objetivoValor: number
+  /**
+   * MARGEM PISO — limite econômico absoluto, em % de margem líquida.
+   *
+   * Nome antigo, semântica confirmada na auditoria da Fase 2: é isto que
+   * `aplicarRegra` já tratava como piso. Não foi renomeada porque renomear
+   * coluna em produção para ganhar clareza de nome é troca ruim.
+   */
   margemMinima: number | null
+  /**
+   * MARGEM PROMOCIONAL MÍNIMA — até onde uma promoção pode reduzir sem
+   * precisar de aprovação. NULA = sem política promocional declarada; o
+   * classificador então usa o próprio piso, deixando a faixa promocional
+   * vazia. Ver `margens.ts` e supabase-precificacao-margem-promocional.sql.
+   */
+  margemPromocionalMinima: number | null
   arredondamento: string
   prioridade: number
 }
@@ -125,6 +139,7 @@ export function linhaParaRegra(row: any): Regra {
     objetivoTipo: row.objetivo_tipo,
     objetivoValor: Number(row.objetivo_valor),
     margemMinima: row.margem_minima != null ? Number(row.margem_minima) : null,
+    margemPromocionalMinima: row.margem_promocional_minima != null ? Number(row.margem_promocional_minima) : null,
     arredondamento: row.arredondamento ?? 'nenhum',
     prioridade: Number(row.prioridade ?? 0),
   }

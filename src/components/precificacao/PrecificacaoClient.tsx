@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ROTULO_SAUDE } from '@/lib/precificacao/motor'
+import { ROTULO_CLASSIFICACAO } from '@/lib/precificacao/margens'
 import type { SaudePreco } from '@/lib/precificacao/tipos'
 import TaxasCanal from './TaxasCanal'
 import RegrasPrecificacao from './RegrasPrecificacao'
@@ -36,6 +37,12 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
 
   const [tipoObjetivo, setTipoObjetivo] = useState<TipoObjetivo>('margem_liquida')
   const [valorObjetivo, setValorObjetivo] = useState('20')
+
+  // Cenário promocional: um preço candidato OU um desconto sobre o preço que
+  // o objetivo produziu. Simular não altera nada — é a regra desta fase.
+  const [verFaixas, setVerFaixas] = useState(false)
+  const [precoPromo, setPrecoPromo] = useState('')
+  const [descontoPromo, setDescontoPromo] = useState('')
 
   const [calculando, setCalculando] = useState(false)
   const [erro, setErro] = useState('')
@@ -87,6 +94,9 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
           produtoId: produto?.id,
           custoManual: produto ? undefined : Number(custoManual.replace(',', '.')),
           objetivo: { tipo: tipoObjetivo, valor: Number(valorObjetivo.replace(',', '.')) },
+          sugerirQuantidade: verFaixas || undefined,
+          precoCandidato: precoPromo.trim() ? Number(precoPromo.replace(',', '.')) : undefined,
+          descontoPercentual: descontoPromo.trim() ? Number(descontoPromo.replace(',', '.')) : undefined,
         }),
       })
       const d = await resp.json()
@@ -198,6 +208,38 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
               </div>
             </div>
 
+            {!porRegra && (
+              <div className="border border-slate-200 rounded-lg px-3 py-2.5 bg-slate-50">
+                <p className="text-xs font-medium text-gray-700 mb-1.5">
+                  Testar uma promoção <span className="font-normal text-gray-400">(opcional — simular não altera nada)</span>
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className="text-xs text-gray-500">Preço promocional</label>
+                  <input value={precoPromo} onChange={e => { setPrecoPromo(e.target.value); if (e.target.value) setDescontoPromo('') }}
+                    placeholder="R$" inputMode="decimal"
+                    className="w-24 border border-gray-300 rounded-lg px-2 py-1 text-sm" />
+                  <span className="text-xs text-gray-400">ou desconto</span>
+                  <input value={descontoPromo} onChange={e => { setDescontoPromo(e.target.value); if (e.target.value) setPrecoPromo('') }}
+                    placeholder="%" inputMode="decimal"
+                    className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-sm" />
+                  {(precoPromo || descontoPromo) && (
+                    <button type="button" onClick={() => { setPrecoPromo(''); setDescontoPromo('') }}
+                      className="text-xs text-gray-400 hover:text-gray-600 underline">limpar</button>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                  O desconto incide sobre o preço que o objetivo acima produzir em cada canal. A margem
+                  sai do mesmo motor, com a comissão e o frete reais daquele preço.
+                </p>
+
+                <label className="flex items-center gap-2 mt-2.5 text-xs text-gray-600">
+                  <input type="checkbox" checked={verFaixas} onChange={e => setVerFaixas(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-blue-600" />
+                  Sugerir preço por quantidade (3+, 5+, 10+)
+                </label>
+              </div>
+            )}
+
             <button onClick={simular} disabled={!podeSimular || calculando}
               className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg">
               {calculando ? 'Calculando...' : 'Calcular em todos os canais'}
@@ -238,6 +280,83 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
                         </div>
                         <span className={`text-xs px-2 py-1 rounded-lg border ${s.cor}`}>{s.emoji} {s.texto}</span>
                       </div>
+
+                      {r.quantidade && (() => {
+                        const q = r.quantidade
+                        const cap = q.capacidadePublicacao
+                        return (
+                          <div className="px-4 py-3 border-b border-gray-100">
+                            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                              <p className="text-xs font-medium text-gray-700">Preço por quantidade</p>
+                              <span className="text-[10px] text-gray-400">{q.criterio}</span>
+                            </div>
+
+                            {q.avaliadas.length === 0 ? (
+                              <p className="text-xs text-gray-500 mt-1.5">{q.cabe.motivo}</p>
+                            ) : (
+                              <table className="w-full text-xs mt-2">
+                                <tbody className="divide-y divide-gray-100">
+                                  <tr className="text-gray-500">
+                                    <td className="py-1">1 un</td>
+                                    <td className="py-1 text-right font-mono">{brl(r.resultado.preco)}</td>
+                                    <td className="py-1 text-right font-mono">{pct(r.resultado.margemLiquida)}</td>
+                                    <td className="py-1 text-right text-gray-300">—</td>
+                                  </tr>
+                                  {q.avaliadas.map((a: any) => (
+                                    <tr key={a.faixa.qtd} className="text-gray-700">
+                                      <td className="py-1">{a.faixa.qtd}+</td>
+                                      <td className="py-1 text-right font-mono">{brl(a.faixa.preco)}</td>
+                                      <td className="py-1 text-right font-mono">{pct(a.resultado.margemLiquida)}</td>
+                                      <td className="py-1 text-right text-[10px]"
+                                        title={`Lucro do pedido de ${a.faixa.qtd} un: ${brl(a.lucroPedido)}`}>
+                                        {a.descontoPercentual > 0 ? `-${pct(a.descontoPercentual)}` : "—"}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+
+                            {q.avisos?.length > 0 && (
+                              <p className="text-[11px] text-gray-500 mt-1.5">{q.avisos[0]}</p>
+                            )}
+                            {cap?.estado !== "suportado" && (
+                              <p className="text-[11px] text-amber-700 mt-1.5">{q.explicacaoPublicacao}</p>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {r.promocional && (() => {
+                        const c = ROTULO_CLASSIFICACAO[r.promocional.classificacao.classificacao as keyof typeof ROTULO_CLASSIFICACAO]
+                        const m = r.promocional.margens
+                        return (
+                          <div className="px-4 py-3 bg-slate-50 border-b border-gray-100">
+                            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                              <p className="text-xs text-gray-500">
+                                Promoção a <strong className="text-gray-900 font-mono">{brl(r.promocional.precoCandidato)}</strong>
+                                {' '}({pct(r.promocional.descontoPercentual)} sobre {brl(r.promocional.precoBase)})
+                              </p>
+                              <span className={`text-xs px-2 py-1 rounded-lg border ${c.cor}`}>{c.emoji} {c.texto}</span>
+                            </div>
+                            <p className="text-xs text-gray-600 mt-1.5">
+                              Margem <strong>{pct(r.promocional.cenario.resultado.margemLiquida)}</strong>
+                              {' · '}lucro {brl(r.promocional.cenario.resultado.lucro)}
+                              {' · '}comissão {brl(r.promocional.cenario.resultado.comissao)}
+                              {r.promocional.cenario.resultado.frete > 0 ? ` · frete ${brl(r.promocional.cenario.resultado.frete)}` : ''}
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Alvo {pct(m.alvo)}
+                              {m.promocionalMinima != null ? ` · mínimo promocional ${pct(m.promocionalMinima)}` : ' · sem política promocional'}
+                              {m.piso != null ? ` · piso ${pct(m.piso)}` : ''}
+                            </p>
+                            <p className="text-[11px] text-gray-500 mt-1">{r.promocional.classificacao.motivo}</p>
+                            {r.promocional.cenario.resultado.regime && (
+                              <p className="text-[11px] text-gray-400 mt-0.5">Regime: {r.promocional.cenario.resultado.regime.descricao}</p>
+                            )}
+                          </div>
+                        )
+                      })()}
 
                       <div className="px-4 py-3">
                         {r.regra && <PorQueEstePreco r={r} />}

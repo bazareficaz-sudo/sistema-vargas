@@ -74,6 +74,11 @@ export async function POST(req: Request) {
     objetivo_tipo: regra.objetivo_tipo,
     objetivo_valor: Number(regra.objetivo_valor),
     margem_minima: regra.margem_minima != null && regra.margem_minima !== '' ? Number(regra.margem_minima) : null,
+    // Nula é uma resposta legítima e é o padrão: significa "sem política
+    // promocional declarada", e o classificador então usa o próprio piso.
+    // Ver supabase-precificacao-margem-promocional.sql.
+    margem_promocional_minima: regra.margem_promocional_minima != null && regra.margem_promocional_minima !== ''
+      ? Number(regra.margem_promocional_minima) : null,
     arredondamento: regra.arredondamento ?? 'nenhum',
     prioridade: Number(regra.prioridade ?? 0),
     ativo: regra.ativo !== false,
