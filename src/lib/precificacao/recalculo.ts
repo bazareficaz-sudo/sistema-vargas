@@ -35,6 +35,8 @@ export type ItemRecalculo = {
   anuncioId: string
   canalId: string
   canalNome: string
+  /** Plataforma do canal. A tela usa para saber o que pode oferecer. */
+  canalPlataforma: string
   titulo: string
   produtoId: string
   produtoNome: string
@@ -284,6 +286,7 @@ export async function varrerRecalculo(
         if (itens.length < limiteItens && Math.abs(diferenca) > TOLERANCIA) {
           itens.push({
             anuncioId: a.id, canalId: canal.id, canalNome: canal.nome,
+            canalPlataforma: canal.plataforma,
             titulo: a.titulo ?? '', produtoId: p.id, produtoNome: p.nome ?? '(produto)', sku: p.sku ?? null,
             custo: ctx.economia.custo,
             precoAtual, precoNovo: novo.resultado.preco, diferenca,
@@ -402,6 +405,7 @@ async function anexarRecomendacoes(
     const ctx = contextos.get(item.anuncioId)
     if (!ctx) continue
 
+    const capacidades = capacidadesDoCanal(ctx.plataforma, { temCredencial: ctx.temCredencial })
     const estoque = estoques.get(ctx.produto.id) ?? sinalDeEstoque(null)
     const entradaVendas = vendas.get(item.anuncioId) ?? { unidades: null, dias: 0 }
     const sinalVendas = sinalDeVendas(estoque, entradaVendas)
@@ -415,8 +419,8 @@ async function anexarRecomendacoes(
       atacado: estoque.temEstoque
         ? cabeAtacado(ctx.economia, ctx.estrategia.margens)
         : null,
-      capacidadeAtacado: capacidadesDoCanal(ctx.plataforma, { temCredencial: ctx.temCredencial })
-        .precoQuantidadeEscrita,
+      capacidadeAtacado: capacidades.precoQuantidadeEscrita,
+      capacidadeCampanhas: capacidades.campanhasLeitura,
       campanhaSincronizadaEm: ctx.campanhaSincronizadaEm,
       agora,
     })

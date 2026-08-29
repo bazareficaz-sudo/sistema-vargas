@@ -241,3 +241,63 @@ describe('recomendações — espelho de campanha', () => {
     assert.ok(!tipos(rs).includes('dados_de_campanha_desatualizados'))
   })
 })
+
+describe('recomendações — campanha depende de o canal saber ler campanhas', () => {
+  // Defeito encontrado em produção, testando a tela: a recomendação mandava
+  // "Sincronizar promoções do canal" num anúncio do Mercado Livre. A rota de
+  // sincronização filtra `.eq('plataforma','shopee')` e o botão "🏷️ Promoções"
+  // só é renderizado para Shopee — o conselho era impossível de seguir.
+  //
+  // Pior que impossível: sugeria que o problema era estar desatualizado,
+  // quando o sistema NUNCA leu campanha de ML.
+
+  function comCanal(plataforma: string, sincronizadaEm: string | null) {
+    const estoque = sinalDeEstoque(90)
+    const vendas = sinalDeVendas(estoque, VENDAS_NORMAIS)
+    return recomendar({
+      estrategia: montar(200, regra()),
+      estoque, vendas,
+      capacidadeCampanhas: capacidadesDoCanal(plataforma).campanhasLeitura,
+      campanhaSincronizadaEm: sincronizadaEm,
+      agora: AGORA,
+    })
+  }
+
+  test('Mercado Livre: avisa que NÃO lê campanhas, e não manda sincronizar', () => {
+    const rs = comCanal('mercadolivre', AGORA.toISOString())
+    const r = rs.find(x => x.tipo === 'campanhas_nao_lidas_no_canal')
+    assert.ok(r, 'canal sem leitura de campanha precisa avisar do ponto cego')
+    assert.match(r!.diagnostico, /não lê as campanhas/)
+    assert.match(r!.recomendacao, /pode não ser a que está valendo/)
+    assert.doesNotMatch(r!.acaoSugerida ?? '', /[Ss]incronizar/)
+    assert.ok(!rs.some(x => x.tipo === 'dados_de_campanha_desatualizados'),
+      'não faz sentido falar em espelho atrasado onde não há espelho')
+  })
+
+  test('Shopee: continua mandando sincronizar quando o espelho envelhece', () => {
+    const rs = comCanal('shopee', '2026-09-01T12:00:00Z')
+    const r = rs.find(x => x.tipo === 'dados_de_campanha_desatualizados')
+    assert.ok(r)
+    assert.match(r!.acaoSugerida ?? '', /Sincronizar/)
+    assert.ok(!rs.some(x => x.tipo === 'campanhas_nao_lidas_no_canal'))
+  })
+
+  test('Shopee com espelho recente: nenhuma das duas incomoda', () => {
+    const rs = comCanal('shopee', '2026-09-14T12:00:00Z')
+    assert.ok(!rs.some(x => x.tipo === 'dados_de_campanha_desatualizados'))
+    assert.ok(!rs.some(x => x.tipo === 'campanhas_nao_lidas_no_canal'))
+  })
+
+  test('canal sem credencial: o aviso aparece, e o motivo é a conexão', () => {
+    const estoque = sinalDeEstoque(90)
+    const rs = recomendar({
+      estrategia: montar(200, regra()),
+      estoque, vendas: sinalDeVendas(estoque, VENDAS_NORMAIS),
+      capacidadeCampanhas: capacidadesDoCanal('shopee', { temCredencial: false }).campanhasLeitura,
+      campanhaSincronizadaEm: AGORA.toISOString(), agora: AGORA,
+    })
+    const r = rs.find(x => x.tipo === 'campanhas_nao_lidas_no_canal')
+    assert.ok(r)
+    assert.ok(r!.evidencias.some(e => e.rotulo === 'Leitura de campanhas' && /conexão/i.test(e.valor)))
+  })
+})

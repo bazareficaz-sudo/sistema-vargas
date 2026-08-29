@@ -38,6 +38,7 @@ export type TipoRecomendacao =
   | 'fora_da_politica_promocional'
   | 'preco_efetivo_inconsistente'
   | 'dados_de_campanha_desatualizados'
+  | 'campanhas_nao_lidas_no_canal'
   | 'sem_estoque'
   // Oportunidades
   | 'espaco_para_promocao'
@@ -77,6 +78,13 @@ export type EntradaRecomendacoes = {
   atacado?: { cabe: boolean; motivo: string; economiaPorUnidade: number } | null
   /** Capacidade do canal para publicar preço por quantidade. */
   capacidadeAtacado?: Capacidade | null
+  /**
+   * Capacidade do canal para LER campanhas.
+   *
+   * Sem ela, "sincronize as promoções" é um conselho impossível: a Shopee
+   * tem rota de sincronização, o Mercado Livre não tem nenhuma.
+   */
+  capacidadeCampanhas?: Capacidade | null
   /** Quando o espelho de campanhas foi sincronizado pela última vez. */
   campanhaSincronizadaEm?: string | null
   agora?: Date
@@ -192,15 +200,34 @@ function gerar(entrada: EntradaRecomendacoes): Recomendacao[] {
     })
   }
 
-  const espelhoVelho = espelhoDesatualizado(entrada)
-  if (espelhoVelho) {
+  // Campanhas do canal: o conselho depende de o sistema saber LER campanhas
+  // daquela plataforma. Sugerir "sincronize" a um canal sem rota de
+  // sincronização manda o operador procurar um botão que não existe — e,
+  // pior, sugere que o problema é de atualização quando é de cobertura.
+  const leCampanhas = entrada.capacidadeCampanhas?.estado
+  if (leCampanhas != null && leCampanhas !== 'suportado') {
     saida.push({
-      tipo: 'dados_de_campanha_desatualizados', prioridade: 'media',
-      diagnostico: espelhoVelho,
-      recomendacao: 'Campanha que começou depois da última sincronização não aparece aqui.',
-      acaoSugerida: 'Sincronizar promoções do canal',
-      evidencias: evidenciasBase(),
+      tipo: 'campanhas_nao_lidas_no_canal', prioridade: 'media',
+      diagnostico: 'O sistema não lê as campanhas deste canal — nunca leu.',
+      recomendacao:
+        'Se houver promoção no ar na plataforma, ela não entra nesta conta, e a margem mostrada aqui pode não ser a que está valendo.',
+      acaoSugerida: 'Conferir no painel da plataforma antes de mudar preço',
+      evidencias: [
+        ...evidenciasBase(),
+        { rotulo: 'Leitura de campanhas', valor: entrada.capacidadeCampanhas?.motivo ?? 'não disponível' },
+      ],
     })
+  } else {
+    const espelhoVelho = espelhoDesatualizado(entrada)
+    if (espelhoVelho) {
+      saida.push({
+        tipo: 'dados_de_campanha_desatualizados', prioridade: 'media',
+        diagnostico: espelhoVelho,
+        recomendacao: 'Campanha que começou depois da última sincronização não aparece aqui.',
+        acaoSugerida: 'Sincronizar promoções do canal',
+        evidencias: evidenciasBase(),
+      })
+    }
   }
 
   // ── Oportunidades ─────────────────────────────────────────────────────────

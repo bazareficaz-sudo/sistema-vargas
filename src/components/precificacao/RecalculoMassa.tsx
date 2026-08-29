@@ -35,6 +35,8 @@ export default function RecalculoMassa() {
 
   const [calculando, setCalculando] = useState(false)
   const [previa, setPrevia] = useState<any | null>(null)
+  const [sincronizandoPromo, setSincronizandoPromo] = useState(false)
+  const [resumoPromo, setResumoPromo] = useState<string>('')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [aplicando, setAplicando] = useState(false)
   const [resultado, setResultado] = useState<any | null>(null)
@@ -114,6 +116,58 @@ export default function RecalculoMassa() {
   // Transforma o ajuste numa regra do proprio produto. Sem isso o anuncio
   // volta a aparecer na proxima varredura, porque a regra da categoria
   // continua pedindo a margem antiga.
+  /**
+   * Sincroniza as campanhas dos canais que aparecem na prévia e recalcula.
+   *
+   * Existe aqui, e não só na tela de Promoções, porque é aqui que a falta
+   * da campanha dói: a margem mostrada na linha pode estar medindo o preço
+   * errado. Mandar o operador procurar outra tela no meio de uma decisão de
+   * preço é onde ele desiste.
+   *
+   * SÓ SHOPEE. A rota de sincronização recusa qualquer outra plataforma
+   * (`.eq('plataforma', 'shopee')`), e o Mercado Livre não tem leitura de
+   * campanha nenhuma — por isso o botão nem aparece quando não há canal
+   * Shopee na prévia.
+   */
+  async function sincronizarPromocoes() {
+    const canais = canaisComPromocao()
+    if (canais.length === 0) return
+
+    setSincronizandoPromo(true); setResumoPromo(''); setErro('')
+    const partes: string[] = []
+    try {
+      for (const c of canais) {
+        try {
+          const d = await fetch('/api/marketplace/shopee/promocoes/sync', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ canalId: c.id, situacao: 'all' }),
+          }).then(r => r.json())
+          partes.push(d?.ok
+            ? `${c.nome}: ${d.campanhas ?? 0} campanha(s), ${d.itens ?? 0} item(ns)`
+            : `${c.nome}: ${d?.erro ?? 'falhou'}`)
+        } catch (e) {
+          partes.push(`${c.nome}: ${e instanceof Error ? e.message : 'falhou'}`)
+        }
+      }
+      setResumoPromo(partes.join(' · '))
+      // A prévia envelheceu no instante em que o espelho mudou: os preços
+      // efetivos e as margens podem ser outros agora.
+      await calcularPrevia()
+    } finally {
+      setSincronizandoPromo(false)
+    }
+  }
+
+  /** Canais da prévia cujas campanhas o sistema sabe ler. */
+  function canaisComPromocao(): { id: string; nome: string }[] {
+    const vistos = new Map<string, string>()
+    type LinhaDeCanal = { canalId: string; canalNome: string; canalPlataforma: string }
+    for (const i of (previa?.itens ?? []) as LinhaDeCanal[]) {
+      if (i.canalPlataforma === 'shopee') vistos.set(i.canalId, i.canalNome)
+    }
+    return [...vistos.entries()].map(([id, nome]) => ({ id, nome }))
+  }
+
   async function fixarParaProduto(i: any) {
     const margem = ajustes[i.anuncioId]?.margemAlvo
     if (!(margem > 0)) return
@@ -342,6 +396,24 @@ export default function RecalculoMassa() {
               <Bloco rotulo="Já estão certos" valor={r.iguais} cor="text-gray-600" />
               <Bloco rotulo="Em prejuízo hoje" valor={r.emPrejuizoAgora} cor={r.emPrejuizoAgora > 0 ? 'text-red-700' : 'text-gray-600'} />
             </div>
+
+            {canaisComPromocao().length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap mb-4">
+                <button onClick={sincronizarPromocoes} disabled={sincronizandoPromo || calculando}
+                  title="Lê as campanhas na Shopee e recalcula a prévia com os preços que estiverem valendo"
+                  className="px-3 py-1.5 border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+                  {sincronizandoPromo
+                    ? '🏷️ sincronizando promoções...'
+                    : `🏷️ Sincronizar promoções (${canaisComPromocao().length} canal(is) Shopee)`}
+                </button>
+                {resumoPromo && <span className="text-xs text-gray-500">{resumoPromo}</span>}
+                {!resumoPromo && (
+                  <span className="text-[11px] text-gray-400">
+                    Só lê — nada é criado nem alterado na plataforma.
+                  </span>
+                )}
+              </div>
+            )}
 
             {(r.emPromocao + r.promocoesTerminando + r.foraDaPoliticaPromocional + r.abaixoDoPiso) > 0 && (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
