@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { ROTULO_CLASSIFICACAO } from '@/lib/precificacao/margens'
+import { ROTULO_PRIORIDADE } from '@/lib/precificacao/recomendacoes'
 import { ROTULO_SAUDE } from '@/lib/precificacao/motor'
 import type { SaudePreco } from '@/lib/precificacao/tipos'
 import CampoNumero from './CampoNumero'
@@ -459,7 +460,23 @@ export default function RecalculoMassa() {
                             {i.avisos?.length > 0 && (
                               <p className="text-[11px] text-amber-700 mt-0.5">{i.avisos[0]}</p>
                             )}
-                            {i.oportunidades?.length > 0 && (
+                            {i.recomendacoes?.length > 0 ? (() => {
+                              const r = i.recomendacoes[0]
+                              const pr = ROTULO_PRIORIDADE[r.prioridade as keyof typeof ROTULO_PRIORIDADE]
+                              // As evidências vão no title: a recomendação não pode
+                              // ser caixa-preta, mas também não pode ocupar a linha.
+                              const porQue = [r.diagnostico, r.recomendacao,
+                                ...r.evidencias.map((e: any) => `${e.rotulo}: ${e.valor}`)].join(' · ')
+                              return (
+                                <p className="text-[11px] mt-0.5 flex items-baseline gap-1 flex-wrap" title={porQue}>
+                                  <span className={`px-1 py-px rounded border text-[9px] ${pr.cor}`}>{pr.texto}</span>
+                                  <span className="text-gray-700">{r.recomendacao}</span>
+                                  {r.acaoSugerida && (
+                                    <span className="text-gray-400">— {r.acaoSugerida}</span>
+                                  )}
+                                </p>
+                              )
+                            })() : i.oportunidades?.length > 0 && (
                               <p className="text-[11px] text-blue-700 mt-0.5" title={i.oportunidades[0].detalhe}>
                                 {i.oportunidades[0].titulo}
                                 {i.precoPromocionalLimite != null && i.oportunidades[0].tipo === 'margem_para_promocao'

@@ -50,8 +50,10 @@ type DadosBrutos = unknown
 export const COLUNAS_CANAL =
   'id, nome, plataforma, empresa_id, seller_id, access_token, refresh_token, token_expira_em'
 
+// `estoque` entra aqui por causa do sinal comercial da Fase 3 — é a entrada
+// de `estoqueDoSistema`, que decide o número que vale para o marketplace.
 export const COLUNAS_PRODUTO =
-  'id, nome, sku, categoria, marca, tipo, preco_custo, preco_venda, peso_kg, comprimento_cm, largura_cm, altura_cm'
+  'id, nome, sku, categoria, marca, tipo, preco_custo, preco_venda, estoque, peso_kg, comprimento_cm, largura_cm, altura_cm'
 
 export const COLUNAS_ANUNCIO =
   'id, canal_id, produto_id, id_externo, titulo, preco_venda, preco_promocional, promo_inicio, promo_fim, status, tem_variacao, categoria_externa, dados_brutos'

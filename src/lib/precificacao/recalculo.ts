@@ -1,9 +1,21 @@
-import { criarResolvedor, descreverOrigem, COLUNAS_ANUNCIO, COLUNAS_CANAL, COLUNAS_PRODUTO, type OrigemComissao, type OrigemFrete } from './contexto'
+import { criarResolvedor, descreverOrigem, COLUNAS_ANUNCIO, COLUNAS_CANAL, COLUNAS_PRODUTO, type OrigemComissao, type OrigemFrete, type ProdutoPrecificacao } from './contexto'
 import { buscarRegras, descreverObjetivo, resolverRegra, type Regra } from './regras'
-import { montarEstrategia, type EstadoComercial, type FlagComercial, type Oportunidade } from './estrategia'
+import { montarEstrategia, type EstadoComercial, type EstrategiaEconomicaAnuncio, type FlagComercial, type Oportunidade } from './estrategia'
+import { recomendar, type Recomendacao } from './recomendacoes'
+import { sinalDeEstoque, sinalDeVendas } from './sinais'
+import { estoquePorProduto, vendasPorAnuncio } from './sinaisLote'
+import { cabeAtacado } from './quantidade'
+import { capacidadesDoCanal } from './capacidades'
+import type { EconomiaResolvida } from './cenarios'
 import type { ClassificacaoMargem, Margens } from './margens'
 import type { OrigemPrecoEfetivo, CampanhaVigenteResumo } from './precos'
 import type { SaudePreco } from './tipos'
+
+// O cliente do Supabase é `any` em todo o repositório: tipá-lo exigiria os
+// tipos gerados do banco, que este projeto não usa. O alias existe para a
+// exceção ficar declarada em UM lugar, e não repetida em cada assinatura.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ClienteSupabase = any
 
 // Varredura de recálculo: percorre os anúncios, aplica a regra que vale pra
 // cada um e devolve o que MUDARIA — sem alterar nada.
@@ -76,6 +88,12 @@ export type ItemRecalculo = {
   flags: FlagComercial[]
   campanha: CampanhaVigenteResumo | null
   oportunidades: Oportunidade[]
+  /**
+   * Recomendações comerciais, já sem contradição e ordenadas pela
+   * gravidade. Vazio quando os sinais de estoque e venda não puderam ser
+   * apurados — nenhuma delas chuta.
+   */
+  recomendacoes: Recomendacao[]
   /** Comissão + frete que valeram neste preço, em uma linha legível. */
   regime: string | null
   /** Custo, comissão e frete: de onde cada um saiu. */
@@ -114,7 +132,7 @@ const TOLERANCIA = 0.01 // centavos: abaixo disso o preço é "o mesmo"
 const LIMITE_PRODUTOS_BUSCA = 400
 
 export async function varrerRecalculo(
-  sb: any,
+  sb: ClienteSupabase,
   empresaId: string,
   opcoes: {
     canaisIds?: string[]
@@ -173,9 +191,22 @@ export async function varrerRecalculo(
       .eq('empresa_id', empresaId)
       .or(`nome.ilike.%${seguro}%,sku.ilike.%${seguro}%,ean.ilike.%${seguro}%`)
       .limit(LIMITE_PRODUTOS_BUSCA)
-    idsDaBusca = (achados ?? []).map((p: any) => p.id)
+    idsDaBusca = (achados ?? []).map((p: { id: string }) => p.id)
   }
   const itens: ItemRecalculo[] = []
+
+  // O que cada item precisa para virar recomendação depois da varredura.
+  // Guardado só para os itens que entram na lista (no máximo `limiteItens`),
+  // e não para os milhares varridos.
+  type ContextoDoItem = {
+    estrategia: EstrategiaEconomicaAnuncio
+    economia: EconomiaResolvida
+    produto: { id: string; estoque: number | null; tipo: string | null }
+    plataforma: string
+    temCredencial: boolean
+    campanhaSincronizadaEm: string | null
+  }
+  const contextoDoItem = new Map<string, ContextoDoItem>()
 
   const TAM = 1000
   for (const canal of canais ?? []) {
@@ -204,7 +235,7 @@ export async function varrerRecalculo(
 
       for (const a of lote) {
         resumo.totalAnuncios++
-        const p: any = a.produtos
+        const p = a.produtos as ProdutoPrecificacao & { estoque?: number | null } | null
         if (!p) { resumo.semProduto++; continue }
 
         // As três peneiras vêm ANTES do contexto completo, e nesta ordem, de
@@ -214,7 +245,7 @@ export async function varrerRecalculo(
         const { custo } = await resolvedor.custo(p)
         if (!(custo > 0)) { resumo.semCusto++; continue }
 
-        const resolucao = resolverRegra(regras, { id: p.id, categoria: p.categoria, marca: p.marca }, canal)
+        const resolucao = resolverRegra(regras, { id: p.id, categoria: p.categoria ?? null, marca: p.marca ?? null }, canal)
         if (!resolucao.vencedora) { resumo.semRegra++; continue }
 
         const ctx = await resolvedor.contexto({ canal, produto: p, anuncio: a })
@@ -253,7 +284,7 @@ export async function varrerRecalculo(
         if (itens.length < limiteItens && Math.abs(diferenca) > TOLERANCIA) {
           itens.push({
             anuncioId: a.id, canalId: canal.id, canalNome: canal.nome,
-            titulo: a.titulo ?? '', produtoId: p.id, produtoNome: p.nome, sku: p.sku ?? null,
+            titulo: a.titulo ?? '', produtoId: p.id, produtoNome: p.nome ?? '(produto)', sku: p.sku ?? null,
             custo: ctx.economia.custo,
             precoAtual, precoNovo: novo.resultado.preco, diferenca,
             precoBase: precos.base,
@@ -286,7 +317,23 @@ export async function varrerRecalculo(
             flags: estrategia.flags,
             campanha: estrategia.campanha,
             oportunidades: estrategia.oportunidades,
+            recomendacoes: [],
             avisos: [...ctx.avisos, ...novo.resultado.avisos],
+          })
+
+          contextoDoItem.set(a.id, {
+            estrategia,
+            economia: ctx.economia,
+            produto: { id: p.id, estoque: p.estoque ?? null, tipo: p.tipo ?? null },
+            plataforma: canal.plataforma,
+            temCredencial: !!canal.access_token,
+            // A campanha mais recentemente sincronizada do canal diz a idade
+            // do espelho — e o espelho velho é motivo de recomendação.
+            campanhaSincronizadaEm: ctx.campanhas
+              .map(c => c.campanha.sincronizadoEm)
+              .filter(Boolean)
+              .sort()
+              .pop() ?? null,
           })
         }
       }
@@ -299,10 +346,79 @@ export async function varrerRecalculo(
   // custa dinheiro deixar como está.
   itens.sort((a, b) => Math.abs(b.diferenca) - Math.abs(a.diferenca))
 
+  await anexarRecomendacoes(sb, empresaId, itens, contextoDoItem, resolvedor.agora)
+
   const totalComDiferenca = resumo.sobem + resumo.descem
   return { resumo, itens, truncado: totalComDiferenca > itens.length }
 }
 
 export function regraDoItem(regras: Regra[], id: string): Regra | undefined {
   return regras.find(r => r.id === id)
+}
+
+/**
+ * Segunda passada: transforma os itens da prévia em recomendações.
+ *
+ * POR QUE UMA SEGUNDA PASSADA, e não dentro do laço
+ *
+ * Estoque e vendas são consultas em LOTE. Buscá-los durante a varredura
+ * significaria uma consulta por anúncio entre milhares; aqui são duas
+ * consultas para os poucos que entraram na lista.
+ *
+ * E por que só para os que entraram: recomendação é para ler, e o que não vai
+ * ser mostrado não precisa ser apurado.
+ *
+ * Falha em qualquer das duas buscas deixa as recomendações vazias em vez de
+ * inventar sinal. Um estoque desconhecido tratado como zero produziria
+ * "sem estoque, não promova" para a loja inteira.
+ */
+async function anexarRecomendacoes(
+  sb: ClienteSupabase,
+  empresaId: string,
+  itens: ItemRecalculo[],
+  contextos: Map<string, {
+    estrategia: EstrategiaEconomicaAnuncio
+    economia: EconomiaResolvida
+    produto: { id: string; estoque: number | null; tipo: string | null }
+    plataforma: string
+    temCredencial: boolean
+    campanhaSincronizadaEm: string | null
+  }>,
+  agora: Date,
+): Promise<void> {
+  if (itens.length === 0) return
+
+  const produtos = [...new Map(
+    itens.map(i => contextos.get(i.anuncioId)?.produto).filter(Boolean)
+      .map(p => [p!.id, p!] as const),
+  ).values()]
+
+  const [estoques, vendas] = await Promise.all([
+    estoquePorProduto(sb, empresaId, produtos),
+    vendasPorAnuncio(sb, empresaId, itens.map(i => i.anuncioId), { agora }),
+  ])
+
+  for (const item of itens) {
+    const ctx = contextos.get(item.anuncioId)
+    if (!ctx) continue
+
+    const estoque = estoques.get(ctx.produto.id) ?? sinalDeEstoque(null)
+    const entradaVendas = vendas.get(item.anuncioId) ?? { unidades: null, dias: 0 }
+    const sinalVendas = sinalDeVendas(estoque, entradaVendas)
+
+    item.recomendacoes = recomendar({
+      estrategia: ctx.estrategia,
+      estoque,
+      vendas: sinalVendas,
+      // Só pergunta se cabe atacado quando há estoque: a resposta não muda
+      // nada num item que não pode ser entregue.
+      atacado: estoque.temEstoque
+        ? cabeAtacado(ctx.economia, ctx.estrategia.margens)
+        : null,
+      capacidadeAtacado: capacidadesDoCanal(ctx.plataforma, { temCredencial: ctx.temCredencial })
+        .precoQuantidadeEscrita,
+      campanhaSincronizadaEm: ctx.campanhaSincronizadaEm,
+      agora,
+    })
+  }
 }
