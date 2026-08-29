@@ -123,9 +123,23 @@ estrutural que o espelho do anúncio não guarda em lugar nenhum.
 **`plataforma` não virou coluna**: a campanha pertence a um canal, e o canal
 tem plataforma. Derivar é mais honesto que guardar um valor constante.
 
-**RLS**: as duas tabelas já têm RLS **habilitada**, com policy copiada de
-`marketplace_anuncios`. São as únicas do domínio de precificação que não estão
-na dívida do `anon`.
+**RLS**: as duas tabelas têm RLS **habilitada**, com policy copiada de
+`marketplace_anuncios`.
+
+> **Correção de 29/08/2026, medida no banco de produção.** Este documento
+> afirmava que elas eram *as únicas* do domínio de precificação fora da dívida
+> do `anon`. Está errado. `precificacao_regra`, `precificacao_config` e
+> `precificacao_historico` também estão com RLS habilitada, com a policy
+> `empresa_do_meu_grupo(empresa_id) OR is_system_admin()` — ligadas depois da
+> criação, e por isso os arquivos `supabase-precificacao*.sql` (que as criam
+> com RLS desabilitada) não descrevem mais o estado atual.
+>
+> Do domínio, seguem sem RLS apenas `precificacao_ml_comissao_cache` e
+> `precificacao_ml_frete_cache`, que guardam tabela de comissão e escada de
+> frete por canal, sem dado de cliente.
+>
+> A lição vale para além deste caso: **o SQL versionado diz o que foi feito uma
+> vez; o banco diz o que vale agora.**
 
 ### Variação
 

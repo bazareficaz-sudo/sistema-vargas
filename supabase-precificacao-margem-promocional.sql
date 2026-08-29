@@ -73,8 +73,22 @@ ALTER TABLE public.precificacao_regra
 -- código trata a ausência como "sem política promocional", então derrubá-la
 -- devolve exatamente o comportamento anterior.
 
--- RLS: `precificacao_regra` está com RLS DESABILITADA desde a criação
--- (supabase-precificacao-regras.sql). Esta migration NÃO altera isso — mudar
--- o regime de acesso da tabela junto com uma coluna nova misturaria duas
--- decisões independentes. A dívida continua registrada em
--- docs/seguranca-fechar-acesso-anon.md.
+-- RLS: esta migration NÃO altera o regime de acesso da tabela — mudar isso
+-- junto com uma coluna nova misturaria duas decisões independentes.
+--
+-- CORREÇÃO DE UMA AFIRMAÇÃO ANTERIOR: o arquivo de criação
+-- (supabase-precificacao-regras.sql) desabilita RLS, e por isso a Fase 2
+-- registrou `precificacao_regra` como parte da dívida do anon. CONFERIDO NO
+-- BANCO DE PRODUÇÃO em 29/08/2026, ao aplicar esta migration: a tabela está
+-- com RLS HABILITADA e com a policy `precificacao_regra_do_grupo`
+-- (`empresa_do_meu_grupo(empresa_id) OR is_system_admin()`), assim como
+-- `precificacao_config` e `precificacao_historico`. Foram ligadas depois da
+-- criação, provavelmente na leva do fechamento de acesso público.
+--
+-- Do domínio de precificação, seguem SEM RLS apenas os dois caches do
+-- Mercado Livre — `precificacao_ml_comissao_cache` e
+-- `precificacao_ml_frete_cache` —, que guardam tabela de comissão e escada de
+-- frete por canal, sem dado de cliente.
+--
+-- A lição: ler o arquivo de criação não substitui consultar o banco. O SQL
+-- versionado diz o que foi feito UMA vez; o banco diz o que vale agora.
