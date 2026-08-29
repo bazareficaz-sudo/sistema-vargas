@@ -272,6 +272,14 @@ function FormRegra({ regra: inicial, dados, empresaId, onFechar, onSalvo }: {
               <CampoNumero valor={r.objetivo_valor} onChange={v => set('objetivo_valor', v)}
                 className={`${inputCls} w-24`} />
             </div>
+            {r.objetivo_tipo && r.objetivo_tipo !== 'margem_liquida' && (
+              <p className="text-xs text-amber-700 mt-1.5">
+                Este número <b>não é margem líquida</b>. Os dois campos abaixo são —
+                e por isso não se comparam diretamente com ele. A margem líquida que
+                este objetivo entrega depende das taxas de cada canal, e aparece no
+                Simulador e no Recalcular em massa.
+              </p>
+            )}
           </div>
 
           <div>
@@ -280,7 +288,8 @@ function FormRegra({ regra: inicial, dados, empresaId, onFechar, onSalvo }: {
               <CampoNumero valor={r.margem_minima} onChange={v => set('margem_minima', v)}
                 placeholder="sem piso" className={`${inputCls} w-24`} />
               <span className="text-xs text-gray-400">
-                % — se o objetivo acima der menos que isso, o preço sobe até respeitar o piso (e o sistema avisa).
+                % de <b>margem líquida</b> (lucro sobre o preço de venda) — se o objetivo acima der
+                menos que isso, o preço sobe até respeitar o piso, e o sistema avisa.
                 É também o limite abaixo do qual nenhuma promoção é aceita.
               </span>
             </div>
@@ -292,9 +301,9 @@ function FormRegra({ regra: inicial, dados, empresaId, onFechar, onSalvo }: {
               <CampoNumero valor={r.margem_promocional_minima} onChange={v => set('margem_promocional_minima', v)}
                 placeholder="sem política" className={`${inputCls} w-24`} />
               <span className="text-xs text-gray-400">
-                % — até onde uma promoção pode descer sem precisar de aprovação. Em branco significa
-                <b> sem política promocional</b>: nada é aprovado sozinho, e tudo abaixo da meta cai em
-                &quot;requer aprovação&quot;.
+                % de <b>margem líquida</b> — até onde uma promoção pode descer sem precisar de
+                aprovação. Em branco significa <b>sem política promocional</b>: nada é aprovado
+                sozinho, e tudo abaixo da meta cai em &quot;requer aprovação&quot;.
               </span>
             </div>
             {r.margem_promocional_minima != null && r.margem_promocional_minima !== '' &&
