@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { ROTULO_CLASSIFICACAO } from '@/lib/precificacao/margens'
 import { ROTULO_SAUDE } from '@/lib/precificacao/motor'
 import type { SaudePreco } from '@/lib/precificacao/tipos'
 import CampoNumero from './CampoNumero'
@@ -281,6 +282,17 @@ export default function RecalculoMassa() {
               ))}
             </div>
           )}
+          {resultado.retidos?.length > 0 && (
+            <div className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <p className="font-medium">
+                {resultado.retidos.length} preço(s) retido(s): o anúncio está com promoção vigente, e gravar o
+                preço novo não mudaria o que o cliente paga.
+              </p>
+              {resultado.retidos.slice(0, 5).map((r: any, i: number) => (
+                <p key={i} className="mt-0.5">· {r.titulo || r.anuncioId} — {r.motivo}</p>
+              ))}
+            </div>
+          )}
           {resultado.falhas?.length > 0 && (
             <p className="text-xs text-red-700 mt-1">{resultado.falhas.length} falharam ao gravar.</p>
           )}
@@ -329,6 +341,16 @@ export default function RecalculoMassa() {
               <Bloco rotulo="Já estão certos" valor={r.iguais} cor="text-gray-600" />
               <Bloco rotulo="Em prejuízo hoje" valor={r.emPrejuizoAgora} cor={r.emPrejuizoAgora > 0 ? 'text-red-700' : 'text-gray-600'} />
             </div>
+
+            {(r.emPromocao + r.promocoesTerminando + r.foraDaPoliticaPromocional + r.abaixoDoPiso) > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
+                <Bloco rotulo="Em promoção" valor={r.emPromocao} cor="text-blue-700" />
+                <Bloco rotulo="Sem promoção" valor={r.semPromocao} cor="text-gray-600" />
+                <Bloco rotulo="Promoção terminando" valor={r.promocoesTerminando} cor={r.promocoesTerminando > 0 ? 'text-amber-700' : 'text-gray-600'} />
+                <Bloco rotulo="Fora da política" valor={r.foraDaPoliticaPromocional} cor={r.foraDaPoliticaPromocional > 0 ? 'text-amber-700' : 'text-gray-600'} />
+                <Bloco rotulo="Abaixo do piso" valor={r.abaixoDoPiso} cor={r.abaixoDoPiso > 0 ? 'text-red-700' : 'text-gray-600'} />
+              </div>
+            )}
 
             {(r.semProduto + r.semCusto + r.semRegra + r.semPrecoAtual) > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
@@ -437,9 +459,33 @@ export default function RecalculoMassa() {
                             {i.avisos?.length > 0 && (
                               <p className="text-[11px] text-amber-700 mt-0.5">{i.avisos[0]}</p>
                             )}
+                            {i.oportunidades?.length > 0 && (
+                              <p className="text-[11px] text-blue-700 mt-0.5" title={i.oportunidades[0].detalhe}>
+                                {i.oportunidades[0].titulo}
+                                {i.precoPromocionalLimite != null && i.oportunidades[0].tipo === 'margem_para_promocao'
+                                  ? ` — até ${brl(i.precoPromocionalLimite)}` : ''}
+                              </p>
+                            )}
                             {aj?.erro && <p className="text-[11px] text-red-600 mt-0.5">{aj.erro}</p>}
                           </td>
-                          <td className="px-3 py-2 text-right text-gray-500 font-mono">{brl(i.precoAtual)}</td>
+                          <td className="px-3 py-2 text-right font-mono">
+                            <span className="text-gray-500">{brl(i.precoAtual)}</span>
+                            {i.origemPrecoAtual === 'campanha' && (
+                              <span className="block text-[10px] font-sans text-blue-700"
+                                title={i.campanha ? `Campanha "${i.campanha.nome}"${i.campanha.diasRestantes != null ? ` · termina em ${i.campanha.diasRestantes} dia(s)` : ''}` : 'Campanha vigente'}>
+                                🏷 campanha{i.campanha?.diasRestantes != null && i.campanha.diasRestantes <= 7 ? ` · ${i.campanha.diasRestantes}d` : ''}
+                              </span>
+                            )}
+                            {i.origemPrecoAtual === 'promocional_local' && (
+                              <span className="block text-[10px] font-sans text-blue-600">promoção local</span>
+                            )}
+                            {i.classificacao && ROTULO_CLASSIFICACAO[i.classificacao as keyof typeof ROTULO_CLASSIFICACAO] && (
+                              <span className="block text-[10px] font-sans text-gray-500" title={i.motivoClassificacao}>
+                                {ROTULO_CLASSIFICACAO[i.classificacao as keyof typeof ROTULO_CLASSIFICACAO].emoji}{' '}
+                                {ROTULO_CLASSIFICACAO[i.classificacao as keyof typeof ROTULO_CLASSIFICACAO].texto}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-right font-mono font-medium text-gray-900">
                             {aj?.carregando ? <span className="text-gray-400 text-xs">calculando...</span> : brl(precoDe(i))}
                             {ajustado && <span className="block text-[10px] text-blue-600 font-sans">ajustado</span>}

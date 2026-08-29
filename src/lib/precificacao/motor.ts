@@ -1,4 +1,4 @@
-import type { ConfigTaxas, FaixaComissao, ItemCusto, LinhaCalculo, Objetivo, Resultado, SaudePreco, FaixaFrete } from './tipos'
+import type { ArredondamentoPreco, ConfigTaxas, EconomiaDoPedido, FaixaComissao, ItemCusto, LinhaCalculo, Objetivo, RegimeUsado, Resultado, SaudePreco, FaixaFrete } from './tipos'
 
 // Motor de Precificação — função pura, síncrona, sem banco e sem tela.
 // É consumido pela simulação, pelo comparador entre canais, pelo indicador de
@@ -13,6 +13,30 @@ import type { ConfigTaxas, FaixaComissao, ItemCusto, LinhaCalculo, Objetivo, Res
 // custos extras. Parte delas é percentual sobre o preço — e é por isso que,
 // quando o objetivo é uma margem, o preço não pode ser calculado direto: ele
 // aparece nos dois lados da conta. A resolução está em `resolverPreco`.
+//
+// QUANTIDADE (Fase 3)
+//
+// `preco` é SEMPRE o preço unitário, e todos os campos do resultado saem por
+// unidade. O que muda com a quantidade é o RATEIO dos custos que a plataforma
+// cobra uma vez por pedido:
+//
+//   fixo por unidade = fixos unitários + (frete + fixos por pedido) / N
+//
+// O frete é por ENVIO, e isso não é suposição: a Shopee grava
+// `actual_shipping_fee` no PEDIDO (lib/shopee/orders.ts) e o Mercado Livre
+// mantém o custo em `/shipments/{id}`, não no item (lib/mercadolivre/orders.ts).
+// Sem o rateio, avaliar a faixa "10+ unidades" cobraria dez fretes e faria um
+// preço de atacado saudável parecer prejuízo.
+//
+// As FAIXAS de comissão e de frete continuam indexadas pelo preço UNITÁRIO —
+// a sonda do ML usa `item_price`, e a da Shopee, o preço do item. Por isso os
+// regimes não mudam de forma: muda só o `fixo` de cada um.
+//
+// O QUE NÃO FOI POSSÍVEL VERIFICAR: se a parcela FIXA da comissão é cobrada
+// por unidade ou por pedido quando N > 1. `mlComissao.ts` mede `fixed_fee`
+// para UM item no preço X, e a documentação oficial responde 403 a este
+// ambiente. Fica tratada como POR UNIDADE, que é a leitura conservadora:
+// superestima o custo do atacado, nunca a margem.
 
 const BRL = (v: number) => Math.round(v * 100) / 100
 
@@ -57,22 +81,33 @@ export function freteDaFaixa(faixas: FaixaFrete[] | null | undefined, preco: num
   return achada?.valor ?? faixas[faixas.length - 1]?.valor ?? 0
 }
 
+// Devolve {pctPreco, fixo, fixoPedido}: o que incide sobre o preço fica como
+// taxa percentual (entra na resolução), o resto vira valor em reais —
+// separado entre o que se paga por unidade e o que se paga uma vez por pedido.
+//
+// Percentual sobre o PREÇO nunca é "por pedido": ele acompanha a receita, e a
+// receita já escala com a quantidade. Marcar `porPedido` num percentual sobre
+// preço não teria sentido econômico, então é ignorado.
 function separarItem(item: ItemCusto | null | undefined, custo: number) {
-  // Devolve {pctPreco, fixo}: o que incide sobre o preço fica como taxa
-  // percentual (entra na resolução), o resto já vira valor em reais.
-  if (!item || !item.valor) return { pctPreco: 0, fixo: 0 }
-  if (item.tipo === 'fixo') return { pctPreco: 0, fixo: item.valor }
-  if ((item.base ?? 'preco') === 'custo') return { pctPreco: 0, fixo: custo * (item.valor / 100) }
-  return { pctPreco: item.valor / 100, fixo: 0 }
+  const zero = { pctPreco: 0, fixo: 0, fixoPedido: 0 }
+  if (!item || !item.valor) return zero
+  const paraPedido = !!item.porPedido
+  const emReais = item.tipo === 'fixo'
+    ? item.valor
+    : (item.base ?? 'preco') === 'custo' ? custo * (item.valor / 100) : null
+  if (emReais == null) return { pctPreco: item.valor / 100, fixo: 0, fixoPedido: 0 }
+  return paraPedido
+    ? { pctPreco: 0, fixo: 0, fixoPedido: emReais }
+    : { pctPreco: 0, fixo: emReais, fixoPedido: 0 }
 }
 
 function separarLista(itens: ItemCusto[] | null | undefined, custo: number) {
-  let pctPreco = 0, fixo = 0
+  let pctPreco = 0, fixo = 0, fixoPedido = 0
   for (const i of itens ?? []) {
     const r = separarItem(i, custo)
-    pctPreco += r.pctPreco; fixo += r.fixo
+    pctPreco += r.pctPreco; fixo += r.fixo; fixoPedido += r.fixoPedido
   }
-  return { pctPreco, fixo }
+  return { pctPreco, fixo, fixoPedido }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -90,6 +125,9 @@ type Regime = {
   freteGratis: boolean | null // null = frete não depende do preço
   pctPreco: number
   fixo: number
+  // O frete que está DENTRO de `fixo`, guardado à parte só para o regime
+  // poder se explicar depois. Não entra na conta duas vezes.
+  frete: number
   precoMin: number
   precoMax: number | null
 }
@@ -99,6 +137,7 @@ function montarRegimes(
   custo: number,
   pesoKg: number | null,
   freteFaixasItem?: FaixaFrete[] | null,
+  quantidade = 1,
 ): Regime[] {
   const faixas: FaixaComissao[] = cfg.comissaoModo === 'simples'
     ? [{ min: 0, max: null, percentual: cfg.comissaoPercentual, fixo: cfg.comissaoFixo }]
@@ -118,7 +157,10 @@ function montarRegimes(
   for (const faixa of faixas) {
     const comuns = {
       pctPreco: faixa.percentual / 100 + taxas.pctPreco + extras.pctPreco + imposto.pctPreco,
-      fixoBase: faixa.fixo + taxas.fixo + extras.fixo + imposto.fixo,
+      // `faixa.fixo` fica no lado unitário: ver a ressalva do cabeçalho sobre
+      // a parcela fixa da comissão não ter sido verificada para N > 1.
+      fixoBase: faixa.fixo + taxas.fixo + extras.fixo + imposto.fixo
+        + (taxas.fixoPedido + extras.fixoPedido + imposto.fixoPedido) / quantidade,
     }
     // Frete importado do marketplace: também é uma escada por faixa de preço,
     // então cruza com a escada da comissão. Cada pedaço em que as duas são
@@ -136,7 +178,7 @@ function montarRegimes(
         if (max != null && max < min) continue // sem interseção
         regimes.push({
           faixa, freteGratis: ff.valor > 0,
-          pctPreco: comuns.pctPreco, fixo: comuns.fixoBase + ff.valor,
+          pctPreco: comuns.pctPreco, fixo: comuns.fixoBase + ff.valor / quantidade, frete: ff.valor,
           precoMin: min, precoMax: max,
         })
       }
@@ -147,20 +189,24 @@ function montarRegimes(
       const maxAbaixo = faixa.max == null ? limite : Math.min(faixa.max, limite)
       if (faixa.min < limite) {
         regimes.push({
-          faixa, freteGratis: false, pctPreco: comuns.pctPreco, fixo: comuns.fixoBase,
+          faixa, freteGratis: false, pctPreco: comuns.pctPreco, fixo: comuns.fixoBase, frete: 0,
           precoMin: faixa.min, precoMax: maxAbaixo,
         })
       }
       // No limite ou acima: o vendedor paga o frete.
       if (faixa.max == null || faixa.max >= limite) {
         regimes.push({
-          faixa, freteGratis: true, pctPreco: comuns.pctPreco, fixo: comuns.fixoBase + (cfg.freteCustoMedio ?? 0),
+          faixa, freteGratis: true,
+          pctPreco: comuns.pctPreco, fixo: comuns.fixoBase + (cfg.freteCustoMedio ?? 0) / quantidade,
+          frete: cfg.freteCustoMedio ?? 0,
           precoMin: Math.max(faixa.min, limite), precoMax: faixa.max,
         })
       }
     } else {
       regimes.push({
-        faixa, freteGratis: null, pctPreco: comuns.pctPreco, fixo: comuns.fixoBase + freteFixoSempre,
+        faixa, freteGratis: null,
+        pctPreco: comuns.pctPreco, fixo: comuns.fixoBase + freteFixoSempre / quantidade,
+        frete: freteFixoSempre,
         precoMin: faixa.min, precoMax: faixa.max,
       })
     }
@@ -170,9 +216,17 @@ function montarRegimes(
 
 // Custo que não depende do preço: produto + embalagem (quando fixa ou % do
 // custo). Embalagem percentual sobre o PREÇO cai nas deduções, não aqui.
-function custoBase(cfg: ConfigTaxas, custoProduto: number) {
+//
+// Embalagem marcada como `porPedido` é rateada: dez unidades num pedido
+// costumam ir numa caixa só, e cobrar dez caixas inventaria custo.
+function custoBase(cfg: ConfigTaxas, custoProduto: number, quantidade = 1) {
   const emb = separarItem(cfg.embalagem, custoProduto)
-  return { custoTotal: custoProduto + emb.fixo, embalagemPctPreco: emb.pctPreco, embalagemValorFixo: emb.fixo }
+  const embalagemPorUnidade = emb.fixo + emb.fixoPedido / quantidade
+  return {
+    custoTotal: custoProduto + embalagemPorUnidade,
+    embalagemPctPreco: emb.pctPreco,
+    embalagemValorFixo: embalagemPorUnidade,
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -225,14 +279,25 @@ export function calcular(params: {
    * preenchida, substitui o frete configurado no canal — ver montarRegimes.
    */
   freteFaixas?: FaixaFrete[] | null
-  arredondamento?: 'nenhum' | 'terminar_90' | 'terminar_99' | 'cima_inteiro'
+  arredondamento?: ArredondamentoPreco
+  /**
+   * Unidades no mesmo pedido. Default 1 — o comportamento de sempre.
+   *
+   * `preco` continua sendo o preço UNITÁRIO; a quantidade só decide como os
+   * custos por pedido (frete, e o que estiver marcado `porPedido`) são
+   * rateados entre as unidades.
+   */
+  quantidade?: number
 }): Resultado {
   const { cfg, custoProduto, objetivo } = params
   const pesoKg = params.pesoKg ?? null
   const avisos: string[] = []
+  // Quantidade fracionária ou zero não descreve pedido nenhum: cai em 1, que
+  // é o caso de sempre, em vez de dividir por zero.
+  const quantidade = Math.max(1, Math.trunc(Number(params.quantidade) || 1))
 
-  const { custoTotal, embalagemPctPreco } = custoBase(cfg, custoProduto)
-  const regimes = montarRegimes(cfg, custoProduto, pesoKg, params.freteFaixas)
+  const { custoTotal, embalagemPctPreco } = custoBase(cfg, custoProduto, quantidade)
+  const regimes = montarRegimes(cfg, custoProduto, pesoKg, params.freteFaixas, quantidade)
 
   // Acha o preço: resolve em cada regime e fica com as soluções coerentes.
   let preco: number
@@ -276,14 +341,22 @@ export function calcular(params: {
   // O detalhamento precisa mostrar o MESMO frete que o preço usou. Quando a
   // escada veio importada do marketplace, ela manda aqui também — senão a
   // tela exibiria o custo médio digitado enquanto a conta usou outro número.
-  const frete = BRL(params.freteFaixas?.length
+  // O frete é do ENVIO. `fretePedido` é o que sai do bolso uma vez; `frete`
+  // é a parte que cabe a cada unidade, e é ele que entra na conta unitária.
+  const fretePedido = BRL(params.freteFaixas?.length
     ? freteDaFaixa(params.freteFaixas, preco)
     : freteEm(cfg, preco, pesoKg))
+  const frete = BRL(fretePedido / quantidade)
 
+  // Item marcado `porPedido` também rateia: uma caixa para dez unidades é
+  // uma caixa, não dez.
   const valorDe = (item: ItemCusto | null | undefined): number => {
     if (!item || !item.valor) return 0
-    if (item.tipo === 'fixo') return item.valor
-    return (item.base ?? 'preco') === 'custo' ? custoProduto * (item.valor / 100) : preco * (item.valor / 100)
+    const rateio = item.porPedido ? quantidade : 1
+    if (item.tipo === 'fixo') return item.valor / rateio
+    return (item.base ?? 'preco') === 'custo'
+      ? (custoProduto * (item.valor / 100)) / rateio
+      : preco * (item.valor / 100)
   }
   const somaDe = (itens: ItemCusto[] | null | undefined) => (itens ?? []).reduce((s, i) => s + valorDe(i), 0)
 
@@ -309,9 +382,15 @@ export function calcular(params: {
     })
   }
   if (frete) {
+    const porQueGratis = cfg.freteModo === "gratis_acima"
+      ? `frete grátis a partir de R$ ${(cfg.freteLimiteGratis ?? 0).toFixed(2)}`
+      : undefined
+    const rateado = quantidade > 1
+      ? `R$ ${fretePedido.toFixed(2)} por pedido ÷ ${quantidade} unidades`
+      : undefined
     linhas.push({
       rotulo: 'Frete', valor: frete, sinal: '-',
-      detalhe: cfg.freteModo === 'gratis_acima' ? `frete grátis a partir de R$ ${(cfg.freteLimiteGratis ?? 0).toFixed(2)}` : undefined,
+      detalhe: [rateado, porQueGratis].filter(Boolean).join(' · ') || undefined,
     })
   }
   for (const t of cfg.taxas ?? []) {
@@ -325,6 +404,19 @@ export function calcular(params: {
 
   if (lucro < 0) avisos.push('Este preço dá prejuízo: as deduções superam o que sobra do custo.')
 
+  const regimeUsado = descreverRegime(regimes.find(r => dentroDoRegime(r, preco)) ?? null)
+
+  // O pedido inteiro. Com quantidade 1 é o mesmo que a conta unitária — e é
+  // exatamente isso que preserva todo cálculo anterior.
+  const pedido: EconomiaDoPedido = {
+    quantidade,
+    receita: BRL(preco * quantidade),
+    custoTotal: BRL(custoComEmbalagem * quantidade),
+    frete: fretePedido,
+    totalDeducoes: BRL(totalDeducoes * quantidade),
+    lucro: BRL(lucro * quantidade),
+  }
+
   return {
     preco,
     custoProduto,
@@ -337,7 +429,32 @@ export function calcular(params: {
     valorLiquido,
     diasRecebimento: cfg.diasRecebimento ?? null,
     linhas,
+    regime: regimeUsado,
+    quantidade,
+    pedido,
     avisos,
+  }
+}
+
+// Tradução do regime interno para algo que a tela e o histórico possam
+// guardar. O regime é a resposta para "por que esta comissão e este frete, e
+// não outros?" — sem ele, um preço avaliado é um número sem procedência.
+function descreverRegime(r: Regime | null): RegimeUsado | null {
+  if (!r) return null
+  const dinheiro = (v: number) => `R$ ${v.toFixed(2).replace('.', ',')}`
+  const ate = r.precoMax == null ? 'em diante' : `até ${dinheiro(r.precoMax)}`
+  const partes = [
+    `comissão ${r.faixa.percentual}%${r.faixa.fixo ? ` + ${dinheiro(r.faixa.fixo)}` : ''}`,
+    r.frete > 0 ? `frete ${dinheiro(r.frete)}` : 'sem custo de frete',
+    `de ${dinheiro(r.precoMin)} ${ate}`,
+  ]
+  return {
+    descricao: partes.join(' · '),
+    comissaoPercentual: r.faixa.percentual,
+    comissaoFixo: r.faixa.fixo,
+    frete: r.frete,
+    precoMin: r.precoMin,
+    precoMax: r.precoMax,
   }
 }
 

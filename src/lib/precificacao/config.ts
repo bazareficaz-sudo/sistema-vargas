@@ -137,8 +137,12 @@ export function configParaLinha(cfg: ConfigTaxas & { faixasSaude?: FaixasSaude }
 export async function buscarConfigDoCanal(
   sb: any, empresaId: string, canal: { id: string; plataforma: string },
 ): Promise<{ cfg: ConfigTaxas & { faixasSaude: FaixasSaude }; origem: 'canal' | 'plataforma' | 'preset' }> {
+  // O filtro por empresa é redundante hoje (o canal já veio resolvido pela
+  // empresa da sessão) e é justamente por isso que ele deve estar aqui: a
+  // tabela está com RLS desabilitada, então esta consulta é a única barreira
+  // se um dia alguém chamar a função com um canal de fora.
   const { data: doCanal } = await sb.from('precificacao_config')
-    .select('*').eq('canal_id', canal.id).eq('ativo', true).maybeSingle()
+    .select('*').eq('empresa_id', empresaId).eq('canal_id', canal.id).eq('ativo', true).maybeSingle()
   if (doCanal) return { cfg: linhaParaConfig(doCanal), origem: 'canal' }
 
   const { data: daPlataforma } = await sb.from('precificacao_config')

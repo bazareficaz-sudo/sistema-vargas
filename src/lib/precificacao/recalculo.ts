@@ -1,9 +1,8 @@
-import { buscarConfigDoCanal } from './config'
-import { saudeDaMargem, calcular } from './motor'
-import { aplicarRegra, buscarRegras, descreverObjetivo, resolverRegra, type Regra } from './regras'
-import { calcularKit } from '@/lib/produtos/kit'
-import { resolverFreteML, embalagemDoAnuncio, logisticTypeDoAnuncio, listingTypeDoAnuncio, pesoCobravelML } from './mlFrete'
-import type { FaixaFrete } from './tipos'
+import { criarResolvedor, descreverOrigem, COLUNAS_ANUNCIO, COLUNAS_CANAL, COLUNAS_PRODUTO, type OrigemComissao, type OrigemFrete } from './contexto'
+import { buscarRegras, descreverObjetivo, resolverRegra, type Regra } from './regras'
+import { montarEstrategia, type EstadoComercial, type FlagComercial, type Oportunidade } from './estrategia'
+import type { ClassificacaoMargem, Margens } from './margens'
+import type { OrigemPrecoEfetivo, CampanhaVigenteResumo } from './precos'
 import type { SaudePreco } from './tipos'
 
 // Varredura de recálculo: percorre os anúncios, aplica a regra que vale pra
@@ -13,6 +12,12 @@ import type { SaudePreco } from './tipos'
 // deu pra calcular e por quê. Um recálculo que diz "142 anúncios" quando
 // existem 8.655 precisa dizer o que houve com os outros 8.513, senão passa a
 // impressão de que a loja inteira foi coberta.
+//
+// FASE 1: a economia de cada anúncio deixou de ser montada aqui e passou a
+// vir de `contexto.ts`, o mesmo que o simulador, o explicar e o ajustar-item
+// usam. Antes esta varredura tinha frete real do ML mas comissão de tabela,
+// enquanto o simulador tinha o contrário — o mesmo anúncio saía com dois
+// preços dependendo da tela.
 
 export type ItemRecalculo = {
   anuncioId: string
@@ -26,6 +31,12 @@ export type ItemRecalculo = {
   precoAtual: number
   precoNovo: number
   diferenca: number
+  /** `preco_venda`: o preço espelhado do canal. */
+  precoBase: number
+  /** O preço que vale agora — é sobre ele que a margem atual foi medida. */
+  precoEfetivo: number
+  /** Qual dos dois virou `precoAtual`. Ver `precos.ts`. */
+  origemPrecoAtual: OrigemPrecoEfetivo
   /** Margem LÍQUIDA: lucro ÷ preço de venda. Não confundir com markup. */
   margemAtual: number
   margemNova: number
@@ -49,6 +60,26 @@ export type ItemRecalculo = {
   frete: number
   /** true quando o valor veio da API do marketplace, não do custo médio. */
   freteImportado: boolean
+  origemComissao: OrigemComissao
+  origemFrete: OrigemFrete
+
+  // ── Leitura comercial (Fase 2) ──
+  /** Classificação do preço EFETIVO contra a política de margens da regra. */
+  classificacao: ClassificacaoMargem
+  motivoClassificacao: string
+  margens: Margens
+  /** Preço para a margem alvo, para o limite promocional e para o piso. */
+  precoAlvo: number
+  precoPromocionalLimite: number | null
+  precoPiso: number | null
+  estado: EstadoComercial
+  flags: FlagComercial[]
+  campanha: CampanhaVigenteResumo | null
+  oportunidades: Oportunidade[]
+  /** Comissão + frete que valeram neste preço, em uma linha legível. */
+  regime: string | null
+  /** Custo, comissão e frete: de onde cada um saiu. */
+  origem: string
   avisos: string[]
 }
 
@@ -65,6 +96,14 @@ export type ResumoRecalculo = {
   emPrejuizoAgora: number
   emPrejuizoDepois: number
   somaDiferenca: number
+
+  // ── Contagens comerciais (Fase 2) — alimentam os cartões da tela ──
+  emPromocao: number
+  semPromocao: number
+  promocoesTerminando: number
+  foraDaPoliticaPromocional: number
+  abaixoDoPiso: number
+  comOportunidade: number
 }
 
 const TOLERANCIA = 0.01 // centavos: abaixo disso o preço é "o mesmo"
@@ -89,24 +128,28 @@ export async function varrerRecalculo(
      * nenhum produto", e o resultado correto é zero, não a loja inteira.
      */
     produtoIds?: string[] | null
+    /**
+     * Instante de referência. A varredura inteira é avaliada contra o mesmo
+     * relógio: uma promoção que vence no meio de 9 mil anúncios não pode
+     * produzir dois critérios na mesma execução.
+     */
+    agora?: Date
   } = {},
 ): Promise<{ resumo: ResumoRecalculo; itens: ItemRecalculo[]; truncado: boolean }> {
   const limiteItens = opcoes.limiteItens ?? 500
 
-  let qCanais = sb.from('marketplace_canais').select('id, nome, plataforma, seller_id, access_token').eq('empresa_id', empresaId)
+  let qCanais = sb.from('marketplace_canais').select(COLUNAS_CANAL).eq('empresa_id', empresaId)
   if (opcoes.canaisIds?.length) qCanais = qCanais.in('id', opcoes.canaisIds)
   const { data: canais } = await qCanais.order('nome')
 
   const regras = await buscarRegras(sb, empresaId)
-  const configPorCanal = new Map<string, any>()
-  for (const c of canais ?? []) {
-    const { cfg } = await buscarConfigDoCanal(sb, empresaId, c)
-    configPorCanal.set(c.id, cfg)
-  }
+  const resolvedor = criarResolvedor(sb, empresaId, opcoes.agora ?? new Date())
 
   const resumo: ResumoRecalculo = {
     totalAnuncios: 0, calculados: 0, semProduto: 0, semCusto: 0, semRegra: 0, semPrecoAtual: 0,
     sobem: 0, descem: 0, iguais: 0, emPrejuizoAgora: 0, emPrejuizoDepois: 0, somaDiferenca: 0,
+    emPromocao: 0, semPromocao: 0, promocoesTerminando: 0,
+    foraDaPoliticaPromocional: 0, abaixoDoPiso: 0, comOportunidade: 0,
   }
 
   // Restrição por produto (entrada de mercadoria). Lista vazia é uma resposta
@@ -133,22 +176,18 @@ export async function varrerRecalculo(
     idsDaBusca = (achados ?? []).map((p: any) => p.id)
   }
   const itens: ItemRecalculo[] = []
-  // Custo de kit é caro (consulta os componentes) — calcula uma vez por
-  // produto, não uma vez por anúncio.
-  const custoKitCache = new Map<string, number>()
-
-  // Escadas de frete já resolvidas nesta varredura. A chave é peso cobrável +
-  // logística + tipo de anúncio: caixas diferentes que dão o mesmo peso
-  // cobrável pagam o mesmo frete, então uma consulta serve para todas.
-  const freteCache = new Map<string, FaixaFrete[] | null>()
 
   const TAM = 1000
   for (const canal of canais ?? []) {
-    const cfg = configPorCanal.get(canal.id)
     for (let off = 0; off < 30 * TAM; off += TAM) {
       let q = sb.from('marketplace_anuncios')
-        .select('id, titulo, preco_venda, preco_promocional, status, produto_id, dados_brutos, produtos(id, nome, sku, categoria, marca, tipo, preco_custo, peso_kg, comprimento_cm, largura_cm, altura_cm)')
+        .select(`${COLUNAS_ANUNCIO}, produtos(${COLUNAS_PRODUTO})`)
         .eq('canal_id', canal.id).eq('empresa_id', empresaId)
+        // ORDENAÇÃO OBRIGATÓRIA. Sem ela o Postgres não promete a mesma ordem
+        // entre duas requisições, e a paginação por `range` passa a repetir e
+        // a perder linha — defeito intermitente, pior que o original, porque
+        // some quando se vai conferir. Ver src/lib/supabase/paginar.ts.
+        .order('id', { ascending: true })
         .range(off, off + TAM - 1)
       if (opcoes.apenasAtivos) q = q.eq('status', 'ativo')
       // Filtrar no banco, não em memória: sem isso, pedir 12 anúncios ainda
@@ -168,88 +207,86 @@ export async function varrerRecalculo(
         const p: any = a.produtos
         if (!p) { resumo.semProduto++; continue }
 
-        let custo = Number(p.preco_custo ?? 0)
-        if (p.tipo === 'kit') {
-          if (!custoKitCache.has(p.id)) {
-            custoKitCache.set(p.id, Number((await calcularKit(sb, p.id))?.custo ?? 0))
-          }
-          custo = custoKitCache.get(p.id)!
-        }
+        // As três peneiras vêm ANTES do contexto completo, e nesta ordem, de
+        // propósito: resolver o contexto pode significar consultar comissão e
+        // frete na API do Mercado Livre, e não se paga esse preço por um
+        // anúncio que já se sabe que não vai virar cálculo.
+        const { custo } = await resolvedor.custo(p)
         if (!(custo > 0)) { resumo.semCusto++; continue }
 
         const resolucao = resolverRegra(regras, { id: p.id, categoria: p.categoria, marca: p.marca }, canal)
         if (!resolucao.vencedora) { resumo.semRegra++; continue }
 
-        const precoAtual = Number(a.preco_promocional || a.preco_venda || 0)
+        const ctx = await resolvedor.contexto({ canal, produto: p, anuncio: a })
+
+        // O preço "de hoje" sai do vocabulário canônico, não de um
+        // `promocional || venda` solto: campanha vigente da plataforma ganha
+        // da promoção local, e promoção fora da janela não vale nenhuma das
+        // duas. A checagem vem depois do contexto porque é a campanha que
+        // pode dar preço a um anúncio cujo espelho está zerado.
+        const precos = ctx.precos!
+        const precoAtual = precos.efetivo
         if (!(precoAtual > 0)) { resumo.semPrecoAtual++; continue }
 
-        const pesoKg = p.peso_kg != null ? Number(p.peso_kg) : null
+        const estrategia = montarEstrategia({
+          economia: ctx.economia, precos, regra: resolucao.vencedora, agora: resolvedor.agora,
+        })
+        const novo = estrategia.cenarioAlvo!
+        const atual = estrategia.cenarioEfetivo
 
-        // Frete real do Mercado Livre para ESTE anúncio, quando o canal está
-        // configurado para importar. Substitui o "custo médio" digitado —
-        // que erra por tamanho e por faixa de preço ao mesmo tempo.
-        let freteFaixas: FaixaFrete[] | null = null
-        const avisosFrete: string[] = []
-        if (cfg.freteMlImportar && canal.plataforma === 'mercadolivre' && canal.access_token && canal.seller_id) {
-          const emb = embalagemDoAnuncio(a.dados_brutos, p)
-          if (!emb) {
-            // Sem medida não dá pra saber o frete, e chutar uma caixa vira
-            // erro de preço — exatamente o que esta importação existe para
-            // evitar. Cai no frete configurado e diz por quê.
-            avisosFrete.push('Sem peso/medidas no anúncio nem no cadastro — frete pelo custo médio configurado.')
-          } else {
-            const logistica = logisticTypeDoAnuncio(a.dados_brutos)
-            const tipoAnuncio = listingTypeDoAnuncio(a.dados_brutos)
-            const chave = `${pesoCobravelML(emb)}|${logistica}|${tipoAnuncio}`
-            if (!freteCache.has(chave)) {
-              try {
-                const r = await resolverFreteML(
-                  sb,
-                  { id: canal.id, sellerId: String(canal.seller_id), accessToken: canal.access_token },
-                  emb, logistica, tipoAnuncio,
-                )
-                freteCache.set(chave, r.faixas)
-              } catch {
-                // Falha de consulta não derruba a varredura inteira: este
-                // anúncio volta pro frete configurado, e os outros seguem.
-                freteCache.set(chave, null)
-              }
-            }
-            freteFaixas = freteCache.get(chave) ?? null
-            if (!freteFaixas) avisosFrete.push('Não foi possível consultar o frete no Mercado Livre — usando o custo médio configurado.')
-          }
-        }
+        if (estrategia.estado === 'em_promocao') resumo.emPromocao++
+        else if (estrategia.estado === 'normal') resumo.semPromocao++
+        if (estrategia.flags.includes('promocao_terminando')) resumo.promocoesTerminando++
+        if (estrategia.classificacao.classificacao === 'requer_aprovacao') resumo.foraDaPoliticaPromocional++
+        if (estrategia.classificacao.classificacao === 'bloqueado') resumo.abaixoDoPiso++
+        if (estrategia.oportunidades.length > 0) resumo.comOportunidade++
 
-        const novo = aplicarRegra({ cfg, custoProduto: custo, regra: resolucao.vencedora, pesoKg, freteFaixas })
-        const atual = calcular({ cfg, custoProduto: custo, objetivo: { tipo: 'preco', valor: precoAtual }, pesoKg, freteFaixas })
-
-        const diferenca = Number((novo.preco - precoAtual).toFixed(2))
+        const diferenca = Number((novo.resultado.preco - precoAtual).toFixed(2))
         resumo.calculados++
         resumo.somaDiferenca += diferenca
         if (diferenca > TOLERANCIA) resumo.sobem++
         else if (diferenca < -TOLERANCIA) resumo.descem++
         else resumo.iguais++
-        if (atual.lucro < 0) resumo.emPrejuizoAgora++
-        if (novo.lucro < 0) resumo.emPrejuizoDepois++
+        if (atual.resultado.lucro < 0) resumo.emPrejuizoAgora++
+        if (novo.resultado.lucro < 0) resumo.emPrejuizoDepois++
 
         if (itens.length < limiteItens && Math.abs(diferenca) > TOLERANCIA) {
           itens.push({
             anuncioId: a.id, canalId: canal.id, canalNome: canal.nome,
             titulo: a.titulo ?? '', produtoId: p.id, produtoNome: p.nome, sku: p.sku ?? null,
-            custo, precoAtual, precoNovo: novo.preco, diferenca,
-            margemAtual: Number(atual.margemLiquida.toFixed(2)),
-            margemNova: Number(novo.margemLiquida.toFixed(2)),
+            custo: ctx.economia.custo,
+            precoAtual, precoNovo: novo.resultado.preco, diferenca,
+            precoBase: precos.base,
+            precoEfetivo: precos.efetivo,
+            origemPrecoAtual: precos.origemEfetivo,
+            margemAtual: Number(atual.resultado.margemLiquida.toFixed(2)),
+            margemNova: Number(novo.resultado.margemLiquida.toFixed(2)),
             // `roi` do motor JÁ é lucro ÷ custo em % — a mesma base das regras
             // de "lucro sobre o custo". Bate com o número configurado na regra.
-            lucroSobreCustoAtual: Number(atual.roi.toFixed(2)),
-            lucroSobreCustoNovo: Number(novo.roi.toFixed(2)),
-            saudeAtual: saudeDaMargem(atual.margemLiquida, cfg.faixasSaude),
-            saudeNova: saudeDaMargem(novo.margemLiquida, cfg.faixasSaude),
+            lucroSobreCustoAtual: atual.lucroSobreCusto,
+            lucroSobreCustoNovo: novo.lucroSobreCusto,
+            saudeAtual: atual.saude,
+            saudeNova: novo.saude,
             regraNome: resolucao.vencedora.nome,
             regraObjetivo: descreverObjetivo(resolucao.vencedora.objetivoTipo, resolucao.vencedora.objetivoValor),
             regraId: resolucao.vencedora.id,
-            frete: novo.frete, freteImportado: !!freteFaixas,
-            avisos: [...avisosFrete, ...novo.avisos],
+            frete: novo.resultado.frete,
+            freteImportado: !!ctx.economia.freteFaixas,
+            origemComissao: ctx.origemComissao,
+            origemFrete: ctx.origemFrete,
+            regime: novo.resultado.regime?.descricao ?? null,
+            origem: descreverOrigem(ctx),
+            classificacao: estrategia.classificacao.classificacao,
+            motivoClassificacao: estrategia.classificacao.motivo,
+            margens: estrategia.margens,
+            precoAlvo: estrategia.precoAlvo,
+            precoPromocionalLimite: estrategia.precoPromocionalLimite,
+            precoPiso: estrategia.precoPiso,
+            estado: estrategia.estado,
+            flags: estrategia.flags,
+            campanha: estrategia.campanha,
+            oportunidades: estrategia.oportunidades,
+            avisos: [...ctx.avisos, ...novo.resultado.avisos],
           })
         }
       }

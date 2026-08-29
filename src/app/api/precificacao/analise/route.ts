@@ -4,8 +4,8 @@ import { exigirPermissao } from '@/lib/auth/permissoes'
 import { varrerRecalculo } from '@/lib/precificacao/recalculo'
 import { cruzarCompetitividade, diagnosticar, type AchadoCompetitivo } from '@/lib/precificacao/analise'
 import { buscarCompetitividade } from '@/lib/precificacao/competitividade'
-import { buscarConfigDoCanal } from '@/lib/precificacao/config'
-import { calcular } from '@/lib/precificacao/motor'
+import { criarResolvedor, COLUNAS_ANUNCIO, COLUNAS_PRODUTO } from '@/lib/precificacao/contexto'
+import { avaliarPreco, precificarPorObjetivo } from '@/lib/precificacao/cenarios'
 import { buscarRegras, resolverRegra } from '@/lib/precificacao/regras'
 import { refreshAccessTokenIfNeeded } from '@/lib/mercadolivre/client'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
@@ -31,7 +31,10 @@ export async function POST(req: Request) {
   const guarda = await exigirPermissao(sb, 'gerenciar_marketplaces')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
-  const { resumo, itens } = await varrerRecalculo(sb, guarda.empresaId, { canaisIds, apenasAtivos: true })
+  // Um relógio só para a análise inteira: a varredura e o cruzamento de
+  // competitividade precisam concordar sobre o que está vigente agora.
+  const agora = new Date()
+  const { resumo, itens } = await varrerRecalculo(sb, guarda.empresaId, { canaisIds, apenasAtivos: true, agora })
   const achados = diagnosticar({ resumo, itens })
 
   // ── Competitividade (só Mercado Livre — a Shopee não expõe isso) ──
@@ -48,7 +51,11 @@ export async function POST(req: Request) {
     } else {
       const regras = await buscarRegras(sb, guarda.empresaId)
       const tokenPorCanal = new Map<string, string>()
-      const cfgPorCanal = new Map<string, any>()
+      // A economia sai do MESMO resolvedor da varredura. Antes esta parte
+      // remontava a configuração por conta própria e chamava o motor sem a
+      // comissão nem o frete reais do ML — então a "margem se adotar o preço
+      // sugerido" não era comparável com a margem da linha logo acima dela.
+      const resolvedor = criarResolvedor(sb, guarda.empresaId, agora)
       for (const c of canaisML) {
         try {
           const atualizado = await refreshAccessTokenIfNeeded(sb, {
@@ -56,7 +63,6 @@ export async function POST(req: Request) {
             accessToken: c.access_token, refreshToken: c.refresh_token, tokenExpiraEm: c.token_expira_em,
           })
           tokenPorCanal.set(c.id, atualizado.accessToken)
-          cfgPorCanal.set(c.id, (await buscarConfigDoCanal(sb, guarda.empresaId, c)).cfg)
         } catch { /* canal sem conexão fica de fora, os outros seguem */ }
       }
 
@@ -65,10 +71,11 @@ export async function POST(req: Request) {
       const candidatos = itens.filter(i => idsCanaisML.has(i.canalId)).slice(0, MAX_COMPETITIVIDADE)
 
       const { data: anunciosRows } = candidatos.length > 0
-        ? await sb.from('marketplace_anuncios').select('id, id_externo, produto_id, produtos(categoria, marca, peso_kg)')
-            .in('id', candidatos.map(c => c.anuncioId))
+        ? await sb.from('marketplace_anuncios').select(`${COLUNAS_ANUNCIO}, produtos(${COLUNAS_PRODUTO})`)
+            .in('id', candidatos.map(c => c.anuncioId)).eq('empresa_id', guarda.empresaId)
         : { data: [] as any[] }
       const porId = new Map((anunciosRows ?? []).map((a: any) => [a.id, a]))
+      const canalPorId = new Map(canaisML.map((c: any) => [c.id, c]))
 
       for (const item of candidatos) {
         const linha = porId.get(item.anuncioId)
@@ -78,23 +85,24 @@ export async function POST(req: Request) {
         const comp = await buscarCompetitividade(token, String(linha.id_externo))
         if (!comp?.temBenchmark || comp.precoSugerido == null) continue
 
-        const cfg = cfgPorCanal.get(item.canalId)
         const p: any = linha.produtos
-        const pesoKg = p?.peso_kg != null ? Number(p.peso_kg) : null
+        const canalDoItem = canalPorId.get(item.canalId)
+        if (!canalDoItem) continue
+        const ctx = await resolvedor.contexto({ canal: canalDoItem, produto: p, anuncio: linha })
 
         // Qual seria a margem se adotássemos o preço sugerido pelo ML?
-        const noSugerido = calcular({ cfg, custoProduto: item.custo, objetivo: { tipo: 'preco', valor: comp.precoSugerido }, pesoKg })
+        const noSugerido = avaliarPreco(ctx.economia, comp.precoSugerido, 'sugerido pelo ML')
 
         // E até onde dá pra baixar sem furar a margem mínima da regra?
         const resolucao = resolverRegra(regras, { id: linha.produto_id, categoria: p?.categoria ?? null, marca: p?.marca ?? null }, { id: item.canalId, plataforma: 'mercadolivre' })
         const piso = resolucao.vencedora?.margemMinima
         const precoMinimoViavel = piso != null
-          ? calcular({ cfg, custoProduto: item.custo, objetivo: { tipo: 'margem_liquida', valor: piso }, pesoKg }).preco
+          ? precificarPorObjetivo(ctx.economia, { tipo: 'margem_liquida', valor: piso }).resultado.preco
           : null
 
         const achado = cruzarCompetitividade(comp, {
           anuncioId: item.anuncioId, titulo: item.titulo || item.produtoNome, canalNome: item.canalNome,
-          margemNoSugerido: Number(noSugerido.margemLiquida.toFixed(1)),
+          margemNoSugerido: Number(noSugerido.resultado.margemLiquida.toFixed(1)),
           precoMinimoViavel,
         })
         if (achado) competitivos.push(achado)
