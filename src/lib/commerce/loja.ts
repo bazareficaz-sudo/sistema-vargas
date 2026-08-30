@@ -101,6 +101,9 @@ function paraLoja(l: Record<string, any>): Loja {
     limiteMaximoPorCompra: l.limite_maximo_por_compra,
     entregaAtiva: l.entrega_ativa,
     retiradaAtiva: l.retirada_ativa,
+    // Coalescido como a política de preços, e pelo mesmo motivo: a loja pode
+    // ser lida antes de supabase-loja-checkout.sql rodar.
+    pagamentoFormas: Array.isArray(l.pagamento_formas) ? l.pagamento_formas : [],
   }
 }
 

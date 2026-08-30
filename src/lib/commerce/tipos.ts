@@ -82,6 +82,11 @@ export type Loja = {
   limiteMaximoPorCompra: number | null
   entregaAtiva: boolean
   retiradaAtiva: boolean
+  /**
+   * O que o cliente pode escolher no checkout. NÃO cobra nada — diz à loja o
+   * que levar na entrega. A loja não tem gateway; ver supabase-loja-checkout.sql.
+   */
+  pagamentoFormas: string[]
 }
 
 /** O que um card precisa. Nada além disso — card é para decidir o clique. */

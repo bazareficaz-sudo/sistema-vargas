@@ -190,29 +190,34 @@ export default function CarrinhoCliente({
             <span className="text-2xl font-bold tracking-tight">{real(subtotal)}</span>
           </div>
           <p className="mt-1 text-xs text-[var(--tinta-fraca)]">
-            Frete calculado na próxima etapa.
+            O frete é combinado pela loja — ele não entra neste total.
           </p>
 
-          {/* Checkout é a Fase 3. Enquanto isso, o caminho honesto é o
-              WhatsApp que a loja já usa — e não um botão que leva a uma
-              tela inacabada. */}
-          {textoWhatsApp ? (
+          {/* O checkout existe (Fase 3), e é ele o caminho principal: o
+              pedido nasce no ERP, com estoque reservado, em vez de virar uma
+              conversa que alguém precisa transcrever depois.
+              O WhatsApp fica como saída secundária — há quem prefira falar
+              antes de comprar, e tirar isso não ganharia nada. */}
+          <Link
+            href="/checkout"
+            className={classesBotao('primario', 'mt-4 w-full')}
+            style={estiloPrimario}
+          >
+            Finalizar compra
+          </Link>
+
+          {textoWhatsApp && (
             <a
               href={textoWhatsApp}
               target="_blank"
               rel="noopener noreferrer"
-              className={classesBotao('primario', 'mt-4 w-full')}
-              style={estiloPrimario}
+              className={classesBotao('secundario', 'mt-2 w-full')}
             >
-              Finalizar pelo WhatsApp
+              Prefiro combinar pelo WhatsApp
             </a>
-          ) : (
-            <button type="button" disabled className={classesBotao('primario', 'mt-4 w-full')} style={estiloPrimario}>
-              Finalizar compra
-            </button>
           )}
 
-          <Link href="/" className={classesBotao('secundario', 'mt-2 w-full')}>
+          <Link href="/" className={classesBotao('sutil', 'mt-2 w-full')}>
             Continuar comprando
           </Link>
 
