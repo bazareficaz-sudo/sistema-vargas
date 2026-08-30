@@ -69,6 +69,7 @@ const CAMPOS: Record<string, Regra> = {
   // garantia, esta lista é a mensagem de erro legível. Sem ela, digitar 900%
   // de desconto no Pix devolveria "Não foi possível salvar".
   preco_exibicao: { tipo: 'opcao', valores: ['preco_unico', 'dois_precos'] },
+  avista_origem: { tipo: 'opcao', valores: ['percentual', 'promocao'] },
   pix_desconto_pct: { tipo: 'numero', min: 0, max: 90 },
   pix_rotulo: { tipo: 'texto', max: 40 },
   parcelas_max: { tipo: 'inteiro', min: 2, max: 24, nulavel: true },

@@ -18,7 +18,18 @@
 export type PoliticaPreco = {
   /** 'preco_unico' é o comportamento da Fase 1, e é o padrão. */
   exibicao: 'preco_unico' | 'dois_precos'
-  /** Desconto do à vista, em % sobre o preço praticado. 0 = sem segundo preço. */
+  /**
+   * De onde sai o preço à vista. São dois modelos de negócio, não dois
+   * jeitos de fazer a mesma conta:
+   *
+   *   'percentual' → um desconto sobre o preço praticado, valendo para o
+   *                  catálogo inteiro. Todo produto ganha preço à vista.
+   *   'promocao'   → o preço promocional do produto É o preço à vista, e o
+   *                  parcelado é o de tabela. Só quem está em promoção
+   *                  vigente tem segundo preço; o resto fica com um só.
+   */
+  avistaOrigem: 'percentual' | 'promocao'
+  /** Desconto do à vista, em %. Só vale em `avistaOrigem = 'percentual'`. */
   pixDescontoPct: number
   /** Como o à vista se chama na tela: "no Pix", "no Pix ou dinheiro"… */
   pixRotulo: string

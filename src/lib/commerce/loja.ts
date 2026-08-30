@@ -85,6 +85,7 @@ function paraLoja(l: Record<string, any>): Loja {
     // exatamente a política da Fase 1 — um preço só.
     politicaPreco: {
       exibicao: l.preco_exibicao === 'dois_precos' ? 'dois_precos' : 'preco_unico',
+      avistaOrigem: l.avista_origem === 'promocao' ? 'promocao' : 'percentual',
       pixDescontoPct: Number(l.pix_desconto_pct ?? 0),
       pixRotulo: l.pix_rotulo ?? 'no Pix',
       parcelasMax: l.parcelas_max != null ? Number(l.parcelas_max) : null,

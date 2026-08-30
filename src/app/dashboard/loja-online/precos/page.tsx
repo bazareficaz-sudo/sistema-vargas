@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
 // este catálogo tem muitos.
 
 const CAMPOS = [
-  'preco_exibicao', 'pix_desconto_pct', 'pix_rotulo',
+  'preco_exibicao', 'avista_origem', 'pix_desconto_pct', 'pix_rotulo',
   'parcelas_max', 'parcelas_sem_juros', 'parcelas_juros_mes', 'parcela_minima',
 ] as const
 
@@ -28,6 +28,7 @@ const CAMPOS = [
  */
 const PADRAO: Record<string, unknown> = {
   preco_exibicao: 'preco_unico',
+  avista_origem: 'percentual',
   pix_desconto_pct: 0,
   pix_rotulo: 'no Pix',
   parcelas_max: null,

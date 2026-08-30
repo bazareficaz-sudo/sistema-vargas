@@ -45,6 +45,7 @@ export const brl = (v: number) => BRL.format(Number.isFinite(v) ? v : 0)
  */
 export const PRECO_UNICO: PoliticaPreco = {
   exibicao: 'preco_unico',
+  avistaOrigem: 'percentual',
   pixDescontoPct: 0,
   pixRotulo: 'no Pix',
   parcelasMax: null,
@@ -166,16 +167,29 @@ export type ExibicaoPreco = {
  * A regra de exibição, num lugar só.
  *
  * Fora de 'dois_precos' o resultado é exatamente o que a Fase 1 fazia — e é
- * assim que uma loja no ar não muda de aparência no dia em que esta migração
+ * assim que uma loja no ar não muda de aparência no dia em que a migração
  * roda. Ligar é decisão de quem opera, na aba Preços.
  *
- * Dentro de 'dois_precos':
+ * Dentro de 'dois_precos', os dois modelos de `avistaOrigem`:
  *
- *   sem promoção → o preço normal é o destaque, com o parcelamento embaixo
- *                  e o à vista como terceira linha.
- *   com promoção → o à VISTA sobe para o destaque. É o momento em que o
- *                  menor preço merece ser a primeira coisa que o olho
- *                  encontra; o normal desce, com o parcelamento junto.
+ * ── 'percentual' ──────────────────────────────────────────
+ *   sem promoção → o preço normal é o destaque, o parcelamento embaixo e o
+ *                  à vista como terceira linha.
+ *   com promoção → o à VISTA sobe para o destaque, e o promocional desce
+ *                  com o parcelamento. O riscado continua sendo o de tabela.
+ *   Todo produto ganha segundo preço, porque o desconto é do canal.
+ *
+ * ── 'promocao' ────────────────────────────────────────────
+ *   A promoção do produto É o preço à vista. Quem está em promoção mostra o
+ *   promocional em destaque como à vista, e o de TABELA logo abaixo,
+ *   parcelado; quem não está mostra um preço só.
+ *
+ *   Aqui NÃO existe riscado, e a diferença não é estética: o de tabela
+ *   deixou de ser "o preço antigo" e virou "o preço de quem não paga à
+ *   vista". Risca-lo diria que ninguém paga aquilo, e alguém paga.
+ *
+ *   Repare também que o parcelamento passa a ser calculado sobre o de
+ *   tabela, e não sobre o promocional — é o valor que a pessoa vai parcelar.
  */
 export function exibicaoPreco(
   p: Pick<ProdutoCard, 'preco' | 'precoDe' | 'precoPix'>,
@@ -187,23 +201,67 @@ export function exibicaoPreco(
   const de = p.precoDe != null && p.precoDe > p.preco ? p.precoDe : null
   const descontoPct = descontoPercentual(p.preco, de)
 
-  const aVista = p.precoPix != null && p.precoPix > 0 && p.precoPix < p.preco ? p.precoPix : null
+  const pixDigitado = p.precoPix != null && p.precoPix > 0 && p.precoPix < p.preco ? p.precoPix : null
 
   const base: ExibicaoPreco = {
-    destaque: p.preco, de, aVista, normal: null,
+    destaque: p.preco, de, aVista: pixDigitado, normal: null,
     parcelamento: null, aVistaEmDestaque: false, descontoPct,
   }
 
   if (pol.exibicao !== 'dois_precos') return base
+
+  if (pol.avistaOrigem === 'promocao') {
+    // Sem promocao vigente e sem excecao digitada, nao ha segundo preco:
+    // um preco so, com o parcelamento dele.
+    const aVista = pixDigitado ?? (de != null ? p.preco : null)
+    if (aVista == null) {
+      return { ...base, parcelamento: melhorParcelamento(p.preco, pol) }
+    }
+    // O parcelado e o de tabela quando ha promocao; sem ela, o proprio preco.
+    const normal = de ?? p.preco
+    return {
+      destaque: aVista,
+      de: null,
+      aVista,
+      normal,
+      parcelamento: melhorParcelamento(normal, pol),
+      aVistaEmDestaque: true,
+      descontoPct: descontoPercentual(aVista, normal),
+    }
+  }
 
   const parcelamento = melhorParcelamento(p.preco, pol)
 
   // Promoção vigente E um à vista para mostrar: os dois trocam de lugar.
   // Sem à vista não há troca — destacar o preço normal duas vezes não é
   // destaque, é repetição.
-  if (de && aVista) {
-    return { ...base, destaque: aVista, normal: p.preco, parcelamento, aVistaEmDestaque: true }
+  if (de && pixDigitado) {
+    return { ...base, destaque: pixDigitado, normal: p.preco, parcelamento, aVistaEmDestaque: true }
   }
 
   return { ...base, parcelamento }
+}
+
+/**
+ * Por que a vitrine não está falando de parcelamento, em uma frase.
+ *
+ * Existe porque a configuração tem DOIS jeitos silenciosos de não produzir
+ * parcela nenhuma, e o operador que os encontra não tem como distinguir "não
+ * configurei" de "configurei e não pegou". Aconteceu: teto 6x com "sem juros
+ * até 0" devolveu silêncio na loja inteira.
+ *
+ * `null` quando está tudo certo e a frase apareceria.
+ */
+export function motivoSemParcelamento(preco: number, pol: PoliticaPreco): string | null {
+  if (pol.exibicao !== 'dois_precos') return null
+  const max = pol.parcelasMax ?? 0
+  if (max < 2) return 'Sem parcelamento: "Parcelar em até" está vazio.'
+  if (pol.jurosMes <= 0 && pol.parcelasSemJuros < 2) {
+    return 'Sem parcelamento: "Sem juros até" está em '
+      + `${pol.parcelasSemJuros} e não há juros configurados, então não sobra parcela para oferecer.`
+  }
+  if (melhorParcelamento(preco, pol) == null && pol.parcelaMinima > 0) {
+    return `Sem parcelamento: a parcela ficaria abaixo de ${brl(pol.parcelaMinima)}.`
+  }
+  return null
 }

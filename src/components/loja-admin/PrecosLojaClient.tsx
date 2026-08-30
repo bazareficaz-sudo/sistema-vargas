@@ -1,7 +1,9 @@
 'use client'
 
 import FormularioLoja, { type Secao } from './FormularioLoja'
-import { exibicaoPreco, brl, rotuloAVista, textoAVista, textoParcelamento } from '@/lib/commerce/precos'
+import {
+  brl, exibicaoPreco, motivoSemParcelamento, rotuloAVista, textoAVista, textoParcelamento,
+} from '@/lib/commerce/precos'
 import type { PoliticaPreco } from '@/lib/commerce/tipos'
 
 // A aba Preços.
@@ -45,10 +47,16 @@ const SECOES: Secao[] = [
   },
   {
     titulo: 'Preço à vista',
-    descricao: 'Vale para o catálogo inteiro. O campo "Preço no Pix" de um produto continua ganhando desta regra, como exceção.',
+    descricao: 'O campo "Preço no Pix" de um produto continua ganhando desta regra, como exceção.',
     campos: [
+      { nome: 'avista_origem', rotulo: 'De onde vem o preço à vista', tipo: 'select',
+        opcoes: [
+          { valor: 'percentual', rotulo: 'Um desconto em % sobre todo o catálogo' },
+          { valor: 'promocao', rotulo: 'O preço promocional do produto' },
+        ],
+        ajuda: 'Com "promocional", só os produtos em promoção vigente têm dois preços — o promocional à vista e o de tabela parcelado. Os demais ficam com um preço só, e o riscado deixa de existir.' },
       { nome: 'pix_desconto_pct', rotulo: 'Desconto à vista', tipo: 'numero', sufixo: '%',
-        ajuda: 'Sobre o preço praticado — que já é o promocional quando há promoção. 0 desliga o segundo preço.' },
+        ajuda: 'Só vale na opção do percentual. Incide sobre o preço praticado — que já é o promocional quando há promoção. 0 desliga o segundo preço.' },
       { nome: 'pix_rotulo', rotulo: 'Como chamar', max: 40, placeholder: 'no Pix',
         ajuda: 'Aparece como "R$ 89,00 no Pix". Se a loja dá o mesmo desconto em dinheiro, escreva "no Pix ou dinheiro".' },
     ],
@@ -77,6 +85,7 @@ function politicaDoForm(f: Record<string, unknown>): PoliticaPreco {
   }
   return {
     exibicao: f.preco_exibicao === 'dois_precos' ? 'dois_precos' : 'preco_unico',
+    avistaOrigem: f.avista_origem === 'promocao' ? 'promocao' : 'percentual',
     pixDescontoPct: num(f.pix_desconto_pct),
     pixRotulo: typeof f.pix_rotulo === 'string' && f.pix_rotulo.trim() ? f.pix_rotulo : 'no Pix',
     parcelasMax: f.parcelas_max == null || f.parcelas_max === '' ? null : num(f.parcelas_max),
@@ -96,7 +105,10 @@ function politicaDoForm(f: Record<string, unknown>): PoliticaPreco {
  */
 function aVistaPrevisto(a: AmostraPreco, pol: PoliticaPreco): number | null {
   if (a.precoPixManual != null && a.precoPixManual < a.preco) return a.precoPixManual
-  if (pol.pixDescontoPct > 0 && a.preco > 0) {
+  // Em 'promocao' o à vista não sai daqui: sai da própria promoção, e quem
+  // monta isso é `exibicaoPreco`. Devolver um número aqui criaria um segundo
+  // preço à vista concorrendo com o primeiro.
+  if (pol.avistaOrigem === 'percentual' && pol.pixDescontoPct > 0 && a.preco > 0) {
     return Math.round(a.preco * (1 - pol.pixDescontoPct / 100) * 100) / 100
   }
   return null
@@ -109,11 +121,9 @@ function LinhaPrevia({ a, pol }: { a: AmostraPreco; pol: PoliticaPreco }) {
   )
 
   // Por que NÃO há parcelamento, quando não há. Silêncio aqui faria o
-  // operador achar que o campo não pegou, e mexer no que já estava certo.
-  const semParcelaPorPiso =
-    pol.exibicao === 'dois_precos' && !e.parcelamento
-    && (pol.parcelasMax ?? 0) >= 2 && pol.parcelaMinima > 0
-    && a.preco < pol.parcelaMinima * 2
+  // operador achar que o campo não pegou, e mexer no que já estava certo —
+  // foi exatamente o que aconteceu com "6x, sem juros até 0".
+  const semParcela = e.parcelamento ? null : motivoSemParcelamento(e.normal ?? a.preco, pol)
 
   return (
     <li className="flex flex-col gap-1 p-3 sm:flex-row sm:items-start sm:gap-4">
@@ -162,10 +172,8 @@ function LinhaPrevia({ a, pol }: { a: AmostraPreco; pol: PoliticaPreco }) {
           </>
         )}
 
-        {semParcelaPorPiso && (
-          <p className="mt-0.5 text-[0.6875rem] text-amber-700">
-            Sem parcelamento: a parcela ficaria abaixo de {brl(pol.parcelaMinima)}.
-          </p>
+        {semParcela && (
+          <p className="mt-0.5 text-[0.6875rem] text-amber-700">{semParcela}</p>
         )}
       </div>
     </li>

@@ -2,7 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   PRECO_UNICO, descontoPercentual, exibicaoPreco, melhorParcelamento,
-  rotuloAVista, textoAVista, textoParcelamento,
+  motivoSemParcelamento, rotuloAVista, textoAVista, textoParcelamento,
 } from '../../src/lib/commerce/precos'
 import type { PoliticaPreco } from '../../src/lib/commerce/tipos'
 
@@ -118,6 +118,86 @@ describe('exibicaoPreco', () => {
   test('riscado menor que o preço é ignorado', () => {
     // Riscado abaixo do praticado é o golpe de vitrine mais comum.
     assert.equal(exibicaoPreco({ preco: 100, precoDe: 80, precoPix: null }, COM_PIX).de, null)
+  })
+})
+
+describe('avistaOrigem = promocao — a promocao E o preco a vista', () => {
+  const PROMO = pol({
+    avistaOrigem: 'promocao', pixDescontoPct: 0,
+    parcelasMax: 6, parcelasSemJuros: 6, parcelaMinima: 20,
+  })
+
+  test('em promoção: o promocional vira o à vista, e o de tabela é o parcelado', () => {
+    // Caso real do catálogo: CABO FLEXIVEL, tabela 1232,50 e promo 1047,63.
+    const e = exibicaoPreco({ preco: 1047.63, precoDe: 1232.50, precoPix: null }, PROMO)
+    assert.equal(e.destaque, 1047.63)
+    assert.equal(e.aVistaEmDestaque, true)
+    assert.equal(e.aVista, 1047.63)
+    assert.equal(e.normal, 1232.50)
+    // O parcelamento sai sobre o DE TABELA, que é o que se parcela.
+    assert.equal(e.parcelamento?.vezes, 6)
+    assert.equal(e.parcelamento?.valorParcela, 205.42)
+  })
+
+  test('em promoção NÃO existe riscado', () => {
+    // O de tabela deixou de ser "o preço antigo" e virou "o preço de quem
+    // não paga à vista". Riscar diria que ninguém paga aquilo.
+    assert.equal(exibicaoPreco({ preco: 1047.63, precoDe: 1232.50, precoPix: null }, PROMO).de, null)
+  })
+
+  test('sem promoção: um preço só, com o parcelamento dele', () => {
+    const e = exibicaoPreco({ preco: 200, precoDe: null, precoPix: null }, PROMO)
+    assert.equal(e.destaque, 200)
+    assert.equal(e.aVistaEmDestaque, false)
+    assert.equal(e.aVista, null)
+    assert.equal(e.parcelamento?.vezes, 6)
+  })
+
+  test('percentual sobrando não cria um segundo à vista neste modo', () => {
+    // A view já não calcula o percentual em 'promocao'; aqui a garantia é do
+    // lado do TypeScript, para os dois nunca discordarem.
+    const e = exibicaoPreco({ preco: 100, precoDe: null, precoPix: null },
+      { ...PROMO, pixDescontoPct: 30 })
+    assert.equal(e.aVista, null)
+  })
+
+  test('o preço digitado no produto continua ganhando', () => {
+    const e = exibicaoPreco({ preco: 100, precoDe: null, precoPix: 80 }, PROMO)
+    assert.equal(e.aVista, 80)
+    assert.equal(e.aVistaEmDestaque, true)
+    assert.equal(e.normal, 100)
+  })
+})
+
+describe('motivoSemParcelamento — o silêncio que confundiu', () => {
+  test('teto 6x com "sem juros até 0" e juros 0 explica por que não parcela', () => {
+    // A configuração real de 30/08: parcelar em até 6, sem juros até 0.
+    // A vitrine ficou muda e não havia como saber por quê.
+    const m = motivoSemParcelamento(500, pol({
+      parcelasMax: 6, parcelasSemJuros: 0, jurosMes: 0, parcelaMinima: 20,
+    }))
+    assert.match(m ?? '', /Sem juros até/)
+  })
+
+  test('teto vazio diz que o teto está vazio', () => {
+    assert.match(motivoSemParcelamento(500, pol({ parcelasMax: null })) ?? '',
+      /Parcelar em até/)
+  })
+
+  test('produto barato demais culpa o piso, não a configuração', () => {
+    assert.match(motivoSemParcelamento(15, pol({
+      parcelasMax: 6, parcelasSemJuros: 6, parcelaMinima: 20,
+    })) ?? '', /abaixo de/)
+  })
+
+  test('com tudo certo, não há motivo a dar', () => {
+    assert.equal(motivoSemParcelamento(500, pol({
+      parcelasMax: 6, parcelasSemJuros: 6, parcelaMinima: 20,
+    })), null)
+  })
+
+  test('em preco_unico a pergunta não se aplica', () => {
+    assert.equal(motivoSemParcelamento(500, PRECO_UNICO), null)
   })
 })
 
