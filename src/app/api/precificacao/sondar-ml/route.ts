@@ -42,10 +42,18 @@ import type { MLChannel } from '@/lib/mercadolivre/types'
 const API = 'https://api.mercadolibre.com'
 const APP_VERSION = 'v2'
 
-// Quantos tipos de campanha sondar por canal. Limite existe por educação com
-// a plataforma: a conta tem 16 campanhas, e sondar todas responderia a mesma
-// pergunta muitas vezes.
-const MAX_TIPOS = 3
+// Quantos TIPOS de campanha abrir por canal — um id por tipo, não as 16
+// campanhas.
+//
+// Era 3, e o corte mordeu: a rodada de 30/08/2026 achou quatro tipos em cada
+// canal e abriu três. Ficaram de fora justo SELLER_CAMPAIGN (ML Eficaz) — a
+// campanha que o VENDEDOR cria, ou seja, o caminho de escrita — e DEAL
+// (ML Ouro). Sondar de menos escondeu exatamente o tipo que mais interessa.
+//
+// O relatório já separava `tiposDeCampanha` de `tiposAbertos`, e foi por isso
+// que deu para perceber. O limite continua existindo por educação com a
+// plataforma, mas agora acima do número de tipos que a conta tem.
+const MAX_TIPOS = 8
 
 type Sonda = {
   responde: string
@@ -284,6 +292,11 @@ export async function GET() {
     // de campanha real, e id de campanha não se inventa.
     const amostraCampanhas = umaPorTipo(campanhas.body, MAX_TIPOS)
     for (const c of amostraCampanhas) {
+      // MEDIDO em 30/08/2026: o detalhe (`/promotions/{id}`) recusa LIGHTNING
+      // com 400 "Invalid promotion type", mas `/promotions/{id}/items` aceita
+      // o mesmo tipo e responde 200. A assimetria é da plataforma, não nossa —
+      // por isso as duas chamadas continuam sendo feitas para todo tipo: é o
+      // 400 que documenta o limite.
       const qs = `promotion_type=${encodeURIComponent(c.type)}&app_version=${APP_VERSION}`
       sondas.push((await sondar(
         `P4: a campanha ${c.id} (${c.type}) por inteiro — existe campo de subsídio?`,
