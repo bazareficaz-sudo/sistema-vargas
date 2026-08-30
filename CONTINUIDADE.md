@@ -159,17 +159,43 @@ Dois preços no catálogo: o normal com parcelamento e o à vista no Pix. Com
 promoção vigente os dois trocam de lugar — o à vista sobe para o destaque, e
 o normal desce com o parcelamento junto.
 
-**Estado, e leia esta linha antes de qualquer outra:** o código está no ar e
-**`supabase-loja-precos.sql` NÃO foi executado**. A tentativa de aplicá-lo
-pela sessão foi barrada pela política de permissões da máquina; rodar no SQL
-Editor do Supabase é o que falta.
+**Estado:** no ar, com a migração **aplicada em 29/08** (`loja_precos_politica_colunas`
+e `loja_precos_vitrine_preco_avista`). A política está **DESLIGADA**:
+`preco_unico`, Pix 0%, parcelas vazio, piso R$ 5,00.
 
-**E o deploy não depende dessa ordem.** A regra do repositório diz para rodar
-o SQL antes de publicar o código que lê a coluna nova; aqui a causa foi
-resolvida em vez de lembrada. `lojaAtual()` lê `loja_config` com `select('*')`
-e coalesce cada campo, e a aba Preços faz o mesmo — pedir a coluna pelo nome
-é o que derruba a consulta. Sem as colunas, a aba mostra os padrões, avisa em
-tarja âmbar que falta a migração, e a vitrine segue com um preço só.
+Conferido depois de aplicar, e a linha que mais importa é a primeira:
+
+| | |
+|---|---|
+| `anon` enxerga a view | **não** — recriar a view não reabriu nada |
+| `service_role` lê | sim (é com ela que a vitrine renderiza) |
+| publicados com preço | 534, igual a antes |
+| mostrando preço à vista hoje | **0** — a tela não mudou |
+
+**O deploy não dependeu da ordem.** A regra do repositório manda rodar o SQL
+antes de publicar o código que lê a coluna nova; aqui a causa foi removida em
+vez de lembrada. `lojaAtual()` lê `loja_config` com `select('*')` e coalesce
+cada campo, e a aba Preços faz o mesmo — pedir a coluna pelo nome é o que
+derruba a consulta. Vale manter esse padrão: a próxima coluna nova não vai
+precisar de janela de deploy.
+
+**Medido no catálogo em 29/08, e muda a decisão de ligar:**
+
+| | |
+|---|---:|
+| publicados com preço | 534 |
+| em promoção vigente (o à vista viraria destaque) | 137 |
+| preço mediano | R$ 14,50 |
+| abaixo de R$ 10 — o piso de R$ 5,00 tira o parcelamento | **188 (35%)** |
+| de R$ 10 a R$ 50 — parcelam de 2x a 10x | 266 |
+| R$ 50 ou mais — chegam ao teto | 80 |
+
+Ou seja: com piso de R$ 5,00, **um terço do catálogo não exibe parcelamento
+nenhum**, e a maior parte do resto exibe poucas vezes. Não é defeito — é a
+trava funcionando num catálogo de itens baratos. Se a intenção for ver
+parcelamento em mais produtos, o caminho é baixar o piso, não subir o teto de
+vezes: com piso de R$ 5,00 um produto de R$ 14,50 dá 2x, e subir de 10x para
+24x não muda isso em nada.
 
 **Depois de rodar a migração, também não muda nada.** `preco_exibicao` nasce
 em `'preco_unico'`, que é o comportamento da Fase 1. Ligar é uma escolha em
