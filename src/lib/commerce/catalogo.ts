@@ -186,15 +186,35 @@ export async function relacionados(loja: Loja, p: ProdutoDetalhe, limite = 8): P
 // ─── Categorias ──────────────────────────────────────────────────────────────
 
 async function lerCategorias(lojaId: string): Promise<Categoria[]> {
-  const { data } = await db()
-    .from('loja_categorias')
-    .select('id, nome, slug, pai_id, imagem_url, descricao, destaque, ordem')
-    .eq('loja_id', lojaId)
-    .eq('ativo', true)
-    .order('ordem')
-    .order('nome')
+  // Categoria vazia NÃO entra no menu da vitrine.
+  //
+  // Medido em 30/08: 27 das 48 categorias desta loja não tinham nenhum
+  // produto publicado dentro, e o menu mostrava as 48. Mais da metade dos
+  // caminhos levava a uma listagem vazia — e um cliente que clica duas vezes
+  // no nada desconfia da loja inteira, não da categoria.
+  //
+  // A contagem vem do banco, com os descendentes somados (ver
+  // `loja_categorias_com_produtos`): são 534 publicados, e agrupar isso aqui
+  // esbarraria no teto de 1.000 linhas do PostgREST.
+  //
+  // Isto esconde só na VITRINE. O painel continua listando todas, porque é
+  // lá que se preenche ou se apaga uma categoria vazia.
+  const [{ data }, { data: comProduto }] = await Promise.all([
+    db()
+      .from('loja_categorias')
+      .select('id, nome, slug, pai_id, imagem_url, descricao, destaque, ordem')
+      .eq('loja_id', lojaId)
+      .eq('ativo', true)
+      .order('ordem')
+      .order('nome'),
+    db().rpc('loja_categorias_com_produtos', { p_loja_id: lojaId }),
+  ])
 
-  const linhas = (data ?? []) as Record<string, any>[]
+  const temProduto = new Set(
+    ((comProduto ?? []) as { categoria_id: string }[]).map(c => c.categoria_id),
+  )
+
+  const linhas = ((data ?? []) as Record<string, any>[]).filter(l => temProduto.has(l.id))
   const porId = new Map<string, Categoria>()
   for (const l of linhas) {
     porId.set(l.id, {
