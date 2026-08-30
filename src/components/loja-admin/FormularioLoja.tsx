@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { botao } from '@/components/ui/botao'
 
 // Formulário genérico das abas de configuração.
@@ -29,10 +29,20 @@ export type Campo = {
 
 export type Secao = { titulo: string; descricao?: string; campos: Campo[] }
 
-export default function FormularioLoja({ lojaId, secoes, valores }: {
+export default function FormularioLoja({ lojaId, secoes, valores, previa }: {
   lojaId: string
   secoes: Secao[]
   valores: Record<string, unknown>
+  /**
+   * Prévia opcional, desenhada acima dos campos e recalculada a cada tecla.
+   *
+   * Recebe o formulário COMO ESTÁ, com o que ainda não foi salvo — que é o
+   * ponto: aba de política (Preços, Estoque) muda o que o cliente vê no
+   * catálogo inteiro de uma vez, e conferir depois de salvar é conferir
+   * tarde. Só um `function` chega aqui, então quem passa precisa ser um
+   * componente de cliente.
+   */
+  previa?: (form: Record<string, unknown>) => ReactNode
 }) {
   const router = useRouter()
   const [form, setForm] = useState<Record<string, unknown>>(valores)
@@ -71,6 +81,8 @@ export default function FormularioLoja({ lojaId, secoes, valores }: {
 
   return (
     <div className="space-y-5">
+      {previa?.(form)}
+
       {secoes.map(s => (
         <section key={s.titulo} className="rounded-xl border border-gray-200 bg-white">
           <div className="border-b border-gray-200 p-4">

@@ -3,7 +3,7 @@
 Anotações para retomar o trabalho numa sessão nova. Não é documentação do
 sistema: é o estado de quem estava com a mão na massa.
 
-Última atualização: 26/08/2026
+Última atualização: 28/08/2026
 
 Tudo que está descrito aqui como pronto está **no ar** (último deploy:
 `16b3ff0`, com as migrações já rodadas).
@@ -152,6 +152,68 @@ sistema **absorve** overselling de propósito (ver `src/lib/produtos/estoque.ts`
 já vendido é pior). Para a vitrine isso não serve. Recomendação: reserva para
 TODOS os canais, ligada canal a canal e com modo simulação primeiro — o mesmo
 padrão de `marketplace_fila`, que já provou funcionar aqui.
+
+### Política de preços da vitrine — no código, DESLIGADA no banco
+
+Dois preços no catálogo: o normal com parcelamento e o à vista no Pix. Com
+promoção vigente os dois trocam de lugar — o à vista sobe para o destaque, e
+o normal desce com o parcelamento junto.
+
+**Estado, e leia esta linha antes de qualquer outra:** o código está no ar e
+**`supabase-loja-precos.sql` NÃO foi executado**. A tentativa de aplicá-lo
+pela sessão foi barrada pela política de permissões da máquina; rodar no SQL
+Editor do Supabase é o que falta.
+
+**E o deploy não depende dessa ordem.** A regra do repositório diz para rodar
+o SQL antes de publicar o código que lê a coluna nova; aqui a causa foi
+resolvida em vez de lembrada. `lojaAtual()` lê `loja_config` com `select('*')`
+e coalesce cada campo, e a aba Preços faz o mesmo — pedir a coluna pelo nome
+é o que derruba a consulta. Sem as colunas, a aba mostra os padrões, avisa em
+tarja âmbar que falta a migração, e a vitrine segue com um preço só.
+
+**Depois de rodar a migração, também não muda nada.** `preco_exibicao` nasce
+em `'preco_unico'`, que é o comportamento da Fase 1. Ligar é uma escolha em
+**Loja Online → Preços**, e é o segundo item da lista do Silvano abaixo.
+
+**Onde cada decisão mora:**
+
+| | |
+|---|---|
+| quanto custa à vista | banco — `loja_vitrine_produtos.preco_pix`, calculado |
+| em quantas vezes, e a frase | `src/lib/commerce/precos.ts` |
+| quem ganha o tamanho grande | `exibicaoPreco()`, no mesmo arquivo |
+| tipografia | `<Preco>` em `components/loja/ds` |
+
+O preço à vista foi para o BANCO porque quem lê esse número é a listagem, a
+busca, a página do produto e a conferência do carrinho — quatro lugares que
+não podem divergir. O parcelamento ficou no TypeScript porque é aritmética de
+apresentação: não muda o que a loja cobra, muda a frase na tela.
+
+**Política, não digitação.** `loja_produtos.preco_pix` existe desde a Fase 1 e
+ninguém preenche — com 533 publicados, um campo por produto é o mesmo que não
+ter preço à vista nenhum. Agora o desconto é um percentual da loja, e o campo
+por produto continua valendo como exceção (ganha do percentual).
+
+**A trava que não é óbvia:** `parcela_minima`, padrão R$ 5,00. Sem ela um
+produto de R$ 4,90 anuncia "10x de R$ 0,49". A vitrine reduz o número de
+vezes até a parcela alcançar o piso, e some com o parcelamento quando nem 2x
+alcança. Neste catálogo isso pega MUITA coisa — a prévia da aba Preços mostra
+justamente o produto mais barato para o número aparecer antes de ligar.
+
+**Outra que já custou raciocínio:** acima do limite sem juros, a vitrine só
+oferece parcela se houver taxa configurada. Sem `parcelas_juros_mes`, deixar
+`parcelas_max = 12` valer anunciaria 12x SEM JUROS sem ninguém ter decidido
+isso — promessa que o cliente cobra no balcão.
+
+**O parcelamento é informação, não cobrança.** O checkout é a Fase 3; a loja
+não processa pagamento nenhum. O texto da aba diz isso, e a frase usa o mesmo
+vocabulário de `src/lib/orcamentos/condicoes.ts` de propósito, para a loja não
+dizer ao cliente uma condição com palavras diferentes das do balcão.
+
+Conferido em `tests/commerce/precos.test.ts`: piso da parcela, teto sem
+juros, tabela Price a 2% a.m., inversão com promoção e — o que mais importa —
+`preco_unico` entregando exatamente a Fase 1, que é a garantia de que a loja
+no ar não muda de aparência sozinha.
 
 ### SEGURANÇA — acesso anônimo do Supabase (dívida crítica, aberta)
 
@@ -573,6 +635,12 @@ não vale passar por 99 telas.
   mercadoria que a loja não oferece. Causa: publiquei filtrando por
   `produtos.estoque`, e a loja lê `produto_estoque`. Publicar é um comando;
   esperando seu aval.
+- **Ligar os dois preços** em Loja Online → Preços. A política existe e está
+  desligada; o padrão é o preço único de hoje. A aba mostra a prévia com
+  produtos de verdade do catálogo — inclusive o mais barato, onde a parcela
+  mínima derruba o parcelamento. Precisa da sua decisão sobre o percentual do
+  Pix e sobre em quantas vezes a loja realmente parcela, porque o cliente vai
+  cobrar essa condição no balcão.
 - **Ligar `indexavel`** em Loja Online → Configurações é o que abre a loja ao
   Google. Recomendo só depois de revisar os 509 publicados **e** de fechar a
   dívida do `anon`.

@@ -124,6 +124,7 @@ export default function Listagem({
             key={p.lojaProdutoId}
             p={p}
             permiteSemEstoque={loja.permitirVendaSemEstoque}
+            politica={loja.politicaPreco}
             prioridade={i < 4}
           />
         ))}

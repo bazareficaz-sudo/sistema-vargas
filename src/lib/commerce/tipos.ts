@@ -5,6 +5,32 @@
 // começa no tipo. Se um campo desses aparecer nesta interface um dia, é sinal
 // de que alguém furou a camada.
 
+/**
+ * Como a vitrine desta loja fala de preço.
+ *
+ * Mora na loja, e não no produto, porque é decisão de canal: a mesma
+ * mercadoria pode ser 10x sem juros na loja própria e à vista no balcão.
+ * O único campo por produto continua sendo `loja_produtos.preco_pix`, que é
+ * a exceção — a regra está aqui.
+ *
+ * A aritmética que consome isto está em `./precos`.
+ */
+export type PoliticaPreco = {
+  /** 'preco_unico' é o comportamento da Fase 1, e é o padrão. */
+  exibicao: 'preco_unico' | 'dois_precos'
+  /** Desconto do à vista, em % sobre o preço praticado. 0 = sem segundo preço. */
+  pixDescontoPct: number
+  /** Como o à vista se chama na tela: "no Pix", "no Pix ou dinheiro"… */
+  pixRotulo: string
+  /** Teto de parcelas. `null` = a vitrine não fala de parcelamento. */
+  parcelasMax: number | null
+  parcelasSemJuros: number
+  /** % ao mês acima do limite sem juros. 0 = a loja não parcela com juros. */
+  jurosMes: number
+  /** Piso da parcela. Reduz o número de vezes até a parcela alcançá-lo. */
+  parcelaMinima: number
+}
+
 export type Loja = {
   id: string
   empresaId: string
@@ -31,6 +57,9 @@ export type Loja = {
 
   corPrimaria: string
   corDestaque: string
+
+  /** Um preço ou dois, e em quantas vezes. Ver `./precos`. */
+  politicaPreco: PoliticaPreco
 
   seoTitle: string | null
   metaDescription: string | null

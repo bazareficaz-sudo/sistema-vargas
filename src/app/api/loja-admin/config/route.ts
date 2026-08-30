@@ -63,6 +63,19 @@ const CAMPOS: Record<string, Regra> = {
   subdominio: { tipo: 'subdominio' },
   dominio_proprio: { tipo: 'host', nulavel: true },
 
+  // Política de preços
+  //
+  // Os limites aqui repetem os CHECK do banco de propósito: o banco é a
+  // garantia, esta lista é a mensagem de erro legível. Sem ela, digitar 900%
+  // de desconto no Pix devolveria "Não foi possível salvar".
+  preco_exibicao: { tipo: 'opcao', valores: ['preco_unico', 'dois_precos'] },
+  pix_desconto_pct: { tipo: 'numero', min: 0, max: 90 },
+  pix_rotulo: { tipo: 'texto', max: 40 },
+  parcelas_max: { tipo: 'inteiro', min: 2, max: 24, nulavel: true },
+  parcelas_sem_juros: { tipo: 'inteiro', min: 0, max: 24 },
+  parcelas_juros_mes: { tipo: 'numero', min: 0, max: 20 },
+  parcela_minima: { tipo: 'numero', min: 0, max: 100_000 },
+
   // Política de estoque
   estoque_modo: { tipo: 'opcao', valores: ['deposito_unico', 'depositos_selecionados', 'empresa_consolidado', 'grupo_consolidado'] },
   estoque_deposito_id: { tipo: 'uuid', nulavel: true },

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ImagemProduto, Preco, SeloDisponibilidade } from './ds'
-import type { ProdutoCard } from '@/lib/commerce/tipos'
+import { descontoPercentual } from '@/lib/commerce/precos'
+import type { PoliticaPreco, ProdutoCard } from '@/lib/commerce/tipos'
 
 // O card existe para uma decisão só: vale a pena abrir este produto?
 //
@@ -9,16 +10,24 @@ import type { ProdutoCard } from '@/lib/commerce/tipos'
 // deixados de fora de propósito: informação técnica no card é ruído para o
 // consumidor, e "comprar" sem escolher quantidade leva de volta para trás.
 
-export default function CardProduto({ p, permiteSemEstoque, prioridade = false }: {
+export default function CardProduto({ p, permiteSemEstoque, politica, prioridade = false }: {
   p: ProdutoCard
   permiteSemEstoque: boolean
+  /**
+   * Como esta loja fala de preço. Vem de `loja.politicaPreco`.
+   *
+   * Prop própria em vez de a `loja` inteira, pelo mesmo motivo de
+   * `permiteSemEstoque`: o card decide um clique, e o que ele não recebe
+   * ele não pode vazar para uma página pública.
+   */
+  politica?: PoliticaPreco
   /** Só para os primeiros da primeira dobra: carrega a imagem sem lazy. */
   prioridade?: boolean
 }) {
   const semSaldo = p.estoquePublicavel <= 0 && !permiteSemEstoque
-  const desconto = p.precoDe && p.precoDe > p.preco
-    ? Math.round((1 - p.preco / p.precoDe) * 100)
-    : 0
+  // A mesma conta do bloco de preço, pela mesma função — o selo e o "De"
+  // riscado logo abaixo dele precisam fechar.
+  const desconto = descontoPercentual(p.preco, p.precoDe)
 
   return (
     <Link
@@ -65,7 +74,7 @@ export default function CardProduto({ p, permiteSemEstoque, prioridade = false }
         </h3>
 
         <div className="mt-auto pt-1">
-          <Preco valor={p.preco} de={p.precoDe} pix={p.precoPix} />
+          <Preco valor={p.preco} de={p.precoDe} pix={p.precoPix} politica={politica} />
           <div className="mt-1">
             <SeloDisponibilidade disponivel={p.estoquePublicavel} permiteSemEstoque={permiteSemEstoque} />
           </div>

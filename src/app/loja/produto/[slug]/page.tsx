@@ -111,7 +111,10 @@ export default async function PaginaProduto({ params }: Props) {
             </div>
 
             <div>
-              <Preco valor={p.preco} de={p.precoDe} pix={p.precoPix} tamanho="pagina" />
+              <Preco
+                valor={p.preco} de={p.precoDe} pix={p.precoPix}
+                politica={loja.politicaPreco} tamanho="pagina"
+              />
               <div className="mt-2">
                 <SeloDisponibilidade
                   disponivel={disponivel}
@@ -207,6 +210,7 @@ export default async function PaginaProduto({ params }: Props) {
                   key={s.lojaProdutoId}
                   p={s}
                   permiteSemEstoque={loja.permitirVendaSemEstoque}
+                  politica={loja.politicaPreco}
                 />
               ))}
             </div>

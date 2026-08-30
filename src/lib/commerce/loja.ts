@@ -79,6 +79,19 @@ function paraLoja(l: Record<string, any>): Loja {
     horarioAtendimento: l.horario_atendimento,
     corPrimaria: l.cor_primaria,
     corDestaque: l.cor_destaque,
+    // Coalescido campo a campo: a loja pode ter sido lida antes de
+    // supabase-loja-precos.sql rodar, e uma vitrine no ar não pode cair
+    // porque uma coluna ainda não existe. Sem a migração, o resultado é
+    // exatamente a política da Fase 1 — um preço só.
+    politicaPreco: {
+      exibicao: l.preco_exibicao === 'dois_precos' ? 'dois_precos' : 'preco_unico',
+      pixDescontoPct: Number(l.pix_desconto_pct ?? 0),
+      pixRotulo: l.pix_rotulo ?? 'no Pix',
+      parcelasMax: l.parcelas_max != null ? Number(l.parcelas_max) : null,
+      parcelasSemJuros: Number(l.parcelas_sem_juros ?? 0),
+      jurosMes: Number(l.parcelas_juros_mes ?? 0),
+      parcelaMinima: Number(l.parcela_minima ?? 0),
+    },
     seoTitle: l.seo_title,
     metaDescription: l.meta_description,
     ogImageUrl: l.og_image_url,

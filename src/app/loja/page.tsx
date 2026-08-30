@@ -115,6 +115,7 @@ export default async function Home() {
                 key={p.lojaProdutoId}
                 p={p}
                 permiteSemEstoque={loja.permitirVendaSemEstoque}
+                politica={loja.politicaPreco}
                 // Só os primeiros do primeiro bloco escapam do lazy loading.
                 prioridade={i === 0 && j < 4}
               />

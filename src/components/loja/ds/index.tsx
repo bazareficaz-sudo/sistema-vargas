@@ -1,5 +1,9 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import {
+  PRECO_UNICO, brl, exibicaoPreco, rotuloAVista, textoAVista, textoParcelamento,
+} from '@/lib/commerce/precos'
+import type { PoliticaPreco } from '@/lib/commerce/tipos'
 
 // Design system da vitrine. Definido UMA vez, antes das páginas.
 //
@@ -10,8 +14,10 @@ import type { ReactNode } from 'react'
 
 // ─── Dinheiro ────────────────────────────────────────────────────────────────
 
-const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
-export const real = (v: number) => BRL.format(Number.isFinite(v) ? v : 0)
+// O formatador vive em `@/lib/commerce/precos`, junto das frases de
+// parcelamento que também precisam dele. Aqui ele só ganha o nome curto que
+// as páginas da vitrine já usam.
+export const real = brl
 
 // ─── Botão ───────────────────────────────────────────────────────────────────
 
@@ -93,26 +99,78 @@ export function ImagemProduto({ url, alt, prioridade = false, className = '' }: 
 
 // ─── Preço ───────────────────────────────────────────────────────────────────
 
-export function Preco({ valor, de, pix, tamanho = 'card' }: {
-  valor: number; de?: number | null; pix?: number | null; tamanho?: 'card' | 'pagina'
+/**
+ * O bloco de preço da vitrine. Card e página do produto usam este, e só este.
+ *
+ * Sem `politica`, ou com ela em 'preco_unico', desenha exatamente o que a
+ * Fase 1 desenhava — riscado, preço, Pix embaixo. É o que permite esta
+ * mudança chegar a uma loja no ar sem alterar um pixel até alguém ligar a
+ * política na aba Preços.
+ *
+ * Em 'dois_precos' a decisão de QUEM ganha o tamanho grande não está aqui:
+ * está em `exibicaoPreco`, para o card e a página nunca discordarem sobre o
+ * que destacar. Aqui só mora a tipografia.
+ */
+export function Preco({ valor, de, pix, politica, tamanho = 'card' }: {
+  valor: number
+  de?: number | null
+  pix?: number | null
+  politica?: PoliticaPreco
+  tamanho?: 'card' | 'pagina'
 }) {
   const grande = tamanho === 'pagina'
+  const pol = politica ?? PRECO_UNICO
+  const e = exibicaoPreco({ preco: valor, precoDe: de ?? null, precoPix: pix ?? null }, pol)
+
+  const miudo = grande ? 'text-sm' : 'text-[0.6875rem]'
+  const heroi = grande ? 'text-3xl' : 'text-[1.0625rem]'
+
+  // O riscado fica ACIMA do preço quando ele é o destaque, e ABAIXO do à
+  // vista quando o destaque é o Pix. Nos dois casos ele encosta no preço que
+  // está sendo comparado — riscado longe do número que ele contradiz é o
+  // tipo de detalhe que faz o cliente reler.
+  const riscado = e.de != null && (
+    <div className={`text-[var(--tinta-fraca)] line-through ${miudo}`}>{real(e.de)}</div>
+  )
+
   return (
     <div>
-      {/* O riscado só existe quando é MAIOR que o preço — a view garante isso
-          no banco, então aqui não há como exibir desconto inventado. */}
-      {de != null && de > valor && (
-        <div className={`text-[var(--tinta-fraca)] line-through ${grande ? 'text-sm' : 'text-[0.6875rem]'}`}>
-          {real(de)}
-        </div>
-      )}
-      <div className={`font-bold tracking-tight text-[var(--tinta-forte)] ${grande ? 'text-3xl' : 'text-[1.0625rem]'}`}>
-        {real(valor)}
+      {!e.aVistaEmDestaque && riscado}
+
+      <div
+        className={`font-bold tracking-tight ${heroi} ${e.aVistaEmDestaque ? '' : 'text-[var(--tinta-forte)]'}`}
+        style={e.aVistaEmDestaque ? { color: 'var(--sucesso)' } : undefined}
+      >
+        {real(e.destaque)}
+        {e.aVistaEmDestaque && (
+          <span className={`ml-1.5 font-semibold ${miudo}`}>{textoAVista(pol)}</span>
+        )}
       </div>
-      {pix != null && pix > 0 && pix < valor && (
-        <div className={`font-medium text-[var(--sucesso)] ${grande ? 'text-sm mt-1' : 'text-[0.6875rem]'}`}>
-          {real(pix)} no Pix
-        </div>
+
+      {e.aVistaEmDestaque ? (
+        <>
+          {riscado}
+          {/* O preço normal, que é o que vale em qualquer outra forma de
+              pagamento. Sem parcelamento configurado sai só o valor — e
+              continua legível, porque o "De" logo acima dá o contexto. */}
+          <div className={`text-[var(--tinta-media)] ${miudo}`}>
+            <span className="font-semibold">{real(e.normal ?? valor)}</span>
+            {e.parcelamento && <> {textoParcelamento(e.parcelamento)}</>}
+          </div>
+        </>
+      ) : (
+        <>
+          {e.parcelamento && (
+            <div className={`text-[var(--tinta-media)] ${miudo}`}>
+              {textoParcelamento(e.parcelamento)}
+            </div>
+          )}
+          {e.aVista != null && (
+            <div className={`font-medium text-[var(--sucesso)] ${miudo} ${grande ? 'mt-1' : ''}`}>
+              {real(e.aVista)} {rotuloAVista(pol)}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
