@@ -58,6 +58,67 @@ olhando o domínio significa mais chance de alguém extrair a chave `anon` de
 algum bundle e varrer o banco. **O risco não sobe por causa do código da loja;
 sobe por causa da atenção que a loja atrai.**
 
+## 3b. MEDIÇÃO — feita em 30/08/2026, e o que ela corrigiu
+
+O passo 1 abaixo foi executado: 24h de `edge_logs`, separando por
+`request.sb.jwt.authorization.payload.role`.
+
+**A superfície anônima real é pequena.** 887 requisições em 24h, 8 IPs, 21
+caminhos — contra 197 mil do `service_role` e 4,8 mil do `authenticated`.
+Quem usa a chave pública: o terminal (`node`, lê 14 tabelas em ciclo e
+escreve em 5), o app (`Dart/3.12`, lê `vendas` e `venda_itens`) e o site
+público (`blog_posts`).
+
+**Duas coisas que este documento afirmava e a medição desmentiu:**
+
+1. **O passo 3 abaixo derrubaria o caixa.** O terminal pede `select=*` em
+   `produtos`, `clientes`, `contas_receber` e `creditos_cliente`. Quando uma
+   coluna é revogada, o PostgREST recusa o `select=*` INTEIRO com 403 — não
+   devolve o resultado sem a coluna. "Tirar coluna, não tabela" só é seguro
+   onde o cliente nomeia as colunas, e aqui ele não nomeia.
+
+2. **A escrita anônima NÃO foi podada.** `anon` tinha
+   INSERT/UPDATE/DELETE em dezenas de tabelas com RLS desligada. Em uma
+   delas isso era escalada de privilégio — ver abaixo.
+
+**O achado mais grave, e ele não estava neste plano:** `system_admins` tinha
+RLS DESLIGADA (suas 3 políticas eram decoração) e `anon` tinha INSERT. Como
+`is_system_admin()` lê essa tabela por `auth.uid()`, e aparece como
+`OR is_system_admin()` nas políticas de RLS de todo o sistema, inserir a
+própria conta ali abriria todos os tenants. Fechado na Onda 1.
+
+**Detalhe que decide caso a caso:** `Prefer: return=representation` num
+POST/PATCH exige SELECT na tabela. `produtos`, `produto_estoque` e `vendas`
+usam esse cabeçalho — nelas leitura e escrita andam juntas e não dá para
+separar. `estoque_movimentacoes` não usa, e por isso foi possível tirar o
+SELECT dela mantendo o INSERT.
+
+## 3c. ONDA 1 — executada em 30/08/2026
+
+Arquivo: [`../supabase-fechar-anon-onda1.sql`](../supabase-fechar-anon-onda1.sql).
+Só tabelas com ZERO leitura anônima na janela medida.
+
+| | |
+|---|---|
+| `system_admins` | `REVOKE ALL` — fecha a escalada de privilégio |
+| `usuarios_pdv` | `senha_hash` fora do alcance; as outras 18 colunas ficam |
+| `whatsapp_mensagens`, `fornecedor_produto`, `produto_vinculos`, `cr_auditoria`, `vendedor_auditoria`, `cobranca_historico` | `REVOKE ALL` |
+| `estoque_movimentacoes` | só o SELECT sai; o INSERT fica |
+
+Conferido depois: `has_column_privilege('anon','usuarios_pdv','senha_hash')`
+= false, e `autenticar_operador_pdv` continua executável pelo anônimo.
+
+**RLS em `system_admins` ficou de fora de propósito.** A política
+`system_admins_superadmin_write` faz `EXISTS (SELECT 1 FROM system_admins…)`
+dentro da política da própria tabela; ligar RLS assim dispara *infinite
+recursion detected in policy for relation system_admins*. Reescrevê-la para
+uma função `SECURITY DEFINER` é passo próprio, com teste.
+
+**O que resta, medido depois da Onda 1:** 83 tabelas ainda legíveis pelo
+anônimo com RLS desligada, 80 delas ainda escrevíveis e 71 ainda apagáveis.
+Outras 63 já estão protegidas por RLS. O buraco continua grande — a Onda 1
+tirou o pior, não o todo.
+
 ## 4. Caminho de correção (não implementar sem planejar)
 
 A base já existe. `autenticar_operador_pdv()` foi criada na rodada 1 do
@@ -110,3 +171,25 @@ for (const t of ['produtos','clientes','vendas','usuarios_pdv','contas_receber',
 ```
 
 Resultado desejado ao fim desta fase: **0** em todas.
+
+Mais rápido, e sem depender de `.env.local`, é perguntar ao próprio banco:
+
+```sql
+SELECT c.relname, has_table_privilege('anon', c.oid,'SELECT') AS le
+  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname='public' AND c.relkind='r' AND NOT c.relrowsecurity
+   AND has_table_privilege('anon', c.oid,'SELECT')
+ ORDER BY 1;
+```
+
+E, para saber o que o anônimo REALMENTE usa antes de revogar (o passo 1, que
+é o que decide todo o resto), a consulta de log:
+
+```sql
+select log_attributes['request.path'], log_attributes['request.method'],
+       log_attributes['request.headers.prefer'], count(*)
+  from logs
+ where source='edge_logs'
+   and log_attributes['request.sb.jwt.authorization.payload.role']='anon'
+ group by 1,2,3 order by 4 desc
+```
