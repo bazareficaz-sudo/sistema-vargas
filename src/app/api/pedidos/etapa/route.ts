@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { ETAPA_INFO, transicaoPermitida, type Etapa } from '@/lib/pedidos/etapas'
+import { aplicarEfeitoDaEtapa } from '@/lib/pedidos/reservaLoja'
 
 // Muda a etapa de um pedido e registra o evento.
 //
@@ -38,6 +39,16 @@ export async function POST(req: Request) {
     .update({ etapa_operacional: etapa, etapa_operacional_em: agora }).eq('id', id).eq('empresa_id', guarda.empresaId)
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
 
+  // O pedido da loja tem estoque RESERVADO desde que nasceu, e é a etapa que
+  // encerra essa reserva — não o relógio. 'separando' baixa o estoque e
+  // consome a reserva; 'cancelado' devolve o saldo à vitrine.
+  //
+  // Depois do UPDATE de propósito: a etapa já mudou, e um erro aqui não pode
+  // desfazê-la nem parar a expedição. O que não deu certo volta como aviso.
+  const efeito = fonte === 'marketplace'
+    ? await aplicarEfeitoDaEtapa(sb, id, etapa, observacao)
+    : null
+
   const { data: perfil } = await sb.from('profiles').select('nome').eq('id', guarda.userId).maybeSingle()
 
   await sb.from('pedido_eventos').insert({
@@ -51,7 +62,14 @@ export async function POST(req: Request) {
     automatico: false,
   })
 
-  return NextResponse.json({ ok: true, etapa, etapaEm: agora })
+  return NextResponse.json({
+    ok: true, etapa, etapaEm: agora,
+    // A tela precisa distinguir "baixou" de "achei que baixou". Silêncio aqui
+    // faria o operador seguir com o estoque errado sem saber.
+    estoque: efeito && (efeito.baixou || efeito.liberou || efeito.erros.length)
+      ? { baixou: efeito.baixou, liberou: efeito.liberou, erros: efeito.erros }
+      : undefined,
+  })
 }
 
 // Linha do tempo do pedido.

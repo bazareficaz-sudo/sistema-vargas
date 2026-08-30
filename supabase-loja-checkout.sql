@@ -319,23 +319,32 @@ BEGIN
          quantidade, preco, preco * quantidade
     FROM conferido_tmp;
 
-  -- ── A RESERVA. É a Fase 2 acontecendo. ────────────────────
-  -- Nasce com prazo: reserva sem expiração some do estoque para sempre e
-  -- ninguém liga uma coisa à outra meses depois. `loja_expirar_reservas`,
-  -- que já roda no cron de 15 min, faz a limpeza.
+  -- ── A RESERVA. É a Fase 2 acontecendo, e ela NÃO EXPIRA. ──
+  --
+  -- `reserva_minutos` é prazo de CARRINHO EM ANDAMENTO — um checkout que o
+  -- cliente pode abandonar. Aqui o pedido já nasce CONFIRMADO, e o esquema da
+  -- Fase 1 já dizia qual era o certo: "expira_em NULL = reserva sem prazo
+  -- (pedido confirmado à espera de separação)".
+  --
+  -- Com prazo acontecia isto: pedido entra, reserva segura 30 min, expira, o
+  -- estoque volta à vitrine — e o pedido continua aberto, com a mercadoria
+  -- prometida a alguém. A loja revendia o que já tinha vendido.
+  --
+  -- A válvula deixa de ser o relógio e passa a ser o ciclo do pedido:
+  -- CONSUMIDA quando o estoque baixa (etapa 'separando') e LIBERADA quando o
+  -- pedido é cancelado. Ver src/lib/pedidos/reservaLoja.ts.
   INSERT INTO estoque_reservas
          (empresa_id, produto_id, canal_id, quantidade,
           referencia_tipo, referencia_id, status, expira_em, observacao)
   SELECT v_loja.empresa_id, produto_id, v_loja.canal_id, quantidade,
          'loja_pedido', v_pedido_id::TEXT, 'ativa',
-         now() + make_interval(mins => v_loja.reserva_minutos),
+         NULL,
          'Pedido ' || v_numero
     FROM conferido_tmp;
 
   RETURN jsonb_build_object(
     'ok', true, 'pedido_id', v_pedido_id, 'numero', v_numero,
-    'total', v_total, 'cliente_id', v_cliente_id,
-    'reserva_expira_em', now() + make_interval(mins => v_loja.reserva_minutos));
+    'total', v_total, 'cliente_id', v_cliente_id);
 END;
 $$;
 

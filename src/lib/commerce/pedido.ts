@@ -50,8 +50,6 @@ export type PedidoCriado = {
   pedidoId: string
   numero: string
   total: number
-  /** Até quando o estoque está segurado. É a Fase 2 em ação. */
-  reservaExpiraEm: string
 }
 
 export type PedidoRecusado = {
@@ -143,7 +141,6 @@ export async function criarPedido(
     pedidoId: String(r.pedido_id),
     numero: String(r.numero),
     total: Number(r.total ?? 0),
-    reservaExpiraEm: String(r.reserva_expira_em ?? ''),
   }
 }
 

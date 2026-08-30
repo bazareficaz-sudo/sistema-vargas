@@ -97,6 +97,5 @@ export async function POST(req: Request) {
     ok: true,
     numero: resultado.numero,
     total: resultado.total,
-    reservaExpiraEm: resultado.reservaExpiraEm,
   })
 }
