@@ -16,13 +16,25 @@ import type { FaixaFrete } from './tipos'
 // sondamos alguns preços e agrupamos os que dão o mesmo valor. O resultado é
 // uma escada de faixas, que o motor consome igual às faixas de comissão.
 
-const PRECOS_SONDA = [79, 100, 120, 150, 200, 300, 500, 1000]
+// Os pontos abaixo de R$ 79 existem desde 29/08/2026, e a razão está no
+// defeito que eles consertam.
+//
+// A sonda começava em 79, e a escada era montada com uma primeira faixa
+// ESCRITA À MÃO: {min: 0, max: 78,99, valor: 0}, sob a premissa "abaixo do
+// limite quem paga é o comprador". Essa premissa nunca foi medida — e ia
+// para o cache com cara de medição, o que a tornava invisível.
+//
+// O painel do próprio Mercado Livre desmentiu, num anúncio a R$ 34,99:
+// tarifa de venda R$ 4,02 (que batia com a nossa) e custo de envio
+// R$ 7,83 — os R$ 9,79 da tabela com 20% de desconto. Com o frete zerado
+// por suposição, a margem daquele anúncio aparecia como 27% quando pode ser
+// ~5%. Eram 4.955 anúncios de ML abaixo de R$ 79 nessa situação.
+//
+// Agora a faixa de baixo é MEDIDA como todas as outras. Se a API devolver
+// zero, o resultado é idêntico ao de antes — e aí a premissa terá sido
+// confirmada em vez de assumida.
+const PRECOS_SONDA = [20, 35, 50, 65, 79, 100, 120, 150, 200, 300, 500, 1000]
 const VALIDADE_HORAS = 24
-
-// Abaixo deste preço o frete é por conta do comprador — custo zero pro
-// vendedor. É a regra do ML, e a própria API confirma: a R$ 78,99 o desconto
-// vem 0,3 e a R$ 79 vira 0,5.
-const LIMITE_FRETE_GRATIS = 79
 
 export type Embalagem = {
   comprimentoCm: number
@@ -171,15 +183,20 @@ export async function resolverFreteML(
     throw new Error('Não foi possível consultar o frete do Mercado Livre para esta embalagem.')
   }
 
-  // Primeira faixa: abaixo do limite quem paga é o comprador.
-  const faixas: FaixaFrete[] = [{ min: 0, max: LIMITE_FRETE_GRATIS - 0.01, valor: 0 }]
+  // A escada inteira sai das medições. A primeira faixa começa em ZERO e
+  // recebe o valor do ponto mais baixo sondado — se o ML não cobrar nada
+  // ali, ela nasce com zero, medido.
+  const faixas: FaixaFrete[] = []
   for (const p of pontos) {
     const ultima = faixas[faixas.length - 1]
     if (ultima && ultima.valor === p.custo) {
       ultima.max = p.preco
     } else {
       if (ultima) ultima.max = p.preco - 0.01
-      faixas.push({ min: p.preco, max: p.preco, valor: p.custo })
+      // O primeiro ponto vale desde R$ 0: abaixo da sonda mais baixa não há
+      // observação, e repetir o valor dela é a leitura conservadora — o
+      // contrário seria voltar a supor frete zero.
+      faixas.push({ min: faixas.length === 0 ? 0 : p.preco, max: p.preco, valor: p.custo })
     }
   }
   // A última faixa vale daí pra cima — a sonda mais alta é só o último ponto

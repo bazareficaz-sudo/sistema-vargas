@@ -272,3 +272,54 @@ describe('motor — memória de cálculo', () => {
     }
   })
 })
+
+describe('escada de frete — a faixa de baixo tem de ser medida, não suposta', () => {
+  // Defeito encontrado em 29/08/2026 conferindo a tela contra o painel do
+  // Mercado Livre: a escada era montada com uma primeira faixa escrita à mão,
+  // `{min: 0, max: 78,99, valor: 0}`, sob a premissa de que abaixo de R$ 79
+  // quem paga o frete é o comprador. A sonda começava em 79 e nunca conferia.
+  //
+  // O painel do ML, num anúncio a R$ 34,99, mostrou custo de envio de R$ 7,83.
+  // Com o frete zerado por suposição, a margem aparecia como 27% em vez de ~5%.
+
+  test('escada que começa em zero devolve o valor medido nos preços baixos', () => {
+    const medida = [
+      { min: 0, max: 78.99, valor: 7.83 },
+      { min: 79, max: null, valor: 15.54 },
+    ]
+    assert.equal(freteDaFaixa(medida, 34.99), 7.83)
+    assert.equal(freteDaFaixa(medida, 100), 15.54)
+  })
+
+  test('e o frete entra na conta, derrubando a margem', () => {
+    const cfg: ConfigTaxas = {
+      ...CFG,
+      comissaoModo: 'faixas',
+      comissaoFaixas: [{ min: 0, max: null, percentual: 11.5, fixo: 0 }],
+      imposto: { nome: 'Imposto', tipo: 'percentual', valor: 5 },
+      embalagem: { nome: 'Embalagem', tipo: 'fixo', valor: 0.8 },
+    }
+    const faixas = [{ min: 0, max: 78.99, valor: 7.83 }, { min: 79, max: null, valor: 15.54 }]
+
+    const supondoZero = calcular({ cfg, custoProduto: 18.97, objetivo: { tipo: 'preco', valor: 34.99 } })
+    const medindo = calcular({ cfg, custoProduto: 18.97, objetivo: { tipo: 'preco', valor: 34.99 }, freteFaixas: faixas })
+
+    perto(supondoZero.comissao, 4.02, 0.01)
+    perto(medindo.comissao, 4.02, 0.01)
+    assert.equal(supondoZero.frete, 0)
+    assert.equal(medindo.frete, 7.83)
+    // O tamanho do engano: mais de vinte pontos de margem.
+    assert.ok(supondoZero.margemLiquida - medindo.margemLiquida > 20,
+      `esperava mais de 20 pontos de diferença; veio ${(supondoZero.margemLiquida - medindo.margemLiquida).toFixed(1)}`)
+  })
+
+  test('escada que NÃO cobre o preço cai na faixa mais cara — por isso ela precisa começar em zero', () => {
+    // `freteDaFaixa` devolve a última faixa quando nenhuma casa. Era inofensivo
+    // enquanto a primeira faixa começava em 0 por construção; passou a ser um
+    // risco quando ela virou medida. Este teste registra o comportamento para
+    // que ninguém o descubra em produção.
+    const escadaTorta = [{ min: 79, max: null, valor: 15.54 }]
+    assert.equal(freteDaFaixa(escadaTorta, 34.99), 15.54,
+      'sem faixa que case, vale a última — nunca zero')
+  })
+})
