@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
 import { buscarCandidatosCest, resolverCest, CestIndisponivelError, type CandidatoCest } from '@/lib/fiscal/cest'
+import { verificarNcm } from '@/lib/fiscal/ncm'
 import { fiscalPadraoDoRegime } from '@/lib/fiscal/regimeDefault'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
@@ -170,7 +171,36 @@ Se não tiver informação suficiente e confiável pra algum campo, use null nes
     const nomeMarcaValido = typeof resultado?.marca === 'string'
       ? (marcas ?? []).find(m => m.nome.toLowerCase() === resultado.marca.toLowerCase())?.nome ?? null
       : null
-    const ncmValido = digitsOuNull(resultado?.ncm, 8)
+    // O NCM SO VALE SE EXISTIR NA NOMENCLATURA OFICIAL.
+    //
+    // Oito digitos nao basta. A venda #201722 foi recusada com "Rejeicao 778"
+    // por causa de 32100090, sugerido aqui: formato perfeito, codigo
+    // inexistente — a posicao 3210.00 tem .10, .20 e .30, e nenhum .90. O
+    // sufixo ".90" e o "outros" de muitas posicoes, e o modelo o aplicou onde
+    // nao cabe.
+    //
+    // E o mesmo cuidado que o CEST ja tinha, pela mesma razao escrita em
+    // cest.ts: o modelo acerta a maioria e erra em silencio. So que ali a
+    // tabela vinha primeiro e o modelo escolhia; aqui ele falava sozinho.
+    //
+    // Quando o codigo nao existe, o campo volta VAZIO com o motivo. Vazio o
+    // operador percebe; errado com cara de certo, so a SEFAZ.
+    const ncmDoModelo = digitsOuNull(resultado?.ncm, 8)
+    let ncmValido: string | null = null
+    let ncmAviso: string | null = null
+    if (ncmDoModelo) {
+      const s = await verificarNcm(sb, ncmDoModelo)
+      if (s.situacao === 'vigente') ncmValido = ncmDoModelo
+      else if (s.situacao === 'nao_verificavel') {
+        // Sem tabela nao da para conferir. Devolver mesmo assim seria repetir o
+        // defeito; recusar em silencio esconderia que a tabela esta faltando.
+        ncmAviso = `O NCM sugerido (${ncmDoModelo}) nao pode ser conferido na nomenclatura oficial e por isso nao foi preenchido. Rode a atualizacao da tabela NCM em Configuracoes.`
+      } else if (s.situacao === 'extinto') {
+        ncmAviso = `A IA sugeriu o NCM ${ncmDoModelo}, que foi EXTINTO. Nao preenchi — um codigo revogado e recusado pela SEFAZ (Rejeicao 778).`
+      } else {
+        ncmAviso = `A IA sugeriu o NCM ${ncmDoModelo}, que NAO EXISTE na nomenclatura oficial. Nao preenchi. Classifique com a contabilidade.`
+      }
+    }
     // O CEST devolvido só vale se estiver na lista que a tabela permitiu. Um
     // código fora dela é alucinação, não sugestão — e nesse caso o valor certo
     // é o da tabela (quando único), nunca o do modelo.
@@ -196,6 +226,7 @@ Se não tiver informação suficiente e confiável pra algum campo, use null nes
       categoria: nomeCategoriaValido,
       marca: nomeMarcaValido,
       ncm: ncmValido,
+      ncm_aviso: ncmAviso,
       cest: cestValido,
       // Por que o CEST veio vazio. Sem isto, "nao consegui consultar" e "este
       // produto nao tem ST" chegam identicos na tela — que foi exatamente o

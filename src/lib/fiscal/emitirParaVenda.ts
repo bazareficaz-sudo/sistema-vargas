@@ -1,6 +1,7 @@
 import { getFiscalProvider } from './factory'
 import { FiscalProviderError, type EmissaoNFCeInput } from './types'
 import { conferirCoerenciaFiscal, situacaoTributariaIcms } from './coerencia'
+import { verificarNcm, explicarNcm } from './ncm'
 
 // Mapeamento das formas de pagamento do PDV pro código da tabela nacional
 // SEFAZ de formas de pagamento (Nota Técnica 2020.006, válida pra qualquer
@@ -104,10 +105,21 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     return { ok: false, erro: 'CNPJ da empresa emitente não cadastrado — preencha em Empresas antes de emitir.' }
   }
 
-  const semNcm = itensVenda.filter((i: any) => !i.produto_id || !(produtoPorId.get(i.produto_id) as any)?.ncm)
-  if (semNcm.length > 0) {
-    const nomes = semNcm.map((i: any) => i.produto_nome).join(', ')
-    return { ok: false, erro: `Produto(s) sem NCM cadastrado — emissão bloqueada: ${nomes}` }
+  // NCM: presente E existente E vigente.
+  //
+  // A checagem antiga era so `!ncm`. Formato certo nao e codigo certo: a venda
+  // #201722 tinha NCM 32100090, oito digitos, preenchido pela IA — e esse
+  // codigo nao existe na nomenclatura. Passou por tudo e morreu na SEFAZ com
+  // "Rejeicao 778", que nao diz qual produto nem o que trocar.
+  const problemasNcm: string[] = []
+  for (const i of itensVenda as any[]) {
+    const p = i.produto_id ? (produtoPorId.get(i.produto_id) as any) : null
+    if (!p) { problemasNcm.push(`${i.produto_nome}: item sem produto vinculado.`); continue }
+    const frase = explicarNcm(await verificarNcm(sb, p.ncm))
+    if (frase) problemasNcm.push(`${p.nome}: ${frase}`)
+  }
+  if (problemasNcm.length > 0) {
+    return { ok: false, erro: `NCM invalido — emissao bloqueada: ${problemasNcm.join(' · ')}` }
   }
 
   // Destinatário da nota. Duas origens, nesta ordem:

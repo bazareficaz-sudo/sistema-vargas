@@ -514,13 +514,17 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       // consultar a tabela". Quando os dois aparecem iguais, um defeito de
       // infraestrutura passa por resposta fiscal — foi o que aconteceu com a
       // tabela CEST ausente do banco, e o que derrubou uma NFC-e depois.
+      // O NCM sugerido que nao existe na nomenclatura volta VAZIO, com o
+      // motivo. Sem esta linha o operador so descobriria na recusa da SEFAZ.
+      const avisoNcm = data.ncm_aviso ? `⚠ ${data.ncm_aviso} ` : ''
+
       const avisoCest = data.cest_aviso
         ? `⚠ O CEST não foi preenchido porque a tabela oficial não pôde ser consultada `
           + `(${data.cest_aviso}). Isso NÃO quer dizer que o produto está sem substituição `
           + `tributária — quer dizer que o sistema não conseguiu conferir. `
         : ''
 
-      setMensagemIA(avisoCest + (preenchidos > 0
+      setMensagemIA(avisoNcm + avisoCest + (preenchidos > 0
         ? (soFiscal
             ? `✓ ${preenchidos} campo(s) fiscal(is) preenchido(s) — CONFIRA COM A CONTABILIDADE antes de salvar. NCM, CFOP, Origem e CST errados fazem a SEFAZ rejeitar a nota.`
             : `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar. Os dados fiscais estão na aba Fiscal e devem ser conferidos com a contabilidade.`)

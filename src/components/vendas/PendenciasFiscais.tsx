@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react'
 type Mudanca = { campo: string; de: string | null; para: string | null }
 type Caminho = { id: 'com_st' | 'sem_st'; titulo: string; fundamento: string; mudancas: Mudanca[]; faltaEscolherCest: boolean }
 type Candidato = { cest: string; ncmPrefixo: string; descricao: string }
+type CandidatoNcm = { codigo: string; descricao: string }
 type Pendencia = {
   produtoId: string | null
   nome: string
@@ -26,6 +27,7 @@ type Pendencia = {
   evidencia: string
   caminhos: Caminho[]
   candidatosCest: Candidato[]
+  candidatosNcm: CandidatoNcm[]
   impedimento?: string
 }
 
@@ -46,6 +48,7 @@ export default function PendenciasFiscais({ vendaId, onResolvido }: {
   const [avisoCest, setAvisoCest] = useState<string | null>(null)
   const [escolha, setEscolha] = useState<Record<string, 'com_st' | 'sem_st'>>({})
   const [cestEscolhido, setCestEscolhido] = useState<Record<string, string>>({})
+  const [ncmEscolhido, setNcmEscolhido] = useState<Record<string, string>>({})
   const [aplicando, setAplicando] = useState(false)
   const [resultado, setResultado] = useState<{ aplicados: number; restantes: string[] } | null>(null)
 
@@ -99,13 +102,34 @@ export default function PendenciasFiscais({ vendaId, onResolvido }: {
   // Escolher um CEST muda o que a proposta vai gravar, então o diagnóstico é
   // refeito no servidor — não recalculado aqui. Duas contas do mesmo número em
   // lugares diferentes é como um deles fica errado sem ninguém ver.
+  /** As escolhas de agora, no formato que a rota espera. */
+  function decisoesAtuais(sobrescreve: { cest?: Record<string, string>; ncm?: Record<string, string> } = {}) {
+    const cests = sobrescreve.cest ?? cestEscolhido
+    const ncms = sobrescreve.ncm ?? ncmEscolhido
+    const ids = new Set([...Object.keys(cests), ...Object.keys(ncms), ...Object.keys(escolha)])
+    return [...ids].map(pid => ({
+      produtoId: pid, caminho: escolha[pid] ?? 'com_st',
+      cest: cests[pid] ?? null, ncm: ncms[pid] ?? null,
+    }))
+  }
+
+  // Trocar o NCM muda a classificacao inteira: o CEST sai dele. Por isso o
+  // diagnostico e refeito no servidor, e nao remendado aqui.
+  async function escolherNcm(produtoId: string, ncm: string) {
+    const novo = { ...ncmEscolhido, [produtoId]: ncm }
+    setNcmEscolhido(novo)
+    try {
+      aplicarDiagnostico(await buscarDiagnostico(decisoesAtuais({ ncm: novo })))
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao conferir')
+    }
+  }
+
   async function escolherCest(produtoId: string, cest: string) {
     const novo = { ...cestEscolhido, [produtoId]: cest }
     setCestEscolhido(novo)
     try {
-      aplicarDiagnostico(await buscarDiagnostico(
-        Object.entries(novo).map(([pid, c]) => ({ produtoId: pid, caminho: escolha[pid] ?? 'com_st', cest: c })),
-      ))
+      aplicarDiagnostico(await buscarDiagnostico(decisoesAtuais({ cest: novo })))
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao conferir')
     }
@@ -114,7 +138,8 @@ export default function PendenciasFiscais({ vendaId, onResolvido }: {
   async function aplicar() {
     const decisoes = pendencias
       .filter(p => p.produtoId && !p.impedimento && escolha[p.produtoId])
-      .map(p => ({ produtoId: p.produtoId!, caminho: escolha[p.produtoId!], cest: cestEscolhido[p.produtoId!] ?? null }))
+      .map(p => ({ produtoId: p.produtoId!, caminho: escolha[p.produtoId!],
+                   cest: cestEscolhido[p.produtoId!] ?? null, ncm: ncmEscolhido[p.produtoId!] ?? null }))
     if (!decisoes.length) return
 
     setAplicando(true); setErro('')
@@ -192,6 +217,26 @@ export default function PendenciasFiscais({ vendaId, onResolvido }: {
                 <p key={i} className="text-[11px] text-red-700 mt-0.5">{problema}</p>
               ))}
             </div>
+
+            {p.candidatosNcm?.length > 0 && (
+              <div className="space-y-1 border border-amber-200 bg-amber-50 rounded px-2 py-1.5">
+                <p className="text-[11px] text-amber-900 font-medium">
+                  O NCM cadastrado não vale. Estes são os códigos vigentes da mesma família:
+                </p>
+                {p.candidatosNcm.map(c => (
+                  <label key={c.codigo} className="flex items-start gap-2 text-[11px] text-gray-800 cursor-pointer">
+                    <input type="radio" name={`ncm-${id}`} className="mt-0.5"
+                      checked={ncmEscolhido[p.produtoId!] === c.codigo}
+                      onChange={() => void escolherNcm(p.produtoId!, c.codigo)} />
+                    <span><b>{c.codigo}</b> — {c.descricao}</span>
+                  </label>
+                ))}
+                <p className="text-[10px] text-amber-800">
+                  Nenhum descreve o produto? Então a classificação é de outra família — corrija no
+                  cadastro com a contabilidade.
+                </p>
+              </div>
+            )}
 
             {p.impedimento ? (
               <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
