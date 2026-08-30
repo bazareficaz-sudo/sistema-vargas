@@ -410,3 +410,24 @@ REVOKE ALL ON SEQUENCE loja_pedido_numero_seq FROM PUBLIC, anon;
 -- Pedidos já criados NÃO são apagados por isto — são linhas de
 -- `marketplace_pedidos` como as dos outros canais, e se apagam por lá.
 -- ============================================================
+
+
+-- ============================================================
+-- 5. Resumo de pedidos — a mercadoria que está presa
+--
+-- Acrescentado depois, e fechando uma pendência que a própria reserva sem
+-- prazo criou: o pedido confirmado segura estoque até ser separado ou
+-- cancelado, e isso é o certo — mas um pedido que ninguém toca segura para
+-- sempre, e nada avisava.
+--
+-- O número que importa aqui NÃO é "quantos pedidos abertos". É quanta
+-- mercadoria está fora da vitrine, e há quanto tempo.
+--
+-- SOMA NO BANCO, nunca na tela: o PostgREST devolve no máximo 1.000 linhas
+-- por requisição, e somar em JavaScript soma o pedaço — foi o defeito que fez
+-- a Visão Geral mostrar R$ 26 mil onde havia R$ 45 mil (commit d9fb508).
+--
+-- E a idade do pedido mais antigo sai daqui, e não de `Date.now()` na tela:
+-- o relógio do servidor de renderização pode divergir do relógio do banco.
+-- (Aplicado como `loja_pedidos_resumo`; ver a migração de mesmo nome.)
+-- ============================================================

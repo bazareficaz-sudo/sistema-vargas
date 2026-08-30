@@ -28,15 +28,26 @@ export default async function VisaoGeral() {
   const ctx = await contextoAdmin()
   if (!ctx?.lojaId) return null
 
-  const [{ data: saude }, { data: loja }] = await Promise.all([
+  const [{ data: saude }, { data: loja }, { data: pedidos }] = await Promise.all([
     ctx.sb.rpc('loja_saude_catalogo', { p_loja_id: ctx.lojaId }),
     ctx.sb.from('loja_config')
       .select('nome, subdominio, dominio_proprio, ativo, em_manutencao, indexavel')
       .eq('id', ctx.lojaId).single(),
+    ctx.sb.rpc('loja_pedidos_resumo', { p_loja_id: ctx.lojaId, p_dias_parado: 2 }),
   ])
 
   const s = (Array.isArray(saude) ? saude[0] : saude) ?? {}
+  const ped = (Array.isArray(pedidos) ? pedidos[0] : pedidos) ?? {}
   const n = (v: unknown) => Number(v ?? 0)
+  const brl = (v: unknown) =>
+    Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  const abertos = n(ped.abertos)
+  const parados = n(ped.parados)
+  // A idade vem do BANCO, e não de `Date.now()` aqui: o relógio do servidor
+  // de renderização pode divergir do relógio do banco, e ler o tempo durante
+  // o render é impuro — o lint do React reclama, com razão.
+  const diasDoMaisAntigo = n(ped.dias_mais_antigo)
 
   const publicados = n(s.publicados)
   const prontos = n(s.prontos)
@@ -130,9 +141,67 @@ export default async function VisaoGeral() {
         )}
       </section>
 
+      {/* ── Pedidos ────────────────────────────────────────
+          O checkout existe, então este bloco deixou de ser promessa.
+          O número que importa aqui NÃO é "quantos pedidos abertos": é
+          quanta mercadoria está presa e há quanto tempo. A reserva do
+          pedido não expira — é o certo, porque o pedido está confirmado —
+          e por isso um pedido esquecido segura estoque indefinidamente.
+          Sem esta tela, isso acontecia sem ninguém saber. */}
+      <section className="rounded-xl border border-gray-200 bg-white">
+        <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 p-4">
+          <div>
+            <h2 className="font-semibold text-gray-900">Pedidos</h2>
+            <p className="mt-0.5 text-sm text-gray-500">
+              Pedido aberto segura o estoque na vitrine até ser separado ou cancelado.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/pedidos-ecommerce"
+            className="ml-auto text-sm font-semibold text-blue-600 hover:text-blue-700"
+          >
+            Ver pedidos
+          </Link>
+        </div>
+
+        {n(ped.total) === 0 ? (
+          <p className="p-4 text-sm text-gray-600">
+            Nenhum pedido ainda. Quando entrar o primeiro, ele aparece aqui e em Pedidos —
+            e o WhatsApp avisa, se estiver ligado em Configurações.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 p-4 lg:grid-cols-4">
+              <Cartao titulo="Total" valor={n(ped.total)} />
+              <Cartao titulo="Em aberto" valor={abertos} detalhe={brl(ped.valor_aberto)} />
+              <Cartao
+                titulo="Parados há 2+ dias"
+                valor={parados}
+                detalhe={parados > 0 ? brl(ped.valor_parado) : 'nenhum'}
+                alerta={parados > 0}
+              />
+              <Cartao
+                titulo="Itens reservados"
+                valor={n(ped.itens_reservados)}
+                detalhe="fora da vitrine"
+              />
+            </div>
+
+            {parados > 0 && (
+              <p className="border-t border-gray-100 px-4 py-3 text-sm text-amber-700">
+                {parados === 1 ? 'Um pedido está' : `${parados} pedidos estão`} sem movimento
+                {diasDoMaisAntigo > 0 && ` (o mais antigo há ${diasDoMaisAntigo} dias)`}.
+                O estoque deles continua reservado e não aparece na loja.
+                Separe ou cancele para liberar.
+              </p>
+            )}
+          </>
+        )}
+      </section>
+
       <p className="text-xs text-gray-500">
-        Visitas, pedidos e conversão entram quando o checkout existir (Fase 3). Mostrar
-        esses números zerados agora só ocuparia espaço.
+        Visitas e conversão ainda não são medidas. Mostrar esses números zerados agora
+        só ocuparia espaço.
       </p>
     </div>
   )
