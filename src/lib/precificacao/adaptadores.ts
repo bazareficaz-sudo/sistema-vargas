@@ -120,9 +120,16 @@ export const ADAPTADOR_SHOPEE: AdaptadorCampanhas = {
 //      Decide se a sincronização entra na fila existente ou vira cron.
 //   6. Rate limit da família `/seller-promotions`.
 //
-// COMO RESPONDER: com `.env.local` presente e um token válido, uma sonda de
-// leitura contra a conta real — exatamente como foi feito para comissão e
-// frete. Um `GET` autenticado responde as seis perguntas em minutos.
+// COMO RESPONDER: a sonda existe desde 30/08/2026 —
+// `GET /api/precificacao/sondar-ml` (src/app/api/precificacao/sondar-ml/route.ts).
+// Ela roda no servidor com o token que já está guardado no canal, faz só GET,
+// e reporta o STATUS CRU de cada chamada: 403 significa falta de escopo (e
+// portanto reautorizar a conta), 404 significa que o caminho do resumo de
+// busca estava errado. São coisas diferentes e não podem virar "erro".
+//
+// Enquanto a sonda não for executada contra a conta real, este adaptador
+// continua `disponivel: false` e as capacidades seguem `nao_verificado`. Ter
+// a sonda não é o mesmo que ter a medição.
 
 export const ADAPTADOR_MERCADOLIVRE: AdaptadorCampanhas = {
   plataforma: 'mercadolivre',
