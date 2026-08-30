@@ -83,6 +83,11 @@ const CAMPOS: Record<string, Regra> = {
   parcelas_juros_mes: { tipo: 'numero', min: 0, max: 20, vazioVira: 0 },
   parcela_minima: { tipo: 'numero', min: 0, max: 100_000, vazioVira: 0 },
 
+  // Aviso de pedido novo
+  notificar_loja: { tipo: 'bool' },
+  notificar_cliente: { tipo: 'bool' },
+  notificar_numero: { tipo: 'texto', max: 40 },
+
   // Política de estoque
   estoque_modo: { tipo: 'opcao', valores: ['deposito_unico', 'depositos_selecionados', 'empresa_consolidado', 'grupo_consolidado'] },
   estoque_deposito_id: { tipo: 'uuid', nulavel: true },

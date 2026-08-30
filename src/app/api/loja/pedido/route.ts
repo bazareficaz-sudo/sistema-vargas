@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { lojaAtual } from '@/lib/commerce/loja'
 import { criarPedido, mensagemDeErro } from '@/lib/commerce/pedido'
+import { notificarPedido } from '@/lib/commerce/notificar'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +86,12 @@ export async function POST(req: Request) {
       { status: conflito ? 409 : 400 },
     )
   }
+
+  // Avisa DEPOIS de o pedido existir, e a função inteira engole os próprios
+  // erros: o pedido já está gravado e o estoque reservado, então uma Z-API
+  // fora do ar não pode virar venda perdida. Aguardado, e não disparado ao
+  // vento, porque em serverless o trabalho após a resposta é cortado.
+  await notificarPedido(loja, resultado.numero)
 
   return NextResponse.json({
     ok: true,

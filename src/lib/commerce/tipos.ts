@@ -87,6 +87,13 @@ export type Loja = {
    * que levar na entrega. A loja não tem gateway; ver supabase-loja-checkout.sql.
    */
   pagamentoFormas: string[]
+
+  /** Avisa a loja por WhatsApp quando entra pedido. */
+  notificarLoja: boolean
+  /** Confirma o pedido para o cliente. Alcança terceiro — nasce desligado. */
+  notificarCliente: boolean
+  /** Destino do aviso da loja. `null` usa `whatsapp`. */
+  notificarNumero: string | null
 }
 
 /** O que um card precisa. Nada além disso — card é para decidir o clique. */

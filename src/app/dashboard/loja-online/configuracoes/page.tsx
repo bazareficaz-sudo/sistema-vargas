@@ -8,7 +8,8 @@ const CAMPOS = [
   'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'uf',
   'instagram', 'facebook', 'tiktok', 'horario_atendimento',
   'seo_title', 'meta_description', 'og_image_url', 'indexavel',
-]
+  'notificar_loja', 'notificar_cliente', 'notificar_numero',
+] as const
 
 const SECOES: Secao[] = [
   {
@@ -48,6 +49,20 @@ const SECOES: Secao[] = [
     ],
   },
   {
+    titulo: 'Aviso de pedido novo',
+    descricao:
+      'Quando entra pedido na loja, o WhatsApp avisa — sem depender de alguém lembrar de olhar a tela. '
+      + 'Usa a mesma conexão das automações, em Integrações; enquanto ela estiver desligada, nada é enviado.',
+    campos: [
+      { nome: 'notificar_loja', rotulo: 'Avisar a loja quando entrar pedido', tipo: 'bool',
+        ajuda: 'A mensagem traz cliente, itens, total, forma de entrega e o aviso de que nada foi cobrado.' },
+      { nome: 'notificar_numero', rotulo: 'Número que recebe o aviso', max: 40, placeholder: '21999999999',
+        ajuda: 'Vazio usa o WhatsApp de atendimento acima. Preencha se quem separa o pedido não é quem atende.' },
+      { nome: 'notificar_cliente', rotulo: 'Confirmar o pedido para o cliente', tipo: 'bool',
+        ajuda: 'Manda uma confirmação no WhatsApp dele. Respeita quem pediu para não receber mensagens.' },
+    ],
+  },
+  {
     titulo: 'Busca do Google',
     descricao: 'Como a loja aparece nos resultados e ao ser compartilhada.',
     campos: [
@@ -67,8 +82,15 @@ export default async function Configuracoes() {
   const ctx = await contextoAdmin()
   if (!ctx?.lojaId) return null
 
+  // `select('*')` e não a lista de colunas, pelo mesmo motivo da aba Preços:
+  // pedir uma coluna que ainda não existe derruba a consulta inteira, e com
+  // ela a tela. Assim esta aba funciona antes e depois da migração, e o
+  // deploy deixa de depender da ordem.
   const { data } = await ctx.sb
-    .from('loja_config').select(CAMPOS.join(', ')).eq('id', ctx.lojaId).single()
+    .from('loja_config').select('*').eq('id', ctx.lojaId).single()
 
-  return <FormularioLoja lojaId={ctx.lojaId} secoes={SECOES} valores={(data ?? {}) as Record<string, unknown>} />
+  const bruto = (data ?? {}) as Record<string, unknown>
+  const valores = Object.fromEntries(CAMPOS.map(c => [c, bruto[c] ?? null]))
+
+  return <FormularioLoja lojaId={ctx.lojaId} secoes={SECOES} valores={valores} />
 }

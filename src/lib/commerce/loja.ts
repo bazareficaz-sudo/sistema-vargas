@@ -104,6 +104,9 @@ function paraLoja(l: Record<string, any>): Loja {
     // Coalescido como a política de preços, e pelo mesmo motivo: a loja pode
     // ser lida antes de supabase-loja-checkout.sql rodar.
     pagamentoFormas: Array.isArray(l.pagamento_formas) ? l.pagamento_formas : [],
+    notificarLoja: l.notificar_loja ?? false,
+    notificarCliente: l.notificar_cliente ?? false,
+    notificarNumero: l.notificar_numero ?? null,
   }
 }
 
