@@ -35,11 +35,38 @@ CREATE TABLE IF NOT EXISTS cest_tabela (
 -- prefixo. text_pattern_ops serve o LIKE 'x%' que a consulta usa.
 CREATE INDEX IF NOT EXISTS idx_cest_ncm_prefixo ON cest_tabela (ncm_prefixo text_pattern_ops);
 
--- Tabela de referência, igual para todos os clientes: leitura liberada,
--- escrita só por quem administra o sistema.
+-- Tabela de referência, igual para todos os clientes: o conteúdo é lei
+-- pública (Convênio ICMS 142/2018), então não há segredo NAS LINHAS. O acesso
+-- mesmo assim é fechado para o anônimo, por duas razões:
+--
+--   1. Coerência com o fechamento do `anon` em andamento (ver
+--      supabase-fechar-anon-onda1.sql e docs/seguranca-fechar-acesso-anon.md).
+--      Uma tabela nova que nasce aberta reabre, sozinha, a superfície que
+--      aquele trabalho está estreitando.
+--   2. Quem precisa desta tabela é o cadastro de produto e a emissão fiscal —
+--      os dois autenticados. Ninguém deslogado tem motivo para lê-la, e uma
+--      permissão sem uso é só risco parado.
+--
+-- OS DOIS PORTÕES, e por que os dois precisam ser fechados: a política de RLS
+-- decide QUAIS LINHAS um papel enxerga; o GRANT decide se ele chega à tabela.
+-- Política restrita com GRANT aberto ainda deixa `anon` contar linhas e ler
+-- metadado de erro; GRANT revogado sem política deixaria a tabela inacessível
+-- também para quem deve ler. Por isso os dois, explicitamente.
 ALTER TABLE cest_tabela ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS cest_tabela_leitura ON cest_tabela;
-CREATE POLICY cest_tabela_leitura ON cest_tabela FOR SELECT USING (true);
+CREATE POLICY cest_tabela_leitura ON cest_tabela
+  FOR SELECT TO authenticated USING (true);
+
+-- O Supabase concede privilégios a `anon` e `authenticated` por DEFAULT
+-- PRIVILEGES em toda tabela nova de `public`. Sem este REVOKE, a tabela
+-- nasceria alcançável pelo anônimo mesmo com a política acima nomeando só
+-- `authenticated`.
+REVOKE ALL ON cest_tabela FROM anon;
+GRANT SELECT ON cest_tabela TO authenticated;
+
+-- A escrita não é de ninguém: a carga é feita por este arquivo, com a chave
+-- de serviço, que ignora RLS. Não existe política de INSERT/UPDATE/DELETE, e
+-- é de propósito — recarregar a tabela é ato administrativo, não de aplicação.
 
 -- Recarga completa: apaga e insere de novo, para o arquivo poder ser rodado
 -- outra vez quando um convênio novo alterar os anexos.
@@ -545,7 +572,8 @@ INSERT INTO cest_tabela (cest, ncm_prefixo, descricao, segmento) VALUES
 ('1300101', '3003', 'medicamentos de referência - negativa, exceto para uso veterinário', '13'),
 ('1300101', '3004', 'medicamentos de referência - negativa, exceto para uso veterinário', '13'),
 ('1300102', '3003', 'medicamentos de referência - neutra, exceto para uso veterinário', '13'),
-('1300102', '3004', 'medicamentos de referência - neutra, exceto para uso veterinário', '13');
+('1300102', '3004', 'medicamentos de referência - neutra, exceto para uso veterinário', '13')
+ON CONFLICT (cest, ncm_prefixo) DO NOTHING;
 
 INSERT INTO cest_tabela (cest, ncm_prefixo, descricao, segmento) VALUES
 ('1300200', '3003', 'medicamentos genérico - positiva, exceto para uso veterinário', '13'),
@@ -1047,7 +1075,8 @@ INSERT INTO cest_tabela (cest, ncm_prefixo, descricao, segmento) VALUES
 ('2000200', '27121000', 'vaselina', '20'),
 ('2000300', '28142000', 'amoníaco em solução aquosa (amônia)', '20'),
 ('2000400', '28470000', 'peróxido de hidrogênio, em embalagens de conteúdo inferior ou igual a 500 ml', '20'),
-('2000500', '30067000', 'lubrificação íntima', '20');
+('2000500', '30067000', 'lubrificação íntima', '20')
+ON CONFLICT (cest, ncm_prefixo) DO NOTHING;
 
 INSERT INTO cest_tabela (cest, ncm_prefixo, descricao, segmento) VALUES
 ('2000600', '3301', 'óleos essenciais (desterpenados ou não), incluídos os chamados “concretos” ou “absolutos”; resinoides; oleorresinas de extração; soluções concentradas de óleos essenciais em gorduras, em óleos fixos, em ceras ou em matérias análogas, obtidas por tratamento de flores através de substâncias gordas ou por maceração; subprodutos terpênicos residuais da desterpenação dos óleos essenciais; águas destiladas aromáticas e soluções aquosas de óleos essenciais, em embalagens de conteúdo inferior ou igual a 500 ml', '20'),
@@ -1384,9 +1413,24 @@ INSERT INTO cest_tabela (cest, ncm_prefixo, descricao, segmento) VALUES
 ('2805100', '63026000', 'roupas de toucador/cozinha, de tecidos atoalhados de algodão', '28'),
 ('2805200', '63079090', 'outros artefatos têxteis confeccionados', '28'),
 ('2805300', '65069900', 'chapéus e outros artefatos de outras matérias, exceto de malha', '28'),
-('2805400', '95059000', 'artigos para outras festas, carnaval ou outros divertimentos', '28');
+('2805400', '95059000', 'artigos para outras festas, carnaval ou outros divertimentos', '28')
+ON CONFLICT (cest, ncm_prefixo) DO NOTHING;
 
--- Conferência: deve devolver 1335 pares.
+-- POR QUE OS INSERTs TÊM `ON CONFLICT ... DO NOTHING`
+--
+-- O texto do convênio repete o mesmo par CEST × NCM em contextos diferentes:
+-- 1.335 tuplas extraídas, 1.253 pares distintos, 82 repetições. Sem o
+-- ON CONFLICT esta migration ABORTA na primeira repetição, contra o
+-- `UNIQUE (cest, ncm_prefixo)` declarado acima — foi o que aconteceu quando ela
+-- finalmente foi executada, em 30/08/2026, e é a prova de que ela nunca tinha
+-- sido rodada nem em teste.
+--
+-- Descartar a repetição é seguro para o uso que esta tabela tem: `resolverCest`
+-- agrupa por CEST distinto, então a segunda linha de um par nunca mudaria a
+-- resposta. Onde as descrições repetidas diferem (03.006.00, por exemplo), elas
+-- descrevem a mesma mercadoria com outras palavras.
+--
+-- Conferência: deve devolver 1253 pares.
 SELECT count(*) AS pares, count(DISTINCT cest) AS cests_distintos FROM cest_tabela;
 
 -- Exemplo do que a busca faz para um produto com NCM 39259090:
