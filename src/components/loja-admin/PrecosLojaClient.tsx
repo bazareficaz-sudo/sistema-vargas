@@ -66,9 +66,9 @@ const SECOES: Secao[] = [
     descricao: 'Só informação de vitrine: a loja ainda não cobra pelo site (o checkout é a Fase 3). Escreva aqui o que o balcão realmente pratica.',
     campos: [
       { nome: 'parcelas_max', rotulo: 'Parcelar em até', tipo: 'numero', sufixo: 'x',
-        ajuda: 'Vazio não fala de parcelamento. Mínimo 2, máximo 24.' },
+        ajuda: 'Vazio não fala de parcelamento. Se todas forem sem juros, repita este mesmo número no campo ao lado.' },
       { nome: 'parcelas_sem_juros', rotulo: 'Sem juros até', tipo: 'numero', sufixo: 'x',
-        ajuda: 'Acima disso só é oferecido se houver juros configurados abaixo. Digite 0 para nenhuma.' },
+        ajuda: 'É este campo que faz a parcela aparecer. Em 0, e sem juros configurados, a vitrine não oferece parcelamento nenhum — nem as vezes do campo ao lado.' },
       { nome: 'parcelas_juros_mes', rotulo: 'Juros ao mês', tipo: 'numero', sufixo: '%',
         ajuda: 'Tabela Price, a conta do cartão. 0 significa que a loja não parcela com juros.' },
       { nome: 'parcela_minima', rotulo: 'Parcela mínima', tipo: 'numero', prefixo: 'R$',

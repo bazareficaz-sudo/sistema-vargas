@@ -18,8 +18,12 @@ const HOST = /^[a-z0-9.-]{4,253}$/
 type Regra =
   | { tipo: 'texto'; max: number }
   | { tipo: 'bool' }
-  | { tipo: 'inteiro'; min: number; max: number; nulavel?: boolean }
-  | { tipo: 'numero'; min: number; max: number }
+  // `vazioVira` existe porque limpar um campo numérico na tela manda `null`,
+  // e para uma coluna NOT NULL isso virava "Valor inválido" — recusando o
+  // formulário INTEIRO, inclusive os campos que estavam certos. Quem apaga
+  // "Sem juros até" quer dizer zero, não quer dizer erro.
+  | { tipo: 'inteiro'; min: number; max: number; nulavel?: boolean; vazioVira?: number }
+  | { tipo: 'numero'; min: number; max: number; vazioVira?: number }
   | { tipo: 'opcao'; valores: string[] }
   | { tipo: 'cor' }
   | { tipo: 'uuid'; nulavel: true }
@@ -70,12 +74,14 @@ const CAMPOS: Record<string, Regra> = {
   // de desconto no Pix devolveria "Não foi possível salvar".
   preco_exibicao: { tipo: 'opcao', valores: ['preco_unico', 'dois_precos'] },
   avista_origem: { tipo: 'opcao', valores: ['percentual', 'promocao'] },
-  pix_desconto_pct: { tipo: 'numero', min: 0, max: 90 },
+  pix_desconto_pct: { tipo: 'numero', min: 0, max: 90, vazioVira: 0 },
   pix_rotulo: { tipo: 'texto', max: 40 },
+  // `parcelas_max` é o único que aceita nulo de verdade: vazio significa "a
+  // vitrine não fala de parcelamento", que é diferente de zero.
   parcelas_max: { tipo: 'inteiro', min: 2, max: 24, nulavel: true },
-  parcelas_sem_juros: { tipo: 'inteiro', min: 0, max: 24 },
-  parcelas_juros_mes: { tipo: 'numero', min: 0, max: 20 },
-  parcela_minima: { tipo: 'numero', min: 0, max: 100_000 },
+  parcelas_sem_juros: { tipo: 'inteiro', min: 0, max: 24, vazioVira: 0 },
+  parcelas_juros_mes: { tipo: 'numero', min: 0, max: 20, vazioVira: 0 },
+  parcela_minima: { tipo: 'numero', min: 0, max: 100_000, vazioVira: 0 },
 
   // Política de estoque
   estoque_modo: { tipo: 'opcao', valores: ['deposito_unico', 'depositos_selecionados', 'empresa_consolidado', 'grupo_consolidado'] },
@@ -132,13 +138,16 @@ function validar(regra: Regra, bruto: unknown): unknown | typeof RECUSA {
     }
 
     case 'inteiro': {
-      if (vazio) return regra.nulavel ? null : RECUSA
+      if (vazio) {
+        if (regra.nulavel) return null
+        return regra.vazioVira ?? RECUSA
+      }
       const n = Math.floor(Number(bruto))
       return Number.isFinite(n) && n >= regra.min && n <= regra.max ? n : RECUSA
     }
 
     case 'numero': {
-      if (vazio) return RECUSA
+      if (vazio) return regra.vazioVira ?? RECUSA
       const n = Number(bruto)
       return Number.isFinite(n) && n >= regra.min && n <= regra.max ? n : RECUSA
     }
@@ -172,8 +181,17 @@ export async function POST(req: Request) {
   }
 
   if (recusados.length > 0) {
+    // Nomear a coluna do banco não ajuda quem está olhando um rótulo em
+    // português. Dizer o limite, sim — é a informação que falta para
+    // consertar sem adivinhar.
+    const detalhe = recusados.map(c => {
+      const r = CAMPOS[c]
+      if (r.tipo === 'inteiro' || r.tipo === 'numero') return `${c} (aceita de ${r.min} a ${r.max})`
+      if (r.tipo === 'opcao') return `${c} (aceita ${r.valores.join(' ou ')})`
+      return c
+    })
     return NextResponse.json(
-      { erro: `Valor inválido em: ${recusados.join(', ')}` },
+      { erro: `Valor fora do permitido em: ${detalhe.join('; ')}` },
       { status: 400 },
     )
   }
