@@ -119,6 +119,51 @@ anônimo com RLS desligada, 80 delas ainda escrevíveis e 71 ainda apagáveis.
 Outras 63 já estão protegidas por RLS. O buraco continua grande — a Onda 1
 tirou o pior, não o todo.
 
+## 3d. ONDA 2 — a escrita, executada em 30/08/2026
+
+Arquivo: [`../supabase-fechar-anon-onda2.sql`](../supabase-fechar-anon-onda2.sql).
+
+**Por que a escrita e não a leitura:** a escrita é decidível com o que já foi
+medido; a leitura não. Em 24h a chave anônima escreveu em CINCO tabelas —
+`vendas`, `venda_itens`, `estoque_movimentacoes`, `produto_estoque`,
+`produtos` — mais o RPC de login. Mas a janela foi um FIM DE SEMANA, e numa
+segunda o balcão faz o que não fez no domingo.
+
+Por isso a onda **não** revogou a escrita de tudo que não apareceu. Foi uma
+lista escolhida a dedo do que o terminal não tem como escrever nem numa
+segunda de pico: maquinário de marketplace (filas, logs, caches de
+precificação), auxiliar de compras, programa de incentivo, configuração de
+empresa — e `_backup_correcao_20260824`, uma tabela de backup que o anônimo
+podia **apagar**.
+
+Nas cinco tabelas de configuração que o terminal LÊ (`saude_config`,
+`config_desconto`, `pdv_impressao`, `deposito_enderecamento_config`,
+`vendedor_empresas`) só a escrita saiu — ele lê config, nunca a grava.
+
+| | antes da Onda 1 | depois da Onda 2 |
+|---|---:|---:|
+| tabelas legíveis pelo anônimo | 90 | **44** |
+| escrevíveis | 87 | **36** |
+| apagáveis | 71 | **27** |
+
+Conferido depois: os 16 caminhos que o terminal usa continuam abertos —
+lê `produtos`, `clientes` e as cinco configs; grava `vendas`, `venda_itens`,
+`estoque_movimentacoes`; baixa `produto_estoque`; atualiza `produtos`.
+
+**Onda 3, com logs de dia útil.** Ficaram de fora de propósito, porque são
+operação de balcão que não aparece num domingo: `orcamentos`,
+`creditos_cliente`, `credito_utilizacoes`, `recebimentos`, `renegociacoes`,
+`faltas`, `inventarios`, `inventario_itens`, `transferencias_estoque`,
+`separacoes`, `entregas`, `enderecos`, `produto_enderecos`,
+`endereco_movimentacoes`, `cliente_contatos`, `cliente_enderecos_entrega`,
+`etiqueta_impressoes`, `saude_autorizacoes`, `categorias`, `marcas`, `nfe_*`
+e `config_fiscal`. Medir numa segunda e numa terça antes de mexer.
+
+E a leitura das tabelas grandes (`produtos` com `preco_custo`, `clientes` com
+CPF, `vendas`) continua aberta: ela não se fecha por `REVOKE`, porque o
+terminal usa `select=*`. Depende do passo 5 — o terminal autenticar de
+verdade.
+
 ## 4. Caminho de correção (não implementar sem planejar)
 
 A base já existe. `autenticar_operador_pdv()` foi criada na rodada 1 do
