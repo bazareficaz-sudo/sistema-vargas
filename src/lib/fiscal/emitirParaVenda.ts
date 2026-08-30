@@ -1,6 +1,6 @@
 import { getFiscalProvider } from './factory'
 import { FiscalProviderError, type EmissaoNFCeInput } from './types'
-import { conferirCoerenciaFiscal } from './coerencia'
+import { conferirCoerenciaFiscal, situacaoTributariaIcms } from './coerencia'
 
 // Mapeamento das formas de pagamento do PDV pro código da tabela nacional
 // SEFAZ de formas de pagamento (Nota Técnica 2020.006, válida pra qualquer
@@ -146,18 +146,11 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
   // `icms_cst`. Dá pra separar pelo formato — CST tem 2 dígitos (00, 40, 60)
   // e CSOSN tem 3 (102, 400) — e assim nunca mandar o código do regime
   // errado, que a SEFAZ rejeita item por item.
-  const ehCsosn = (v: unknown) => /^\d{3}$/.test(String(v ?? ''))
-  const ehCst = (v: unknown) => /^\d{2}$/.test(String(v ?? ''))
-
-  function situacaoTributariaIcms(produto: any): string {
-    if (simplesNacional) {
-      if (ehCsosn(produto.csosn)) return String(produto.csosn)
-      if (ehCsosn(produto.icms_cst)) return String(produto.icms_cst)
-      return '102' // sem permissão de crédito — padrão do varejo no Simples
-    }
-    if (ehCst(produto.icms_cst)) return String(produto.icms_cst)
-    return '00' // tributada integralmente
-  }
+  // A regra em si mora em `coerencia.ts`, exportada — porque a tela de
+  // pendências fiscais precisa enxergar exatamente o mesmo valor que vai na
+  // nota. Ver o comentário de lá: a primeira versão daquela tela recalculou
+  // isto por conta própria, chegou noutro resultado, e anunciava "nenhuma
+  // pendência" enquanto a emissão recusava o mesmo item.
 
   // Desconto do cabeçalho da venda, rateado entre os itens.
   //
@@ -214,7 +207,7 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
       // desconto próprio, então somar é seguro e dispensa um condicional.
       valorDesconto: Number(it.desconto ?? 0) + descontoPorItem[idx],
       icmsOrigem: String(produto.icms_origem ?? 0),
-      icmsSituacaoTributaria: situacaoTributariaIcms(produto),
+      icmsSituacaoTributaria: situacaoTributariaIcms(produto, simplesNacional),
       // 49 = "outras operações": aceito nos dois regimes e não exige
       // alíquota, que o cadastro de produto não obriga hoje. Quando o
       // produto tem CST próprio cadastrado, ele manda.

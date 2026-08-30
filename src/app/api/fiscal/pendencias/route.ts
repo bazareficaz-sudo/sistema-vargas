@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { resolverEmitente } from '@/lib/fiscal/emitirParaVenda'
-import { conferirCoerenciaFiscal, type ItemParaConferir } from '@/lib/fiscal/coerencia'
+import { conferirCoerenciaFiscal, situacaoTributariaIcms, type ItemParaConferir } from '@/lib/fiscal/coerencia'
 import { buscarCandidatosCest, resolverCest, CestIndisponivelError } from '@/lib/fiscal/cest'
 import { proporCorrecao, camposDoCaminho, type ProdutoFiscal, type IdCaminho } from '@/lib/fiscal/correcao'
 
@@ -113,13 +113,13 @@ export async function POST(req: Request) {
 
     // Os problemas de HOJE, do mesmo conferidor que bloqueia a emissão — não
     // uma segunda opinião escrita aqui, que poderia discordar dele.
-    const situacao = simplesNacional
-      ? (produto.csosn ?? produto.icms_cst ?? '')
-      : (produto.icms_cst ?? '')
     const paraConferir: ItemParaConferir = {
       nome: produto.nome, sku: produto.sku,
       cfop: produto.cfop || cfopPadrao,
-      situacao: String(situacao),
+      // A MESMA funcao da emissao, nao uma leitura parecida. `csosn ?? icms_cst`
+      // devolvia '60' onde a nota manda '102', e a tela dizia "nenhuma
+      // pendencia" enquanto a emissao recusava o item.
+      situacao: situacaoTributariaIcms(produto, simplesNacional),
       cest: String(produto.cest ?? '').replace(/\D/g, '').length === 7
         ? String(produto.cest).replace(/\D/g, '') : undefined,
     }
@@ -177,12 +177,11 @@ export async function POST(req: Request) {
 
   const conferirDepois: ItemParaConferir[] = itensVenda.map(i => {
     const p = i.produto_id ? depoisPorId.get(i.produto_id) : null
-    const situacao = !p ? '' : simplesNacional ? (p.csosn ?? p.icms_cst ?? '') : (p.icms_cst ?? '')
     const cestLimpo = String(p?.cest ?? '').replace(/\D/g, '')
     return {
       nome: p?.nome ?? i.produto_nome, sku: p?.sku ?? null,
       cfop: p?.cfop || cfopPadrao,
-      situacao: String(situacao),
+      situacao: p ? situacaoTributariaIcms(p, simplesNacional) : '',
       cest: cestLimpo.length === 7 ? cestLimpo : undefined,
     }
   })

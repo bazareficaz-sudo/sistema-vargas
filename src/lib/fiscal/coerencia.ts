@@ -57,6 +57,44 @@ const SITUACAO_COM_ST = new Set([
   '60',               // ICMS cobrado anteriormente por ST — o caso do varejo
 ])
 
+/**
+ * A situação tributária que VAI NA NOTA para este produto.
+ *
+ * NÃO É `csosn ?? icms_cst`. A diferença derrubou a venda #301980 duas vezes,
+ * a segunda por minha causa:
+ *
+ *   produto com `csosn = null` e `icms_cst = '60'`, empresa no Simples
+ *     · a emissão procura um CSOSN (3 dígitos), '60' não é, e cai no padrão
+ *       '102' — que contradiz o CFOP 5405 e bloqueia a nota;
+ *     · uma leitura ingênua (`csosn ?? icms_cst`) devolve '60', que combina
+ *       com 5405 e diz que está tudo certo.
+ *
+ * A tela de pendências fazia a leitura ingênua. Resultado: ela anunciava
+ * "nenhuma pendência" enquanto a emissão continuava recusando o mesmo item —
+ * e o operador ficava sem nada para corrigir e sem poder emitir.
+ *
+ * Por isso a regra está AQUI, exportada, e tanto a emissão quanto a
+ * conferência a chamam. Duas contas do mesmo número em lugares diferentes é
+ * como uma delas fica errada sem ninguém ver.
+ */
+export function situacaoTributariaIcms(
+  produto: { csosn?: unknown; icms_cst?: unknown },
+  simplesNacional: boolean,
+): string {
+  const ehCsosn = (v: unknown) => /^\d{3}$/.test(String(v ?? ''))
+  const ehCst = (v: unknown) => /^\d{2}$/.test(String(v ?? ''))
+
+  if (simplesNacional) {
+    if (ehCsosn(produto.csosn)) return String(produto.csosn)
+    // O CSOSN às vezes foi digitado no campo do CST. Aceitar só quando ele
+    // TEM cara de CSOSN — senão um CST de regime normal passaria por CSOSN.
+    if (ehCsosn(produto.icms_cst)) return String(produto.icms_cst)
+    return '102' // sem permissão de crédito — padrão do varejo no Simples
+  }
+  if (ehCst(produto.icms_cst)) return String(produto.icms_cst)
+  return '00' // tributada integralmente
+}
+
 export type ItemParaConferir = {
   nome: string
   sku?: string | null
