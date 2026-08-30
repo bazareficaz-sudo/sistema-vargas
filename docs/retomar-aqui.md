@@ -26,13 +26,25 @@ meio**.
    no SQL Editor do Supabase. Não há `migrate` automático, e a ordem é a da
    necessidade, não a alfabética.
 3. **Rodar o SQL ANTES de publicar o código que lê a coluna nova.** Um `select`
-   de coluna inexistente derruba a consulta inteira, e com ela a tela.
-4. **Ler o dado de produção antes de afirmar.** Vários erros desta série de
+   de coluna inexistente derruba a consulta inteira, e com ela a tela. Melhor
+   ainda: ler configuração com `select('*')` e coalescer campo a campo, que é
+   o que `lojaAtual()` e a aba Preços fazem — aí a ordem deixa de importar.
+4. **Depois de `ALTER TABLE`, recarregar o cache do PostgREST.** Ele guarda o
+   esquema, e por alguns instantes continua respondendo *"Could not find the
+   'x' column of 'y' in the schema cache"* para uma coluna que já existe. O
+   usuário encontrou isso em 30/08 ao salvar a aba Preços logo depois da
+   migração; salvar de novo minutos depois funcionou. O conserto é uma linha
+   no SQL Editor, e vale rodar junto de toda migração:
+
+   ```sql
+   NOTIFY pgrst, 'reload schema';
+   ```
+5. **Ler o dado de produção antes de afirmar.** Vários erros desta série de
    sessões vieram de deduzir pelo código. Consultar o banco custa segundos.
-5. **`git status` no fim de cada fatia.** Foi ele que pegou um `src/proxy.ts`
+6. **`git status` no fim de cada fatia.** Foi ele que pegou um `src/proxy.ts`
    sobrescrito que o `next build` deixou passar — o compilador não protege
    contra arquivo apagado.
-6. **O Next 16 renomeou Middleware para Proxy.** O arquivo é `src/proxy.ts` e
+7. **O Next 16 renomeou Middleware para Proxy.** O arquivo é `src/proxy.ts` e
    ele já existe. Procurar `middleware.ts`, não achar e concluir que não há
    camada de proxy é erro fácil; já foi cometido.
 

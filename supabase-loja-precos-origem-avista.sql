@@ -146,6 +146,18 @@ REVOKE ALL ON loja_vitrine_produtos FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON loja_vitrine_produtos TO authenticated;
 
 
+-- ── 4. Recarregar o cache de esquema do PostgREST ───────────
+--
+-- Sem isto, salvar a aba Preços falha por alguns instantes com "Could not
+-- find the 'avista_origem' column of 'loja_config' in the schema cache" —
+-- para uma coluna que já existe. Aconteceu de verdade em 30/08 com
+-- `parcela_minima`, e o operador viu um erro que não era erro dele.
+--
+-- Vale para toda migração que acrescente coluna que o painel grava.
+
+NOTIFY pgrst, 'reload schema';
+
+
 -- ============================================================
 -- CONFERÊNCIA
 --
