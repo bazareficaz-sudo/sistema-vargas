@@ -206,6 +206,54 @@ não precisa mudar.
 
 ---
 
+## 7.1. Medido não pode parecer suposto — nem o contrário
+
+> **Acrescentado em 29/08/2026, depois de um defeito que passou semanas escondido.**
+
+`mlFrete.ts` montava a escada de frete começando com uma faixa **escrita à mão**:
+
+```ts
+const faixas = [{ min: 0, max: 78.99, valor: 0 }]  // premissa, não medição
+```
+
+A sonda começava em R$ 79. Para **todo** anúncio de Mercado Livre abaixo disso, o
+sistema afirmava "frete zero" sem nunca ter perguntado — e essa faixa inventada era
+gravada em `precificacao_ml_frete_cache` **junto com as medidas, com a mesma forma**.
+Quem abrisse o cache veria uma escada de seis faixas, sem nenhum modo de saber que a
+primeira era palpite.
+
+O painel do próprio Mercado Livre desmentiu, num anúncio a R$ 34,99: tarifa de venda
+R$ 4,02 — que batia com a nossa ao centavo — e custo de envio R$ 7,83. Com o frete
+zerado por suposição, aquele anúncio aparecia com 27% de margem quando pode ter ~5%.
+Eram 4.955 anúncios de ML abaixo de R$ 79, dos quais 554 precificáveis.
+
+### A regra que fica
+
+**Um valor suposto nunca pode ser indistinguível de um valor medido** — nem no cache,
+nem na tela, nem no tipo. Três coisas mudaram por causa disso:
+
+1. A escada inteira passou a sair das medições (`PRECOS_SONDA` inclui 20, 35, 50 e 65),
+   e a constante `LIMITE_FRETE_GRATIS` deixou de existir.
+2. `origemFrete` já distinguia as origens no contexto — agora a **tela** também: frete
+   zero **medido** aparece em azul, como `R$ 0,00`; zero **suposto** aparece em âmbar,
+   escrito "suposto". Antes os dois eram o mesmo traço cinza.
+3. `freteDaFaixa` devolve a faixa **mais cara** quando nenhuma casa com o preço. Era
+   inofensivo enquanto a primeira faixa começava em zero por construção; virou risco
+   quando ela passou a ser medida. Está preso em teste.
+
+O mesmo princípio já valia para a comissão, e é por isso que ela estava certa: o modo
+`api_ml` mede, e o resultado bateu ao centavo com o painel do vendedor. A diferença
+entre os dois casos não foi cuidado — foi que um media e o outro supunha.
+
+### O que ficou pendente de medição
+
+O fallback `frete_modo = gratis_acima` (limite R$ 79) carrega a **mesma suposição, em
+forma de configuração**. Ele só vale quando a escada importada não existe — anúncio sem
+peso nem dimensões, ou falha na API. Não foi alterado porque o valor certo vem da
+primeira medição real abaixo de R$ 79; trocar um palpite por outro não é conserto.
+
+---
+
 ## 8. Limites, e por que existem
 
 | Limite | Onde | Motivo |

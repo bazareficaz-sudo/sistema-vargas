@@ -5,6 +5,7 @@ import { ROTULO_CLASSIFICACAO } from '@/lib/precificacao/margens'
 import { ROTULO_PRIORIDADE } from '@/lib/precificacao/recomendacoes'
 import { ROTULO_SAUDE } from '@/lib/precificacao/motor'
 import type { SaudePreco } from '@/lib/precificacao/tipos'
+import type { OrigemFrete } from '@/lib/precificacao/contexto'
 import CampoNumero from './CampoNumero'
 
 // Recálculo em massa: primeiro a prévia (não muda nada), depois a aplicação
@@ -583,14 +584,45 @@ export default function RecalculoMassa() {
                             {dif > 0 ? '+' : ''}{brl(dif)}
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-xs whitespace-nowrap">
-                            {i.frete > 0 ? (
-                              <span className={i.freteImportado ? 'text-blue-700' : 'text-gray-500'}
-                                title={i.freteImportado
-                                  ? 'Valor real buscado no Mercado Livre para a embalagem deste anúncio'
-                                  : 'Custo médio configurado no canal'}>
-                                {i.freteImportado && '🔵 '}{brl(i.frete)}
-                              </span>
-                            ) : <span className="text-gray-300">—</span>}
+                            {(() => {
+                              // ZERO MEDIDO E ZERO SUPOSTO NÃO PODEM SER O MESMO TRAÇO.
+                              //
+                              // Foi assim que o frete do ML abaixo de R$ 79 ficou errado por
+                              // semanas: a faixa era escrita à mão, ia para o cache com a
+                              // mesma cara das medidas, e na tela aparecia como um traço
+                              // cinza indistinguível de uma medição. O número errado se
+                              // esconde atrás da aparência do número certo.
+                              const medido = i.origemFrete === 'api_ml' || i.origemFrete === 'api_ml_cache'
+                              // Record<OrigemFrete, ...>: se alguém acrescentar uma origem
+                              // nova, o build quebra aqui em vez de a tela dizer
+                              // "desconhecida" e o usuário acreditar no número.
+                              const porQue: Record<OrigemFrete, string> = {
+                                api_ml: 'Medido agora na API do Mercado Livre, para a embalagem deste anúncio.',
+                                api_ml_cache: 'Medido na API do Mercado Livre (servido do cache de 24h).',
+                                api_ml_sem_medidas: 'NÃO medido: o anúncio e o cadastro não têm peso nem dimensões. Vale o que está configurado no canal.',
+                                api_ml_indisponivel: 'NÃO medido: a consulta ao Mercado Livre falhou. Vale o que está configurado no canal.',
+                                config: 'NÃO medido: vem do modo de frete configurado no canal.',
+                              }
+                              const ajuda = porQue[i.origemFrete as OrigemFrete] ?? 'Origem do frete desconhecida.'
+
+                              if (i.frete > 0) {
+                                return (
+                                  <span className={medido ? 'text-blue-700' : 'text-gray-500'} title={ajuda}>
+                                    {medido && '🔵 '}{brl(i.frete)}
+                                  </span>
+                                )
+                              }
+                              // Zero medido: a plataforma respondeu que o vendedor não paga.
+                              if (medido) {
+                                return <span className="text-blue-700" title={ajuda}>🔵 {brl(0)}</span>
+                              }
+                              // Zero suposto: ninguém perguntou. É o caso que precisa saltar.
+                              return (
+                                <span className="text-amber-700" title={`${ajuda} O valor não foi conferido com a plataforma.`}>
+                                  — <span className="font-sans text-[10px]">suposto</span>
+                                </span>
+                              )
+                            })()}
                           </td>
                           <td className="px-3 py-2 text-center whitespace-nowrap text-xs">
                             <span title={sa.texto}>{sa.emoji} {i.margemAtual.toFixed(0)}%</span>
