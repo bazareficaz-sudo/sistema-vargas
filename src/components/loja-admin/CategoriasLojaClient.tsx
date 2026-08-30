@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { botao } from '@/components/ui/botao'
+import ArvoreCategorias from './ArvoreCategorias'
 
 type Cat = {
   id: string; nome: string; slug: string; paiId: string | null
@@ -135,8 +136,22 @@ export default function CategoriasLojaClient({ lojaId, categorias, semCategoria 
         </p>
       )}
 
+      {categorias.length > 0 && (
+        <ArvoreCategorias
+          categorias={categorias.map(c => ({
+            id: c.id, nome: c.nome, slug: c.slug, paiId: c.paiId,
+            ativo: c.ativo, ordem: c.ordem, produtos: c.produtos,
+          }))}
+          ocupado={ocupado}
+          onSalvar={arvore => chamar({ acao: 'reordenar', arvore }, 'Ordem salva.')}
+        />
+      )}
+
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
         <table className="w-full min-w-[520px] text-sm">
+          <caption className="border-b border-gray-200 p-3 text-left text-sm text-gray-500">
+            Renomear e esconder. A ordem e o aninhamento ficam no bloco acima.
+          </caption>
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
               <th className="p-3">Categoria</th>
