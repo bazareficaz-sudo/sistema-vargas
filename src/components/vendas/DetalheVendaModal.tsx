@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import BuscaCliente from '@/components/automacoes/BuscaCliente'
+import PendenciasFiscais from './PendenciasFiscais'
 import { abrirDanfe, type FormatoPapel } from '@/lib/fiscal/danfe'
 import type { Venda } from './VendasClient'
 
@@ -47,6 +48,7 @@ export default function DetalheVendaModal({
     cliente_id: string | null; cliente_nome: string | null; cliente_cpf_cnpj: string | null
   } | null>(null)
   const [emitindoNfce, setEmitindoNfce] = useState(false)
+  const [pendenciasAbertas, setPendenciasAbertas] = useState(false)
 
   // Identificação do destinatário antes de emitir. Duas formas: escolher um
   // cliente cadastrado ou digitar CPF/CNPJ na hora. Sem isso a nota sai como
@@ -362,6 +364,28 @@ export default function DetalheVendaModal({
                         {emitindoNfce ? 'Emitindo...' : 'Emitir agora'}
                       </button>
                     </div>
+
+                    {/* A recusa por dado fiscal tem conserto aqui mesmo.
+                        Mandar o operador abrir o cadastro de cada produto era
+                        o que fazia a mensagem — que já continha a resposta —
+                        virar trabalho manual repetido. */}
+                    {!pendenciasAbertas ? (
+                      <button onClick={() => setPendenciasAbertas(true)}
+                        className="text-xs text-blue-700 underline font-medium">
+                        🔧 Resolver pendências fiscais dos produtos
+                      </button>
+                    ) : (
+                      <PendenciasFiscais
+                        vendaId={venda.id}
+                        onResolvido={() => {
+                          // Não emite sozinho: a nota é ato do operador, e ele
+                          // acabou de mexer em dado fiscal. Fecha o painel e
+                          // deixa "Emitir agora" à mão, agora desbloqueado.
+                          setPendenciasAbertas(false)
+                          setDetalhe(prev => prev ? { ...prev, nfce_motivo_rejeicao: null } : prev)
+                        }}
+                      />
+                    )}
 
                     {/* Quem vai no destinatário da nota. */}
                     {detalhe?.cliente_id || detalhe?.cliente_cpf_cnpj ? (

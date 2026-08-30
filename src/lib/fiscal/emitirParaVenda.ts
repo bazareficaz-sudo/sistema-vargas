@@ -23,6 +23,46 @@ const CODIGO_SEFAZ_PAGAMENTO: Record<string, string> = {
   dinheiro: '01', debito: '04', credito: '03', pix: '17', carteira: '99', fiado: '90',
 }
 
+/**
+ * Quem efetivamente emite o documento, e sob qual regime.
+ *
+ * Igual a `empresaId` no caso comum. Só diverge quando configurado em
+ * Empresas → Fiscal ("Empresa que emite o documento fiscal das vendas do
+ * PDV"): a venda continua pertencendo a `empresaId`, mas CNPJ, numeração/série
+ * e credenciais do provedor passam a ser os da empresa fiscal escolhida.
+ *
+ * ESTÁ AQUI, EXPORTADA, POR UM MOTIVO CONCRETO. O regime que vale para os
+ * códigos do produto é o de quem EMITE, não o de quem vende. Na configuração
+ * real deste sistema uma empresa de Lucro Presumido (CRT 3) emite por uma do
+ * Simples (CRT 1) — e foi assim que 102 produtos ficaram com CST 60 (regime
+ * normal) enquanto a nota, emitida pelo Simples, procurava CSOSN, não achava,
+ * caía no padrão 102 e contradizia o CFOP 5405.
+ *
+ * Qualquer tela que proponha corrigir campo fiscal precisa resolver o emitente
+ * pelo MESMO caminho da emissão. Duas resoluções que discordam produzem
+ * exatamente o defeito que a correção deveria consertar.
+ */
+export async function resolverEmitente(sb: any, empresaId: string): Promise<{
+  empresaFiscalId: string
+  configFiscal: any
+  simplesNacional: boolean
+  cfopPadrao: string
+}> {
+  let { data: configFiscal } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaId).single()
+  const empresaFiscalId: string = configFiscal?.empresa_fiscal_id || empresaId
+  if (empresaFiscalId !== empresaId) {
+    const { data: configFiscalEmitente } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaFiscalId).single()
+    configFiscal = configFiscalEmitente
+  }
+  const crt = String(configFiscal?.crt ?? '1')
+  return {
+    empresaFiscalId,
+    configFiscal,
+    simplesNacional: crt === '1' || crt === '2',
+    cfopPadrao: configFiscal?.cfop_venda_dentro ?? '5102',
+  }
+}
+
 export type ResultadoEmissao = {
   ok: boolean
   jaEmitida?: boolean
@@ -57,20 +97,7 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     : { data: [] as any[] }
   const produtoPorId = new Map((produtos ?? []).map((p: any) => [p.id, p]))
 
-  // Empresa que efetivamente emite o documento — igual a empresaId no caso
-  // comum. Só diverge quando configurado em Empresas → Fiscal ("Empresa
-  // que emite o documento fiscal das vendas do PDV"): a venda continua
-  // pertencendo a empresaId (checado acima), mas CNPJ, numeração/série e
-  // credenciais do provedor passam a ser os da empresa fiscal escolhida —
-  // resolvido aqui, um ponto só, então os 4 lugares que chamam esta função
-  // (PDV, "Emitir agora", emissão em massa, automação) ficam consistentes
-  // sem precisar mudar nada nelas.
-  let { data: configFiscal } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaId).single()
-  const empresaFiscalId: string = configFiscal?.empresa_fiscal_id || empresaId
-  if (empresaFiscalId !== empresaId) {
-    const { data: configFiscalEmitente } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaFiscalId).single()
-    configFiscal = configFiscalEmitente
-  }
+  const { empresaFiscalId, configFiscal, simplesNacional, cfopPadrao } = await resolverEmitente(sb, empresaId)
 
   const { data: empresa } = await sb.from('empresas').select('cnpj').eq('id', empresaFiscalId).single()
   if (!empresa?.cnpj) {
@@ -105,7 +132,6 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     }
   }
 
-  const cfopPadrao = configFiscal?.cfop_venda_dentro ?? '5102'
 
   // CRT da empresa QUE EMITE (1 Simples Nacional, 2 Simples c/ excesso,
   // 3 regime normal). Isso decide se o item leva CSOSN ou CST de ICMS —
@@ -114,8 +140,6 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
   // regime simples nacional ou MEI"). Antes o código mandava '102' fixo,
   // que só funciona no Simples — toda emissão de empresa em regime normal
   // era rejeitada.
-  const crt = String(configFiscal?.crt ?? '1')
-  const simplesNacional = crt === '1' || crt === '2'
 
   // O cadastro de produto tem as duas colunas (`csosn` e `icms_cst`), mas na
   // prática os códigos foram misturados: há produto com CSOSN gravado em
