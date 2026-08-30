@@ -84,6 +84,17 @@ export default function RecalculoMassa() {
   const precoDe = (i: any) => ajustes[i.anuncioId]?.preco ?? i.precoNovo
   const margemDe = (i: any) => ajustes[i.anuncioId]?.margem ?? i.margemNova
   const saudeDe = (i: any) => ajustes[i.anuncioId]?.saude ?? i.saudeNova
+  // O lado direito da linha inteiro sai do mesmo preço. Enquanto estes dois
+  // liam o valor da REGRA, um ajuste de margem deixava a tela dizendo duas
+  // coisas incompatíveis ao mesmo tempo: margem líquida 10% (do ajuste) ao
+  // lado de "s/ custo → 20%" (da regra). É a unidade em que as regras são
+  // escritas, então era justo o número em que o operador confiava.
+  const lucroSobreCustoDe = (i: { anuncioId: string; lucroSobreCustoNovo: number }) =>
+    ajustes[i.anuncioId]?.lucroSobreCusto ?? i.lucroSobreCustoNovo
+  // O frete também muda com o preço: a escada do ML tem degraus, e um ajuste
+  // pode atravessar um deles.
+  const freteDe = (i: { anuncioId: string; frete: number }) =>
+    ajustes[i.anuncioId]?.frete ?? i.frete
   const foiAjustado = (i: any) => ajustes[i.anuncioId]?.preco != null
 
   function mudarMargem(i: any, valor: number | null) {
@@ -92,7 +103,8 @@ export default function RecalculoMassa() {
     clearTimeout(timers.current[id])
     if (valor == null || !(valor > 0)) {
       // Campo vazio volta ao preco da regra, em vez de travar num meio-termo.
-      setAjustes(a => ({ ...a, [id]: { ...a[id], preco: undefined, margem: undefined, saude: undefined } }))
+      setAjustes(a => ({ ...a, [id]: { ...a[id], preco: undefined, margem: undefined, saude: undefined,
+        lucroSobreCusto: undefined, frete: undefined } }))
       return
     }
     setAjustes(a => ({ ...a, [id]: { ...a[id], carregando: true } }))
@@ -105,7 +117,8 @@ export default function RecalculoMassa() {
         setAjustes(a => ({
           ...a,
           [id]: d.ok
-            ? { ...a[id], carregando: false, preco: d.preco, margem: d.margem, saude: d.saude, erro: d.avisos?.[0] ?? '' }
+            ? { ...a[id], carregando: false, preco: d.preco, margem: d.margem, saude: d.saude,
+                lucroSobreCusto: d.lucroSobreCusto, frete: d.frete, erro: d.avisos?.[0] ?? '' }
             : { ...a[id], carregando: false, erro: d.erro ?? 'Erro ao recalcular' },
         }))
       } catch (e: any) {
@@ -605,10 +618,11 @@ export default function RecalculoMassa() {
                               }
                               const ajuda = porQue[i.origemFrete as OrigemFrete] ?? 'Origem do frete desconhecida.'
 
-                              if (i.frete > 0) {
+                              const frete = freteDe(i)
+                              if (frete > 0) {
                                 return (
                                   <span className={medido ? 'text-blue-700' : 'text-gray-500'} title={ajuda}>
-                                    {medido && '🔵 '}{brl(i.frete)}
+                                    {medido && '🔵 '}{brl(frete)}
                                   </span>
                                 )
                               }
@@ -636,7 +650,7 @@ export default function RecalculoMassa() {
                             {i.lucroSobreCustoNovo != null && (
                               <span className="block text-[10px] text-gray-400 mt-0.5"
                                 title="Lucro sobre o custo: o mesmo dinheiro da margem acima, dividido pelo custo em vez de pelo preço. É a base usada pelas regras.">
-                                s/ custo {i.lucroSobreCustoAtual.toFixed(0)}% → {i.lucroSobreCustoNovo.toFixed(0)}%
+                                s/ custo {i.lucroSobreCustoAtual.toFixed(0)}% → {lucroSobreCustoDe(i).toFixed(0)}%
                               </span>
                             )}
                           </td>
