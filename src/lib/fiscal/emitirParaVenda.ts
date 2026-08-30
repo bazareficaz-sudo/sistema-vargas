@@ -6,6 +6,19 @@ import { conferirCoerenciaFiscal } from './coerencia'
 // SEFAZ de formas de pagamento (Nota Técnica 2020.006, válida pra qualquer
 // emissor, não é específico da Focus). 'fiado' vira "90 Sem pagamento" —
 // a venda fiada não tem contrapartida financeira imediata no ato da venda.
+/**
+ * O campo limpo de máscara, se e somente se tiver exatamente N dígitos.
+ *
+ * O cadastro aceita CEST digitado com máscara ("10.079.00"), colado de PDF ou
+ * do XML do fornecedor. Os provedores querem os 7 dígitos limpos. E um valor
+ * incompleto não é "quase certo": é ausente, e precisa aparecer como ausente
+ * para a conferência reclamar antes da SEFAZ.
+ */
+function soDigitos(valor: unknown, digitos: number): string | undefined {
+  const limpo = String(valor ?? '').replace(/\D/g, '')
+  return limpo.length === digitos ? limpo : undefined
+}
+
 const CODIGO_SEFAZ_PAGAMENTO: Record<string, string> = {
   dinheiro: '01', debito: '04', credito: '03', pix: '17', carteira: '99', fiado: '90',
 }
@@ -40,7 +53,7 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
 
   const produtoIds = [...new Set(itensVenda.map((i: any) => i.produto_id).filter(Boolean))]
   const { data: produtos } = produtoIds.length > 0
-    ? await sb.from('produtos').select('id, nome, sku, ncm, cfop, icms_cst, csosn, pis_cst, cofins_cst, icms_origem, unidade').in('id', produtoIds)
+    ? await sb.from('produtos').select('id, nome, sku, ncm, cest, cfop, icms_cst, csosn, pis_cst, cofins_cst, icms_origem, unidade').in('id', produtoIds)
     : { data: [] as any[] }
   const produtoPorId = new Map((produtos ?? []).map((p: any) => [p.id, p]))
 
@@ -183,6 +196,11 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
       // produto tem CST próprio cadastrado, ele manda.
       pisCst: produto.pis_cst || '49',
       cofinsCst: produto.cofins_cst || '49',
+      // Só dígitos: o cadastro aceita o CEST digitado com ponto ("10.079.00")
+      // e os dois provedores querem os 7 dígitos limpos. Menos que 7 não é
+      // CEST — vai como ausente, e a conferência abaixo reclama com o nome do
+      // produto, em vez de a SEFAZ devolver o número da rejeição.
+      cest: soDigitos(produto.cest, 7),
     }
   })
 
@@ -195,7 +213,7 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
   const coerencia = conferirCoerenciaFiscal(
     itens.map(i => {
       const p = produtoPorId.get(i.produtoId) as any
-      return { nome: i.descricao, sku: p?.sku, cfop: i.cfop, situacao: i.icmsSituacaoTributaria }
+      return { nome: i.descricao, sku: p?.sku, cfop: i.cfop, situacao: i.icmsSituacaoTributaria, cest: i.cest }
     }),
     simplesNacional,
   )

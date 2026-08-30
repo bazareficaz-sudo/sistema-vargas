@@ -509,11 +509,22 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         }
         return novo
       })
-      setMensagemIA(preenchidos > 0
+      // O CEST vazio tem dois motivos MUITO diferentes, e a tela precisa
+      // distinguir: "este NCM nao esta na tabela de ST" e "nao deu para
+      // consultar a tabela". Quando os dois aparecem iguais, um defeito de
+      // infraestrutura passa por resposta fiscal — foi o que aconteceu com a
+      // tabela CEST ausente do banco, e o que derrubou uma NFC-e depois.
+      const avisoCest = data.cest_aviso
+        ? `⚠ O CEST não foi preenchido porque a tabela oficial não pôde ser consultada `
+          + `(${data.cest_aviso}). Isso NÃO quer dizer que o produto está sem substituição `
+          + `tributária — quer dizer que o sistema não conseguiu conferir. `
+        : ''
+
+      setMensagemIA(avisoCest + (preenchidos > 0
         ? (soFiscal
             ? `✓ ${preenchidos} campo(s) fiscal(is) preenchido(s) — CONFIRA COM A CONTABILIDADE antes de salvar. NCM, CFOP, Origem e CST errados fazem a SEFAZ rejeitar a nota.`
             : `✓ ${preenchidos} campo(s) preenchido(s) pela IA — revise antes de salvar. Os dados fiscais estão na aba Fiscal e devem ser conferidos com a contabilidade.`)
-        : 'A IA não encontrou sugestões novas — os campos já estavam preenchidos ou não há confiança suficiente.')
+        : 'A IA não encontrou sugestões novas — os campos já estavam preenchidos ou não há confiança suficiente.'))
     } catch {
       setErro('Erro ao consultar a IA — tente novamente.')
     } finally {

@@ -47,6 +47,11 @@ function montarPayload(input: EmissaoNFCeInput, ambiente: 'producao' | 'homologa
       CodProdutoServico: it.codigoProduto,
       NmProduto: it.descricao,
       NCM: it.ncm,
+      // `Produtos[].CEST`, string de 7 dígitos, irmão de NCM — conferido na
+      // referência da própria Brasil NFe, não deduzido do padrão dos outros
+      // campos. Só vai quando existe: mandar vazio num produto sem ST seria
+      // declarar substituição tributária onde não há.
+      ...(it.cest ? { CEST: it.cest } : {}),
       CFOP: Number(it.cfop),
       UnidadeComercial: it.unidade,
       Quantidade: it.quantidade,

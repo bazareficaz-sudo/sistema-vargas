@@ -64,6 +64,11 @@ function montarPayload(input: EmissaoNFCeInput) {
       codigo_produto: it.codigoProduto,
       descricao: it.descricao,
       codigo_ncm: it.ncm,
+      // `cest` (minúsculo), tag XML CEST — conferido na documentação completa
+      // de campos da Focus. Vai como STRING mesmo a doc dizendo Integer[7]:
+      // CEST tem códigos que começam com zero ("0104600"), e converter para
+      // número comeria o dígito e mandaria outro produto.
+      ...(it.cest ? { cest: it.cest } : {}),
       cfop: it.cfop,
       quantidade_comercial: it.quantidade,
       quantidade_tributavel: it.quantidade,

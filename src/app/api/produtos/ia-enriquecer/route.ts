@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { perguntarJSON, MODELO_FORTE } from '@/lib/ia/claude'
 import { buscarPadraoAnuncio, blocoPadraoAnuncio } from '@/lib/ia/padraoAnuncio'
-import { buscarCandidatosCest, resolverCest, type CandidatoCest } from '@/lib/fiscal/cest'
+import { buscarCandidatosCest, resolverCest, CestIndisponivelError, type CandidatoCest } from '@/lib/fiscal/cest'
 import { fiscalPadraoDoRegime } from '@/lib/fiscal/regimeDefault'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
@@ -86,10 +86,24 @@ export async function POST(req: Request) {
   // a consulta devolve os candidatos possíveis e o modelo no máximo escolhe
   // entre eles — nunca inventa um código. Medido no catálogo real: 82% dos
   // produtos ficam resolvidos aqui, sem a IA precisar opinar.
-  const candidatosCest: CandidatoCest[] = await buscarCandidatosCest(sb, produtoNcm)
+  //
+  // A falha de consulta NÃO vira `nao_aplica` silencioso: quem pediu para
+  // preencher precisa saber a diferença entre "este produto não tem ST" e "o
+  // sistema não conseguiu conferir". Os outros campos continuam sendo
+  // sugeridos — só o CEST fica sem resposta, e dizendo por quê.
+  let candidatosCest: CandidatoCest[] = []
+  let cestIndisponivel: string | null = null
+  try {
+    candidatosCest = await buscarCandidatosCest(sb, produtoNcm)
+  } catch (e) {
+    if (!(e instanceof CestIndisponivelError)) throw e
+    cestIndisponivel = e.message
+  }
   const resolucao = resolverCest(candidatosCest)
 
-  const instrucaoCest =
+  const instrucaoCest = cestIndisponivel
+    ? 'null (a tabela CEST não pôde ser consultada agora — responda null; o sistema avisa o operador)'
+    :
     resolucao.certeza === 'unico'
       ? `"${resolucao.cest}" (já resolvido pela tabela oficial — repita exatamente este valor)`
       : resolucao.certeza === 'nao_aplica'
@@ -163,7 +177,8 @@ Se não tiver informação suficiente e confiável pra algum campo, use null nes
     const cestDoModelo = digitsOuNull(resultado?.cest, 7)
     const permitidos = new Set(candidatosCest.map(c => c.cest))
     const cestValido =
-      resolucao.certeza === 'unico' ? resolucao.cest
+      cestIndisponivel ? null
+      : resolucao.certeza === 'unico' ? resolucao.cest
       : resolucao.certeza === 'nao_aplica' ? null
       : cestDoModelo && permitidos.has(cestDoModelo) ? cestDoModelo
       : null
@@ -182,6 +197,10 @@ Se não tiver informação suficiente e confiável pra algum campo, use null nes
       marca: nomeMarcaValido,
       ncm: ncmValido,
       cest: cestValido,
+      // Por que o CEST veio vazio. Sem isto, "nao consegui consultar" e "este
+      // produto nao tem ST" chegam identicos na tela — que foi exatamente o
+      // que escondeu a tabela CEST ausente do banco.
+      cest_aviso: cestIndisponivel,
       descricao_marketplace: descricao,
       peso_kg: numOuNull(resultado?.peso_kg, 0, 200),
       altura_cm: numOuNull(resultado?.altura_cm, 0, 300),

@@ -28,6 +28,13 @@ export type CandidatoCest = {
  * "tubos de plástico e acessórios", por exemplo. Comparar por igualdade
  * perderia um terço da tabela.
  */
+export class CestIndisponivelError extends Error {
+  constructor(detalhe: string) {
+    super(`Não foi possível consultar a tabela CEST: ${detalhe}`)
+    this.name = 'CestIndisponivelError'
+  }
+}
+
 export async function buscarCandidatosCest(sb: any, ncm: string | null | undefined): Promise<CandidatoCest[]> {
   const limpo = String(ncm ?? '').replace(/\D/g, '')
   if (limpo.length < 4) return []
@@ -42,7 +49,21 @@ export async function buscarCandidatosCest(sb: any, ncm: string | null | undefin
     .from('cest_tabela')
     .select('cest, ncm_prefixo, descricao')
     .in('ncm_prefixo', prefixos)
-  if (error || !data) return []
+
+  // FALHA DE CONSULTA NÃO É "NÃO SE APLICA".
+  //
+  // Aqui havia `if (error || !data) return []`, e a lista vazia seguia para
+  // `resolverCest`, que a lê como `nao_aplica` — "este NCM não consta na
+  // tabela de substituição tributária". Com a tabela AUSENTE do banco (a
+  // migration supabase-cest-tabela.sql nunca tinha sido executada), essa
+  // resposta era dada para todo produto do catálogo, com a mesma cara de uma
+  // consulta bem-sucedida. O CEST ficava vazio sempre, e nada no sistema
+  // dizia por quê.
+  //
+  // Agora o erro sobe. Quem chama decide o que mostrar — mas não pode mais
+  // confundir "perguntei e não tem" com "não consegui perguntar".
+  if (error) throw new CestIndisponivelError(error.message ?? String(error))
+  if (!data) return []
 
   return (data as any[])
     .map(r => ({ cest: r.cest, ncmPrefixo: r.ncm_prefixo, descricao: r.descricao }))

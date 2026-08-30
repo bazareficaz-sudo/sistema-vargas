@@ -63,6 +63,8 @@ export type ItemParaConferir = {
   cfop: string
   /** CST (2 dígitos) ou CSOSN (3 dígitos) já resolvido pelo regime da empresa. */
   situacao: string
+  /** CEST com 7 dígitos, já limpo de máscara. Ausente = não cadastrado. */
+  cest?: string
 }
 
 export type ResultadoCoerencia = {
@@ -130,6 +132,28 @@ export function conferirCoerenciaFiscal(itens: ItemParaConferir[], simplesNacion
         `${quem}: ${nomeSituacao} ${situacao} declara substituição tributária, mas o CFOP ${cfop} ` +
         `é de venda comum. Ou o produto tem ST e o CFOP deveria ser 5405, ou não tem e o ` +
         `${nomeSituacao} deveria ser ${simplesNacional ? '102' : '00'}.`)
+      continue
+    }
+
+    // ST coerente, mas sem CEST — a rejeição 806.
+    //
+    // Chegar aqui já significa que CFOP e situação CONCORDAM sobre haver ST:
+    // os dois casos de contradição acima terminam em `continue`. A ordem
+    // importa. Se esta checagem viesse antes, um par contraditório sairia como
+    // "falta CEST", mandando o operador preencher um campo que talvez nem
+    // devesse existir naquele produto — a mensagem certa ali é o par errado.
+    //
+    // A venda #301973 foi recusada com "Rejeição 806: Operação com ICMS-ST sem
+    // informação do CEST" tendo o CEST 1007900 corretamente cadastrado. Ele
+    // nunca saiu do banco: `EmissaoNFCeItem` não tinha o campo, então nenhum
+    // dos dois provedores recebia o dado. Isso foi corrigido no envio; esta
+    // checagem é a rede embaixo, para o caso que o envio não resolve — o
+    // produto que declara ST e de fato não tem CEST nenhum cadastrado.
+    if (cfopTemST && !item.cest) {
+      erros.push(
+        `${quem}: operação com substituição tributária (CFOP ${cfop}, ${nomeSituacao} ${situacao}) ` +
+        `e sem CEST cadastrado. A SEFAZ recusa com "Rejeição 806". O CEST vem do NCM do produto: ` +
+        `abra o cadastro, aba Fiscal, e use "Preencher fiscal" ou digite os 7 dígitos.`)
       continue
     }
   }

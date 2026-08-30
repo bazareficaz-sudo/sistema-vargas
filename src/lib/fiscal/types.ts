@@ -44,6 +44,18 @@ export type EmissaoNFCeItem = {
   icmsSituacaoTributaria: string
   pisCst: string
   cofinsCst: string
+  /**
+   * Código Especificador da Substituição Tributária, 7 dígitos, sem máscara.
+   *
+   * OBRIGATÓRIO quando a operação tem ICMS-ST: sem ele a SEFAZ devolve
+   * "Rejeição 806: Operação com ICMS-ST sem informação do CEST" — foi o que
+   * derrubou a venda #301973, com o CEST cadastrado corretamente no produto e
+   * simplesmente não enviado, porque este campo não existia.
+   *
+   * Opcional no tipo porque a maioria das mercadorias não tem ST. Quem tem, e
+   * está sem CEST, é barrado antes do envio por `conferirCoerenciaFiscal`.
+   */
+  cest?: string
 }
 
 export type EmissaoNFCePagamento = {
