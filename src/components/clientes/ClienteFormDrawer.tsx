@@ -50,6 +50,11 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
   const [erro, setErro] = useState('')
   const [buscandoCep, setBuscandoCep] = useState<'principal' | number | null>(null)
   const [buscandoCnpj, setBuscandoCnpj] = useState(false)
+  // Cadastro que já existe: em vez de criar a segunda ficha, oferece abrir
+  // a que está lá. O banco também protege (gatilho impedir_cliente_duplicado
+  // faz a cópia nascer apontando pro original), mas cair no gatilho deixaria
+  // a tela achando que criou um cliente que na verdade nasceu inativo.
+  const [jaExiste, setJaExiste] = useState<{ id: string; nome: string; telefone: string | null } | null>(null)
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }))
 
@@ -142,10 +147,46 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
     setEnderecos(p => p.map((e, i) => ({ ...e, padrao: i === idx })))
   }
 
+  // Mesmo critério de clientes_equivalentes() no banco e de _mesmoCliente()
+  // no PDV externo: nome igual, telefone e documento não conflitantes. Os
+  // três precisam concordar, senão a duplicata entra pela porta que um
+  // deles não vigia.
+  const chaveNome = (n: string) =>
+    n.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toUpperCase()
+
+  async function procurarEquivalente() {
+    const nome = form.nome.trim()
+    if (!nome) return null
+    const doc = soDigitos(form.cpf_cnpj)
+    const tel = soDigitos(form.telefone)
+
+    const { data } = await sb.from('clientes')
+      .select('id, nome, telefone, cpf_cnpj')
+      .eq('empresa_id', empresaId).eq('ativo', true).is('mesclado_em', null)
+      .ilike('nome', `${nome.split(/\s+/)[0]}%`).limit(500)
+
+    return (data || []).find(c => {
+      if (c.id === clienteId) return false
+      if (chaveNome(c.nome || '') !== chaveNome(nome)) return false
+      const t = soDigitos(c.telefone || ''), d = soDigitos(c.cpf_cnpj || '')
+      if (tel && t && tel !== t) return false
+      if (doc && d && doc !== d) return false
+      return true
+    }) || null
+  }
+
   async function salvar() {
     if (!form.nome.trim()) { setErro('O nome do cliente é obrigatório.'); setAba('dados'); return }
-    setSalvando(true); setErro('')
+    setSalvando(true); setErro(''); setJaExiste(null)
     try {
+      // Só no cadastro novo: editar um cliente existente não é duplicar.
+      if (!clienteId) {
+        const igual = await procurarEquivalente()
+        if (igual) {
+          setJaExiste({ id: igual.id, nome: igual.nome, telefone: igual.telefone })
+          setAba('dados'); setSalvando(false); return
+        }
+      }
       const dados = {
         empresa_id: empresaId,
         nome: form.nome.trim(),
@@ -440,6 +481,27 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
         </div>
 
         {erro && <p className="px-6 text-sm text-red-600">{erro}</p>}
+        {jaExiste && (
+          <div className="mx-6 mb-2 p-3 rounded-lg border border-amber-300 bg-amber-50 text-sm text-amber-900">
+            <p className="font-medium">Esse cliente já está cadastrado.</p>
+            <p className="mt-0.5">
+              <span className="font-medium">{jaExiste.nome}</span>
+              {jaExiste.telefone ? ` — ${formatarTelefone(jaExiste.telefone)}` : ' — sem telefone'}
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => { const id = jaExiste.id; setJaExiste(null); onSalvo?.(id); onFechar() }}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium rounded-lg">
+                Abrir o cadastro que já existe
+              </button>
+              <button
+                onClick={() => setJaExiste(null)}
+                className="px-3 py-1.5 border border-amber-400 text-amber-800 text-xs rounded-lg hover:bg-amber-100">
+                Não é o mesmo — mudar o nome
+              </button>
+            </div>
+          </div>
+        )}
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
           <button onClick={onFechar} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
           <button onClick={salvar} disabled={salvando}
