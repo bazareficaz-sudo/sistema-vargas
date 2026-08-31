@@ -1,0 +1,92 @@
+-- ============================================================
+-- TRAVA CONTRA A IMPORTAÇÃO QUE DUPLICA CLIENTE — 31/08/2026
+--
+-- O QUE ACONTECEU. Uma importação do sistema legado roda periodicamente e
+-- recria os clientes em vez de casar com quem já existe. Os lotes são visíveis
+-- no `created_at`, com timestamps idênticos ao microssegundo:
+--
+--   30/06 20:03:18 → 22    26/07 01:00 → 19    07/08 22:05 → 8
+--   23/08 22:04    →  6    24/08 13:16 → 33
+--
+-- E o de 07/08 tem um vizinho revelador: "TESTE BASE44 LEGADO", criado às
+-- 21:57, oito minutos antes do lote.
+--
+-- Chegou a 98 cadastros para 54 nomes. Pior que a lista suja: a dívida do
+-- MESMO cliente ficou partida entre duas fichas — R$ 3.534,70 em quatro
+-- clientes, aparecendo pela metade em qualquer filtro.
+--
+-- ESTE ARQUIVO NÃO CONSERTA A IMPORTAÇÃO. Ela não está neste repositório: o
+-- app só insere cliente um a um, pelo cadastro manual. É script externo, e não
+-- dá para corrigir daqui pedindo para ele parar.
+--
+-- O QUE DÁ É FAZER O BANCO RECUSAR. Mesmo raciocínio de
+-- supabase-cliente-mesclado-redirecionar.sql: "a regra desce da tela pro
+-- banco, e passa a valer por qualquer porta de entrada".
+--
+-- ── POR QUE FALHAR, E NÃO ABSORVER ──────────────────────────
+--
+-- A alternativa era um gatilho que, ao inserir nome repetido, marcasse o novo
+-- como `mesclado_em` do antigo. A importação rodaria sem erro e o problema
+-- pararia de crescer.
+--
+-- Foi descartada de propósito. Absorver em silêncio funde dois homônimos de
+-- verdade sem ninguém ver — e um cadastro fundido errado é mais difícil de
+-- descobrir que uma importação que quebra. Falhar alto é o que faz alguém
+-- descobrir QUEM roda a importação, que é a informação que ainda falta para
+-- consertar na origem.
+--
+-- ── O QUE ISTO CUSTA, E É REAL ──────────────────────────────
+--
+-- Dois clientes homônimos de verdade passam a ser impossíveis de cadastrar.
+-- Hoje não há nenhum caso (55 nomes distintos em 55 fichas), mas "Maria Silva"
+-- e "Maria Silva" são plausíveis num bazar. Quando acontecer, o balconista
+-- leva um erro do banco sem entender por quê.
+--
+-- Se isso incomodar, a saída não é derrubar o índice: é diferenciar o nome
+-- ("Maria Silva (Bangu)"), que é o que o balcão já faz — o catálogo está cheio
+-- de "TIO RICO (TIO DO MAURICIO)" e "SILVANA (AMIGA DA LILI)".
+--
+-- ── DETALHES QUE IMPORTAM ───────────────────────────────────
+--
+-- `WHERE mesclado_em IS NULL`: as 44 fichas unificadas hoje continuam no banco
+-- pelo histórico, várias com o mesmo nome do vencedor. Sem esta cláusula o
+-- índice não poderia nem ser criado.
+--
+-- `lower(trim(nome))`: "balcao", "BALCAO" e "balcao " são o mesmo cliente. Sem
+-- normalizar, a trava seria contornada por uma tecla de maiúscula.
+--
+-- `CONCURRENTLY`: não trava a tabela enquanto cria. O balcão está vendendo.
+-- Por isso o comando fica FORA de transação — CONCURRENTLY não roda dentro de
+-- BEGIN/COMMIT.
+--
+-- PRÉ-REQUISITO conferido em 31/08/2026: zero nomes repetidos entre as fichas
+-- vivas. Com duplicado na tabela, a criação falha.
+--
+-- Execute no Supabase Dashboard → SQL Editor
+-- ============================================================
+
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_clientes_nome_unico
+    ON clientes (empresa_id, lower(trim(nome)))
+ WHERE mesclado_em IS NULL;
+
+COMMENT ON INDEX idx_clientes_nome_unico IS
+  'Impede dois cadastros vivos com o mesmo nome na mesma empresa. Existe por causa da importacao do sistema legado, que recriava os clientes a cada rodada (98 cadastros para 54 nomes em 31/08/2026). Se um cadastro legitimo for recusado, diferencie o nome em vez de derrubar o indice.';
+
+
+-- ── Se a criação falhar ─────────────────────────────────────
+--
+-- CONCURRENTLY deixa um índice INVÁLIDO para trás quando falha, e ele continua
+-- ocupando espaço sem servir para nada. Confira e limpe:
+--
+--   SELECT c.relname, i.indisvalid
+--     FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
+--    WHERE c.relname = 'idx_clientes_nome_unico';
+--
+--   -- se indisvalid = false:
+--   DROP INDEX CONCURRENTLY idx_clientes_nome_unico;
+--
+-- E para achar o que impediu:
+--
+--   SELECT empresa_id, lower(trim(nome)), count(*)
+--     FROM clientes WHERE mesclado_em IS NULL
+--    GROUP BY 1,2 HAVING count(*) > 1;
