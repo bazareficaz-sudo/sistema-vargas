@@ -80,7 +80,9 @@ export default async function DashboardPage({
     temVendas ? supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioHoje }) : Promise.resolve({ data: [] as any[] }),
     temVendas ? supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioMes }) : Promise.resolve({ data: [] as any[] }),
     tem('produtos') ? supabase.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).eq('ativo', true) : Promise.resolve({ count: null }),
-    tem('clientes') ? supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId) : Promise.resolve({ count: null }),
+    // `mesclado_em` fora da conta: cadastro unificado noutro nao e um cliente
+    // a mais, e conta-lo inflava o indicador em silencio.
+    tem('clientes') ? supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).is('mesclado_em', null) : Promise.resolve({ count: null }),
     tem('fornecedores') ? supabase.from('fornecedores').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId) : Promise.resolve({ count: null }),
     tem('contas_receber') ? supabase.from('contas_receber').select('valor_aberto, status, data_vencimento').eq('empresa_id', empresaId).not('status', 'in', '(cancelado,recebido,renegociado)') : Promise.resolve({ data: [] as any[] }),
     tem('contas_pagar') ? supabase.from('contas_pagar').select('valor, status, vencimento').eq('empresa_id', empresaId).neq('status', 'cancelado') : Promise.resolve({ data: [] as any[] }),

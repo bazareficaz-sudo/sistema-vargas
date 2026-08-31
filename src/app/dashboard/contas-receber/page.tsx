@@ -27,6 +27,10 @@ export default async function ContasReceberPage() {
       .select('id, nome, cpf_cnpj, telefone, saldo_credito, saldo_devedor, limite_credito, bloqueado_fiado')
       .eq('empresa_id', empresaId)
       .eq('ativo', true)
+      // Cadastro unificado noutro não entra no filtro: ele continua no banco
+      // pelo histórico, mas listá-lo faz o MESMO cliente aparecer duas vezes —
+      // exatamente o que a tela de Clientes já evitava e esta não.
+      .is('mesclado_em', null)
       .order('nome')
       .limit(500),
     sb.from('creditos_cliente')

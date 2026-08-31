@@ -28,7 +28,9 @@ export default async function CobrancaPage() {
       .limit(200),
     sb.from('clientes')
       .select('id, nome, cpf_cnpj, telefone, saldo_devedor, valor_vencido, bloqueado_fiado, cobranca_whatsapp_ativa')
-      .eq('empresa_id', empresaId),
+      .eq('empresa_id', empresaId)
+      // Cobrar pelo cadastro morto é cobrar duas vezes o mesmo devedor.
+      .is('mesclado_em', null),
   ])
 
   return (

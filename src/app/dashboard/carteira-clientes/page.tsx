@@ -18,6 +18,7 @@ export default async function CarteiraClientesPage() {
       .select('id, nome, cpf_cnpj, telefone, limite_credito, bloqueado_fiado, status_credito, permite_fiado, cobranca_whatsapp_ativa')
       .eq('empresa_id', empresaId)
       .eq('ativo', true)
+      .is('mesclado_em', null)
       .order('nome')
       .limit(1000),
     sb.from('contas_receber')

@@ -86,6 +86,7 @@ export default function EditarOrcamentoModal({ empresaId, orcamento, onClose, on
     const t = setTimeout(async () => {
       const { data } = await sb.from('clientes')
         .select('id, nome, telefone').eq('empresa_id', empresaId)
+        .is('mesclado_em', null)
         .ilike('nome', `%${termo}%`).limit(6)
       setClientesEncontrados((data ?? []) as Cliente[])
     }, 250)

@@ -19,7 +19,9 @@ export default async function PDVPage() {
   const [{ data: clientes }, { data: saudeConfig }, { data: saudeFaixas }, { data: configEstoque }] = await Promise.all([
     sb.from('clientes')
       .select('id, nome, cpf_cnpj, telefone, limite_credito, saldo_credito, saldo_devedor, bloqueado_fiado, permite_fiado')
-      .eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
+      // Sem isto o balconista pode escolher um cadastro morto. O gatilho do
+      // banco redireciona o lançamento, mas ele não deveria nem aparecer.
+      .eq('empresa_id', empresaId).eq('ativo', true).is('mesclado_em', null).order('nome'),
     sb.from('saude_config').select('*').eq('empresa_id', empresaId).single(),
     sb.from('saude_faixas').select('*').eq('empresa_id', empresaId).order('ordem'),
     sb.from('empresa_config_estoque').select('empresa_estoque_id').eq('empresa_id', empresaId).maybeSingle(),

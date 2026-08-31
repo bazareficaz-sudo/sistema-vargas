@@ -23,6 +23,7 @@ export default async function CreditosClientePage() {
       .select('id, nome, cpf_cnpj, telefone, saldo_credito')
       .eq('empresa_id', empresaId)
       .eq('ativo', true)
+      .is('mesclado_em', null)
       .order('nome'),
     sb.from('credito_utilizacoes')
       .select('*')

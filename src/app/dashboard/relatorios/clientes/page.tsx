@@ -17,7 +17,7 @@ export default async function RelatorioClientesPage() {
   const inicio90 = new Date(hoje); inicio90.setDate(inicio90.getDate() - 90)
 
   const [clientesRes, vendasRes] = await Promise.all([
-    supabase.from('clientes').select('id, nome, telefone, created_at').eq('empresa_id', empresaId),
+    supabase.from('clientes').select('id, nome, telefone, created_at').eq('empresa_id', empresaId).is('mesclado_em', null),
     // Paginado: o RFM classifica cliente por quanto e quando comprou, e as
     // 2.120 vendas nao cabem numa resposta do PostgREST (teto de 1.000). Com
     // o corte, quem compra ha mais tempo aparecia gastando menos do que gasta.

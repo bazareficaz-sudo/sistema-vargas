@@ -54,6 +54,9 @@ export async function POST(request: NextRequest) {
           .from('clientes')
           .select('id, nome')
           .eq('empresa_id', empresaId)
+          // O telefone duplicado casa com os dois cadastros, e `.limit(1)`
+          // pegava qualquer um. A mensagem tem que cair no que está vivo.
+          .is('mesclado_em', null)
           .or(`telefone.ilike.%${phoneDigits}%,telefone_whatsapp.ilike.%${phoneDigits}%`)
           .limit(1)
 

@@ -52,7 +52,7 @@ export default async function RelatorioAlertasPage() {
     supabase.from('contas_receber').select('valor, status, vencimento').eq('empresa_id', empresaId).in('status', ['pendente', 'vencido']),
     supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioDoMes(hoje).toISOString() }),
     supabase.rpc('vendas_resumo', { p_empresa: empresaId, p_inicio: inicioDoMesAnterior(hoje).toISOString(), p_fim: inicioDoMes(hoje).toISOString() }),
-    supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId),
+    supabase.from('clientes').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).is('mesclado_em', null),
     supabase.from('entradas').select('id, status, valor_total').eq('empresa_id', empresaId).eq('status', 'confirmada').is('total_contas', null),
     // A mesma compra entra por duas portas. Contar só o lançamento manual
     // escondia as notas importadas que também ficaram sem conta a pagar.

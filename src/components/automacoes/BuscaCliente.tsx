@@ -18,6 +18,7 @@ export default function BuscaCliente({ empresaId, clienteId, clienteNome, onChan
       const sb = createClient()
       const { data } = await sb.from('clientes').select('id, nome, cpf_cnpj, telefone')
         .eq('empresa_id', empresaId)
+        .is('mesclado_em', null)
         .or(`nome.ilike.%${busca}%,cpf_cnpj.ilike.%${busca}%,telefone.ilike.%${busca}%`)
         .limit(10)
       setResultados(data ?? [])
