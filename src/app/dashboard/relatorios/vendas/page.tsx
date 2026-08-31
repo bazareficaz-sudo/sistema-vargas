@@ -7,11 +7,11 @@ export const dynamic = 'force-dynamic'
 
 type VendaRelatorio = {
   id: string; total: number | null; desconto: number | null; status: string; created_at: string
+  vendedor_nome: string | null
   // O tipo gerado do PostgREST descreve relacao embutida como ARRAY, mesmo
   // quando ela e um-para-um. A tela ja lia esses dois campos com `as any` por
   // causa disso; aqui as duas formas sao aceitas em vez de fingir uma so.
   clientes: { nome: string } | { nome: string }[] | null
-  vendedores: { nome: string } | { nome: string }[] | null
 }
 
 export default async function RelatorioVendasPage({
@@ -37,7 +37,7 @@ export default async function RelatorioVendasPage({
     // requisicao. Com 1.701 vendas no mes, todo numero desta tela vinha menor.
     buscarTudo<VendaRelatorio>(
       (de, ate) => supabase.from('vendas')
-        .select('id, total, desconto, status, created_at, clientes(nome), vendedores(nome)')
+        .select('id, total, desconto, status, created_at, vendedor_nome, clientes(nome)')
         .eq('empresa_id', empresaId)
         .gte('created_at', inicioISO)
         .lte('created_at', fimISO)
@@ -109,8 +109,7 @@ export default async function RelatorioVendasPage({
   const porVendedor: Record<string, { nome: string; faturamento: number; qtd: number }> = {}
   for (const v of vendas) {
     if (v.status !== 'concluida') continue
-    const vend = v.vendedores
-    const nome = (Array.isArray(vend) ? vend[0]?.nome : vend?.nome) ?? 'Sem vendedor'
+    const nome = v.vendedor_nome?.trim() || 'Sem vendedor'
     if (!porVendedor[nome]) porVendedor[nome] = { nome, faturamento: 0, qtd: 0 }
     porVendedor[nome].faturamento += Number(v.total ?? 0)
     porVendedor[nome].qtd++

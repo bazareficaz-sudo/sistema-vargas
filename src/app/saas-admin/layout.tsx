@@ -21,6 +21,7 @@ export default async function SaasAdminLayout({ children }: { children: React.Re
     { href: '/saas-admin/clientes', label: '🏢 Clientes' },
     { href: '/saas-admin/planos', label: '📋 Planos' },
     { href: '/saas-admin/fiscal', label: '🧾 Fiscal' },
+    { href: '/saas-admin/ia', label: '✦ IA e Consumo' },
     { href: '/saas-admin/blog', label: '📰 Blog' },
   ]
 
