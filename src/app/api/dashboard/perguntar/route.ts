@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { perguntarJSONComGateway } from '@/lib/ia/gateway'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import type { DashboardQuestionContext } from '@/components/dashboard/AskVargas'
+import { periodoDosIndicadores } from '@/lib/dashboard/periodo'
 
 type Resultado = {
   resposta: string
@@ -50,6 +51,13 @@ function normalizarContexto(valor: unknown): DashboardQuestionContext {
 
 function respostaAutomatica(pergunta: string, c: DashboardQuestionContext): Resultado {
   const texto = pergunta.toLocaleLowerCase('pt-BR')
+  // O MESMO CUIDADO DO CAMINHO DA IA. Este ramo e deterministico, mas dizia
+  // "as compras do mes somam R$ 0,00, variacao de 100% para baixo" no dia 1o
+  // do mes — verdade aritmetica lida como colapso.
+  const per = periodoDosIndicadores(new Date())
+  const ressalvaMes = per.mesIncompleto
+    ? ` Atencao: ${per.mesDeReferencia} tem ${per.diasDecorridosDoMes} de ${per.diasNoMes} dias decorridos, entao os numeros do mes ainda estao parciais.`
+    : ''
   if (/produto|item|mercadoria/.test(texto) && /mais|melhor|campe[aã]o|lider|top|vend/.test(texto)) {
     if (!c.produtoMaisVendidoMes && !c.produtoMaiorFaturamentoMes) {
       return {
@@ -108,7 +116,7 @@ function respostaAutomatica(pergunta: string, c: DashboardQuestionContext): Resu
       modo: 'automatico',
       resposta: `Hoje foram vendidos ${brl(c.vendasHoje)} em ${c.quantidadeVendasHoje} transações, com ticket médio de ${brl(c.ticketMedioHoje)}. Mantido o comportamento atual, a projeção de fechamento é ${brl(c.projecaoFechamento)}.${c.variacaoRitmo === null ? '' : ` O ritmo está ${percentual(c.variacaoRitmo)} ${c.variacaoRitmo >= 0 ? 'acima' : 'abaixo'} da média equivalente.`}`,
       evidencias: [
-        `Faturamento do mês: ${brl(c.faturamentoMes)}`,
+        `Faturamento de ${per.mesDeReferencia} (${per.periodoDosIndicadoresDoMes}): ${brl(c.faturamentoMes)}`,
         `Ticket médio hoje: ${brl(c.ticketMedioHoje)}`,
         `Vendas no marketplace hoje: ${brl(c.vendasMarketplaceHoje)}`,
       ],
@@ -126,8 +134,14 @@ function respostaAutomatica(pergunta: string, c: DashboardQuestionContext): Resu
   if (/compra|fornecedor|estoque/.test(texto)) {
     return {
       modo: 'automatico',
-      resposta: `As compras do mês somam ${brl(c.comprasMes)}.${c.variacaoCompras === null ? ' Ainda não há base anterior suficiente para medir a variação.' : ` Isso representa uma variação de ${percentual(c.variacaoCompras)} ${c.variacaoCompras >= 0 ? 'para cima' : 'para baixo'} frente ao mês anterior.`}`,
-      evidencias: [`Compras no mês: ${brl(c.comprasMes)}`, c.variacaoCompras === null ? 'Comparação mensal indisponível' : `Variação mensal: ${c.variacaoCompras.toFixed(1).replace('.', ',')}%`],
+      resposta: `As compras de ${per.mesDeReferencia} somam ${brl(c.comprasMes)}.${c.variacaoCompras === null ? ' Ainda não há base anterior suficiente para medir a variação.' : ` Isso representa uma variação de ${percentual(c.variacaoCompras)} ${c.variacaoCompras >= 0 ? 'para cima' : 'para baixo'} frente ao mês anterior.`}${ressalvaMes}`,
+      evidencias: [
+        `Compras em ${per.mesDeReferencia} (${per.periodoDosIndicadoresDoMes}): ${brl(c.comprasMes)}`,
+        c.variacaoCompras === null ? 'Comparação mensal indisponível'
+          // Comparar um mes parcial com um mes fechado nao mede queda de
+          // compras; mede que o mes ainda nao aconteceu.
+          : `Variação mensal: ${c.variacaoCompras.toFixed(1).replace('.', ',')}%${per.mesIncompleto ? ' — comparação de mês parcial com mês fechado' : ''}`,
+      ],
       sugestoes: ['Comparar compras com vendas', 'Revisar fornecedores', 'Analisar giro de estoque'],
     }
   }
@@ -160,10 +174,17 @@ export async function POST(request: Request) {
   if (pergunta.length < 3) return NextResponse.json({ ok: false, erro: 'Escreva uma pergunta um pouco mais detalhada.' }, { status: 400 })
   const contexto = normalizarContexto(body?.contexto)
 
+  const periodo = periodoDosIndicadores(new Date())
+
   const prompt = `Você é o analista executivo do Sistema Vargas, um ERP brasileiro.
 Responda à pergunta do empresário usando SOMENTE os indicadores JSON fornecidos. Não invente causas, produtos, clientes ou valores. Diferencie correlação de causa. Seja direto, em português brasileiro, com no máximo 130 palavras. Não dê aconselhamento jurídico, contábil ou de investimento. Se faltar dado, diga claramente.
 
+REGRAS SOBRE O PERÍODO — elas corrigem dois erros reais cometidos por esta ferramenta:
+1. Todo indicador com "Mes" no nome cobre APENAS o período em "periodo", que vai do dia 1º até hoje. NUNCA atribua esses números a outro mês, mesmo que a pergunta cite outro mês pelo nome. Se perguntarem sobre um mês que não é o de referência, diga que não tem esse dado — não ofereça o número do mês corrente no lugar.
+2. Quando "mesIncompleto" for true, um valor baixo ou zero em indicador do mês pode ser apenas o mês ter poucos dias decorridos, e NÃO queda de atividade. Não conclua crise, colapso nem restrição de caixa a partir disso. Diga quantos dias de quantos já passaram.
+
 Pergunta: ${JSON.stringify(pergunta)}
+Periodo: ${JSON.stringify(periodo)}
 Indicadores: ${JSON.stringify(contexto)}
 
 Responda SOMENTE neste JSON:
