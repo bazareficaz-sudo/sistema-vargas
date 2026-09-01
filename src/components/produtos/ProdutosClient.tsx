@@ -108,7 +108,7 @@ const ABAS = [
 ]
 
 export default function ProdutosClient({
-  produtos: inicial, imagensMap = {}, total, totalAtivos, totalInativos, totalTodos, totalSimples, totalKits, totalEmPromocao,
+  produtos: inicial, imagensMap = {}, total, totalTodos, totalSimples, totalKits,
   pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, apenasAtivos: apenasAtivosInicial, empresaId,
   anunciosMap, abrirProdutoId, abrirProdutoAba,
   categoriasRaiz, categoriasTodas, marcas,
@@ -487,13 +487,10 @@ export default function ProdutosClient({
       {/* No celular título e botões empilham: lado a lado, "Importar de URL"
           e "Novo produto" espremiam o título até quebrar a palavra. */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4 mb-5">
-        <div>
-          <h1 className="text-gray-950 text-2xl font-semibold tracking-tight">Produtos</h1>
-          <p className="mt-1 text-sm text-gray-500">Organize o catálogo, estoque e presença nos canais de venda.</p>
-        </div>
+        <h1 className="text-gray-950 text-2xl font-semibold tracking-tight">Produtos</h1>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setImportandoUrl(true)} className={botao('secundario')}>
-            Importar de URL
+            ↓ Importar
           </button>
           {podeEditarProdutos && (
             <button onClick={() => setCriandoNovo(true)} className={botao('primario')}>
@@ -566,8 +563,8 @@ export default function ProdutosClient({
       )}
 
       {/* Barra de busca e filtros */}
-      <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-      <form onSubmit={buscar} className="flex flex-col lg:flex-row lg:items-center gap-2 p-3 sm:p-4">
+      <div>
+      <form onSubmit={buscar} className="flex flex-col lg:flex-row lg:items-center gap-2">
         <div className="relative flex-1 min-w-0">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -579,9 +576,6 @@ export default function ProdutosClient({
             className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 bg-white"
           />
         </div>
-        <button type="submit" className={botao('secundario')}>
-          Buscar
-        </button>
         <div className="flex items-center gap-1.5 flex-wrap lg:ml-2">
           <button
             type="button"
@@ -598,26 +592,8 @@ export default function ProdutosClient({
           >
             {apenasAtivos ? '✓ ' : ''}produtos ativos
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              const next = !promo
-              setPromo(next)
-              navegar({ promo: next ? '1' : '', pagina: '1' })
-            }}
-            className={`px-3 py-1.5 text-xs rounded-full border transition-colors flex items-center gap-1.5 ${
-              promo
-                ? 'border-orange-400 text-orange-600 bg-orange-50 font-medium'
-                : 'border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
-            }`}
-          >
-            <span>🏷</span>
-            em promoção
-            {totalEmPromocao > 0 && (
-              <span className={`text-xs font-semibold ${promo ? 'text-orange-500' : 'text-gray-400'}`}>
-                {totalEmPromocao}
-              </span>
-            )}
+          <button type="button" onClick={() => { const next = !promo; setPromo(next); navegar({ promo: next ? '1' : '', pagina: '1' }) }} className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${promo ? 'border-orange-300 bg-orange-50 font-medium text-orange-700' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'}`}>
+            Promoções
           </button>
           <button
             type="button"
@@ -628,7 +604,7 @@ export default function ProdutosClient({
                 : 'border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
             }`}
           >
-            ⚙ filtros
+            ☷ Filtros
             {filtrosAtivos > 0 && (
               <span className="min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
                 {filtrosAtivos}
@@ -637,14 +613,27 @@ export default function ProdutosClient({
           </button>
           <button type="button" onClick={() => { setQ(''); setPromo(false); limparFiltrosAvancados() }}
             className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-            ⊗ limpar filtros
+            Limpar
           </button>
         </div>
       </form>
 
+      {(marcaF || categoriaF || subcategoriaF || estoqueF || imagemF || ncmF || tagF || entradaF) && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {[
+            ['Marca', marcaF], ['Categoria', categoriaF], ['Subcategoria', subcategoriaF],
+            ['Estoque', estoqueF], ['Imagem', imagemF], ['NCM', ncmF], ['Tag', tagF], ['Entrada', entradaF],
+          ].filter((item): item is string[] => Boolean(item[1])).map(([label, valor]) => (
+            <span key={label} className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600">
+              <strong className="font-medium text-gray-800">{label}:</strong> {valor}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Painel de filtros avançados */}
       {mostrarFiltros && (
-        <div className="flex flex-wrap items-end gap-3 border-t border-gray-100 p-3 sm:p-4 bg-gray-50/70">
+        <div className="flex flex-wrap items-end gap-3 mt-3 rounded-xl border border-gray-200 p-3 sm:p-4 bg-gray-50/70">
           <div>
             <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Marca</label>
             <select
@@ -754,22 +743,6 @@ export default function ProdutosClient({
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-gray-100">
-        {[
-          { label: 'No catálogo', valor: totalTodos ?? total, detalhe: `${totalAtivos.toLocaleString('pt-BR')} ativos` },
-          { label: 'Nesta seleção', valor: total, detalhe: filtrosAtivos > 0 || qInicial ? 'com os filtros atuais' : 'produtos encontrados' },
-          { label: 'Em promoção', valor: totalEmPromocao, detalhe: 'com oferta ativa' },
-          { label: 'Inativos', valor: totalInativos, detalhe: 'fora da operação' },
-        ].map((item, index) => (
-          <div key={item.label} className={`px-4 py-3 ${index % 2 ? 'border-l' : ''} lg:border-l first:border-l-0 border-gray-100`}>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">{item.label}</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <span className="text-lg font-semibold tabular-nums text-gray-900">{item.valor.toLocaleString('pt-BR')}</span>
-              <span className="hidden xl:inline text-xs text-gray-400">{item.detalhe}</span>
-            </div>
-          </div>
-        ))}
-      </div>
       </div>
 
       {/* Abas */}
@@ -792,155 +765,77 @@ export default function ProdutosClient({
         ))}
       </div>
 
+      <div className="flex flex-col gap-3 border-x border-gray-200 bg-gray-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-gray-500">
+          <strong className="font-semibold text-gray-900">{total.toLocaleString('pt-BR')} produtos</strong>
+          <span> · {produtos.filter(p => (p.estoque ?? 0) <= 0).length} sem estoque nesta página</span>
+          <span> · {produtos.filter(p => !p.preco_venda || !p.categoria).length} cadastros incompletos</span>
+        </p>
+        <div className="flex items-center gap-2" aria-label="Modo de visualização">
+          <button type="button" className="rounded-lg border border-blue-400 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">☷ Tabela</button>
+          <button type="button" disabled title="Visualização em cards será disponibilizada em breve" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-400">▦ Cards</button>
+          <button type="button" disabled title="Personalização de colunas será disponibilizada em breve" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-400">▥ Colunas</button>
+        </div>
+      </div>
+
       {/* Tabela */}
       {/* A tabela tem mais colunas do que cabe num celular. Sem um contêiner
           com rolagem própria ela empurra a PÁGINA para o lado, e aí o menu e
           o cabeçalho saem de vista junto. Com ele, só a tabela desliza.
           `min-w` evita que as colunas se esmaguem uma sobre a outra. */}
       <div className="border border-gray-200 rounded-b-xl bg-white overflow-x-auto">
-        <table className="w-full text-sm min-w-[980px]">
+        <table className="w-full text-sm min-w-[920px]">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="w-10 px-4 py-3">
-                <input type="checkbox"
-                  checked={selecionados.size === produtos.length && produtos.length > 0}
-                  onChange={e => toggleAll(e.target.checked)}
-                  className="w-4 h-4 accent-blue-600" />
-              </th>
-              <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Descrição</th>
-              <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Código / GTIN-EAN</th>
-              <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Unidade</th>
-              <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Preço</th>
-              <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Custo</th>
-              <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Markup</th>
-              <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Marca</th>
-              <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Estoque</th>
-              <th className="w-48 px-3 py-3 text-right font-medium text-gray-600 text-xs uppercase tracking-wide">Ações</th>
+            <tr className="border-b border-gray-200 bg-gray-50/80">
+              <th className="w-10 px-4 py-3"><input type="checkbox" checked={selecionados.size === produtos.length && produtos.length > 0} onChange={e => toggleAll(e.target.checked)} className="h-4 w-4 accent-blue-600" /></th>
+              <th className="px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Produto</th>
+              <th className="w-56 px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Comercial</th>
+              <th className="w-52 px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Estoque</th>
+              <th className="w-40 px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">Situação</th>
+              <th className="w-48 px-3 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {produtos.map(p => (
-              <tr key={p.id} className={`hover:bg-blue-50/30 transition-colors group ${selecionados.has(p.id) ? 'bg-blue-50/50' : ''}`}>
-                <td className="px-4 py-2.5">
-                  <input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleOne(p.id)}
-                    className="w-4 h-4 accent-blue-600" />
-                </td>
-                <td className="px-3 py-2.5 min-w-[380px]">
-                  <div className="flex items-start gap-2.5">
-                    {imagensMap[p.id] ? (
-                      <img src={imagensMap[p.id]} alt={p.nome}
-                        onClick={() => abrirProduto(p)}
-                        className="w-9 h-9 rounded-lg object-cover border border-gray-200 flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity" />
-                    ) : (
-                      <div className="w-9 h-9 rounded-lg border border-dashed border-gray-200 flex items-center justify-center flex-shrink-0 text-gray-300 text-sm select-none">
-                        📷
-                      </div>
-                    )}
+            {produtos.map(p => {
+              const markup = calcMarkup(p)
+              const estoque = p.estoque ?? 0
+              const situacao = !p.ativo
+                ? { texto: 'Inativo', cls: 'border-gray-200 bg-gray-100 text-gray-600' }
+                : estoque < 0
+                  ? { texto: 'Estoque negativo', cls: 'border-red-200 bg-red-50 text-red-700' }
+                  : estoque === 0
+                    ? { texto: 'Sem estoque', cls: 'border-amber-200 bg-amber-50 text-amber-700' }
+                    : !p.preco_venda || !p.categoria
+                      ? { texto: 'Cadastro incompleto', cls: 'border-violet-200 bg-violet-50 text-violet-700' }
+                      : { texto: 'Ativo', cls: 'border-blue-200 bg-blue-50 text-blue-700' }
+              return (
+              <tr key={p.id} className={`group transition-colors hover:bg-blue-50/30 ${selecionados.has(p.id) ? 'bg-blue-50/60' : ''}`}>
+                <td className="px-4 py-4"><input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleOne(p.id)} className="h-4 w-4 accent-blue-600" /></td>
+                <td className="min-w-[390px] px-3 py-4">
+                  <div className="flex items-start gap-3">
+                    {imagensMap[p.id] ? <img src={imagensMap[p.id]} alt={p.nome} onClick={() => abrirProduto(p)} className="h-10 w-10 shrink-0 cursor-pointer rounded-xl border border-gray-200 object-cover hover:opacity-80" /> : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-gray-400">▧</div>}
                     <div className="min-w-0 flex-1">
-                    {nomeEditando === p.id ? (
-                      <input
-                        autoFocus
-                        value={nomeValor}
-                        onChange={e => setNomeValor(e.target.value)}
-                        onBlur={() => salvarNome(p.id)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') e.currentTarget.blur()
-                          if (e.key === 'Escape') cancelarEdicaoNome()
-                        }}
-                        className="text-sm text-gray-900 font-medium border border-blue-400 rounded-md px-1.5 py-0.5 focus:outline-none flex-1 min-w-[260px]"
-                      />
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <button onClick={() => iniciarEdicaoNome(p)} title="Clique para editar o nome"
-                          className="text-left text-gray-900 hover:text-blue-600 font-medium block transition-colors break-words">
-                          {p.nome}
-                        </button>
-                        {/* Mesmo atalho que já existe no SKU e no EAN — o nome
-                            é o que mais se copia, para colar em anúncio,
-                            pesquisa de fornecedor e conversa com cliente. */}
-                        <button onClick={() => copiar(p.id, 'nome', p.nome)} title="Copiar nome"
-                          className="text-gray-300 hover:text-blue-600 transition-colors leading-none shrink-0">
-                          {copiado === `${p.id}-nome` ? '✓' : '⧉'}
-                        </button>
-                        {/* Em quais canais o produto está anunciado. Clicar
-                            abre a lista de anúncios, onde dá para pausar. */}
-                        {/* Marketplaces e Loja Online no mesmo selo — a
-                            pergunta que ele responde é "onde este produto
-                            está à venda?", e a loja é mais um canal. */}
+                      {nomeEditando === p.id ? <input autoFocus value={nomeValor} onChange={e => setNomeValor(e.target.value)} onBlur={() => salvarNome(p.id)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') cancelarEdicaoNome() }} className="w-full rounded-md border border-blue-400 px-1.5 py-0.5 font-medium text-gray-900 outline-none" /> : <div className="flex items-center gap-1.5"><button onClick={() => iniciarEdicaoNome(p)} className="text-left font-medium text-gray-900 hover:text-blue-600">{p.nome}</button><button onClick={() => copiar(p.id, 'nome', p.nome)} title="Copiar nome" className="shrink-0 text-gray-300 hover:text-blue-600">{copiado === `${p.id}-nome` ? '✓' : '⧉'}</button></div>}
+                      <p className="mt-1 text-xs text-gray-400">{[p.categoria, p.marca, p.sku ? `SKU ${p.sku}` : null].filter(Boolean).join(' · ') || 'Sem classificação'}</p>
+                      <div className="mt-2 flex min-h-5 flex-wrap items-center gap-1.5">
+                        <SeloCanais contagem={anunciosMap?.[p.id]} onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }} />
+                        {p.promocao_ativa && <span className="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600">Promoção</span>}
+                        {!p.disponivel_pdv && <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Oculto no PDV</span>}
+                        {(p.tags ?? []).map(t => <span key={t} className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700">{t}</span>)}
                       </div>
-                    )}
-                    <div className="mt-1.5 flex min-h-5 flex-wrap items-center gap-1.5">
-                      {p.categoria && <span className="mr-1 text-[11px] text-gray-400">{p.categoria}</span>}
-                      <SeloCanais contagem={anunciosMap?.[p.id]}
-                        onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }} />
-                    {p.promocao_ativa && (
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-orange-100 text-orange-600 border border-orange-200 shrink-0">
-                        🏷 PROMOÇÃO
-                      </span>
-                    )}
-                    {!p.disponivel_pdv && (
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200 shrink-0">
-                        🚫 OCULTO NO PDV
-                      </span>
-                    )}
-                    {(p.tags ?? []).map(t => (
-                      <span key={t} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-teal-50 text-teal-700 border border-teal-200 shrink-0">
-                        {t}
-                      </span>
-                    ))}
-                    </div>
                     </div>
                   </div>
-                  <div className="ml-11 mt-1 flex items-center gap-2">
-                    {p.promocao_ativa && p.preco_promocional && (
-                      <span className="text-xs text-orange-500 font-medium">
-                        {p.preco_promocional.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
-                    )}
-                  </div>
                 </td>
-                <td className="px-3 py-2.5 text-gray-500 font-mono text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <span>{p.sku ?? '—'}</span>
-                    {p.sku && (
-                      <button onClick={() => copiar(p.id, 'sku', p.sku!)} title="Copiar SKU"
-                        className="text-gray-300 hover:text-blue-600 transition-colors leading-none">
-                        {copiado === `${p.id}-sku` ? '✓' : '⧉'}
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span>{p.ean ?? '—'}</span>
-                    {p.ean && (
-                      <button onClick={() => copiar(p.id, 'ean', p.ean!)} title="Copiar GTIN/EAN"
-                        className="text-gray-300 hover:text-blue-600 transition-colors leading-none">
-                        {copiado === `${p.id}-ean` ? '✓' : '⧉'}
-                      </button>
-                    )}
-                  </div>
+                <td className="px-3 py-4 align-middle">
+                  <p className="font-medium text-gray-900">{p.preco_venda > 0 ? p.preco_venda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'Sem preço'}</p>
+                  <p className="mt-1 text-xs text-gray-400">Custo {p.preco_custo > 0 ? p.preco_custo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}{markup !== null ? <><span> · </span><span className={markup > 0 ? 'text-emerald-600' : 'text-red-600'}>Margem {markup.toFixed(1)}%</span></> : null}</p>
                 </td>
-                <td className="px-3 py-2.5 text-gray-600">{p.unidade}</td>
-                <td className="px-3 py-2.5 text-right text-gray-900 font-medium">
-                  {p.preco_venda > 0 ? p.preco_venda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : <span className="text-gray-400">—</span>}
+                <td className="px-3 py-4 align-middle">
+                  <button onClick={() => setVendoEstoque(p)} className={`font-medium hover:underline ${estoque < 0 ? 'text-red-600' : estoque === 0 ? 'text-amber-700' : 'text-gray-900'}`}>{estoque.toLocaleString('pt-BR')} {p.unidade.toLowerCase()}</button>
+                  <p className="mt-1 text-xs text-gray-400">{estoque < 0 ? 'Reposição urgente' : estoque === 0 ? 'Sem disponibilidade' : estoque <= p.estoque_minimo ? 'Abaixo do mínimo' : 'Estoque disponível'}</p>
                 </td>
-                <td className="px-3 py-2.5 text-right text-gray-600">
-                  {p.preco_custo > 0 ? p.preco_custo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : <span className="text-gray-400">—</span>}
-                </td>
-                <td className="px-3 py-2.5 text-right">
-                  {(() => {
-                    const mk = calcMarkup(p)
-                    if (mk === null) return <span className="text-gray-400">—</span>
-                    return <span className={`font-medium ${mk > 0 ? 'text-green-600' : 'text-red-600'}`}>{mk.toFixed(1)}%</span>
-                  })()}
-                </td>
-                <td className="px-3 py-2.5 text-gray-600 text-xs">{p.marca ?? '—'}</td>
-                <td className="px-3 py-2.5 text-right">
-                  <button onClick={() => setVendoEstoque(p)} title="Ver estoque detalhado"
-                    className="text-gray-700 hover:text-blue-600 hover:underline font-medium transition-colors">
-                    {p.estoque ?? 0}
-                  </button>
-                </td>
-                <td className="px-3 py-2.5">
+                <td className="px-3 py-4 align-middle"><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${situacao.cls}`}>{situacao.texto}</span></td>
+                <td className="px-3 py-4 align-middle">
                   <div className="flex items-center justify-end gap-1.5">
                     <button
                       onClick={() => abrirProduto(p)}
@@ -993,9 +888,9 @@ export default function ProdutosClient({
                   </div>
                 </td>
               </tr>
-            ))}
+            )})}
             {produtos.length === 0 && (
-              <tr><td colSpan={10} className="py-12 text-center text-gray-400">Nenhum produto encontrado.</td></tr>
+              <tr><td colSpan={6} className="py-12 text-center text-gray-400">Nenhum produto encontrado.</td></tr>
             )}
           </tbody>
         </table>
