@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import PagarContasModal from '@/components/contas-pagar/PagarContasModal'
 import NovaDespesaModal from '@/components/contas-pagar/NovaDespesaModal'
+import { resumoDoFornecedor, type ContaParaResumo } from '@/lib/contas/resumoFornecedor'
+import type { OrigemDaConta } from '@/lib/contas/origemDaConta'
 
 type Conta = {
   id: string; descricao: string; valor: number; vencimento: string
@@ -12,7 +14,11 @@ type Conta = {
   parcela: number; total_parcelas: number; observacoes: string | null
   valor_pago: number | null; juros: number | null; multa: number | null
   tipo_despesa_id: string | null; competencia: string | null
-  fornecedores: { razao_social: string; nome_fantasia: string | null } | null
+  fornecedor_id: string | null
+  fornecedores: { id?: string; razao_social: string; nome_fantasia: string | null } | null
+  origemDoc: OrigemDaConta | null
+  pedidoDoc: OrigemDaConta | null
+  obsDaEntrada: string | null
 }
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
@@ -33,11 +39,15 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 export default function ContasPagarClient({
-  contas: inicial, statusFiltro, qInicial, empresaId,
-  totalPendente, totalVencido, totalPago,
+  contas: inicial, contasAbertas, statusFiltro, qInicial, empresaId,
+  totalPendente, totalVencido, totalPago, hojeIso,
 }: {
-  contas: Conta[]; statusFiltro: string; qInicial: string; empresaId: string
+  contas: Conta[]
+  /** TODAS as contas em aberto da empresa — a base do resumo por fornecedor. */
+  contasAbertas: (ContaParaResumo & { fornecedor_id: string | null })[]
+  statusFiltro: string; qInicial: string; empresaId: string
   totalPendente: number; totalVencido: number; totalPago: number
+  hojeIso: string
 }) {
   const router = useRouter()
   const [contas, setContas] = useState(inicial)
@@ -50,21 +60,40 @@ export default function ContasPagarClient({
   // do período, e o volume é de dezenas — paginar no servidor aqui só somaria
   // espera sem resolver problema que exista.
   const [ordem, setOrdem] = useState<'vencimento' | 'fornecedor' | 'valor'>('vencimento')
+  // POR ID, NÃO POR NOME. Filtrar por nome junta dois fornecedores homônimos
+  // numa linha só, e o resumo somaria a dívida dos dois — número errado com
+  // cara de certo. O id também é a chave do resumo.
   const [fornecedorFiltro, setFornecedorFiltro] = useState('')
 
   const nomeForn = (c: Conta) =>
     c.fornecedores?.nome_fantasia || c.fornecedores?.razao_social || ''
 
+  const SEM_FORNECEDOR = '(sem fornecedor)'
+  const chaveForn = (c: Conta) => c.fornecedor_id ?? ''
+
   // Só os fornecedores que APARECEM na lista carregada. Uma lista fixa com o
   // cadastro inteiro encheria o seletor de nomes sem nenhuma conta.
   const fornecedoresPresentes = (() => {
-    const m = new Map<string, number>()
+    const m = new Map<string, { nome: string; qtd: number }>()
     for (const c of contas) {
-      const n = nomeForn(c) || '(sem fornecedor)'
-      m.set(n, (m.get(n) ?? 0) + 1)
+      const id = chaveForn(c)
+      const atual = m.get(id)
+      m.set(id, { nome: nomeForn(c) || SEM_FORNECEDOR, qtd: (atual?.qtd ?? 0) + 1 })
     }
-    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+    return [...m.entries()].sort((a, b) => a[1].nome.localeCompare(b[1].nome, 'pt-BR'))
   })()
+
+  // O RESUMO SAI DE `contasAbertas`, não da lista da tela. A lista está
+  // filtrada por status e cortada em 200; o resumo responde "quanto devo a
+  // este fornecedor" e essa resposta não pode depender do recorte que o
+  // operador está olhando.
+  const resumo = fornecedorFiltro
+    ? resumoDoFornecedor(
+        contasAbertas.filter(c => (c.fornecedor_id ?? '') === fornecedorFiltro),
+        hojeIso,
+      )
+    : null
+  const nomeDoFiltro = fornecedoresPresentes.find(([id]) => id === fornecedorFiltro)?.[1].nome ?? ''
 
   function navegar(params: Record<string, string>) {
     const sp = new URLSearchParams({ status: statusFiltro, q, ...params })
@@ -98,6 +127,42 @@ export default function ContasPagarClient({
     setModalPgto(marcadas)
   }
 
+  // OBS editavel direto na linha.
+  //
+  // Sem modal: a observacao e uma frase curta ("boleto no email do dia 12",
+  // "cobrar desconto"), e abrir uma janela para escrever quinze caracteres
+  // custa mais que o proprio texto. Grava ao sair do campo.
+  const [editandoObs, setEditandoObs] = useState<string | null>(null)
+  const [rascunhoObs, setRascunhoObs] = useState('')
+  const [salvandoObs, setSalvandoObs] = useState(false)
+
+  function abrirObs(c: Conta) {
+    setEditandoObs(c.id)
+    setRascunhoObs(c.observacoes ?? '')
+  }
+
+  async function salvarObs(id: string) {
+    const texto = rascunhoObs.trim()
+    const anterior = contas.find(c => c.id === id)?.observacoes ?? ''
+    // Nada mudou: fecha sem escrever. Evita um UPDATE por clique acidental.
+    if (texto === anterior.trim()) { setEditandoObs(null); return }
+
+    setSalvandoObs(true)
+    const sb = createClient()
+    const { error } = await sb.from('contas_pagar')
+      .update({ observacoes: texto || null }).eq('id', id)
+    setSalvandoObs(false)
+
+    if (error) {
+      // Nao fecha o campo: o texto continua na tela para nao se perder, e a
+      // pessoa decide se tenta de novo ou copia para outro lugar.
+      alert(`Nao foi possivel salvar a observacao: ${error.message}`)
+      return
+    }
+    setContas(prev => prev.map(c => c.id === id ? { ...c, observacoes: texto || null } : c))
+    setEditandoObs(null)
+  }
+
   async function cancelar(id: string) {
     if (!confirm('Cancelar esta conta?')) return
     const sb = createClient()
@@ -107,7 +172,7 @@ export default function ContasPagarClient({
 
   const filtradas = contas
     .filter(c => !q || c.descricao.toLowerCase().includes(q.toLowerCase()))
-    .filter(c => !fornecedorFiltro || (nomeForn(c) || '(sem fornecedor)') === fornecedorFiltro)
+    .filter(c => !fornecedorFiltro || chaveForn(c) === fornecedorFiltro)
     .slice()
     .sort((a, b) => {
       if (ordem === 'fornecedor') {
@@ -185,8 +250,8 @@ export default function ContasPagarClient({
         <select value={fornecedorFiltro} onChange={e => setFornecedorFiltro(e.target.value)}
           className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 bg-white">
           <option value="">Todos os fornecedores</option>
-          {fornecedoresPresentes.map(([nome, qtd]) => (
-            <option key={nome} value={nome}>{nome} ({qtd})</option>
+          {fornecedoresPresentes.map(([id, f]) => (
+            <option key={id} value={id}>{f.nome} ({f.qtd})</option>
           ))}
         </select>
 
@@ -203,6 +268,54 @@ export default function ContasPagarClient({
             className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
         )}
       </div>
+
+      {/* RESUMO DO FORNECEDOR — só quando há um escolhido.
+          Sempre visível ocuparia a tela com zeros, e "todos os fornecedores"
+          já é o que os três cartões do topo mostram. */}
+      {resumo && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-900">{nomeDoFiltro}</h2>
+            <span className="text-xs text-gray-500">
+              {resumo.totalAberto.quantidade} conta(s) em aberto · {fmt(resumo.totalAberto.total)}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div className={`rounded-lg px-3 py-2.5 border ${resumo.vencido.quantidade > 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+              <p className="text-[11px] text-gray-500">Vencido</p>
+              <p className={`text-lg font-bold ${resumo.vencido.quantidade > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                {fmt(resumo.vencido.total)}
+              </p>
+              <p className="text-[11px] text-gray-400">{resumo.vencido.quantidade} boleto(s)</p>
+            </div>
+            <div className="rounded-lg px-3 py-2.5 border bg-amber-50 border-amber-200">
+              <p className="text-[11px] text-gray-500">Vence este mês</p>
+              <p className="text-lg font-bold text-amber-700">{fmt(resumo.mesCorrente.total)}</p>
+              <p className="text-[11px] text-gray-400">{resumo.mesCorrente.quantidade} boleto(s)</p>
+            </div>
+            <div className="rounded-lg px-3 py-2.5 border bg-blue-50 border-blue-200">
+              <p className="text-[11px] text-gray-500">Vence no mês seguinte</p>
+              <p className="text-lg font-bold text-blue-700">{fmt(resumo.mesSeguinte.total)}</p>
+              <p className="text-[11px] text-gray-400">{resumo.mesSeguinte.quantidade} boleto(s)</p>
+            </div>
+          </div>
+
+          {/* O QUE OS TRÊS CARTÕES NÃO MOSTRAM. Sem esta linha, um fornecedor
+              com parcelas longas pareceria dever menos do que deve. */}
+          {resumo.depois.quantidade > 0 && (
+            <p className="text-[11px] text-gray-500 mt-2">
+              Além desses, {resumo.depois.quantidade} conta(s) vencem depois do mês seguinte,
+              somando {fmt(resumo.depois.total)}.
+            </p>
+          )}
+
+          <p className="text-[11px] text-gray-400 mt-2">
+            O resumo considera todas as contas em aberto deste fornecedor — não só as que
+            estão na lista abaixo, que segue o filtro de status.
+          </p>
+        </div>
+      )}
 
       {/* Ações em massa */}
       {marcadas.length > 0 && (
@@ -230,12 +343,14 @@ export default function ContasPagarClient({
                   className="w-4 h-4 accent-blue-600" />
               </th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Descrição</th>
+              <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide" title="Documento que originou a conta">Origem</th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Fornecedor</th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Vencimento</th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide" title="Mês a que a despesa pertence">Competência</th>
               <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Valor</th>
               <th className="text-center px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Status</th>
               <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Pagamento</th>
+              <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide" title="Clique para escrever">OBS</th>
               <th className="px-3 py-3"></th>
             </tr>
           </thead>
@@ -256,6 +371,22 @@ export default function ContasPagarClient({
                     <p className="text-gray-900 font-medium text-xs">{c.descricao}</p>
                     {c.total_parcelas > 1 && (
                       <p className="text-xs text-gray-400">{c.parcela}/{c.total_parcelas} parcelas</p>
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    {c.origemDoc ? (
+                      <a href={c.origemDoc.href} title={c.origemDoc.descricao}
+                        onClick={e => e.stopPropagation()}
+                        className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium">
+                        {c.origemDoc.rotulo}
+                      </a>
+                    ) : <span className="text-xs text-gray-300">—</span>}
+                    {c.pedidoDoc && (
+                      <a href={c.pedidoDoc.href} title={c.pedidoDoc.descricao}
+                        onClick={e => e.stopPropagation()}
+                        className="block text-[11px] text-blue-600 hover:underline">
+                        {c.pedidoDoc.rotulo}
+                      </a>
                     )}
                   </td>
                   <td className="px-3 py-3 text-xs text-gray-500">
@@ -295,6 +426,39 @@ export default function ContasPagarClient({
                       </div>
                     )}
                   </td>
+                  {/* OBS. Duas frases de autores diferentes podem conviver
+                      aqui: a da conta (escrita por quem paga) e a da entrada
+                      (escrita por quem recebeu a mercadoria). A segunda vem
+                      marcada, para ninguém achar que digitou. */}
+                  <td className="px-3 py-3 max-w-[14rem]">
+                    {editandoObs === c.id ? (
+                      <input
+                        autoFocus
+                        value={rascunhoObs}
+                        disabled={salvandoObs}
+                        onChange={e => setRascunhoObs(e.target.value)}
+                        onBlur={() => void salvarObs(c.id)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); void salvarObs(c.id) }
+                          if (e.key === 'Escape') setEditandoObs(null)
+                        }}
+                        placeholder="observação..."
+                        className="w-full border border-blue-400 rounded px-1.5 py-1 text-xs focus:outline-none" />
+                    ) : (
+                      <div onClick={() => abrirObs(c)}
+                        title={c.observacoes ?? 'Clique para escrever uma observação'}
+                        className="cursor-text min-h-[1.25rem]">
+                        {c.observacoes
+                          ? <p className="text-xs text-gray-700 truncate">{c.observacoes}</p>
+                          : <p className="text-xs text-gray-300 opacity-0 group-hover:opacity-100">escrever…</p>}
+                        {c.obsDaEntrada && (
+                          <p className="text-[11px] text-gray-500 truncate" title={`Da entrada: ${c.obsDaEntrada}`}>
+                            <span className="text-gray-400">da entrada:</span> {c.obsDaEntrada}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-3">
                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       {c.status !== 'pago' && c.status !== 'cancelado' && (
@@ -311,15 +475,15 @@ export default function ContasPagarClient({
               )
             })}
             {filtradas.length === 0 && (
-              <tr><td colSpan={9} className="py-12 text-center text-gray-400">Nenhuma conta encontrada.</td></tr>
+              <tr><td colSpan={11} className="py-12 text-center text-gray-400">Nenhuma conta encontrada.</td></tr>
             )}
           </tbody>
           {filtradas.length > 0 && (
             <tfoot>
               <tr className="bg-gray-50 border-t border-gray-200">
-                <td colSpan={5} className="px-4 py-3 text-xs text-gray-500">{filtradas.length} conta(s)</td>
+                <td colSpan={6} className="px-4 py-3 text-xs text-gray-500">{filtradas.length} conta(s)</td>
                 <td className="px-3 py-3 text-right text-sm font-bold text-gray-900">{fmt(totalFiltrado)}</td>
-                <td colSpan={3}></td>
+                <td colSpan={4}></td>
               </tr>
             </tfoot>
           )}
