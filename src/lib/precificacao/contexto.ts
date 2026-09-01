@@ -332,9 +332,28 @@ export function criarResolvedor(sb: ClienteSupabase, empresaId: string, agora: D
 
     const emb = embalagemDoAnuncio(anuncio?.dados_brutos, produto ?? undefined)
     if (!emb) {
+      // O QUE ACONTECE DE VERDADE quando caímos aqui, que é diferente do que
+      // este aviso dizia até 01/09/2026 ("frete pelo custo médio configurado"):
+      // o cálculo passa a usar `cfg.freteModo`, e nos dois canais de ML deste
+      // sistema esse modo é `gratis_acima`. Abaixo do limite ele devolve ZERO,
+      // não o custo médio.
+      //
+      // E o zero é sabidamente falso. A medição de 29/08/2026 — a mesma que
+      // fez `mlFrete.ts` sondar preços abaixo de R$ 79 — mostrou o vendedor
+      // pagando R$ 6,95 na faixa de R$ 0 a R$ 49,99. A premissa "abaixo do
+      // limite quem paga é o comprador" já foi derrubada com número.
+      //
+      // Não dá para inventar o frete deste item sem as medidas dele. Dá para
+      // parar de chamar de "custo médio" o que é zero.
+      const zeraAbaixoDoLimite = cfg.freteModo === 'gratis_acima'
       return {
         faixas: null, origem: 'api_ml_sem_medidas',
-        aviso: 'Sem peso/medidas no anúncio nem no cadastro — frete pelo custo médio configurado.',
+        aviso: zeraAbaixoDoLimite
+          ? 'Sem peso/medidas no anúncio nem no cadastro: abaixo de '
+            + `R$ ${(cfg.freteLimiteGratis ?? 0).toFixed(2).replace('.', ',')} o cálculo usa frete ZERO. `
+            + 'Medições reais do Mercado Livre mostram frete cobrado do vendedor também abaixo desse '
+            + 'limite — cadastre peso e dimensões do produto para o frete entrar na conta.'
+          : 'Sem peso/medidas no anúncio nem no cadastro — frete pelo modo configurado no canal, não medido.',
       }
     }
 
@@ -462,8 +481,11 @@ export function descreverOrigem(ctx: ContextoPrecificacao): string {
     config: 'frete conforme configurado',
     api_ml: 'frete medido no Mercado Livre',
     api_ml_cache: 'frete medido no Mercado Livre (cache)',
-    api_ml_sem_medidas: 'frete pelo custo médio (sem medidas)',
-    api_ml_indisponivel: 'frete pelo custo médio (consulta ao ML falhou)',
+    // "custo médio" era otimista: com `gratis_acima` abaixo do limite o valor
+    // usado é zero. O rótulo diz o que é — não medido — em vez de nomear um
+    // número que pode não ter entrado na conta.
+    api_ml_sem_medidas: 'frete NÃO medido (produto sem peso/dimensões)',
+    api_ml_indisponivel: 'frete NÃO medido (consulta ao ML falhou)',
   }
   const custo: Record<OrigemCusto, string> = {
     produto: 'custo do cadastro',

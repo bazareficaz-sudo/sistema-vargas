@@ -1044,11 +1044,44 @@ export default function RascunhoEditorClient({
                   ) : (
                     precificacao.canais.map((canal: any) => (
                       <div key={canal.canalId}>
-                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
                           {canal.canalNome}
                         </p>
+
+                        {/* DE ONDE SAIU CADA NÚMERO deste canal. Um frete
+                            suposto não pode ter a mesma cara de um medido —
+                            é a regra que este módulo aprendeu caro. */}
+                        {canal.economia && (
+                          <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                              canal.economia.comissaoMedida
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                              {canal.economia.comissaoMedida ? '🔵 comissão medida' : '⚠ comissão suposta'}
+                            </span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                              canal.economia.freteMedido
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                              {canal.economia.freteMedido ? '🔵 frete medido' : '⚠ frete NÃO medido'}
+                            </span>
+                          </div>
+                        )}
+
+                        {canal.economia?.avisos?.length > 0 && (
+                          <div className="mb-2 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200">
+                            {canal.economia.avisos.map((a: string, i: number) => (
+                              <p key={i} className="text-[11px] text-amber-800">{a}</p>
+                            ))}
+                          </div>
+                        )}
+
                         {canal.regras.length === 0 ? (
-                          <p className="text-xs text-slate-400 mb-3">Sem regra ativa neste canal.</p>
+                          <p className="text-xs text-slate-400 mb-3">
+                            Sem regra ativa neste canal.{' '}
+                            <a href={`/dashboard/marketplaces/${canal.canalId}/regras`}
+                              className="text-blue-600 hover:underline">cadastrar regra</a>
+                          </p>
                         ) : (
                           <div className="space-y-2 mb-4">
                             {canal.regras.map((r: any) => (
@@ -1069,12 +1102,33 @@ export default function RascunhoEditorClient({
                                     )}
                                   </div>
                                   {r.aplicavel ? (
-                                    <p className="text-[11px] text-slate-500 mt-0.5">
-                                      {r.preco != null ? <>preço {brl(r.preco)}</> : 'sem preço'}
-                                      {r.markup != null && <> · markup {r.markup.toFixed(1)}%</>}
-                                      {r.estoque != null && <> · estoque {r.estoque}</>}
-                                      {r.depositoNome && <> · depósito {r.depositoNome}</>}
-                                    </p>
+                                    <>
+                                      <p className="text-[11px] text-slate-500 mt-0.5">
+                                        {r.preco != null ? <>preço {brl(r.preco)}</> : 'sem preço'}
+                                        {r.margemLiquida != null && (
+                                          <> · <span className={r.margemLiquida < 0 ? 'text-red-700 font-semibold' : ''}>
+                                            margem líquida {r.margemLiquida.toFixed(1)}%
+                                          </span></>
+                                        )}
+                                        {r.lucroUnitario != null && <> ({brl(r.lucroUnitario)}/un)</>}
+                                        {r.estoque != null && <> · estoque {r.estoque}</>}
+                                        {r.depositoNome && <> · depósito {r.depositoNome}</>}
+                                      </p>
+                                      {/* A DECOMPOSIÇÃO. Sem ela "margem 12%"
+                                          é um número para acreditar; com ela é
+                                          um número para conferir. */}
+                                      <p className="text-[10px] text-slate-400 mt-0.5">
+                                        {r.comissao != null && <>comissão {brl(r.comissao)}</>}
+                                        {r.frete != null && (
+                                          <> · frete {brl(r.frete)}
+                                            {!canal.economia?.freteMedido && r.frete === 0 && (
+                                              <span className="text-amber-700 font-semibold"> (suposto)</span>
+                                            )}
+                                          </>
+                                        )}
+                                        {r.markup != null && <> · markup {r.markup.toFixed(1)}%</>}
+                                      </p>
+                                    </>
                                   ) : (
                                     <p className="text-[11px] text-amber-700 mt-0.5">{r.motivo}</p>
                                   )}
@@ -1095,9 +1149,9 @@ export default function RascunhoEditorClient({
                   )}
 
                   <p className="text-[11px] text-slate-400">
-                    O markup mostrado é sobre o custo. Regras de margem líquida da Shopee já
-                    descontam comissão, taxa e imposto dentro do preço calculado — nesse caso o
-                    markup aqui é maior que a margem que sobra, e é assim mesmo.
+                    A margem líquida é o que sobra depois de comissão, frete, imposto e embalagem —
+                    calculada com a configuração real de cada canal, não com a de outro. O markup é
+                    sobre o custo e por isso é sempre maior que a margem.
                   </p>
                   <p className="text-[11px] text-slate-400">
                     Clicar em &quot;usar&quot; só preenche o campo de preço na aba Conteúdo. Nada é
