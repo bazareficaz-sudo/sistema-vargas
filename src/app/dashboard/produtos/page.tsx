@@ -4,6 +4,7 @@ import { aplicarBuscaPorTermos } from '@/lib/busca/termos'
 import ProdutosClient from '@/components/produtos/ProdutosClient'
 import type { ContagemCanais } from '@/components/marketplaces/SeloCanais'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { urlDoProdutoNaVitrine } from '@/lib/commerce/urlProduto'
 
 const POR_PAGINA = 50
 
@@ -44,12 +45,22 @@ export default async function ProdutosPage({
     supabase.from('marcas').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     // A empresa tem loja online? É o que decide se a linha ganha o botão de
     // publicar. Sem loja, o botão não apareceria para lugar nenhum.
-    supabase.from('loja_config').select('id').eq('empresa_id', empresaId).maybeSingle(),
+    //
+    // O domínio vem junto porque o selo LO leva para a vitrine, e quem sabe
+    // montar esse endereço é o servidor: domínio próprio quando existe,
+    // subdomínio na plataforma quando não.
+    supabase.from('loja_config').select('id, subdominio, dominio_proprio').eq('empresa_id', empresaId).maybeSingle(),
   ])
   const categoriasTodas = categoriasRows ?? []
   const categoriasRaiz = categoriasTodas.filter(c => !c.pai_id)
   const marcasTodas = marcasRows ?? []
   const temLoja = !!lojaRow?.id
+
+  // O endereço da vitrine sai de `urlDoProdutoNaVitrine` — as regras (domínio
+  // próprio vence subdomínio, sem slug não há link) estão lá com teste.
+  const enderecoDaLoja = lojaRow
+    ? { dominioProprio: lojaRow.dominio_proprio, subdominio: lojaRow.subdominio }
+    : null
 
   // Ids-com-imagem — só busca quando o filtro de imagem está ativo.
   let idsComImagem: string[] | null = null
@@ -181,12 +192,12 @@ export default async function ProdutosPage({
   if (produtoIds.length > 0) {
     const { data: naLoja } = await supabase
       .from('loja_produtos')
-      .select('produto_id, status')
+      .select('produto_id, status, slug')
       .eq('empresa_id', empresaId)
       .in('produto_id', produtoIds)
       .in('status', ['publicado', 'pausado', 'rascunho'])
 
-    for (const l of (naLoja ?? []) as { produto_id: string; status: string }[]) {
+    for (const l of (naLoja ?? []) as { produto_id: string; status: string; slug: string | null }[]) {
       const porProduto = anunciosMap[l.produto_id] ??= {}
       porProduto.loja = {
         total: 1,
@@ -194,6 +205,12 @@ export default async function ProdutosPage({
         // quando o produto está pausado ou ainda em rascunho.
         ativos: l.status === 'publicado' ? 1 : 0,
         estado: l.status as 'publicado' | 'pausado' | 'rascunho',
+        // SÓ PUBLICADO GANHA LINK, e a razão é a view: `loja_vitrine_produtos`
+        // contém apenas `publicado`, então o endereço de um pausado ou de um
+        // rascunho responde 404. Um selo que parece clicável e leva a "produto
+        // não encontrado" é pior que um selo que não é clicável — o operador
+        // acharia que a vitrine quebrou.
+        url: l.status === 'publicado' ? urlDoProdutoNaVitrine(enderecoDaLoja, l.slug) : undefined,
       }
     }
   }

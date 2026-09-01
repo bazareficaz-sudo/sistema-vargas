@@ -16,6 +16,20 @@ export type ContagemCanais = Record<string, {
    * está publicado ou não —, então o estado substitui a contagem.
    */
   estado?: 'publicado' | 'pausado' | 'rascunho'
+  /**
+   * Endereço público do produto na vitrine. Só a Loja Online preenche, e só
+   * quando a página EXISTE de verdade.
+   *
+   * Quem monta é o servidor (`dashboard/produtos/page.tsx`), que tem o
+   * subdomínio da loja e o slug do produto. Montar aqui exigiria o domínio
+   * raiz no cliente e repetiria a regra de domínio próprio × subdomínio em
+   * mais um lugar.
+   *
+   * Vem ausente para pausado e rascunho: a view da vitrine só contém
+   * `publicado`, então esses endereços dariam 404. Um link que leva a lugar
+   * nenhum é pior que nenhum link — ele parece que funciona.
+   */
+  url?: string
 }>
 
 const CANAL: Record<string, { sigla: string; nome: string; cls: string }> = {
@@ -57,15 +71,42 @@ export default function SeloCanais({ contagem, onAbrir }: {
           // A loja não tem contagem: um produto está publicado ou não.
           // Mostrar "1" ali seria um número sem significado.
           ? `${info.nome}: ${ESTADO_LOJA[c.estado ?? ''] ?? 'publicado'}`
+            + (c.url ? '. Clique para abrir na vitrine.' : '')
           : `${info.nome}: ${c.total} anúncio(s)`
             + (pausados > 0 ? ` — ${c.ativos} ativo(s), ${pausados} pausado(s)/rascunho` : '')
             + (onAbrir ? '. Clique para ver e pausar.' : '')
+
+        const classe = `relative inline-flex items-center justify-center w-6 h-5 rounded border text-[10px] font-bold leading-none
+          ${info.cls} ${pausados === c.total ? 'opacity-50' : ''}`
+
+        // A LOJA ABRE A VITRINE; os marketplaces abrem a lista de anúncios.
+        //
+        // São ações diferentes e por isso elementos diferentes: a vitrine é
+        // uma página pública noutro domínio, então é uma âncora de verdade —
+        // abre em nova aba, aceita clique do meio, "copiar endereço" e
+        // aparece na barra de status antes do clique. Um `onClick` num
+        // <span> não faz nada disso.
+        if (ehLoja && c.url) {
+          return (
+            <a key={plataforma}
+              href={c.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              // A linha do produto abre a edição no clique. Sem parar aqui, o
+              // clique no selo abriria a vitrine E a edição ao mesmo tempo.
+              onClick={(e) => e.stopPropagation()}
+              title={titulo}
+              className={`${classe} cursor-pointer hover:brightness-95 hover:ring-1 hover:ring-indigo-400`}>
+              {info.sigla}
+            </a>
+          )
+        }
+
         return (
           <span key={plataforma}
             onClick={!ehLoja && onAbrir ? (e) => { e.stopPropagation(); onAbrir() } : undefined}
             title={titulo}
-            className={`relative inline-flex items-center justify-center w-6 h-5 rounded border text-[10px] font-bold leading-none
-              ${info.cls} ${pausados === c.total ? 'opacity-50' : ''} ${!ehLoja && onAbrir ? 'cursor-pointer hover:brightness-95' : ''}`}>
+            className={`${classe} ${!ehLoja && onAbrir ? 'cursor-pointer hover:brightness-95' : ''}`}>
             {info.sigla}
             {/* Contagem só faz sentido onde existe mais de um anúncio. */}
             {!ehLoja && (
