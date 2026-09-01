@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
-import { extrairItemId } from '@/lib/mercadolivre/item'
+import { classificarUrlML } from '@/lib/mercadolivre/item'
 import { lerAnuncioPorUrl, type CanalParaLeitura } from '@/lib/mercadolivre/lerPorUrl'
 
 // CAPTURAR UM RASCUNHO COLANDO O LINK.
@@ -54,17 +54,35 @@ export async function POST(req: Request) {
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 
-  // Só Mercado Livre por enquanto, e a mensagem diz isso em vez de falhar
-  // com um erro genérico depois de tentar. A Shopee não tem leitura de
-  // anúncio de terceiro pela API; fingir suporte aqui só produziria um erro
-  // confuso três passos adiante.
-  const idExterno = extrairItemId(url)
-  if (!idExterno) {
+  // TRES RESPOSTAS DIFERENTES, e a diferenca importa porque cada uma pede
+  // uma acao diferente de quem colou o link.
+  //
+  // A primeira versao dizia "o ML negou a leitura, reconecte a conta" para um
+  // link de catalogo — conselho errado para um problema que nao era de
+  // autorizacao. A pessoa iria reconectar e continuaria sem funcionar.
+  const alvo = classificarUrlML(url)
+
+  if (alvo.tipo === 'catalogo') {
     return NextResponse.json({
       ok: false,
-      erro: 'Não reconheci um anúncio do Mercado Livre neste link. Por enquanto a importação por link funciona só para o Mercado Livre — para outros marketplaces, use a extensão do Chrome.',
+      tipoLink: 'catalogo',
+      erro: 'Este link e da pagina de CATALOGO do Mercado Livre (/p/ ou /up/), que nao pertence a um '
+        + 'vendedor — nela varios vendedores disputam a caixa de compra, e o ganhador muda. '
+        + 'Abra o anuncio do vendedor especifico e cole aquele endereco: na pagina do catalogo, o '
+        + 'caminho e clicar no nome do vendedor ou em "outras opcoes de compra".',
     }, { status: 400 })
   }
+
+  if (alvo.tipo === 'nenhum') {
+    return NextResponse.json({
+      ok: false,
+      tipoLink: 'nenhum',
+      erro: 'Nao encontrei o codigo do anuncio no caminho deste link. Por enquanto a importacao por '
+        + 'link funciona so para o Mercado Livre — para outros marketplaces, use a extensao do Chrome.',
+    }, { status: 400 })
+  }
+
+  const idExterno = alvo.itemId
 
   // JÁ CAPTURADO? Devolve o existente em vez de criar duplicado — mesma regra
   // da extensão. Sem isto, colar o mesmo link duas vezes criaria dois

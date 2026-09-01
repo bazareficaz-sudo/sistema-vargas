@@ -34,14 +34,88 @@ export type AnuncioMercadoLivre = {
   condicao: 'new' | 'used' | null
 }
 
+/**
+ * O que um link do Mercado Livre aponta.
+ *
+ *   anuncio   /MLB-123456789-slug  — o anúncio de UM vendedor. É o único que
+ *             a API /items/ atende, e o único que dá para importar.
+ *   catalogo  /p/MLB123 ou /up/MLBU123 — a página de PRODUTO, onde vários
+ *             vendedores disputam a caixa de compra. Não pertence a ninguém,
+ *             e /items/ não a atende.
+ *   nenhum    não há id de anúncio no caminho.
+ */
+export type AlvoUrlML =
+  | { tipo: 'anuncio'; itemId: string }
+  | { tipo: 'catalogo'; catalogoId: string }
+  | { tipo: 'nenhum' }
+
+/**
+ * Classifica um link do Mercado Livre, olhando SÓ O CAMINHO.
+ *
+ * POR QUE SÓ O CAMINHO, e isto é a correção de um defeito real: a versão
+ * anterior fazia `url.match(/MLB-?(\d+)/i)` na URL inteira. Os links que o ML
+ * gera na busca carregam parâmetros de rastreio com id de item dentro:
+ *
+ *   .../up/MLBU3472391724#polycard_client=search-desktop&wid=MLB5099887766
+ *                                                         ^^^^^^^^^^^^^^^
+ *
+ * O `wid` era lido como se fosse o anúncio. No caso reportado o ML negou a
+ * leitura e o operador viu uma mensagem pedindo para reconectar a conta — o
+ * conselho errado, para um problema que não era de autorização.
+ *
+ * O caso PIOR é o que não deu erro: se aquele id de rastreio fosse legível,
+ * o sistema teria importado um anúncio DIFERENTE do que a pessoa abriu, sem
+ * nada indicando a troca.
+ *
+ * `MLBU` é distinguido de `MLB` de propósito: `MLB-?\d` não casa com `MLBU`
+ * (a letra U não é dígito nem hífen), então a versão antiga simplesmente não
+ * via a página de catálogo — e ia procurar id noutro lugar da URL.
+ */
+export function classificarUrlML(url: string): AlvoUrlML {
+  let caminho: string
+  try {
+    caminho = new URL(url).pathname
+  } catch {
+    // Não é URL: pode ser o id colado sozinho.
+    caminho = String(url ?? '')
+  }
+
+  // Catálogo primeiro: /up/MLBU... e /p/MLB... são páginas de produto.
+  const catalogo = caminho.match(/\/(?:p|up)\/(MLB[A-Z]?\d+)/i)
+  if (catalogo) return { tipo: 'catalogo', catalogoId: catalogo[1].toUpperCase() }
+
+  // Anúncio: MLB-123456789 (com hífen, formato de link) ou MLB123456789.
+  // `(?![A-Z])` impede que MLBU3472391724 seja lido como MLB + "U347..." —
+  // sem isso, um catálogo fora do padrão /up/ viraria um id inventado.
+  const anuncio = caminho.match(/MLB-?(?![A-Z])(\d+)/i)
+  if (anuncio) return { tipo: 'anuncio', itemId: `MLB${anuncio[1]}` }
+
+  return { tipo: 'nenhum' }
+}
+
+/**
+ * O id do anúncio, quando o link for de um anúncio.
+ *
+ * Devolve `null` para página de catálogo — que é diferente de "não achei id".
+ * Quem precisa distinguir os dois usa `classificarUrlML`.
+ */
 export function extrairItemId(url: string): string | null {
-  const match = url.match(/MLB-?(\d+)/i)
-  return match ? `MLB${match[1]}` : null
+  const alvo = classificarUrlML(url)
+  return alvo.tipo === 'anuncio' ? alvo.itemId : null
 }
 
 export async function buscarAnuncioPorUrl(url: string, accessToken: string): Promise<AnuncioMercadoLivre> {
-  const itemId = extrairItemId(url)
-  if (!itemId) throw new Error('Não foi possível identificar o anúncio nessa URL. Cole o link completo da página do produto no Mercado Livre.')
+  const alvo = classificarUrlML(url)
+  if (alvo.tipo === 'catalogo') {
+    throw new Error(
+      'Este link é da página de CATÁLOGO do Mercado Livre, que não pertence a um vendedor — nela vários '
+      + 'vendedores disputam a caixa de compra. Abra o anúncio do vendedor específico (o link fica em '
+      + '"outras opções de compra" ou no nome do vendedor) e cole aquele endereço.')
+  }
+  if (alvo.tipo === 'nenhum') {
+    throw new Error('Não encontrei o código do anúncio neste link. Cole o endereço da página do anúncio no Mercado Livre.')
+  }
+  const itemId = alvo.itemId
 
   let item: any
   try {
