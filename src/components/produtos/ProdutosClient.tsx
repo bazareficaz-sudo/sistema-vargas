@@ -108,7 +108,7 @@ const ABAS = [
 ]
 
 export default function ProdutosClient({
-  produtos: inicial, imagensMap = {}, total, totalTodos, totalSimples, totalKits, totalEmPromocao,
+  produtos: inicial, imagensMap = {}, total, totalAtivos, totalInativos, totalTodos, totalSimples, totalKits, totalEmPromocao,
   pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, apenasAtivos: apenasAtivosInicial, empresaId,
   anunciosMap, abrirProdutoId, abrirProdutoAba,
   categoriasRaiz, categoriasTodas, marcas,
@@ -486,8 +486,11 @@ export default function ProdutosClient({
           botões, espremiam tudo até o texto quebrar em duas linhas. */}
       {/* No celular título e botões empilham: lado a lado, "Importar de URL"
           e "Novo produto" espremiam o título até quebrar a palavra. */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-5">
-        <h1 className="text-gray-900 text-xl font-semibold">Produtos</h1>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4 mb-5">
+        <div>
+          <h1 className="text-gray-950 text-2xl font-semibold tracking-tight">Produtos</h1>
+          <p className="mt-1 text-sm text-gray-500">Organize o catálogo, estoque e presença nos canais de venda.</p>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => setImportandoUrl(true)} className={botao('secundario')}>
             Importar de URL
@@ -508,7 +511,7 @@ export default function ProdutosClient({
           que não hierarquiza nada e polui tudo. Aqui a cor só marca o que é
           destrutivo. */}
       {selecionados.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 bg-blue-50/60 border border-blue-200 rounded-xl px-4 py-3 mb-4">
+        <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 bg-white border border-blue-300 rounded-xl px-4 py-3 mb-4 shadow-lg shadow-blue-100/60">
           <span className="text-sm font-medium text-blue-900 mr-1">
             {selecionados.size} {selecionados.size === 1 ? 'produto selecionado' : 'produtos selecionados'}
           </span>
@@ -563,8 +566,9 @@ export default function ProdutosClient({
       )}
 
       {/* Barra de busca e filtros */}
-      <form onSubmit={buscar} className="flex items-center gap-2 mb-0">
-        <div className="relative flex-1 max-w-sm">
+      <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <form onSubmit={buscar} className="flex flex-col lg:flex-row lg:items-center gap-2 p-3 sm:p-4">
+        <div className="relative flex-1 min-w-0">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -578,7 +582,7 @@ export default function ProdutosClient({
         <button type="submit" className={botao('secundario')}>
           Buscar
         </button>
-        <div className="flex items-center gap-1 ml-2">
+        <div className="flex items-center gap-1.5 flex-wrap lg:ml-2">
           <button
             type="button"
             onClick={() => {
@@ -640,7 +644,7 @@ export default function ProdutosClient({
 
       {/* Painel de filtros avançados */}
       {mostrarFiltros && (
-        <div className="flex flex-wrap items-end gap-3 mt-3 p-3 border border-gray-200 rounded-xl bg-white">
+        <div className="flex flex-wrap items-end gap-3 border-t border-gray-100 p-3 sm:p-4 bg-gray-50/70">
           <div>
             <label className="block text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">Marca</label>
             <select
@@ -750,8 +754,26 @@ export default function ProdutosClient({
         </div>
       )}
 
+      <div className="grid grid-cols-2 lg:grid-cols-4 border-t border-gray-100">
+        {[
+          { label: 'No catálogo', valor: totalTodos ?? total, detalhe: `${totalAtivos.toLocaleString('pt-BR')} ativos` },
+          { label: 'Nesta seleção', valor: total, detalhe: filtrosAtivos > 0 || qInicial ? 'com os filtros atuais' : 'produtos encontrados' },
+          { label: 'Em promoção', valor: totalEmPromocao, detalhe: 'com oferta ativa' },
+          { label: 'Inativos', valor: totalInativos, detalhe: 'fora da operação' },
+        ].map((item, index) => (
+          <div key={item.label} className={`px-4 py-3 ${index % 2 ? 'border-l' : ''} lg:border-l first:border-l-0 border-gray-100`}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">{item.label}</p>
+            <div className="mt-0.5 flex items-baseline gap-2">
+              <span className="text-lg font-semibold tabular-nums text-gray-900">{item.valor.toLocaleString('pt-BR')}</span>
+              <span className="hidden xl:inline text-xs text-gray-400">{item.detalhe}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      </div>
+
       {/* Abas */}
-      <div className="flex items-end gap-6 border-b border-gray-200 mt-4 mb-0">
+      <div className="flex items-end gap-5 overflow-x-auto border-b border-gray-200 mt-5 mb-0">
         {ABAS.map(a => (
           <button
             key={a.key}
@@ -776,7 +798,7 @@ export default function ProdutosClient({
           o cabeçalho saem de vista junto. Com ele, só a tabela desliza.
           `min-w` evita que as colunas se esmaguem uma sobre a outra. */}
       <div className="border border-gray-200 rounded-b-xl bg-white overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px]">
+        <table className="w-full text-sm min-w-[980px]">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50">
               <th className="w-10 px-4 py-3">
@@ -793,7 +815,7 @@ export default function ProdutosClient({
               <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Markup</th>
               <th className="text-left px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Marca</th>
               <th className="text-right px-3 py-3 font-medium text-gray-600 text-xs uppercase tracking-wide">Estoque</th>
-              <th className="w-28 px-2 py-3"></th>
+              <th className="w-48 px-3 py-3 text-right font-medium text-gray-600 text-xs uppercase tracking-wide">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -803,8 +825,8 @@ export default function ProdutosClient({
                   <input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleOne(p.id)}
                     className="w-4 h-4 accent-blue-600" />
                 </td>
-                <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2.5 flex-wrap">
+                <td className="px-3 py-2.5 min-w-[380px]">
+                  <div className="flex items-start gap-2.5">
                     {imagensMap[p.id] ? (
                       <img src={imagensMap[p.id]} alt={p.nome}
                         onClick={() => abrirProduto(p)}
@@ -814,6 +836,7 @@ export default function ProdutosClient({
                         📷
                       </div>
                     )}
+                    <div className="min-w-0 flex-1">
                     {nomeEditando === p.id ? (
                       <input
                         autoFocus
@@ -827,7 +850,7 @@ export default function ProdutosClient({
                         className="text-sm text-gray-900 font-medium border border-blue-400 rounded-md px-1.5 py-0.5 focus:outline-none flex-1 min-w-[260px]"
                       />
                     ) : (
-                      <>
+                      <div className="flex items-center gap-1.5">
                         <button onClick={() => iniciarEdicaoNome(p)} title="Clique para editar o nome"
                           className="text-left text-gray-900 hover:text-blue-600 font-medium block transition-colors break-words">
                           {p.nome}
@@ -844,10 +867,12 @@ export default function ProdutosClient({
                         {/* Marketplaces e Loja Online no mesmo selo — a
                             pergunta que ele responde é "onde este produto
                             está à venda?", e a loja é mais um canal. */}
-                        <SeloCanais contagem={anunciosMap?.[p.id]}
-                          onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }} />
-                      </>
+                      </div>
                     )}
+                    <div className="mt-1.5 flex min-h-5 flex-wrap items-center gap-1.5">
+                      {p.categoria && <span className="mr-1 text-[11px] text-gray-400">{p.categoria}</span>}
+                      <SeloCanais contagem={anunciosMap?.[p.id]}
+                        onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }} />
                     {p.promocao_ativa && (
                       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-orange-100 text-orange-600 border border-orange-200 shrink-0">
                         🏷 PROMOÇÃO
@@ -863,9 +888,10 @@ export default function ProdutosClient({
                         {t}
                       </span>
                     ))}
+                    </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {p.categoria && <span className="text-xs text-gray-400">{p.categoria}</span>}
+                  <div className="ml-11 mt-1 flex items-center gap-2">
                     {p.promocao_ativa && p.preco_promocional && (
                       <span className="text-xs text-orange-500 font-medium">
                         {p.preco_promocional.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -914,19 +940,19 @@ export default function ProdutosClient({
                     {p.estoque ?? 0}
                   </button>
                 </td>
-                <td className="px-2 py-2.5">
-                  <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-all">
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center justify-end gap-1.5">
                     <button
                       onClick={() => abrirProduto(p)}
-                      className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 shadow-sm hover:border-blue-300 hover:text-blue-700"
                       title="Editar"
                     >
-                      ✎
+                      <span aria-hidden="true">✎</span> Editar
                     </button>
                     {p.tipo !== 'kit' && (
                       <button
                         onClick={() => setDuplicando(p)}
-                        className="text-gray-400 hover:text-gray-600 text-sm leading-none"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700"
                         title="Duplicar produto"
                       >
                         ⧉
@@ -935,7 +961,7 @@ export default function ProdutosClient({
                     {p.tipo !== 'kit' && (
                       <button
                         onClick={() => setCriandoKit(p)}
-                        className="text-gray-400 hover:text-gray-600 text-sm leading-none"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700"
                         title="Criar kit a partir deste produto"
                       >
                         📦
@@ -952,8 +978,8 @@ export default function ProdutosClient({
                         <button
                           onClick={() => acaoLoja(p, publicado ? 'atualizar' : 'publicar')}
                           disabled={ocupado}
-                          className={`text-sm leading-none disabled:opacity-40 ${
-                            publicado ? 'text-indigo-500 hover:text-indigo-700' : 'text-gray-400 hover:text-indigo-600'}`}
+                          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-sm leading-none disabled:opacity-40 ${
+                            publicado ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'text-gray-400 hover:bg-indigo-50 hover:text-indigo-600'}`}
                           title={publicado
                             ? 'Atualizar na Loja Online — relê foto, preço e estoque do cadastro agora, sem esperar a rotina'
                             : naLoja

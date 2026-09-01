@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirSystemAdmin } from '@/lib/auth/saasAdmin'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { cifrarSegredo } from '@/lib/ia/segredos'
 
 const modelos = new Set(['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'])
 const provedores = new Set(['herdar', 'automatico', 'anthropic', 'openai', 'desativado'])
@@ -10,6 +12,24 @@ export async function POST(request: Request) {
   const acesso = await exigirSystemAdmin(supabase)
   if (!acesso.ok) return NextResponse.json({ ok: false, erro: acesso.erro }, { status: acesso.status })
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
+  if (body?.escopo === 'provedor') {
+    const provedor = body.provedor === 'anthropic' || body.provedor === 'openai' ? body.provedor : null
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
+    if (!provedor || apiKey.length < 20 || apiKey.length > 500) {
+      return NextResponse.json({ ok: false, erro: 'Informe uma chave de API válida.' }, { status: 400 })
+    }
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return NextResponse.json({ ok: false, erro: 'O cofre ainda não está habilitado neste ambiente (SUPABASE_SERVICE_ROLE_KEY ausente).' }, { status: 503 })
+    }
+    const { error } = await createAdminClient().from('ia_provedor_segredos').upsert({
+      provedor,
+      segredo_cifrado: cifrarSegredo(apiKey),
+      atualizado_por: acesso.adminId,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'provedor' })
+    if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true })
+  }
   const escopo = body?.escopo === 'global' ? 'global' : 'empresa'
   if (escopo === 'global') {
     const provedorGlobal = typeof body?.provedor === 'string' ? body.provedor : ''

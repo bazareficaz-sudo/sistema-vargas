@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { obterSegredoProvedor } from '@/lib/ia/segredos'
 
 export type ProvedorIA = 'herdar' | 'automatico' | 'anthropic' | 'openai' | 'desativado'
 
@@ -92,9 +93,10 @@ async function dentroDoLimite(supabase: SupabaseClient, empresaId: string, confi
 }
 
 async function executarAnthropic(prompt: string, config: ConfigIA, signal: AbortSignal): Promise<ExecucaoJSON> {
-  if (!process.env.ANTHROPIC_API_KEY) throw new Error('chave_anthropic_ausente')
+  const apiKey = await obterSegredoProvedor('anthropic')
+  if (!apiKey) throw new Error('chave_anthropic_ausente')
   const modelo = config.modelo || 'claude-haiku-4-5-20251001'
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const client = new Anthropic({ apiKey })
   const resposta = await client.messages.create({
     model: modelo,
     max_tokens: config.max_tokens_resposta,
@@ -108,11 +110,12 @@ async function executarAnthropic(prompt: string, config: ConfigIA, signal: Abort
 }
 
 async function executarOpenAI(prompt: string, config: ConfigIA, signal: AbortSignal): Promise<ExecucaoJSON> {
-  if (!process.env.OPENAI_API_KEY) throw new Error('chave_openai_ausente')
+  const apiKey = await obterSegredoProvedor('openai')
+  if (!apiKey) throw new Error('chave_openai_ausente')
   const modelo = config.modelo || 'gpt-5.6-luna'
   const resposta = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST', signal,
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: modelo, input: prompt, max_output_tokens: config.max_tokens_resposta, store: false }),
   })
   const data = await resposta.json() as RespostaOpenAI
