@@ -50,9 +50,36 @@ export default function ContasPagarClient({
   hojeIso: string
 }) {
   const router = useRouter()
+  // A LISTA PRECISA SEGUIR O SERVIDOR, e `useState(inicial)` não segue.
+  //
+  // Defeito reportado em 01/09/2026: com um fornecedor escolhido, clicar em
+  // "Vencidos" ou "Pagos" não mudava nada — a tabela continuava mostrando as
+  // contas a vencer. Os botões acertavam o destaque (leem `statusFiltro`
+  // direto da prop) e a tabela não.
+  //
+  // `useState(x)` usa `x` UMA vez, na primeira renderização. Trocar o status
+  // faz `router.push`, o servidor devolve outra lista, e o componente recebe
+  // a prop nova — mas não é remontado, então o estado guardava para sempre a
+  // primeira lista carregada (a aba "A vencer", que é o padrão).
+  //
+  // O estado local existe por um motivo real: pagar e cancelar atualizam a
+  // linha na hora, sem esperar o servidor. Então não dá para simplesmente
+  // usar a prop. O que falta é RESSINCRONIZAR quando ela muda — o padrão que
+  // o React documenta para ajustar estado quando uma prop muda, feito durante
+  // a renderização e não num efeito (efeito renderizaria a lista velha uma
+  // vez antes de corrigir, e o lint deste projeto proíbe setState em efeito).
   const [contas, setContas] = useState(inicial)
   const [q, setQ] = useState(qInicial)
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
+
+  const [baseDoServidor, setBaseDoServidor] = useState(inicial)
+  if (inicial !== baseDoServidor) {
+    setBaseDoServidor(inicial)
+    setContas(inicial)
+    // Marcação some junto: o que estava selecionado saiu da tela, e pagar em
+    // massa uma seleção invisível é exatamente o que não pode acontecer.
+    setSelecionadas(new Set())
+  }
   const [modalPgto, setModalPgto] = useState<Conta[] | null>(null)
   const [modalNova, setModalNova] = useState(false)
 
