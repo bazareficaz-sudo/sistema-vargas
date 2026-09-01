@@ -30,8 +30,15 @@ function item(p: Partial<ItemCampanha> = {}): ItemCampanha {
   return {
     campanhaId: 'camp-1', anuncioId: p.anuncioId !== undefined ? p.anuncioId : ANUNCIO_ID,
     itemIdExterno: p.itemIdExterno ?? '123', modelId: p.modelId ?? null,
+    // Default `participando`: todo teste que ja existia descreve campanha que
+    // VALE preco. Quem quiser convite pede explicitamente.
+    status: p.status ?? 'participando',
     precoBase: p.precoBase !== undefined ? p.precoBase : 74.90,
     precoCampanha: p.precoCampanha !== undefined ? p.precoCampanha : 59.90,
+    precoMinimoMarketplace: p.precoMinimoMarketplace ?? null,
+    precoSugeridoMarketplace: p.precoSugeridoMarketplace ?? null,
+    pctMarketplace: p.pctMarketplace ?? null,
+    pctVendedor: p.pctVendedor ?? null,
     limitePorCompra: null, estoquePromocao: null,
   }
 }
@@ -323,5 +330,70 @@ describe('normalização do espelho da Shopee', () => {
     )
     assert.equal(itens[0].precoBase, null)
     assert.equal(itens[0].precoCampanha, null)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CANDIDATE ≠ ACTIVE — Fase 4, seção 49.
+//
+// O Mercado Livre devolve campanhas ATIVAS cheias de itens apenas CONVIDADOS.
+// Medido em 30/08/2026:
+//
+//   LIGHTNING LGH-MLB1000 · status da campanha "started"
+//     └ MLB5708867606 · status do item "candidate" · price 18.31 · original 19.27
+//
+// A campanha está válida, a janela está aberta, o item tem preço no payload —
+// e mesmo assim aquele preço NÃO é o preço de venda do anúncio. É um convite.
+//
+// Antes da Fase 4 o modelo não tinha como saber a diferença: `itemDoAnuncio`
+// aceitava qualquer item com preço, e a vigência era decidida só no nível da
+// campanha. O primeiro sync de ML teria transformado convite em preço.
+describe('candidato não é preço — só oportunidade', () => {
+  test('item CANDIDATO numa campanha vigente NÃO altera o preço efetivo', () => {
+    const r = resolverPrecoEfetivo({
+      anuncio: { id: ANUNCIO_ID, preco_venda: 74.90 },
+      agora: AGORA,
+      campanhas: comCampanha({}, [item({ status: 'candidato', precoCampanha: 18.31 })]),
+    })
+    assert.equal(r.efetivo, 74.90, 'o convite não pode virar preço de venda')
+    assert.equal(r.origemEfetivo, 'base')
+    assert.equal(r.campanha, null)
+  })
+
+  test('o MESMO item, participando, altera', () => {
+    // O par com o teste acima é o ponto: muda só o status, e o resultado
+    // inverte. Se alguém afrouxar o filtro um dia, este par quebra.
+    const r = resolverPrecoEfetivo({
+      anuncio: { id: ANUNCIO_ID, preco_venda: 74.90 },
+      agora: AGORA,
+      campanhas: comCampanha({}, [item({ status: 'participando', precoCampanha: 18.31 })]),
+    })
+    assert.equal(r.efetivo, 18.31)
+    assert.equal(r.origemEfetivo, 'campanha')
+  })
+
+  test('status DESCONHECIDO não ganha o benefício da dúvida', () => {
+    // Um status novo do marketplace não pode, por omissão, ganhar o direito de
+    // mexer no preço de venda. Mesma regra do CEST e do NCM: não conseguir
+    // interpretar não é o mesmo que estar tudo certo.
+    const r = resolverPrecoEfetivo({
+      anuncio: { id: ANUNCIO_ID, preco_venda: 74.90 },
+      agora: AGORA,
+      campanhas: comCampanha({}, [item({ status: 'desconhecido', precoCampanha: 18.31 })]),
+    })
+    assert.equal(r.efetivo, 74.90)
+  })
+
+  test('convite não derruba a promoção LOCAL que estava valendo', () => {
+    // A precedência da Fase 2 é campanha > promoção local > espelho. Um
+    // convite não é campanha vigente, então a promoção local continua mandando
+    // — e não pode ser derrubada por uma oportunidade que ninguém aceitou.
+    const r = resolverPrecoEfetivo({
+      anuncio: { id: ANUNCIO_ID, preco_venda: 74.90, preco_promocional: 64.90, promo_fim: DAQUI_A_CINCO_DIAS },
+      agora: AGORA,
+      campanhas: comCampanha({}, [item({ status: 'candidato', precoCampanha: 18.31 })]),
+    })
+    assert.equal(r.efetivo, 64.90)
+    assert.equal(r.origemEfetivo, 'promocional_local')
   })
 })

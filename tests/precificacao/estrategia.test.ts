@@ -138,7 +138,9 @@ describe('estratégia — estado e bandeiras', () => {
         nome: 'Setembro', tipo: null, status: 'ativa',
         inicio: SEMANA_PASSADA, fim: DAQUI_A_UM_MES, sincronizadoEm: null, dadosMarketplace: null,
       },
-      itens: [{ campanhaId: 'c1', anuncioId: 'a-1', itemIdExterno: '1', modelId: null, precoBase: 120, precoCampanha: 99.9, limitePorCompra: null, estoquePromocao: null }],
+      itens: [{ campanhaId: 'c1', anuncioId: 'a-1', itemIdExterno: '1', modelId: null, status: 'participando' as const,
+      precoMinimoMarketplace: null, precoSugeridoMarketplace: null,
+      pctMarketplace: null, pctVendedor: null, precoBase: 120, precoCampanha: 99.9, limitePorCompra: null, estoquePromocao: null }],
     }]
     const e = montarEstrategia({ economia: ECONOMIA, precos: precos(99.9, campanhas), regra: r, agora: AGORA })
     assert.equal(e.estado, 'em_promocao')
@@ -155,7 +157,9 @@ describe('estratégia — estado e bandeiras', () => {
         nome: 'Relâmpago', tipo: null, status: 'ativa',
         inicio: SEMANA_PASSADA, fim: DAQUI_A_DOIS_DIAS, sincronizadoEm: null, dadosMarketplace: null,
       },
-      itens: [{ campanhaId: 'c1', anuncioId: 'a-1', itemIdExterno: '1', modelId: null, precoBase: 120, precoCampanha: 99.9, limitePorCompra: null, estoquePromocao: null }],
+      itens: [{ campanhaId: 'c1', anuncioId: 'a-1', itemIdExterno: '1', modelId: null, status: 'participando' as const,
+      precoMinimoMarketplace: null, precoSugeridoMarketplace: null,
+      pctMarketplace: null, pctVendedor: null, precoBase: 120, precoCampanha: 99.9, limitePorCompra: null, estoquePromocao: null }],
     }]
     const e = montarEstrategia({ economia: ECONOMIA, precos: precos(99.9, campanhas), regra: r, agora: AGORA })
     assert.ok(e.flags.includes('promocao_terminando'))
@@ -191,7 +195,9 @@ describe('estratégia — estado e bandeiras', () => {
         nome: 'X', tipo: null, status: 'ativa', inicio: SEMANA_PASSADA, fim: DAQUI_A_UM_MES,
         sincronizadoEm: null, dadosMarketplace: null,
       },
-      itens: [{ campanhaId: 'c1', anuncioId: 'a-1', itemIdExterno: '1', modelId: null, precoBase: 120, precoCampanha: 99.9, limitePorCompra: null, estoquePromocao: null }],
+      itens: [{ campanhaId: 'c1', anuncioId: 'a-1', itemIdExterno: '1', modelId: null, status: 'participando' as const,
+      precoMinimoMarketplace: null, precoSugeridoMarketplace: null,
+      pctMarketplace: null, pctVendedor: null, precoBase: 120, precoCampanha: 99.9, limitePorCompra: null, estoquePromocao: null }],
     }]
     // Espelho em 111, que não é nem a base nem o preço da campanha.
     const e = montarEstrategia({ economia: ECONOMIA, precos: precos(111, campanhas), regra: r, agora: AGORA })

@@ -44,16 +44,65 @@ export type CampanhaCanonica = {
   dadosMarketplace: unknown
 }
 
+/**
+ * O que o item É dentro da campanha — que não é o mesmo que a campanha estar
+ * ativa.
+ *
+ *   participando  o preço da campanha vale AGORA para este anúncio
+ *   candidato     a plataforma CONVIDOU; nada mudou no preço
+ *   encerrado     participou e saiu, ou a campanha acabou para ele
+ *   desconhecido  a plataforma mandou um status que ainda não foi traduzido
+ *
+ * A distinção não é acadêmica. Sondagem real de 30/08/2026:
+ *
+ *   LIGHTNING LGH-MLB1000 · status da campanha "started"
+ *     └ MLB5708867606 · status do item "candidate" · price 18.31
+ *
+ * Uma campanha ativa cheia de convidados. Sem esta distinção, o preço de
+ * campanha de um item apenas convidado passaria a valer como preço de venda
+ * do anúncio — convite viraria preço.
+ */
+export type StatusItemCampanha = 'participando' | 'candidato' | 'encerrado' | 'desconhecido'
+
+/**
+ * Traduz o status cru da plataforma para o canônico.
+ *
+ * O que não se reconhece vira `desconhecido`, NUNCA `participando`: um status
+ * novo do marketplace não pode, por omissão, ganhar o direito de mexer no
+ * preço de venda. É a mesma regra do CEST e do NCM — não conseguir interpretar
+ * não é o mesmo que estar tudo certo.
+ */
+export function statusCanonicoDoItem(externo: string | null | undefined): StatusItemCampanha {
+  const s = String(externo ?? '').trim().toLowerCase()
+  if (s === '') return 'desconhecido'
+  // Mercado Livre: "candidate" é convite. Shopee não usa status por item — o
+  // sync dela grava 'participando', porque lá estar na campanha é participar.
+  if (s === 'candidate' || s === 'candidato') return 'candidato'
+  if (s === 'started' || s === 'active' || s === 'participando' || s === 'ativo') return 'participando'
+  if (s === 'finished' || s === 'ended' || s === 'encerrado') return 'encerrado'
+  return 'desconhecido'
+}
+
 export type ItemCampanha = {
   campanhaId: string
   anuncioId: string | null
   itemIdExterno: string
   /** Variação. Nulo em anúncio sem variação. */
   modelId: string | null
+  /** O que este item é DENTRO da campanha. Só `participando` mexe em preço. */
+  status: StatusItemCampanha
   /** Preço antes da campanha, informado pela plataforma. */
   precoBase: number | null
   /** Preço dentro da campanha. */
   precoCampanha: number | null
+  /** O menor preço que a PLATAFORMA aceita. Não é o piso da empresa. */
+  precoMinimoMarketplace: number | null
+  /** O preço que a plataforma sugere. Não é recomendação do Vargas. */
+  precoSugeridoMarketplace: number | null
+  /** Parte do desconto bancada pela plataforma, em % do preço original. */
+  pctMarketplace: number | null
+  /** Parte do desconto bancada pelo vendedor, em % do preço original. */
+  pctVendedor: number | null
   limitePorCompra: number | null
   estoquePromocao: number | null
 }
@@ -117,6 +166,22 @@ export function vigenciaDaCampanha(c: CampanhaCanonica, agora: Date): VigenciaCa
   return { vigente: true, motivo: null, avisos, restaMs: fim ? fim.getTime() - agora.getTime() : null }
 }
 
+/**
+ * Os convites deste anúncio — a outra metade da pergunta.
+ *
+ * Existe separada de `itemDoAnuncio` porque as duas perguntas têm respostas
+ * diferentes e consequências diferentes: uma decide PREÇO, esta decide o que
+ * aparece na Central como OPORTUNIDADE. Uma função só, com um parâmetro
+ * `incluirCandidatos`, seria o caminho curto para alguém passar `true` no
+ * lugar errado e um convite virar preço.
+ */
+export function oportunidadesDoAnuncio(
+  itens: ItemCampanha[],
+  anuncioId: string,
+): ItemCampanha[] {
+  return itens.filter(i => i.anuncioId === anuncioId && i.status === 'candidato')
+}
+
 export type ProximidadeFim =
   | 'ativa'
   | 'termina_em_7_dias'
@@ -154,11 +219,19 @@ export function proximidadeDoFim(
  * uma variação seria inventar: devolve nulo e avisa, do mesmo jeito que o
  * `aplicar` do recálculo recusa anúncio Shopee com variação.
  */
+/**
+ * O item desta campanha que MANDA NO PREÇO deste anúncio.
+ *
+ * Só devolve item `participando`. Um convite tem preço no payload e não tem
+ * efeito no preço de venda — quem quiser o convite deve procurá-lo por
+ * `oportunidadesDoAnuncio`, que é outra pergunta.
+ */
 export function itemDoAnuncio(
   itens: ItemCampanha[],
   anuncioId: string,
 ): { item: ItemCampanha | null; aviso: string | null } {
-  const doAnuncio = itens.filter(i => i.anuncioId === anuncioId && i.precoCampanha != null)
+  const doAnuncio = itens.filter(i =>
+    i.anuncioId === anuncioId && i.precoCampanha != null && i.status === 'participando')
   if (doAnuncio.length === 0) return { item: null, aviso: null }
   if (doAnuncio.length === 1) return { item: doAnuncio[0], aviso: null }
 
@@ -186,6 +259,8 @@ export function normalizarCampanhaDoEspelho(
     canal_id?: string | null
     id_externo?: string | null
     nome?: string | null
+    /** promotion_type da plataforma. Nulo nas linhas gravadas antes da Fase 4. */
+    tipo?: string | null
     status?: string | null
     inicio?: string | null
     fim?: string | null
@@ -208,7 +283,7 @@ export function normalizarCampanhaDoEspelho(
     plataforma: canal.plataforma,
     idExterno: linha.id_externo ?? null,
     nome: linha.nome ?? 'Campanha',
-    tipo: null,
+    tipo: (linha.tipo as string | null) ?? null,
     status,
     inicio: linha.inicio ?? null,
     fim: linha.fim ?? null,
@@ -229,8 +304,19 @@ export function normalizarCampanhaDoEspelho(
       anuncioId: (i.anuncio_id as string | null) ?? null,
       itemIdExterno: String(i.item_id_externo ?? ''),
       modelId: (i.model_id as string | null) ?? null,
+      // O status vem do banco JA canonico (o sync traduz na entrada), mas a
+      // traducao roda de novo aqui porque as linhas gravadas antes da Fase 4
+      // nao tem `status_externo` — e o DEFAULT da coluna e 'participando',
+      // que e o certo para a Shopee e seria errado herdar em silencio no ML.
+      status: statusCanonicoDoItem((i.status as string | null) ?? (i.status_externo as string | null)),
       precoBase: numero(i.preco_original),
       precoCampanha: numero(i.preco_promocional),
+      precoMinimoMarketplace: numero(i.preco_minimo_marketplace),
+      precoSugeridoMarketplace: numero(i.preco_sugerido_marketplace),
+      // Percentual pode ser zero legitimamente (LIGHTNING nao tem subsidio),
+      // entao `numero()` nao serve aqui — ele descarta zero.
+      pctMarketplace: i.pct_marketplace == null ? null : Number(i.pct_marketplace),
+      pctVendedor: i.pct_vendedor == null ? null : Number(i.pct_vendedor),
       limitePorCompra: i.limite_por_compra == null ? null : Number(i.limite_por_compra),
       estoquePromocao: i.estoque_promocao == null ? null : Number(i.estoque_promocao),
     }
