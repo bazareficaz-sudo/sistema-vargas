@@ -54,6 +54,7 @@ export default function AnunciosRascunhosClient({
   const router = useRouter()
   const [busca, setBusca] = useState(buscaFiltro)
   const [painelExtensao, setPainelExtensao] = useState(false)
+  const [painelLink, setPainelLink] = useState(false)
 
   function navegar(mudancas: Record<string, string>) {
     const p = new URLSearchParams()
@@ -75,12 +76,18 @@ export default function AnunciosRascunhosClient({
           </p>
         </div>
         <button
-          onClick={() => setPainelExtensao(v => !v)}
-          className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 hover:bg-purple-700 text-white">
+          onClick={() => { setPainelLink(v => !v); setPainelExtensao(false) }}
+          className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+          🔗 Importar por link
+        </button>
+        <button
+          onClick={() => { setPainelExtensao(v => !v); setPainelLink(false) }}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 hover:bg-purple-700 text-white">
           🧩 Extensão do Chrome
         </button>
       </div>
 
+      {painelLink && <PainelImportarLink onImportado={() => router.refresh()} />}
       {painelExtensao && <PainelExtensao />}
 
       {erro && (
@@ -202,6 +209,100 @@ export default function AnunciosRascunhosClient({
 }
 
 // ── Painel da extensão ───────────────────────────────────────────────────────
+
+/**
+ * Capturar rascunho colando o endereco do anuncio.
+ *
+ * A extensao le a PAGINA; isto le a API do Mercado Livre com o token da
+ * propria empresa. Sao dois caminhos para a mesma coisa, e o motivo de existir
+ * o segundo e simples: quem recebeu um link no WhatsApp, esta no celular, ou
+ * esta numa maquina sem a extensao instalada, nao tinha como capturar.
+ *
+ * A DIFERENCA DE COMPLETUDE E DITA NA TELA, e nao escondida. A API nao devolve
+ * preco riscado, quantidade vendida nem o vendedor do momento — coisas que so
+ * existem na pagina renderizada. Um rascunho que nasce com esses campos vazios
+ * e um rascunho legitimo; um operador que descobre isso na hora de publicar,
+ * nao.
+ */
+function PainelImportarLink({ onImportado }: { onImportado: () => void }) {
+  const [url, setUrl] = useState('')
+  const [importando, setImportando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [resultado, setResultado] = useState<{
+    duplicado: boolean; titulo?: string; qtdImagens?: number; temVariacao?: boolean; mensagem?: string
+  } | null>(null)
+
+  async function importar() {
+    const limpo = url.trim()
+    if (!limpo) return
+    setImportando(true); setErro(''); setResultado(null)
+    try {
+      const d = await fetch('/api/marketplaces/rascunhos/importar-url', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: limpo }),
+      }).then(r => r.json())
+      if (!d.ok) { setErro(d.erro ?? 'Nao foi possivel importar'); return }
+      setResultado(d)
+      setUrl('')
+      onImportado()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao importar')
+    } finally {
+      setImportando(false)
+    }
+  }
+
+  return (
+    <div className="mb-5 bg-white border border-blue-200 rounded-xl p-4">
+      <h2 className="text-sm font-semibold text-slate-800 mb-1">Importar por link</h2>
+      <p className="text-xs text-slate-500 mb-3">
+        Cole o endereço de um anúncio do Mercado Livre. A leitura usa a API com a conta conectada
+        da sua empresa — não é preciso ter a extensão nesta máquina.
+      </p>
+
+      <div className="flex gap-2">
+        <input
+          value={url}
+          onChange={e => setUrl(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !importando) void importar() }}
+          placeholder="https://produto.mercadolivre.com.br/MLB-..."
+          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 placeholder-slate-400" />
+        <button
+          onClick={() => void importar()}
+          disabled={importando || !url.trim()}
+          className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 flex-shrink-0">
+          {importando ? 'Lendo...' : 'Importar'}
+        </button>
+      </div>
+
+      {erro && <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">{erro}</p>}
+
+      {resultado && (
+        <div className={`mt-3 text-xs rounded px-3 py-2 border ${
+          resultado.duplicado
+            ? 'text-amber-800 bg-amber-50 border-amber-200'
+            : 'text-green-800 bg-green-50 border-green-200'}`}>
+          {resultado.duplicado ? (
+            <p>{resultado.mensagem}</p>
+          ) : (
+            <>
+              <p className="font-medium">✓ {resultado.titulo}</p>
+              <p className="mt-0.5">
+                {resultado.qtdImagens} imagem(ns) capturada(s)
+                {resultado.temVariacao ? ' · o anúncio tem variações' : ''}
+              </p>
+              {/* O que esta origem nao traz. Dito agora, nao na publicacao. */}
+              <p className="mt-1.5 text-[11px] text-green-900/70">
+                Lido pela API: preço riscado, quantidade vendida e vendedor não vêm por este
+                caminho — só pela extensão, que lê a página. Confira na revisão.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function PainelExtensao() {
   const [tokens, setTokens] = useState<TokenExtensao[]>([])
