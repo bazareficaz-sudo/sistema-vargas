@@ -1,4 +1,4 @@
-import { DOMINIO_RAIZ } from './loja'
+import { DOMINIO_RAIZ } from './dominio'
 
 // ENDEREÇO PÚBLICO DE UM PRODUTO NA VITRINE.
 //
@@ -48,4 +48,28 @@ export function urlDoProdutoNaVitrine(
   if (sub && dominioRaiz) return `https://${sub}.${dominioRaiz}/produto/${s}`
 
   return undefined
+}
+
+/**
+ * Link que abre o WhatsApp com o endereço do produto já escrito.
+ *
+ * SEM NÚMERO DE DESTINO de propósito: `wa.me/?text=` abre a lista de
+ * contatos do próprio vendedor. Quem escolhe para quem mandar é ele, no
+ * WhatsApp dele, com o histórico daquele cliente à vista — e a mensagem sai
+ * do número dele, não de um número do sistema.
+ *
+ * O sistema TEM envio por Z-API (é o que "enviar imagens do produto" usa), e
+ * ele continua sendo o caminho para envio automático e registrado. Para
+ * "mandar este produto para o cliente agora", digitar o número seria mais
+ * lento que escolher o contato.
+ *
+ * SÓ O ENDEREÇO VAI NO TEXTO. A página do produto tem OpenGraph completo, e
+ * o WhatsApp monta a prévia sozinho com foto, nome e preço — conferido em
+ * produção. Repetir o nome no texto duplicaria o que a prévia já mostra e
+ * roubaria a primeira linha, que é onde o vendedor escreve o recado dele.
+ */
+export function linkCompartilharWhatsApp(url: string | null | undefined): string | undefined {
+  const u = (url ?? '').trim()
+  if (!u) return undefined
+  return `https://wa.me/?text=${encodeURIComponent(u)}`
 }

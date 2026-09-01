@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { urlDoProdutoNaVitrine } from '../../src/lib/commerce/urlProduto'
+import { urlDoProdutoNaVitrine, linkCompartilharWhatsApp } from '../../src/lib/commerce/urlProduto'
 
 // O selo LO na lista de produtos leva para a página do produto na vitrine.
 // Estas são as combinações que decidem se existe endereço para levar.
@@ -51,5 +51,26 @@ describe('quando NÃO há endereço para oferecer', () => {
   test('empresa sem loja', () => {
     assert.equal(urlDoProdutoNaVitrine(null, SLUG, RAIZ), undefined)
     assert.equal(urlDoProdutoNaVitrine(undefined, SLUG, RAIZ), undefined)
+  })
+})
+
+describe('link de compartilhamento no WhatsApp', () => {
+  test('abre a escolha de contato, sem número de destino', () => {
+    // `wa.me/?text=` sem número faz o WhatsApp perguntar para quem enviar —
+    // é o que permite mandar do número do próprio vendedor.
+    const l = linkCompartilharWhatsApp(`https://bazareficaz.${RAIZ}/produto/${SLUG}`)
+    assert.ok(l?.startsWith('https://wa.me/?text='), `veio ${l}`)
+    assert.ok(!/wa\.me\/\d/.test(l ?? ''), 'não pode ter número fixo de destino')
+  })
+
+  test('o endereço vai codificado — sem isso a query string quebra o link', () => {
+    const l = linkCompartilharWhatsApp('https://loja.com/produto/tela-1,3m?x=1&y=2')
+    assert.ok(l?.includes('%3A%2F%2F'), 'os :// precisam ir escapados')
+    assert.ok(!l?.includes('&y=2'), 'o & do endereço não pode virar separador do wa.me')
+  })
+
+  test('sem endereço não há link', () => {
+    assert.equal(linkCompartilharWhatsApp(undefined), undefined)
+    assert.equal(linkCompartilharWhatsApp('  '), undefined)
   })
 })

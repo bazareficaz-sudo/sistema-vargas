@@ -1,5 +1,7 @@
 'use client'
 
+import { linkCompartilharWhatsApp } from '@/lib/commerce/urlProduto'
+
 // Onde o produto está anunciado, em um selo por canal com a quantidade.
 //
 // Não usa a logo oficial de cada marketplace de propósito: distribuir a
@@ -50,6 +52,29 @@ const ESTADO_LOJA: Record<string, string> = {
   rascunho:  'rascunho — ainda não foi para a vitrine',
 }
 
+/**
+ * Botão de mandar o link no WhatsApp.
+ *
+ * NÃO usa a logo do WhatsApp, pela mesma razão que os selos não usam a logo
+ * de cada marketplace: distribuir marca de terceiros exige licença. O verde e
+ * o balão de conversa bastam para reconhecer.
+ */
+function BotaoWhatsApp({ url }: { url: string }) {
+  const link = linkCompartilharWhatsApp(url)
+  if (!link) return null
+  return (
+    <a href={link} target="_blank" rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title="Enviar o link deste produto no WhatsApp — você escolhe o contato"
+      className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-300
+        bg-green-100 text-green-700 hover:brightness-95 hover:ring-1 hover:ring-green-400 cursor-pointer">
+      <svg viewBox="0 0 24 24" className="w-3 h-3" fill="currentColor" aria-hidden="true">
+        <path d="M12 3C7 3 3 6.6 3 11c0 2.2 1 4.2 2.7 5.6L5 21l4.6-1.5c.8.2 1.6.3 2.4.3 5 0 9-3.6 9-8s-4-8-9-8z" />
+      </svg>
+    </a>
+  )
+}
+
 export default function SeloCanais({ contagem, onAbrir }: {
   contagem: ContagemCanais | undefined
   /** Abre a lista de anúncios do produto. Sem isso, o selo é só informativo. */
@@ -87,18 +112,24 @@ export default function SeloCanais({ contagem, onAbrir }: {
         // aparece na barra de status antes do clique. Um `onClick` num
         // <span> não faz nada disso.
         if (ehLoja && c.url) {
+          // Os dois juntos: o selo abre a vitrine, o botão manda o endereço.
+          // Ficam lado a lado porque respondem à mesma pergunta ("e este
+          // produto na loja?") por caminhos diferentes.
           return (
-            <a key={plataforma}
-              href={c.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              // A linha do produto abre a edição no clique. Sem parar aqui, o
-              // clique no selo abriria a vitrine E a edição ao mesmo tempo.
-              onClick={(e) => e.stopPropagation()}
-              title={titulo}
-              className={`${classe} cursor-pointer hover:brightness-95 hover:ring-1 hover:ring-indigo-400`}>
-              {info.sigla}
-            </a>
+            <span key={plataforma} className="inline-flex items-center gap-0.5">
+              <a
+                href={c.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                // A linha do produto abre a edição no clique. Sem parar aqui, o
+                // clique no selo abriria a vitrine E a edição ao mesmo tempo.
+                onClick={(e) => e.stopPropagation()}
+                title={titulo}
+                className={`${classe} cursor-pointer hover:brightness-95 hover:ring-1 hover:ring-indigo-400`}>
+                {info.sigla}
+              </a>
+              <BotaoWhatsApp url={c.url} />
+            </span>
           )
         }
 

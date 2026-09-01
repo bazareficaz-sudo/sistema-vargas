@@ -16,13 +16,11 @@ import type { Loja } from './tipos'
 /** Cabeçalho que o proxy escreve com o subdomínio resolvido. Ver src/proxy.ts. */
 export const CABECALHO_LOJA = 'x-loja-slug'
 
-/**
- * Domínio raiz da plataforma. `bazareficaz.dominio.com.br` → `bazareficaz`.
- * Configurável porque o domínio muda entre desenvolvimento, homologação e
- * produção — e porque o dia em que existir um segundo domínio, isto não pode
- * estar espalhado pelo código.
- */
-export const DOMINIO_RAIZ = process.env.NEXT_PUBLIC_LOJA_DOMINIO_RAIZ ?? ''
+// A constante mora em `./dominio` — um módulo sem `next/headers`, para que
+// componente de cliente possa usá-la sem arrastar este arquivo junto.
+// Reexportada aqui porque este era o endereço dela e há quem já importe daqui.
+export { DOMINIO_RAIZ } from './dominio'
+import { DOMINIO_RAIZ } from './dominio'
 
 /**
  * Extrai o identificador da loja a partir do host.
