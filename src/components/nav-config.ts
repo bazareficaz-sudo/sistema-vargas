@@ -279,6 +279,7 @@ export const NAV: NavGroup[] = [
       // rota de carga do NCM, que existiu tres dias sem ninguem poder chamar.
       { href: '/dashboard/configuracoes/fiscal',      label: 'Fiscal',          icon: '🧾' },
       { href: '/dashboard/agentes',                   label: 'Agentes de IA',   icon: '🤖' },
+      { href: '/dashboard/configuracoes/marketplaces', label: 'Marketplaces — diagnóstico', icon: '🔎', modulo: 'marketplace' },
       { href: '/dashboard/configuracoes/aparencia',   label: 'Aparência',       icon: '🎨' },
     ],
   },
