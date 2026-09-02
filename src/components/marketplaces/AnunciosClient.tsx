@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import AskVargas from '@/components/dashboard/AskVargas'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import AnuncioDetalheModal from './AnuncioDetalheModal'
@@ -194,6 +195,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [erro, setErro] = useState('')
   const [buscaProd, setBuscaProd] = useState('')
   const [sincronizando, setSincronizando] = useState(false)
+  const [perguntarAberto, setPerguntarAberto] = useState(false)
   const [resumoSync, setResumoSync] = useState('')
   const [facetas, setFacetas] = useState<Set<string>>(new Set(facetasIniciais))
   const [tagFiltro, setTagFiltro] = useState(tagInicial)
@@ -1009,6 +1011,32 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             + Novo anúncio
           </button>
         </div>
+      </div>
+
+      {/* PERGUNTE AO VARGAS — ANUNCIOS.
+          Recolhido por padrao: esta tela ja abre com muita coisa, e quem vem
+          aqui na maioria das vezes vem editar anuncio, nao perguntar. O
+          contexto nao viaja daqui — a rota monta a partir do canal, entao o
+          botao so precisa do id. */}
+      <div className="mb-4">
+        {perguntarAberto ? (
+          <AskVargas
+            context={{ canalId: canal.id }}
+            endpoint="/api/marketplaces/perguntar"
+            descricao={`Pergunte sobre os anúncios e campanhas de ${canal.nome}. As respostas dizem de onde veio cada número — e o que não dá para responder com os dados desta tela.`}
+            exemplo="Ex.: Quantos anúncios estão sem produto vinculado?"
+            perguntasSugeridas={[
+              'Quantos anúncios estão sem produto vinculado?',
+              'Os preços deste canal usam comissão medida ou configurada?',
+              'De quando são os dados desta tela?',
+            ]}
+          />
+        ) : (
+          <button onClick={() => setPerguntarAberto(true)}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+            ✦ Pergunte ao Vargas
+          </button>
+        )}
       </div>
 
       {resumoSync && (

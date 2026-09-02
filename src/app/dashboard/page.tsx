@@ -451,6 +451,36 @@ export default async function DashboardPage({
         </section>
       )}
 
+      {/* ── Pergunte ao Vargas ─────────────────────────────────────────────
+          Logo abaixo do cabecalho e em largura total. Estava espremido numa
+          coluna de 320px depois dos graficos: quem abre o dashboard para
+          perguntar alguma coisa precisava rolar ate o fim para achar o campo. */}
+        <AskVargas context={{
+          vendasHoje: totalHoje,
+          quantidadeVendasHoje: qtdHoje,
+          ticketMedioHoje,
+          projecaoFechamento,
+          variacaoRitmo,
+          variacaoTicket,
+          faturamentoMes: totalMes,
+          contasReceber: totalReceber,
+          contasReceberVencidas: crVencido,
+          contasPagar: cpTotal,
+          contasPagarVencidas: cpVencidas,
+          saldoPrevisto30,
+          comprasMes: totalComprasMes,
+          variacaoCompras,
+          percentualVendasSemCliente: percentualSemCliente,
+          vendasMarketplaceHoje: totalMarketplaceHoje,
+          produtoMaiorFaturamentoMes: liderFaturamento ? nomeProduto.get(liderFaturamento.produto_id) ?? null : null,
+          produtoMaiorFaturamentoMesValor: Number(liderFaturamento?.faturamento ?? 0),
+          produtoMaisVendidoMes: liderQuantidade ? nomeProduto.get(liderQuantidade.produto_id) ?? null : null,
+          produtoMaisVendidoMesQuantidade: Number(liderQuantidade?.quantidade ?? 0),
+          vendedorCampeaoMes: vendedorCampeao?.nome ?? null,
+          vendedorCampeaoMesFaturamento: vendedorCampeao?.faturamento ?? 0,
+          vendedorCampeaoMesVendas: vendedorCampeao?.vendas ?? 0,
+        }} />
+
       {/* ── KPIs principais ────────────────────────────────────────────────── */}
       {podeVerFinanceiro && (temVendas || tem('contas_receber') || tem('contas_pagar')) && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -536,31 +566,6 @@ export default async function DashboardPage({
                 <ChangeRow label="Marketplace hoje" value={brl(totalMarketplaceHoje)} progress={totalHoje > 0 ? Math.min(100, (totalMarketplaceHoje / totalHoje) * 100) : 0} tone="positive" />
               </div>
             </div>
-            <AskVargas context={{
-              vendasHoje: totalHoje,
-              quantidadeVendasHoje: qtdHoje,
-              ticketMedioHoje,
-              projecaoFechamento,
-              variacaoRitmo,
-              variacaoTicket,
-              faturamentoMes: totalMes,
-              contasReceber: totalReceber,
-              contasReceberVencidas: crVencido,
-              contasPagar: cpTotal,
-              contasPagarVencidas: cpVencidas,
-              saldoPrevisto30,
-              comprasMes: totalComprasMes,
-              variacaoCompras,
-              percentualVendasSemCliente: percentualSemCliente,
-              vendasMarketplaceHoje: totalMarketplaceHoje,
-              produtoMaiorFaturamentoMes: liderFaturamento ? nomeProduto.get(liderFaturamento.produto_id) ?? null : null,
-              produtoMaiorFaturamentoMesValor: Number(liderFaturamento?.faturamento ?? 0),
-              produtoMaisVendidoMes: liderQuantidade ? nomeProduto.get(liderQuantidade.produto_id) ?? null : null,
-              produtoMaisVendidoMesQuantidade: Number(liderQuantidade?.quantidade ?? 0),
-              vendedorCampeaoMes: vendedorCampeao?.nome ?? null,
-              vendedorCampeaoMesFaturamento: vendedorCampeao?.faturamento ?? 0,
-              vendedorCampeaoMesVendas: vendedorCampeao?.vendas ?? 0,
-            }} />
           </div>
         </section>
       )}

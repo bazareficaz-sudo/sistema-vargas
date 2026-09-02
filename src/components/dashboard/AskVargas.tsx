@@ -30,13 +30,38 @@ export type DashboardQuestionContext = {
 
 type Answer = { resposta: string; evidencias: string[]; sugestoes: string[]; modo?: 'ia' | 'automatico' }
 
-const perguntasSugeridas = [
+const PERGUNTAS_DASHBOARD = [
   'Por que meu saldo previsto ficou negativo?',
   'Como estão as vendas de hoje?',
   'O que exige atenção agora?',
 ]
 
-export default function AskVargas({ context }: { context: DashboardQuestionContext }) {
+// O PAINEL DEIXOU DE SER SÓ DO DASHBOARD.
+//
+// Ele nasceu com o contexto do dashboard embutido no tipo. Para o mesmo
+// painel responder sobre anúncios e marketplaces, o que muda é o ENDEREÇO e o
+// CONTEÚDO — a mecânica (perguntar, esperar, mostrar evidências, distinguir
+// resposta da IA de resposta automática) é a mesma.
+//
+// O contexto ficou aberto de propósito: cada tela sabe o que tem para
+// oferecer, e quem valida é a rota do lado do servidor, que é onde a validação
+// vale alguma coisa. Tipar aqui daria uma falsa sensação de garantia — o JSON
+// chega no servidor por HTTP e precisa ser normalizado lá de qualquer forma.
+export type ContextoPergunta = Record<string, unknown>
+
+export default function AskVargas({
+  context,
+  endpoint = '/api/dashboard/perguntar',
+  perguntasSugeridas = PERGUNTAS_DASHBOARD,
+  descricao = 'Pergunte sobre vendas, caixa, contas e compras usando os dados atualizados desta tela.',
+  exemplo = 'Ex.: Por que meu saldo previsto ficou negativo?',
+}: {
+  context: ContextoPergunta
+  endpoint?: string
+  perguntasSugeridas?: string[]
+  descricao?: string
+  exemplo?: string
+}) {
   const [pergunta, setPergunta] = useState('')
   const [answer, setAnswer] = useState<Answer | null>(null)
   const [loading, setLoading] = useState(false)
@@ -51,7 +76,7 @@ export default function AskVargas({ context }: { context: DashboardQuestionConte
     setErro('')
     setAnswer(null)
     try {
-      const response = await fetch('/api/dashboard/perguntar', {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pergunta: texto, contexto: context }),
@@ -78,7 +103,7 @@ export default function AskVargas({ context }: { context: DashboardQuestionConte
           </span>
         )}
       </div>
-      <p className="mt-2 text-xs leading-5 text-slate-400">Pergunte sobre vendas, caixa, contas e compras usando os dados atualizados desta tela.</p>
+      <p className="mt-2 text-xs leading-5 text-slate-400">{descricao}</p>
 
       <form className="mt-4 flex gap-2" onSubmit={event => perguntar(event)}>
         <input
@@ -86,7 +111,7 @@ export default function AskVargas({ context }: { context: DashboardQuestionConte
           onChange={event => setPergunta(event.target.value)}
           disabled={loading}
           maxLength={300}
-          placeholder="Ex.: Por que meu saldo previsto ficou negativo?"
+          placeholder={exemplo}
           aria-label="Pergunta para o Vargas"
           className="min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-900 px-3 py-3 text-xs text-white outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60"
         />

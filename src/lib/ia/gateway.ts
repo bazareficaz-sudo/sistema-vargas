@@ -43,7 +43,13 @@ const configPadrao: ConfigIA = {
   max_tokens_resposta: 1200,
   timeout_segundos: 25,
   fallback_automatico: true,
-  funcionalidades: ['dashboard'],
+  // FUNCIONALIDADES LIBERADAS POR PADRAO.
+  //
+  // Uma funcionalidade fora desta lista e recusada com `fallbackAutomatico`,
+  // ou seja: a tela responde pelo caminho deterministico e NAO diz que a IA
+  // nem foi chamada. Quem esquecer de acrescentar aqui ve respostas piores e
+  // nenhum erro — por isso a lista mora junto do teste que a cobre.
+  funcionalidades: ['dashboard', 'marketplaces'],
 }
 
 const inicioMes = () => {
