@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   }
 
   let q = sb.from('produto_enderecos')
-    .select('id, produto_id, endereco_id, deposito_id, quantidade, quantidade_reservada, papel, ultima_movimentacao, enderecos(codigo_legivel, tipo, status), produtos(nome, sku, ean)')
+    .select('id, produto_id, endereco_id, deposito_id, quantidade, quantidade_reservada, papel, ultima_movimentacao, foto_url, foto_atualizada_em, enderecos(codigo_legivel, tipo, status, descricao), produtos(nome, sku, ean)')
     .eq('empresa_id', guarda.empresaId).gt('quantidade', 0)
   if (produtoId) q = q.eq('produto_id', produtoId)
   if (enderecoId) q = q.eq('endereco_id', enderecoId)

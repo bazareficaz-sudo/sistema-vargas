@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import AbaEnderecos from '@/components/produtos/AbaEnderecos'
 import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
@@ -83,7 +84,7 @@ type Props = {
   abaInicial?: Aba
 }
 
-type Aba = 'geral' | 'preco' | 'promocao' | 'imagens' | 'kit' | 'fiscal' | 'anuncios'
+type Aba = 'geral' | 'preco' | 'promocao' | 'imagens' | 'kit' | 'fiscal' | 'anuncios' | 'enderecos'
 
 const PLATAFORMA_LABEL: Record<string, string> = {
   mercadolivre: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', outro: 'Outro',
@@ -941,6 +942,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     { key: 'kit',      label: 'Composição', show: form.tipo === 'kit' },
     { key: 'fiscal',   label: 'Fiscal' },
     { key: 'anuncios', label: `Anúncios${anunciosVinculados.length > 0 ? ` (${anunciosVinculados.length})` : ''}` },
+    { key: 'enderecos', label: 'Endereços' },
   ]
 
   return (
@@ -1933,6 +1935,13 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
           )}
 
           {/* ── ABA ANÚNCIOS ── */}
+          {/* ENDERECOS. Ate 02/09/2026 era preciso sair do cadastro,
+              abrir Enderecamento e procurar o produto de novo para saber
+              onde ele estava guardado. */}
+          {aba === 'enderecos' && form?.id && (
+            <AbaEnderecos produtoId={form.id} empresaId={empresaId} />
+          )}
+
           {aba === 'anuncios' && (
             <div className="space-y-4">
               {carregandoAnuncios ? (
