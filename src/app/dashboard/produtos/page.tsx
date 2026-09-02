@@ -40,7 +40,7 @@ export default async function ProdutosPage({
   // resolução de hierarquia categoria → subcategorias (produtos.categoria é
   // um TEXT com o nome escolhido, raiz ou filha; não há coluna própria de
   // subcategoria — ver plano).
-  const [{ data: categoriasRows }, { data: marcasRows }, { data: lojaRow }] = await Promise.all([
+  const [{ data: categoriasRows }, { data: marcasRows }, { data: lojaRow }, { data: envioRow }] = await Promise.all([
     supabase.from('categorias').select('id, nome, pai_id').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     supabase.from('marcas').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
     // A empresa tem loja online? É o que decide se a linha ganha o botão de
@@ -49,12 +49,26 @@ export default async function ProdutosPage({
     // O domínio vem junto porque o selo LO leva para a vitrine, e quem sabe
     // montar esse endereço é o servidor: domínio próprio quando existe,
     // subdomínio na plataforma quando não.
-    supabase.from('loja_config').select('id, subdominio, dominio_proprio').eq('empresa_id', empresaId).maybeSingle(),
+    supabase.from('loja_config').select('id, subdominio, dominio_proprio, nome').eq('empresa_id', empresaId).maybeSingle(),
+    // Como esta empresa manda mensagem e com que texto. Ausente = padrão
+    // (wa.me com o texto do código): quem nunca abriu a tela de mensagens
+    // continua com o botão funcionando.
+    supabase.from('whatsapp_config').select('canal_envio, texto_produto_link, ativo, instance_id, token').eq('empresa_id', empresaId).maybeSingle(),
   ])
   const categoriasTodas = categoriasRows ?? []
   const categoriasRaiz = categoriasTodas.filter(c => !c.pai_id)
   const marcasTodas = marcasRows ?? []
   const temLoja = !!lojaRow?.id
+
+  // Z-API só vale como canal se estiver REALMENTE utilizável: escolhido,
+  // ativo e com credencial. Sem isso o botão cairia num envio que falha —
+  // então volta para o wa.me, que funciona sem configuração nenhuma.
+  const zapiUsavel = !!envioRow?.ativo && !!envioRow?.instance_id && !!envioRow?.token
+  const envioMensagem = {
+    canal: (envioRow?.canal_envio === 'zapi' && zapiUsavel ? 'zapi' : 'whatsapp_web') as 'zapi' | 'whatsapp_web',
+    textoProdutoLink: envioRow?.texto_produto_link ?? null,
+    loja: lojaRow?.nome ?? null,
+  }
 
   // O endereço da vitrine sai de `urlDoProdutoNaVitrine` — as regras (domínio
   // próprio vence subdomínio, sem slug não há link) estão lá com teste.
@@ -238,6 +252,7 @@ export default async function ProdutosPage({
 
   return (
     <ProdutosClient
+      envioMensagem={envioMensagem}
       produtos={produtos ?? []}
       imagensMap={imagensMap}
       total={total}

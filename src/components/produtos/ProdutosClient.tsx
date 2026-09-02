@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissao } from '@/contexts/PlanContext'
 import EditarProdutoModal from './EditarProdutoModal'
-import SeloCanais, { type ContagemCanais } from '@/components/marketplaces/SeloCanais'
+import SeloCanais, { type ContagemCanais, type EnvioMensagem } from '@/components/marketplaces/SeloCanais'
 import DuplicarProdutoModal from './DuplicarProdutoModal'
 import AcoesEmMassaModal from './AcoesEmMassaModal'
 import AdicionarImagemMassaModal from './AdicionarImagemMassaModal'
@@ -51,6 +51,7 @@ type Categoria = { id: string; nome: string; pai_id: string | null }
 type Marca = { id: string; nome: string }
 
 type Props = {
+  envioMensagem?: EnvioMensagem
   produtos: Produto[]
   imagensMap?: Record<string, string>
   total: number
@@ -115,8 +116,34 @@ export default function ProdutosClient({
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
   tagFiltro: tagInicial, entradaFiltro: entradaInicial, entradasCasadas = [], tagsDisponiveis, temLoja = false,
+  envioMensagem,
 }: Props) {
   const router = useRouter()
+  // O FORMULARIO DO NUMERO MORA AQUI, e nao dentro do selo: um modal por
+  // linha numa lista de 14 mil produtos seria absurdo. O selo so avisa qual
+  // mensagem quer mandar.
+  const [zapiMensagem, setZapiMensagem] = useState<string | null>(null)
+  const [zapiTelefone, setZapiTelefone] = useState('')
+  const [zapiEnviando, setZapiEnviando] = useState(false)
+  const [zapiErro, setZapiErro] = useState('')
+
+  async function enviarPorZapi() {
+    const telefone = zapiTelefone.replace(/\D/g, '')
+    if (telefone.length < 10) { setZapiErro('Informe o número com DDD.'); return }
+    setZapiEnviando(true); setZapiErro('')
+    try {
+      const r = await fetch('/api/whatsapp/enviar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefone, mensagem: zapiMensagem, tipo: 'produto_individual' }),
+      }).then(res => res.json())
+      if (r?.error) { setZapiErro(String(r.error)); return }
+      setZapiMensagem(null); setZapiTelefone('')
+    } catch (e) {
+      setZapiErro(e instanceof Error ? e.message : 'Falha ao enviar')
+    } finally {
+      setZapiEnviando(false)
+    }
+  }
   const [produtos, setProdutos] = useState(inicial)
   // O banco recusa a gravacao de quem nao tem permissao (trigger). Aqui a
   // tela some com o botao antes disso, pra pessoa nao esbarrar num erro.
@@ -818,7 +845,11 @@ export default function ProdutosClient({
                       {nomeEditando === p.id ? <input autoFocus value={nomeValor} onChange={e => setNomeValor(e.target.value)} onBlur={() => salvarNome(p.id)} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') cancelarEdicaoNome() }} className="w-full rounded-md border border-blue-400 px-1.5 py-0.5 font-medium text-gray-900 outline-none" /> : <div className="flex items-center gap-1.5"><button onClick={() => iniciarEdicaoNome(p)} className="text-left font-medium text-gray-900 hover:text-blue-600">{p.nome}</button><button onClick={() => copiar(p.id, 'nome', p.nome)} title="Copiar nome" className="shrink-0 text-gray-300 hover:text-blue-600">{copiado === `${p.id}-nome` ? '✓' : '⧉'}</button></div>}
                       <p className="mt-1 text-xs text-gray-400">{[p.categoria, p.marca, p.sku ? `SKU ${p.sku}` : null].filter(Boolean).join(' · ') || 'Sem classificação'}</p>
                       <div className="mt-2 flex min-h-5 flex-wrap items-center gap-1.5">
-                        <SeloCanais contagem={anunciosMap?.[p.id]} onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }} />
+                        <SeloCanais contagem={anunciosMap?.[p.id]}
+                          onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }}
+                          produto={{ nome: p.nome, sku: p.sku, preco: p.preco_venda > 0 ? p.preco_venda.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : null }}
+                          envio={envioMensagem}
+                          onZapi={(msg) => { setZapiMensagem(msg); setZapiErro('') }} />
                         {p.promocao_ativa && <span className="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600">Promoção</span>}
                         {!p.disponivel_pdv && <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Oculto no PDV</span>}
                         {(p.tags ?? []).map(t => <span key={t} className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700">{t}</span>)}
@@ -915,6 +946,37 @@ export default function ProdutosClient({
           </div>
         )}
       </div>
+
+      {/* Envio pelo Z-API: numero digitado, mensagem ja pronta. Um so na tela
+          inteira — o selo de cada linha apenas diz o que mandar. */}
+      {zapiMensagem !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setZapiMensagem(null)}>
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-gray-900">Enviar pelo WhatsApp da empresa</h3>
+            <p className="mt-1 text-xs text-gray-500">
+              A mensagem sai do número conectado ao Z-API e fica registrada no histórico.
+            </p>
+            <pre className="mt-3 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-2.5 text-xs text-gray-700">{zapiMensagem}</pre>
+            <input
+              autoFocus
+              value={zapiTelefone}
+              onChange={e => setZapiTelefone(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void enviarPorZapi() }}
+              placeholder="Número com DDD — ex.: 11999999999"
+              className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none" />
+            {zapiErro && <p className="mt-2 text-xs text-red-600">{zapiErro}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setZapiMensagem(null)}
+                className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800">Cancelar</button>
+              <button onClick={() => void enviarPorZapi()} disabled={zapiEnviando}
+                className="rounded-lg bg-green-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50">
+                {zapiEnviando ? 'Enviando...' : 'Enviar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

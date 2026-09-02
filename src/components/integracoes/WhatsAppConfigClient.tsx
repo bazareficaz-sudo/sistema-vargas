@@ -12,6 +12,15 @@ type Config = {
   texto_cupom: string; texto_cobranca: string; texto_orcamento: string
   texto_confirmacao_pag: string; texto_lista_produtos: string; texto_lembrete_venc: string; texto_pos_venda: string
   assinatura: string; saudacao: string; rodape: string; horario_atendimento: string
+  /** Por onde as mensagens saem. Ver a aba "Envio e mensagens". */
+  canal_envio: 'whatsapp_web' | 'zapi'
+  /**
+   * Modelo da mensagem do link de produto.
+   * NULO = usar o padrão do código; vazio = o gestor apagou de propósito.
+   * A distinção existe para o padrão poder mudar no código e alcançar quem
+   * nunca escolheu texto nenhum.
+   */
+  texto_produto_link: string | null
 }
 
 type Modelo = { id: string; nome: string; tipo: string; conteudo: string; ativo: boolean }
@@ -38,6 +47,8 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${s.cls}`}>{s.label}</span>
 }
 
+import { aplicarModelo, exemploDe, PADRAO_PRODUTO_LINK, VARIAVEIS_PRODUTO_LINK } from '@/lib/mensagens/modelo'
+
 const BLANK: Config = {
   nome: 'WhatsApp Principal', ativo: false,
   instance_id: '', token: '', client_token: '', url_base: 'https://api.z-api.io',
@@ -52,6 +63,7 @@ const BLANK: Config = {
   texto_lembrete_venc: 'Olá {nome_cliente}! ⏰\nSeu pagamento na *{nome_empresa}* vence em *{vencimento}*.\n\n💰 {valor_pendente}\n\n📞 {telefone_empresa}',
   texto_pos_venda: 'Olá {nome_cliente}! 😊\nObrigado pela compra na *{nome_empresa}*! Qualquer dúvida, estamos à disposição.\n📞 {telefone_empresa}',
   assinatura: '', saudacao: 'Olá {nome_cliente}! 👋', rodape: '', horario_atendimento: '',
+  canal_envio: 'whatsapp_web', texto_produto_link: null,
 }
 
 export default function WhatsAppConfigClient({
@@ -61,7 +73,7 @@ export default function WhatsAppConfigClient({
   configInicial: Config | null; modelosIniciais: Modelo[]
 }) {
   const sb = createClient()
-  const [aba, setAba] = useState<'conexao' | 'templates' | 'modelos'>('conexao')
+  const [aba, setAba] = useState<'conexao' | 'envio' | 'templates' | 'modelos'>('conexao')
   const [cfg, setCfg] = useState<Config>(configInicial ?? { ...BLANK })
   const [modelos, setModelos] = useState<Modelo[]>(modelosIniciais)
   const [salvando, setSalvando] = useState(false)
@@ -221,7 +233,7 @@ export default function WhatsAppConfigClient({
 
       {/* Abas */}
       <div className="flex border-b border-gray-200 mb-6 gap-0">
-        {([['conexao', '🔌 Conexão'], ['templates', '📝 Templates'], ['modelos', '💬 Modelos']] as const).map(([key, label]) => (
+        {([['conexao', '🔌 Conexão'], ['envio', '📤 Envio e mensagens'], ['templates', '📝 Templates'], ['modelos', '💬 Modelos']] as const).map(([key, label]) => (
           <button key={key} onClick={() => setAba(key)}
             className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${aba === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -378,6 +390,119 @@ export default function WhatsAppConfigClient({
       )}
 
       {/* ── ABA TEMPLATES ── */}
+      {/* ── ABA ENVIO E MENSAGENS ──
+          Junta duas decisões que sempre foram tomadas juntas e não tinham
+          onde ser tomadas: POR ONDE a mensagem sai e O QUE ela diz. */}
+      {aba === 'envio' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <h2 className="font-semibold text-gray-800">Por onde as mensagens saem</h2>
+            <p className="text-xs text-gray-500 mt-1 mb-4">
+              Vale para os botões de enviar espalhados pelo sistema — como o do link do produto na
+              lista de produtos.
+            </p>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                ['whatsapp_web', 'WhatsApp Web / app', 'Abre o WhatsApp do próprio vendedor com a mensagem escrita. Ele escolhe o contato, e a mensagem sai do número dele. Funciona no celular e não exige configuração nenhuma.'],
+                ['zapi', 'API Z-API (número da empresa)', 'O servidor envia usando a conta Z-API. Você informa o número de destino, a mensagem sai do número da empresa e fica registrada no histórico.'],
+              ] as const).map(([valor, titulo, desc]) => {
+                const escolhido = (cfg.canal_envio ?? 'whatsapp_web') === valor
+                const zapiPronto = !!cfg.instance_id && !!cfg.token && cfg.ativo
+                const bloqueado = valor === 'zapi' && !zapiPronto
+                return (
+                  <button key={valor} type="button" disabled={bloqueado}
+                    onClick={() => upd('canal_envio', valor)}
+                    className={`text-left rounded-xl border p-4 transition-colors ${
+                      escolhido ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+                    } ${bloqueado ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                    <div className="flex items-center gap-2">
+                      <span className={`h-3 w-3 rounded-full border ${escolhido ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`} />
+                      <span className="text-sm font-medium text-gray-900">{titulo}</span>
+                    </div>
+                    <p className="mt-1.5 text-xs leading-5 text-gray-500">{desc}</p>
+                    {/* O QUE FALTA, dito onde a escolha é feita. Sem isto o
+                        gestor escolheria Z-API, salvaria, e descobriria que
+                        não funciona quando um cliente não recebesse. */}
+                    {bloqueado && (
+                      <p className="mt-2 text-[11px] font-medium text-amber-700">
+                        Configure e ative a conexão Z-API na aba Conexão para poder escolher esta opção.
+                      </p>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* ── Mensagem do link de produto ─────────────────────────── */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <h2 className="font-semibold text-gray-800">Mensagem do link do produto</h2>
+            <p className="text-xs text-gray-500 mt-1 mb-3">
+              Usada pelo botão verde ao lado do selo <b>LO</b>, na lista de produtos.
+            </p>
+
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              <span className="text-xs text-gray-400 mr-1 self-center">Clique para inserir:</span>
+              {VARIAVEIS_PRODUTO_LINK.map(v => (
+                <button key={v.chave} type="button"
+                  title={`${v.descricao} — ex.: ${v.exemplo}`}
+                  onClick={() => upd('texto_produto_link', `${cfg.texto_produto_link ?? PADRAO_PRODUTO_LINK}{${v.chave}}`)}
+                  className="px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-[11px] font-mono text-gray-600 hover:bg-blue-50 hover:border-blue-300">
+                  {'{' + v.chave + '}'}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              value={cfg.texto_produto_link ?? PADRAO_PRODUTO_LINK}
+              onChange={e => upd('texto_produto_link', e.target.value)}
+              rows={4}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none" />
+
+            {/* PRÉ-VISUALIZAÇÃO com valores de exemplo — é onde uma variável
+                escrita errada aparece, antes de o cliente receber a frase
+                pela metade. */}
+            {(() => {
+              const modelo = cfg.texto_produto_link ?? PADRAO_PRODUTO_LINK
+              const r = aplicarModelo(modelo, exemploDe(VARIAVEIS_PRODUTO_LINK))
+              return (
+                <div className="mt-3">
+                  <p className="text-xs text-gray-400 mb-1">Como o cliente recebe:</p>
+                  <pre className="whitespace-pre-wrap rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-gray-800">{r.texto || '(mensagem vazia)'}</pre>
+                  {r.desconhecidas.length > 0 && (
+                    <p className="mt-2 text-xs text-amber-700">
+                      Estas variáveis não existem nesta mensagem e vão chegar assim mesmo, entre chaves:{' '}
+                      <b>{r.desconhecidas.map(d => `{${d}}`).join(', ')}</b>
+                    </p>
+                  )}
+                  <p className="mt-2 text-[11px] text-gray-400">
+                    O padrão é só o link porque a página do produto já manda foto, nome e preço para o
+                    WhatsApp montar a prévia. Texto a mais duplica o que a prévia mostra.
+                  </p>
+                </div>
+              )
+            })()}
+          </div>
+
+          {/* O QUE ESTA TELA NÃO CONFIGURA, dito aqui em vez de descoberto
+              depois: o sistema não tem envio de e-mail nenhum. */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <p className="text-sm font-medium text-amber-900">E-mail ainda não é enviado por este sistema</p>
+            <p className="mt-1 text-xs leading-5 text-amber-800">
+              Não há serviço de e-mail configurado no sistema — nenhuma mensagem sai por e-mail hoje,
+              de nenhuma tela. Por isso não existe aqui uma opção de e-mail para escolher: seria uma
+              configuração sem efeito.
+            </p>
+          </div>
+
+          <button onClick={salvar} disabled={salvando}
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg disabled:opacity-50">
+            {salvando ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      )}
+
       {aba === 'templates' && (
         <div className="space-y-5">
           <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">

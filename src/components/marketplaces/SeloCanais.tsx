@@ -1,6 +1,22 @@
 'use client'
 
 import { linkCompartilharWhatsApp } from '@/lib/commerce/urlProduto'
+import { aplicarModelo, PADRAO_PRODUTO_LINK } from '@/lib/mensagens/modelo'
+
+/**
+ * Como esta empresa manda mensagem, e com que texto.
+ *
+ * Vem de `whatsapp_config`. Ausente = o padrão: wa.me com o texto do código.
+ * Uma empresa que nunca abriu a tela de mensagens continua com o botão
+ * funcionando — configuração que falta não pode quebrar o que já funcionava.
+ */
+export type EnvioMensagem = {
+  canal: 'whatsapp_web' | 'zapi'
+  /** Nulo = usar o padrão do código. Vazio = o gestor apagou de propósito. */
+  textoProdutoLink: string | null
+  /** Dados para preencher as variáveis do modelo. */
+  loja?: string | null
+}
 
 // Onde o produto está anunciado, em um selo por canal com a quantidade.
 //
@@ -59,8 +75,41 @@ const ESTADO_LOJA: Record<string, string> = {
  * de cada marketplace: distribuir marca de terceiros exige licença. O verde e
  * o balão de conversa bastam para reconhecer.
  */
-function BotaoWhatsApp({ url }: { url: string }) {
-  const link = linkCompartilharWhatsApp(url)
+function BotaoWhatsApp({ url, produto, envio, onZapi }: {
+  url: string
+  produto?: { nome?: string | null; sku?: string | null; preco?: string | null }
+  envio?: EnvioMensagem
+  onZapi?: (mensagem: string) => void
+}) {
+  // O TEXTO SAI DO MODELO CONFIGURADO. Antes ia só a URL, fixa no código —
+  // o que funcionava e não deixava ninguém mudar.
+  const modelo = envio?.textoProdutoLink ?? PADRAO_PRODUTO_LINK
+  const { texto } = aplicarModelo(modelo, {
+    link: url,
+    produto: produto?.nome,
+    sku: produto?.sku,
+    preco: produto?.preco,
+    loja: envio?.loja,
+  })
+
+  // Z-API manda do servidor, com número digitado: é um fluxo com passo a
+  // mais, então vira botão e quem abre o formulário é a tela de cima — um
+  // modal por linha numa lista de 14 mil produtos seria absurdo.
+  if (envio?.canal === 'zapi' && onZapi) {
+    return (
+      <button type="button"
+        onClick={(e) => { e.stopPropagation(); onZapi(texto) }}
+        title="Enviar pelo WhatsApp da empresa (Z-API) — você informa o número"
+        className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-300
+          bg-green-100 text-green-700 hover:brightness-95 hover:ring-1 hover:ring-green-400 cursor-pointer">
+        <svg viewBox="0 0 24 24" className="w-3 h-3" fill="currentColor" aria-hidden="true">
+          <path d="M12 3C7 3 3 6.6 3 11c0 2.2 1 4.2 2.7 5.6L5 21l4.6-1.5c.8.2 1.6.3 2.4.3 5 0 9-3.6 9-8s-4-8-9-8z" />
+        </svg>
+      </button>
+    )
+  }
+
+  const link = linkCompartilharWhatsApp(texto)
   if (!link) return null
   return (
     <a href={link} target="_blank" rel="noopener noreferrer"
@@ -75,10 +124,15 @@ function BotaoWhatsApp({ url }: { url: string }) {
   )
 }
 
-export default function SeloCanais({ contagem, onAbrir }: {
+export default function SeloCanais({ contagem, onAbrir, produto, envio, onZapi }: {
   contagem: ContagemCanais | undefined
   /** Abre a lista de anúncios do produto. Sem isso, o selo é só informativo. */
   onAbrir?: () => void
+  /** Para preencher as variáveis do modelo de mensagem. */
+  produto?: { nome?: string | null; sku?: string | null; preco?: string | null }
+  envio?: EnvioMensagem
+  /** Chamado no modo Z-API: a tela de cima abre o formulário do número. */
+  onZapi?: (mensagem: string) => void
 }) {
   const canais = Object.entries(contagem ?? {}).filter(([, c]) => c.total > 0)
   if (canais.length === 0) return null
@@ -128,7 +182,7 @@ export default function SeloCanais({ contagem, onAbrir }: {
                 className={`${classe} cursor-pointer hover:brightness-95 hover:ring-1 hover:ring-indigo-400`}>
                 {info.sigla}
               </a>
-              <BotaoWhatsApp url={c.url} />
+              <BotaoWhatsApp url={c.url} produto={produto} envio={envio} onZapi={onZapi} />
             </span>
           )
         }
