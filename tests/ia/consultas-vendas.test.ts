@@ -2,6 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { dataISO, intervaloUTC, rotuloPeriodo, MAX_LINHAS } from '../../src/lib/ia/consultas/tipos'
 import { CONSULTAS_VENDAS } from '../../src/lib/ia/consultas/vendas'
+import { CONSULTAS_ESTOQUE } from '../../src/lib/ia/consultas/estoque'
 
 // O caso que motivou tudo, em 02/09/2026: "teve venda do produto 24150
 // ontem?" recebeu "não tenho esse dado". O banco tinha — 2 vendas, 3
@@ -129,5 +130,60 @@ describe('período inválido volta como recusa, não como exceção', () => {
 describe('limite de linhas', () => {
   test('existe e é modesto — resultado gigante vira prompt gigante', () => {
     assert.ok(MAX_LINHAS > 0 && MAX_LINHAS <= 100)
+  })
+})
+
+// ── ESTOQUE ────────────────────────────────────────────────────────────────
+
+describe('catálogo de estoque — as mesmas travas', () => {
+  test('nenhuma consulta expõe empresa, SQL ou tabela', () => {
+    for (const c of CONSULTAS_ESTOQUE) {
+      const chaves = Object.keys(c.parametros.properties).join(' ').toLowerCase()
+      assert.doesNotMatch(chaves, /empresa|tenant|sql|query|tabela|where|select/, `${c.nome}`)
+    }
+  })
+
+  test('nomes únicos entre vendas e estoque — o modelo escolhe pelo nome', () => {
+    const nomes = [...CONSULTAS_VENDAS, ...CONSULTAS_ESTOQUE].map(c => c.nome)
+    assert.equal(new Set(nomes).size, nomes.length)
+  })
+
+  test('toda consulta tem descrição útil', () => {
+    for (const c of CONSULTAS_ESTOQUE) {
+      assert.ok(c.descricao.length > 20, `${c.nome} sem descrição`)
+    }
+  })
+})
+
+describe('lista vazia não pode virar "está tudo bem"', () => {
+  // Medido em 02/09/2026: ZERO das 28.752 linhas de `produto_estoque` tem
+  // `estoque_minimo` maior que zero. Sem a checagem, "produtos abaixo do
+  // mínimo" responderia "nenhum" — que o gestor leria como estoque saudável
+  // quando o certo é "a regra nunca foi cadastrada". As duas frases levam a
+  // decisões opostas.
+  test('sem mínimo cadastrado, a consulta diz que a REGRA não existe', async () => {
+    const sbSemMinimo = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            gt: async () => ({ count: 0, data: [] }),
+          }),
+        }),
+      }),
+    }
+    const c = CONSULTAS_ESTOQUE.find(x => x.nome === 'produtos_abaixo_do_minimo')!
+    const r = await c.executar(sbSemMinimo, 'empresa-1', {})
+    assert.equal(r.linhas.length, 0)
+    assert.match(r.ressalvas?.[0] ?? '', /regra não existe|NÃO que o estoque/i)
+  })
+})
+
+describe('data inválida também é recusada no estoque', () => {
+  const sbFalso = { from() { throw new Error('não pode consultar com data inválida') } }
+
+  test('capital_parado exige `desde` no formato certo', async () => {
+    const c = CONSULTAS_ESTOQUE.find(x => x.nome === 'capital_parado')!
+    const r = await c.executar(sbFalso, 'empresa-1', { desde: 'mês passado' })
+    assert.match(r.ressalvas?.[0] ?? '', /AAAA-MM-DD/)
   })
 })

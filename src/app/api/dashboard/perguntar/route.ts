@@ -6,6 +6,7 @@ import type { DashboardQuestionContext } from '@/components/dashboard/AskVargas'
 import { periodoDosIndicadores } from '@/lib/dashboard/periodo'
 import { perguntarComConsultas } from '@/lib/ia/comConsultas'
 import { CONSULTAS_VENDAS } from '@/lib/ia/consultas/vendas'
+import { CONSULTAS_ESTOQUE } from '@/lib/ia/consultas/estoque'
 import { registrarConsumoIA } from '@/lib/ia/gateway'
 
 type Resultado = {
@@ -182,7 +183,7 @@ export async function POST(request: Request) {
   const prompt = `Você é o analista executivo do Sistema Vargas, um ERP brasileiro.
 Responda à pergunta do empresário usando SOMENTE os indicadores JSON fornecidos. Não invente causas, produtos, clientes ou valores. Diferencie correlação de causa. Seja direto, em português brasileiro, com no máximo 130 palavras. Não dê aconselhamento jurídico, contábil ou de investimento. Se faltar dado, diga claramente.
 
-VOCÊ PODE CONSULTAR O BANCO. As ferramentas oferecidas respondem perguntas que os indicadores não cobrem — venda de um produto específico, de um cliente, de um vendedor, ranking de produtos. Use-as sempre que a pergunta pedir um detalhe que não esteja nos indicadores, em vez de dizer que não tem o dado.
+VOCÊ PODE CONSULTAR O BANCO. As ferramentas oferecidas respondem perguntas que os indicadores não cobrem — venda de um produto específico, de um cliente, de um vendedor, ranking de produtos, saldo de estoque por depósito, rupturas, capital parado e movimentações. Use-as sempre que a pergunta pedir um detalhe que não esteja nos indicadores, em vez de dizer que não tem o dado.
 Datas relativas ("ontem", "semana passada") você mesmo converte para AAAA-MM-DD usando "periodo.hoje" antes de chamar a ferramenta.
 Todo resultado de consulta traz o período que cobre e as ressalvas — repita-os na resposta em vez de descrever o presente sem data.
 
@@ -215,7 +216,7 @@ Responda SOMENTE neste JSON:
       sb: supabase,
       empresaId: empresaAtiva,
       prompt,
-      consultas: CONSULTAS_VENDAS,
+      consultas: [...CONSULTAS_VENDAS, ...CONSULTAS_ESTOQUE],
       modelo: 'claude-haiku-4-5-20251001',
       maxTokens: 1200,
     })
