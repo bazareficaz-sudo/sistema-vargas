@@ -275,6 +275,9 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/configuracoes/estoque-unificado', label: 'Estoque do Grupo', icon: '🔗' },
       { href: '/dashboard/configuracoes/impressao',   label: 'Impressão',       icon: '🖨️' },
       { href: '/dashboard/configuracoes/anuncios',    label: 'Padrão de anúncios', icon: '✨' },
+      // Sem entrada no menu a tela nasce orfa — foi o que aconteceu com a
+      // rota de carga do NCM, que existiu tres dias sem ninguem poder chamar.
+      { href: '/dashboard/configuracoes/fiscal',      label: 'Fiscal',          icon: '🧾' },
       { href: '/dashboard/configuracoes/aparencia',   label: 'Aparência',       icon: '🎨' },
     ],
   },
