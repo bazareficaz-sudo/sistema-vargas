@@ -135,6 +135,17 @@ async function executarOpenAI(prompt: string, config: ConfigIA, signal: AbortSig
   }
 }
 
+/**
+ * Registra o consumo em `ia_consumo`.
+ *
+ * Exportado porque o laco de consultas (`comConsultas.ts`) faz 2 a 3 chamadas
+ * por pergunta e precisa somar tudo na cota da empresa. Sem isso o laco
+ * gastaria o triplo e a telemetria mostraria zero.
+ */
+export async function registrarConsumoIA(supabase: SupabaseClient, dados: Record<string, unknown>) {
+  return registrar(supabase, dados)
+}
+
 async function registrar(supabase: SupabaseClient, dados: Record<string, unknown>) {
   try { await supabase.from('ia_consumo').insert(dados) } catch { /* telemetria não interrompe a operação */ }
 }

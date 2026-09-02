@@ -4,6 +4,9 @@ import { perguntarJSONComGateway } from '@/lib/ia/gateway'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import type { DashboardQuestionContext } from '@/components/dashboard/AskVargas'
 import { periodoDosIndicadores } from '@/lib/dashboard/periodo'
+import { perguntarComConsultas } from '@/lib/ia/comConsultas'
+import { CONSULTAS_VENDAS } from '@/lib/ia/consultas/vendas'
+import { registrarConsumoIA } from '@/lib/ia/gateway'
 
 type Resultado = {
   resposta: string
@@ -179,6 +182,10 @@ export async function POST(request: Request) {
   const prompt = `Você é o analista executivo do Sistema Vargas, um ERP brasileiro.
 Responda à pergunta do empresário usando SOMENTE os indicadores JSON fornecidos. Não invente causas, produtos, clientes ou valores. Diferencie correlação de causa. Seja direto, em português brasileiro, com no máximo 130 palavras. Não dê aconselhamento jurídico, contábil ou de investimento. Se faltar dado, diga claramente.
 
+VOCÊ PODE CONSULTAR O BANCO. As ferramentas oferecidas respondem perguntas que os indicadores não cobrem — venda de um produto específico, de um cliente, de um vendedor, ranking de produtos. Use-as sempre que a pergunta pedir um detalhe que não esteja nos indicadores, em vez de dizer que não tem o dado.
+Datas relativas ("ontem", "semana passada") você mesmo converte para AAAA-MM-DD usando "periodo.hoje" antes de chamar a ferramenta.
+Todo resultado de consulta traz o período que cobre e as ressalvas — repita-os na resposta em vez de descrever o presente sem data.
+
 REGRAS SOBRE O PERÍODO — elas corrigem dois erros reais cometidos por esta ferramenta:
 1. Todo indicador com "Mes" no nome cobre APENAS o período em "periodo", que vai do dia 1º até hoje. NUNCA atribua esses números a outro mês, mesmo que a pergunta cite outro mês pelo nome. Se perguntarem sobre um mês que não é o de referência, diga que não tem esse dado — não ofereça o número do mês corrente no lugar.
 2. Quando "mesIncompleto" for true, um valor baixo ou zero em indicador do mês pode ser apenas o mês ter poucos dias decorridos, e NÃO queda de atividade. Não conclua crise, colapso nem restrição de caixa a partir disso. Diga quantos dias de quantos já passaram.
@@ -190,12 +197,48 @@ Indicadores: ${JSON.stringify(contexto)}
 Responda SOMENTE neste JSON:
 {"resposta":"análise objetiva","evidencias":["número e significado"],"sugestoes":["próxima investigação segura"]}`
 
+  const perfilSessao = await perfilDaSessao(supabase, user.id, 'empresa_id')
+  const empresaAtiva: string | undefined = perfilSessao?.empresa_id ?? undefined
+  if (!empresaAtiva) return NextResponse.json({ ok: false, erro: 'Empresa ativa não encontrada.' }, { status: 400 })
+
+  // ── PRIMEIRO O CAMINHO COM CONSULTAS ───────────────────────────────────
+  //
+  // O retrato pre-calculado tem teto: so responde o que alguem anteviu.
+  // Medido em 02/09/2026 — "teve venda do produto 24150 ontem?" recebeu
+  // "nao tenho esse dado", e tinha: 2 vendas, 3 unidades, R$ 7,50.
+  //
+  // Falhar aqui NAO e erro: cai no caminho de sempre, que continua inteiro.
+  // Uma pergunta sobre caixa nao precisa de consulta nenhuma, e o retrato
+  // responde melhor e mais barato.
   try {
-    const perfil = await perfilDaSessao(supabase, user.id, 'empresa_id')
-    if (!perfil?.empresa_id) return NextResponse.json({ ok: false, erro: 'Empresa ativa não encontrada.' }, { status: 400 })
+    const comConsultas = await perguntarComConsultas({
+      sb: supabase,
+      empresaId: empresaAtiva,
+      prompt,
+      consultas: CONSULTAS_VENDAS,
+      modelo: 'claude-haiku-4-5-20251001',
+      maxTokens: 1200,
+    })
+    if (comConsultas.ok) {
+      const resultado = validarResultado(comConsultas.valor)
+      if (resultado) {
+        // Telemetria com o custo REAL do laco: uma pergunta com consultas
+        // gasta 2 a 3 chamadas, e a cota da empresa precisa enxergar isso.
+        await registrarConsumoIA(supabase, {
+          empresa_id: empresaAtiva, usuario_id: user.id,
+          funcionalidade: 'dashboard', provedor: 'anthropic',
+          modelo: 'claude-haiku-4-5-20251001', status: 'sucesso',
+          tokens_entrada: comConsultas.tokensEntrada, tokens_saida: comConsultas.tokensSaida,
+        })
+        return NextResponse.json({ ok: true, resultado: { ...resultado, modo: 'ia' } satisfies Resultado })
+      }
+    }
+  } catch { /* cai no caminho de sempre */ }
+
+  try {
     const execucao = await perguntarJSONComGateway({
       supabase,
-      empresaId: perfil.empresa_id,
+      empresaId: empresaAtiva,
       usuarioId: user.id,
       funcionalidade: 'dashboard',
       prompt,
