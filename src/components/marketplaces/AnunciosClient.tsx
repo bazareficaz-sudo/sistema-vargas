@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { estadoDaRegra, ROTULO_ESTADO } from '@/lib/marketplace/estadoRegra'
 import { explicarRegraEstoque } from '@/lib/marketplace/regraEstoque'
 import AskVargas from '@/components/dashboard/AskVargas'
 import { useRouter } from 'next/navigation'
@@ -157,10 +158,12 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'pausa_automatica', label: 'Pausado por estoque' },
 ]
 
-export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco }: {
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true }: {
   canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
   tagInicial?: string; faltaInicial?: string; facetasIniciais?: string[]
   regras?: any[]; depositos?: { id: string; nome: string }[]
+  /** `marketplace_fila_config.simulacao` — o padrao que o canal pode sobrepor. */
+  simulacaoDaEmpresa?: boolean
   configPreco?: any
 }) {
   const router = useRouter()
@@ -181,6 +184,17 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // os botões de envio não aparecem para ela — melhor ausente do que
   // presente e falhando.
   const temEscrita = plataforma === 'shopee' || ehML
+
+  // O nome da regra vem de `regras`, que a pagina ja carrega para o envio em
+  // massa. Sem nome, a coluna mostraria um uuid.
+  const nomeDaRegra = (regraId?: string | null) =>
+    regraId ? (regras.find((r: { id: string }) => r.id === regraId)?.nome ?? 'regra removida') : null
+
+  // VINCULAR REGRA EM MASSA. Ate 03/09/2026 nao havia como: dos 9.281
+  // anuncios das seis contas, ZERO tinham regra — e a unica forma de vincular
+  // seria uma a uma, no formulario de edicao de cada anuncio.
+  const [vinculandoRegra, setVinculandoRegra] = useState(false)
+  const [regraParaVincular, setRegraParaVincular] = useState('')
 
   const [anuncios, setAnuncios] = useState(anunciosIniciais)
   // anunciosIniciais só vale como valor inicial do useState — sem isso,
@@ -525,6 +539,35 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // anúncio) um a um pros selecionados — sequencial com um pequeno intervalo
   // entre chamadas, em vez de disparar tudo de uma vez, pra não estourar
   // limite de taxa da Shopee com uma seleção grande.
+  async function vincularRegraEmMassa() {
+    const ids = [...selecionados]
+    if (ids.length === 0) return
+    // String vazia = DESVINCULAR. E uma acao legitima e precisa ser possivel:
+    // sem ela, um anuncio vinculado por engano ficaria preso a regra.
+    const valor = regraParaVincular || null
+    const nome = valor ? (regras.find((r: { id: string }) => r.id === valor)?.nome ?? 'regra') : null
+
+    if (!confirm(valor
+      ? `Aplicar a regra "${nome}" a ${ids.length} anúncio(s)?`
+      : `Remover a regra de ${ids.length} anúncio(s)? Eles deixam de receber preço e estoque automáticos.`)) return
+
+    setVinculandoRegra(true)
+    try {
+      const sb = createClient()
+      const { error } = await sb.from('marketplace_anuncios')
+        .update({ regra_id: valor, updated_at: new Date().toISOString() })
+        .in('id', ids).eq('canal_id', canal.id)
+      if (error) { setErro(`Não foi possível vincular: ${error.message}`); return }
+      setAnuncios(prev => prev.map(a => ids.includes(a.id) ? { ...a, regra_id: valor } : a))
+      setSelecionados(new Set())
+      setResumoSync(valor
+        ? `Regra "${nome}" aplicada a ${ids.length} anúncio(s).`
+        : `Regra removida de ${ids.length} anúncio(s).`)
+    } finally {
+      setVinculandoRegra(false)
+    }
+  }
+
   async function sincronizarSelecionados() {
     const alvos = filtrados.filter(a => selecionados.has(a.id))
     if (alvos.length === 0) return
@@ -1016,6 +1059,17 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               Publicar na Nuvemshop
             </button>
           )}
+          {/* ATALHO PARA AS REGRAS, sem precisar selecionar anuncio.
+              O outro botao "Gerenciar regras" mora na barra de selecao, e
+              regra e configuracao do CANAL — nao tem nada a ver com quais
+              anuncios estao marcados. Ficar so la escondia a tela. */}
+          {temEscrita && (
+            <a href={`/dashboard/marketplaces/${canal.id}/regras`}
+              title="Regras de preço e estoque deste canal"
+              className="px-4 py-2 border border-gray-300 bg-white text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+              ⚙ Regras do canal
+            </a>
+          )}
           <button onClick={abrirNovo}
             title="Só registra localmente um anúncio que você já criou manualmente na Shopee/ML — não chama a API"
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
@@ -1155,6 +1209,25 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg">
               Atualizar preço/estoque {preposicao} {nomeCanalPlataforma}
             </button>
+          )}
+          {/* APLICAR REGRA AOS SELECIONADOS. E o vinculo que faltava: a regra
+              mora no canal, mas quem a usa e o ANUNCIO, por `regra_id`. Sem
+              este seletor so dava para vincular um por um. */}
+          {temEscrita && regras.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <select value={regraParaVincular} onChange={e => setRegraParaVincular(e.target.value)}
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white">
+                <option value="">— sem regra —</option>
+                {regras.filter((r: { ativo?: boolean }) => r.ativo !== false).map((r: { id: string; nome: string }) => (
+                  <option key={r.id} value={r.id}>{r.nome}</option>
+                ))}
+              </select>
+              <button onClick={() => void vincularRegraEmMassa()} disabled={vinculandoRegra}
+                title="Aplica a regra escolhida aos anúncios selecionados"
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+                {vinculandoRegra ? 'Aplicando...' : 'Aplicar regra'}
+              </button>
+            </div>
           )}
           {temEscrita && (
             <a href={`/dashboard/marketplaces/${canal.id}/regras`}
@@ -1303,6 +1376,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Título / Produto</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">SKU canal</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-40"
+                title="Regra de preço/estoque aplicada a este anúncio, e se ela está de fato enviando ao marketplace">
+                Regra
+              </th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Qualidade</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Estoque</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Vendas</th>
@@ -1361,6 +1438,40 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   </div>
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-500 font-mono">{a.sku_canal || '—'}</td>
+
+                {/* A REGRA E SE ELA ESTA VALENDO.
+                    Sao quatro interruptores em serie — regra, produto, canal
+                    ligado e fora de simulacao — e ate 03/09/2026 a tela nao
+                    mostrava nenhum. O operador via "ENVIANDO" no canal e um
+                    silencio nos anuncios, sem nada explicando. */}
+                <td className="px-4 py-3">
+                  {(() => {
+                    const e = estadoDaRegra({
+                      anuncio: a,
+                      canal: { atualizar_estoque_canal: canal.atualizar_estoque_canal, fila_simulacao: canal.fila_simulacao },
+                      config: { simulacaoDaEmpresa: simulacaoDaEmpresa },
+                      nomeRegra: nomeDaRegra(a.regra_id),
+                    })
+                    const r = ROTULO_ESTADO[e.estado]
+                    return (
+                      <>
+                        <p className="text-xs text-gray-700 truncate">
+                          {e.regra ?? <span className="text-gray-300">sem regra</span>}
+                        </p>
+                        <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded border text-[10px] font-medium ${r.cls}`}
+                          title={e.estado === 'parado' ? e.falta : e.estado === 'simulando' ? e.porque : 'A fila envia preço e estoque deste anúncio.'}>
+                          {r.txt}
+                        </span>
+                        {/* O QUE FALTA, dito na linha e nao so no title:
+                            quem esta procurando por que nada acontece nao
+                            passa o mouse em 500 linhas. */}
+                        {e.estado === 'parado' && (
+                          <p className="text-[10px] text-gray-400 leading-tight mt-0.5">{e.falta}</p>
+                        )}
+                      </>
+                    )
+                  })()}
+                </td>
                 <td className="px-4 py-3">
                   <button onClick={() => setDetalheAberto(a)} className="text-left hover:opacity-70" title="Ver pendências de qualidade">
                     <QualidadeColuna anuncio={a} />

@@ -66,6 +66,12 @@ export default async function AnunciosPage({ params, searchParams }: {
     .eq('id', canalId)
     .eq('empresa_id', empresaId)
     .single()
+  // A SIMULACAO DA EMPRESA e o padrao que o canal pode sobrepor. A coluna
+  // "Regra" da listagem precisa das duas para dizer se o anuncio esta mesmo
+  // enviando — ver src/lib/marketplace/estadoRegra.ts.
+  const { data: filaCfg } = await supabase
+    .from('marketplace_fila_config')
+    .select('simulacao').eq('empresa_id', empresaId).maybeSingle()
 
   if (!canal) notFound()
 
@@ -137,6 +143,7 @@ export default async function AnunciosPage({ params, searchParams }: {
 
   return (
     <AnunciosClient
+      simulacaoDaEmpresa={filaCfg?.simulacao ?? true}
       canal={canal}
       configPreco={configPreco}
       canais={canais ?? []}
