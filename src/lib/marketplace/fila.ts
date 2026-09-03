@@ -1,4 +1,5 @@
 import { estoqueDoSistema } from './estoqueDoSistema'
+import { decidirSimulacao } from '@/lib/marketplace/simulacao'
 import { decidirPausa, camposPausaAutomatica, camposReativacao } from '@/lib/marketplace/pausa'
 import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
@@ -141,7 +142,7 @@ export async function processarFilaDaEmpresa(
   // se aquele canal aceita receber atualizacao.
   const { data: canaisRows } = await sb
     .from('marketplace_canais')
-    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, atualizar_estoque_canal, sincronizar_estoque')
+    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, atualizar_estoque_canal, sincronizar_estoque, fila_simulacao, nome')
     .eq('empresa_id', cfg.empresa_id)
     .not('access_token', 'is', null)
   const mapaCanal = new Map<string, CanalEnvio>((canaisRows ?? []).map((c: any) => [c.id, c as CanalEnvio]))
@@ -290,8 +291,13 @@ export async function processarFilaDaEmpresa(
       let acao = 'enviaria'
       let detalheFinal = `${detalhe} · motivo: ${item.motivo ?? '—'}`
 
-      if (!cfg.simulacao) {
-        const canal = mapaCanal.get(a.canal_id)
+      // SIMULACAO E POR CANAL, com a empresa como padrao. Antes era so da
+      // empresa, e ligar o envio real de um canal ligava todos.
+      const canalDoAnuncio = mapaCanal.get(a.canal_id)
+      const sim = decidirSimulacao(canalDoAnuncio, { simulacaoDaEmpresa: cfg.simulacao })
+
+      if (!sim.simula) {
+        const canal = canalDoAnuncio
         if (!canal) {
           acao = 'erro'; detalheFinal = 'canal nao encontrado ou sem token'
           comFalha.set(produto.id, detalheFinal); falhasEnvio++

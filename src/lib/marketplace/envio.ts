@@ -22,6 +22,9 @@ export type CanalEnvio = {
   token_expira_em: string | null
   atualizar_estoque_canal: boolean | null
   sincronizar_estoque: boolean | null
+  /** Sobrepoe a simulacao da empresa para este canal. NULL = herda. */
+  fila_simulacao?: boolean | null
+  nome?: string | null
 }
 
 export type AlvoEnvio = {

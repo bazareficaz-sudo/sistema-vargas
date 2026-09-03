@@ -14,6 +14,13 @@ export default async function FilaPage() {
     .from('marketplace_fila_config')
     .select('*').eq('empresa_id', empresaId).maybeSingle()
 
+  // OS CANAIS, com a escolha de simulacao de cada um. `fila_simulacao` nula
+  // significa "herda da empresa" — a coluna e nulavel justamente para isso.
+  const { data: canaisFila } = await supabase
+    .from('marketplace_canais')
+    .select('id, nome, plataforma, ativo, fila_simulacao, atualizar_estoque_canal')
+    .eq('empresa_id', empresaId).eq('ativo', true).order('nome')
+
   // Pendentes: sujou depois do último envio.
   const { data: pendentes } = await supabase
     .from('marketplace_fila')
@@ -40,6 +47,7 @@ export default async function FilaPage() {
 
   return (
     <FilaClient
+      canais={canaisFila ?? []}
       empresaId={empresaId}
       config={config ?? null}
       pendentes={(pendentes ?? []) as any}

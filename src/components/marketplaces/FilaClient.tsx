@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { decidirSimulacao } from '@/lib/marketplace/simulacao'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -47,17 +48,46 @@ function quando(iso: string) {
   return d.toLocaleDateString('pt-BR')
 }
 
+type CanalFila = {
+  id: string
+  nome: string
+  plataforma: string
+  /** NULL = herda da empresa. Ver src/lib/marketplace/simulacao.ts. */
+  fila_simulacao: boolean | null
+  atualizar_estoque_canal: boolean | null
+}
+
 export default function FilaClient({
-  empresaId, config: cfgInicial, pendentes, totalPendentes, simulacoes,
+  empresaId, config: cfgInicial, pendentes, totalPendentes, simulacoes, canais = [],
 }: {
   empresaId: string; config: Config | null
   pendentes: Pendente[]; totalPendentes: number; simulacoes: Simulacao[]
+  canais?: CanalFila[]
 }) {
   const router = useRouter()
   const [cfg, setCfg] = useState<Config>(cfgInicial ?? {
     empresa_id: empresaId, ativo: false, simulacao: true,
     intervalo_min: 15, max_produtos_rodada: 100, estoque_urgente: 3, ultima_execucao: null,
   })
+  const [canaisEstado, setCanaisEstado] = useState(canais)
+  const [canalOcupado, setCanalOcupado] = useState<string | null>(null)
+
+  // A ESCOLHA DO CANAL GRAVA NA HORA, sem botao de salvar: sao tres estados
+  // num seletor, e um "salvar" separado so criaria a chance de alguem trocar
+  // e sair sem gravar, achando que ligou o envio real.
+  async function mudarSimulacaoCanal(canalId: string, valor: boolean | null) {
+    setCanalOcupado(canalId)
+    try {
+      const sb = createClient()
+      const { error } = await sb.from('marketplace_canais')
+        .update({ fila_simulacao: valor }).eq('id', canalId)
+      if (error) { setAviso(`Nao foi possivel salvar: ${error.message}`); return }
+      setCanaisEstado(cs => cs.map(c => c.id === canalId ? { ...c, fila_simulacao: valor } : c))
+    } finally {
+      setCanalOcupado(null)
+    }
+  }
+
   const [salvando, setSalvando] = useState(false)
   const [aviso, setAviso] = useState('')
   const [aba, setAba] = useState<'fila' | 'simulacao'>('simulacao')
@@ -155,6 +185,66 @@ export default function FilaClient({
             </span>
           </span>
         </label>
+
+        {/* ── SIMULAÇÃO POR CANAL ──────────────────────────────────
+            A configuração acima é da EMPRESA. Aqui cada canal pode
+            discordar dela — é o que permite testar o envio real em um
+            canal só, mantendo os outros parados. */}
+        {canaisEstado.length > 0 && (
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <p className="text-sm font-medium text-gray-900">Por canal</p>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">
+              Cada canal pode seguir a empresa ou decidir por conta própria. É assim que se liga o
+              envio real em um canal só.
+            </p>
+
+            <div className="space-y-2">
+              {canaisEstado.map(c => {
+                const d = decidirSimulacao(c, { simulacaoDaEmpresa: cfg.simulacao })
+                const valor = c.fila_simulacao === null || c.fila_simulacao === undefined
+                  ? 'herda' : c.fila_simulacao ? 'simula' : 'envia'
+                return (
+                  <div key={c.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
+                    <span className="text-sm text-gray-800 min-w-[9rem]">{c.nome}</span>
+
+                    <select
+                      value={valor}
+                      disabled={canalOcupado === c.id}
+                      onChange={e => {
+                        const v = e.target.value
+                        void mudarSimulacaoCanal(c.id, v === 'herda' ? null : v === 'simula')
+                      }}
+                      className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white">
+                      <option value="herda">Seguir a empresa</option>
+                      <option value="simula">Somente simular</option>
+                      <option value="envia">Enviar de verdade</option>
+                    </select>
+
+                    {/* O RESULTADO EFETIVO, e não só a escolha. "Seguir a
+                        empresa" não diz se está enviando — depende do que a
+                        empresa está fazendo, e é isso que decide. */}
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                      d.simula
+                        ? 'bg-blue-50 border-blue-200 text-blue-700'
+                        : 'bg-green-50 border-green-200 text-green-700'
+                    }`}>
+                      {d.simula ? 'simulando' : 'ENVIANDO'}
+                    </span>
+
+                    {/* O outro interruptor que também precisa estar ligado.
+                        Sem ele o canal recusa o envio, e a pessoa ficaria
+                        procurando por que "ENVIANDO" não envia. */}
+                    {!d.simula && c.atualizar_estoque_canal === false && (
+                      <span className="text-[11px] text-amber-700">
+                        mas &quot;atualizar estoque do canal&quot; está desligado em Configurar → canal
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {pedindoConfirmacao && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-4 mt-2">
