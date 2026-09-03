@@ -32,6 +32,21 @@ export default function PromocoesClient({ canal, promocoes }: {
 }) {
   const router = useRouter()
   const [sincronizando, setSincronizando] = useState(false)
+  const [sondando, setSondando] = useState(false)
+  const [sonda, setSonda] = useState<Record<string, unknown> | null>(null)
+
+  async function sondar() {
+    setSondando(true); setSonda(null)
+    try {
+      const r = await fetch(`/api/marketplace/shopee/sondar-desconto?canalId=${canal.id}`)
+        .then(x => x.json())
+      setSonda(r)
+    } catch (e) {
+      setSonda({ ok: false, erro: e instanceof Error ? e.message : 'falha' })
+    } finally {
+      setSondando(false)
+    }
+  }
   const [resumo, setResumo] = useState('')
   const [erro, setErro] = useState('')
   const [aberta, setAberta] = useState<string | null>(null)
@@ -90,6 +105,16 @@ export default function PromocoesClient({ canal, promocoes }: {
               {sincronizando ? 'Lendo...' : '↺ Puxar campanhas da Shopee'}
             </button>
           )}
+          {/* SONDA — somente leitura, como a do Mercado Livre. Existe porque
+              acrescentar produto a uma campanha e ESCRITA, e nao vamos
+              escrever contra um contrato que ninguem mediu. */}
+          {ehShopee && (
+            <button onClick={() => void sondar()} disabled={sondando}
+              title="Mede o que a API de descontos da Shopee responde. Somente GET: não cria, não altera, não acrescenta."
+              className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">
+              {sondando ? 'Sondando...' : '🔎 Sondar API de descontos'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -107,6 +132,19 @@ export default function PromocoesClient({ canal, promocoes }: {
         fatia — o primeiro envio real mexe em preço no ar, e vem depois de você conferir aqui que o
         que o sistema enxerga bate com o painel da Shopee.
       </div>
+
+      {sonda && (
+        <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4">
+          <p className="text-sm font-semibold text-gray-900">Sonda da API de descontos</p>
+          <p className="text-xs text-gray-500 mt-0.5 mb-3">
+            Somente leitura. O <code>erro</code> de cada linha é o código cru da Shopee — vazio
+            significa que a chamada passou.
+          </p>
+          <pre className="max-h-96 overflow-auto rounded-lg bg-gray-50 p-3 text-[10px] leading-relaxed text-gray-700">
+            {JSON.stringify(sonda, null, 2)}
+          </pre>
+        </div>
+      )}
 
       {promocoes.length === 0 ? (
         <div className="text-center py-14 text-gray-400 border-2 border-dashed border-gray-200 rounded-xl">
