@@ -29,6 +29,9 @@ const COLUNAS_LISTAGEM = [
   'preco_venda', 'preco_promocional', 'promo_inicio', 'promo_fim',
   'estoque_externo', 'estoque_reservado', 'vendas',
   'status', 'status_externo', 'erro_msg', 'tem_variacao',
+  // Por que o anuncio esta pausado. Escalares, e o filtro "pausa manual"
+  // depende deles — sem isto na lista, a faceta nao enxergaria nada.
+  'pausa_origem', 'pausa_em', 'pausa_motivo',
   'categoria_externa', 'marca_externa', 'regra_id',
   'ultima_atualizacao', 'ultima_atualizacao_externa', 'sincronizado_em',
   'created_at', 'updated_at',

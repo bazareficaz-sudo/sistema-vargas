@@ -1,4 +1,5 @@
 import { estoqueDoSistema } from './estoqueDoSistema'
+import { decidirPausa, camposPausaAutomatica, camposReativacao } from '@/lib/marketplace/pausa'
 import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
 import { enviarParaAnuncio, canalAceitaEnvio, sleep, THROTTLE_ENVIO_MS, type CanalEnvio } from './envio'
@@ -116,7 +117,7 @@ export async function processarFilaDaEmpresa(
   // A fila rodava a cada 5 minutos dizendo que não havia nada a fazer.
   const { data: anuncios, error: erroAnuncios } = await sb
     .from('marketplace_anuncios')
-    .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, regra_id, tem_variacao, status')
+    .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, regra_id, tem_variacao, status, pausa_origem')
     .eq('empresa_id', cfg.empresa_id)
     .in('produto_id', produtoIds)
 
@@ -223,6 +224,7 @@ export async function processarFilaDaEmpresa(
       let estoqueNovo = estoqueBase
       let detalhe = base.origem
       let paraPausar = false
+      let riscoDaRegra: number | null = null
 
       if (a.regra_id) {
         let regra = regrasUsadas.get(a.regra_id)
@@ -258,6 +260,9 @@ export async function processarFilaDaEmpresa(
             if (typeof r.estoqueNovo === 'number') estoqueNovo = r.estoqueNovo
             if (typeof r.precoNovo === 'number') precoNovo = r.precoNovo
             paraPausar = !!r.paraPausar
+            // Guardado para a frase do motivo: "estoque 1000 chegou ao limite
+            // de risco (1000)" explica; "pausado" não.
+            riscoDaRegra = regra.estoque_risco ?? null
             detalhe = `regra aplicada${paraPausar ? ' · pausa o anúncio (estoque de risco)' : ''}`
           } else {
             detalhe = `regra não pôde ser aplicada: ${r.motivo}`
@@ -317,16 +322,30 @@ export async function processarFilaDaEmpresa(
             detalheFinal = `${detalheFinal} · preco retido: item em campanha de desconto`
           }
 
+          // PAUSAR, REATIVAR OU NAO MEXER — e quem decide e `decidirPausa`,
+          // que sabe distinguir a pausa do sistema da pausa de uma pessoa.
+          // Antes, `pausar: false` nao religava nada: o anuncio ficava fora do
+          // ar para sempre depois de uma falta de estoque.
+          const decisao = decidirPausa({
+            anuncio: a, paraPausar,
+            estoqueEnviado: estoqueNovo, risco: riscoDaRegra,
+          })
+
           const r = await enviarParaAnuncio(sb, canal, String(a.id_externo), {
             estoque: estoqueNovo,
             preco: emPromocao ? undefined : (precoNovo ?? undefined),
-            pausar: paraPausar,
+            pausar: decisao.acao === 'pausar',
+            reativar: decisao.acao === 'reativar',
           })
           await sleep(THROTTLE_ENVIO_MS)
 
           if (r.ok) {
             acao = 'enviado'; enviados++
-            detalheFinal = `${detalheFinal}${r.pausado ? ' · anuncio pausado' : ''}`
+            detalheFinal = `${detalheFinal}`
+              + (r.pausado ? ` · anuncio pausado (${decisao.acao === 'pausar' ? decisao.motivo : ''})` : '')
+              + (r.reativado ? ' · anuncio reativado (estoque voltou)' : '')
+              + (decisao.acao === 'nada' && paraPausar === false && a.status === 'pausado'
+                  ? ` · mantido pausado: ${decisao.porque}` : '')
             // O que o canal tem agora e o que acabamos de mandar. Guardar isso
             // evita reenviar o mesmo numero na proxima movimentacao e faz a
             // tela de anuncios refletir a realidade sem esperar a varredura.
@@ -337,6 +356,10 @@ export async function processarFilaDaEmpresa(
             await sb.from('marketplace_anuncios').update({
               estoque_externo: estoqueNovo,
               ...(precoNovo != null && !emPromocao ? { preco_venda: precoNovo } : {}),
+              // A ORIGEM DA PAUSA VAI JUNTO. Sem ela, a proxima reposicao de
+              // estoque nao saberia se pode religar este anuncio.
+              ...(decisao.acao === 'pausar' ? camposPausaAutomatica(decisao.motivo) : {}),
+              ...(decisao.acao === 'reativar' ? camposReativacao() : {}),
             }).eq('id', a.id)
           } else {
             acao = 'erro'; falhasEnvio++

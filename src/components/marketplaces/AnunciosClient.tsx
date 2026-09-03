@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { explicarRegraEstoque } from '@/lib/marketplace/regraEstoque'
 import AskVargas from '@/components/dashboard/AskVargas'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -149,6 +150,11 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'divergente', label: 'Divergente' },
   { key: 'qualidade_ruim', label: 'Qualidade ruim' },
   { key: 'qualidade_boa', label: 'Qualidade ótima' },
+  // Pedido do gestor: achar o que uma PESSOA tirou do ar. Sao os anuncios
+  // que a reposicao de estoque nao vai religar sozinha — se ninguem olhar,
+  // ficam fora do ar para sempre.
+  { key: 'pausa_manual', label: '⏸ Pausa manual' },
+  { key: 'pausa_automatica', label: 'Pausado por estoque' },
 ]
 
 export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco }: {
@@ -910,6 +916,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       if (faceta === 'divergente' && !temDivergencia(a)) return false
       if (faceta === 'qualidade_ruim' && !(a.qualidade_em != null && Number(a.qualidade_score ?? 100) <= 40)) return false
       if (faceta === 'qualidade_boa' && !(a.qualidade_em != null && Number(a.qualidade_score ?? 0) > 80)) return false
+      // `pausa_origem` nula em anuncio pausado conta como MANUAL: sao os
+      // pausados de antes desta coluna existir, e o sistema nao religa o que
+      // nao sabe por que foi desligado.
+      if (faceta === 'pausa_manual' && !(a.status === 'pausado' && a.pausa_origem !== 'automatica')) return false
+      if (faceta === 'pausa_automatica' && !(a.status === 'pausado' && a.pausa_origem === 'automatica')) return false
     }
     return true
   })
@@ -1792,6 +1803,25 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                         <input type="number" value={opcoesMassaPreco.estoqueRisco}
                           onChange={e => setOpcoesMassaPreco(p => p ? { ...p, estoqueRisco: e.target.value } : p)}
                           placeholder="Ex: 2" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                      {/* A CONTA, AO VIVO. Aqui vale mais que na tela de
+                          regras: isto escreve em N anuncios de uma vez, e um
+                          risco mal entendido some com todos ou com nenhum. */}
+                      <div className="col-span-2">
+                        {(() => {
+                          const e = explicarRegraEstoque({
+                            complementar: opcoesMassaPreco.estoqueComplementar,
+                            risco: opcoesMassaPreco.estoqueRisco === '' ? null : opcoesMassaPreco.estoqueRisco,
+                            saldoExemplo: 10,
+                          })
+                          return (
+                            <p className={`rounded-lg border px-2.5 py-1.5 text-[11px] leading-5 ${
+                              e.nuncaPausa
+                                ? 'border-amber-300 bg-amber-50 text-amber-900'
+                                : 'border-blue-200 bg-blue-50 text-blue-800'
+                            }`}>{e.frase}</p>
+                          )
+                        })()}
                       </div>
                     </div>
                   )}

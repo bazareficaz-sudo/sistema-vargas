@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { camposPausaManual, camposReativacao } from '@/lib/marketplace/pausa'
 import { createClient } from '@/lib/supabase/server'
 import { pausarAnuncio, reativarAnuncio } from '@/lib/mercadolivre/write'
 import type { MLChannel } from '@/lib/mercadolivre/types'
@@ -58,7 +59,8 @@ export async function POST(req: Request) {
 
   if (sucessos.length > 0) {
     await sb.from('marketplace_anuncios')
-      .update({ status: acao === 'pausar' ? 'pausado' : 'ativo', updated_at: new Date().toISOString() })
+      // PAUSA MANUAL FICA MARCADA — ver a rota da Shopee para o porque.
+      .update(acao === 'pausar' ? camposPausaManual(user.id) : camposReativacao())
       .in('id', sucessos)
   }
 

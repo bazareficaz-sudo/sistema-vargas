@@ -1,5 +1,5 @@
 import { pushPrecoEstoque, unlistItems } from '@/lib/shopee/write'
-import { atualizarPrecoEstoque, pausarAnuncio } from '@/lib/mercadolivre/write'
+import { atualizarPrecoEstoque, pausarAnuncio, reativarAnuncio } from '@/lib/mercadolivre/write'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
 import { atualizarPrecoEstoque as atualizarPrecoEstoqueNuvemshop, publicarProduto } from '@/lib/nuvemshop/write'
@@ -24,8 +24,14 @@ export type CanalEnvio = {
   sincronizar_estoque: boolean | null
 }
 
-export type AlvoEnvio = { preco?: number | null; estoque?: number | null; pausar?: boolean }
-export type ResultadoEnvio = { ok: boolean; erro?: string; pausado?: boolean }
+export type AlvoEnvio = {
+  preco?: number | null
+  estoque?: number | null
+  pausar?: boolean
+  /** O par de `pausar`. Sem ele, `pausar: false` era "nao faca nada". */
+  reativar?: boolean
+}
+export type ResultadoEnvio = { ok: boolean; erro?: string; pausado?: boolean; reativado?: boolean }
 
 /** Espaço entre chamadas ao mesmo marketplace. Rajada é o jeito mais rápido
  *  de tomar bloqueio por excesso de requisições. */
@@ -41,7 +47,10 @@ export async function enviarParaAnuncio(
   const preco = alvo.preco != null ? Number(alvo.preco) : undefined
   const estoque = alvo.estoque != null ? Number(alvo.estoque) : undefined
 
-  if (preco == null && estoque == null && !alvo.pausar) return { ok: true }
+  // `reativar` e o par que faltava de `pausar`. Antes, `pausar: false` nao
+  // significava "religar" — significava "nao fazer nada", e o anuncio ficava
+  // fora do ar para sempre depois de uma falta de estoque.
+  if (preco == null && estoque == null && !alvo.pausar && !alvo.reativar) return { ok: true }
 
   try {
     if (canal.plataforma === 'shopee') {
@@ -66,6 +75,12 @@ export async function enviarParaAnuncio(
         await unlistItems(ctx, [itemId], true)
         return { ok: true, pausado: true }
       }
+      if (alvo.reativar) {
+        await sleep(THROTTLE_ENVIO_MS)
+        // Mesma chamada, `false` no lugar de `true`: republica o item.
+        await unlistItems(ctx, [itemId], false)
+        return { ok: true, reativado: true }
+      }
       return { ok: true }
     }
 
@@ -82,6 +97,11 @@ export async function enviarParaAnuncio(
         await sleep(THROTTLE_ENVIO_MS)
         await pausarAnuncio(sb, c, idExterno)
         return { ok: true, pausado: true }
+      }
+      if (alvo.reativar) {
+        await sleep(THROTTLE_ENVIO_MS)
+        await reativarAnuncio(sb, c, idExterno)
+        return { ok: true, reativado: true }
       }
       return { ok: true }
     }

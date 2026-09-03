@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { camposPausaManual, camposReativacao } from '@/lib/marketplace/pausa'
 import { createClient } from '@/lib/supabase/server'
 import { refreshAccessTokenIfNeeded } from '@/lib/shopee/client'
 import { unlistItems } from '@/lib/shopee/write'
@@ -70,7 +71,11 @@ export async function POST(req: Request) {
     const idsLocaisSucesso = sucessos.map(r => idExternoParaLocal.get(r.itemId)).filter(Boolean) as string[]
     if (idsLocaisSucesso.length > 0) {
       await sb.from('marketplace_anuncios')
-        .update({ status: unlist ? 'pausado' : 'ativo', updated_at: new Date().toISOString() })
+        // PAUSA MANUAL FICA MARCADA. Esta rota so e chamada por uma pessoa
+        // na tela; a fila automatica usa outro caminho. A marca e o que
+        // impede a reposicao de estoque de religar um anuncio que alguem
+        // tirou do ar de proposito.
+        .update(unlist ? camposPausaManual(user.id) : camposReativacao())
         .in('id', idsLocaisSucesso)
     }
 

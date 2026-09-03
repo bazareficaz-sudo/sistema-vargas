@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { explicarRegraEstoque } from '@/lib/marketplace/regraEstoque'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -89,7 +90,16 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
       partes.push(`+ complementar ${r.estoque_complementar}`)
     }
     if (r.modo_estoque !== 'nao' && r.estoque_risco != null) {
-      partes.push(`pausa se estoque ≤ ${r.estoque_risco}`)
+      // O RISCO É COMPARADO DEPOIS DO COMPLEMENTO. Dizer "pausa se estoque ≤
+      // 1000" fala do valor ENVIADO, não do que existe na prateleira — e com
+      // complemento 1000 o anúncio na verdade só pausa quando o saldo real
+      // zera. O resumo passa a falar do saldo real.
+      const e = explicarRegraEstoque({
+        complementar: r.estoque_complementar, risco: r.estoque_risco,
+      })
+      partes.push(e.nuncaPausa
+        ? `NUNCA pausa (risco ${r.estoque_risco} < complemento ${r.estoque_complementar})`
+        : `pausa com estoque real ≤ ${e.pausaComSaldoReal}`)
     }
     return partes.length > 0 ? partes.join(' · ') : 'Nenhuma alteração configurada'
   }
@@ -352,10 +362,31 @@ export default function RegrasPrecoClient({ canal, regras: regrasIniciais, depos
                       <input type="number" value={form.estoque_risco} onChange={e => f('estoque_risco', e.target.value)}
                         placeholder="Ex: 2"
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-                      <p className="text-[10px] text-gray-400 mt-0.5">Se o estoque final ficar ≤ este valor, o anúncio é pausado.</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">Comparado com o estoque JÁ somado ao complemento.</p>
                     </div>
                   </div>
                 )}
+
+                {/* A CONTA, AO VIVO. A ordem das duas operações é o que engana:
+                    `enviado = saldo + complemento` e só depois
+                    `pausa se enviado ≤ risco`. Quem lê os dois campos
+                    separados conclui outra coisa. */}
+                {form.modo_estoque !== 'nao' && (() => {
+                  const e = explicarRegraEstoque({
+                    complementar: form.estoque_complementar === '' ? 0 : parseInt(form.estoque_complementar, 10),
+                    risco: form.estoque_risco === '' ? null : parseInt(form.estoque_risco, 10),
+                    saldoExemplo: 10,
+                  })
+                  return (
+                    <p className={`mt-2 rounded-lg border px-2.5 py-1.5 text-[11px] leading-5 ${
+                      e.nuncaPausa
+                        ? 'border-amber-300 bg-amber-50 text-amber-900'
+                        : 'border-blue-200 bg-blue-50 text-blue-800'
+                    }`}>
+                      {e.frase}
+                    </p>
+                  )
+                })()}
               </div>
 
               <label className="flex items-center gap-2 text-xs text-gray-700">
