@@ -1,6 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import SeloCampanhaChip from '@/components/marketplaces/SeloCampanha'
+import type { SeloCampanha } from '@/lib/marketplace/seloCampanha'
+import { LIMITES_PROXIMIDADE } from '@/lib/precificacao/campanhas'
 import AdicionarNaCampanhaModal from '@/components/marketplaces/AdicionarNaCampanhaModal'
 import { estadoDaRegra, ROTULO_ESTADO } from '@/lib/marketplace/estadoRegra'
 import { explicarRegraEstoque } from '@/lib/marketplace/regraEstoque'
@@ -157,9 +160,14 @@ const FACETAS: { key: string; label: string }[] = [
   // ficam fora do ar para sempre.
   { key: 'pausa_manual', label: '⏸ Pausa manual' },
   { key: 'pausa_automatica', label: 'Pausado por estoque' },
+  // Achar o que esta em campanha, e o que ACABA logo: a data de expiracao so
+  // vira decisao se der para filtrar por ela. Sete dias e o mesmo limite de
+  // atencao que `proximidadeDoFim` usa no resto do sistema.
+  { key: 'em_campanha', label: '🏷 Em campanha' },
+  { key: 'campanha_acabando', label: 'Campanha acaba em 7 dias' },
 ]
 
-export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true, campanhasAtivas = [] }: {
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true, campanhasAtivas = [], selosCampanha = {} }: {
   canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
   tagInicial?: string; faltaInicial?: string; facetasIniciais?: string[]
   regras?: any[]; depositos?: { id: string; nome: string }[]
@@ -167,6 +175,8 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   simulacaoDaEmpresa?: boolean
   /** Campanhas nao encerradas do canal, para o botao de por em promocao. */
   campanhasAtivas?: { idExterno: string; nome: string; status: string }[]
+  /** Selo de campanha por anúncio, calculado no servidor. Ver seloCampanha.ts. */
+  selosCampanha?: Record<string, SeloCampanha[]>
   configPreco?: any
 }) {
   const router = useRouter()
@@ -988,6 +998,9 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       // nao sabe por que foi desligado.
       if (faceta === 'pausa_manual' && !(a.status === 'pausado' && a.pausa_origem !== 'automatica')) return false
       if (faceta === 'pausa_automatica' && !(a.status === 'pausado' && a.pausa_origem === 'automatica')) return false
+      if (faceta === 'em_campanha' && !(selosCampanha[a.id]?.length)) return false
+      if (faceta === 'campanha_acabando' && !(selosCampanha[a.id] ?? []).some(
+        s => s.estado === 'valendo' && s.diasRestantes != null && s.diasRestantes <= LIMITES_PROXIMIDADE.atencao)) return false
     }
     return true
   })
@@ -1464,6 +1477,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                           </span>
                         )}
                         {a.tem_variacao && <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-full">Com variações</span>}
+                        {/* CAMPANHA: nome e quanto falta para expirar. Fica
+                            junto das outras marcas do anuncio porque e uma
+                            propriedade dele, e nao do preco de hoje. */}
+                        <SeloCampanhaChip selos={selosCampanha[a.id]} />
                         {!estaMapeado(a) && <span className="text-xs text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded-full">Não vinculado</span>}
                         {temDivergencia(a) && <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">⚠ Diverge do produto</span>}
                         {(a.produtos?.tags ?? []).map((t: string) => (

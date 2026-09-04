@@ -10,6 +10,7 @@ import type { EconomiaResolvida } from './cenarios'
 import type { ClassificacaoMargem, Margens } from './margens'
 import type { OrigemPrecoEfetivo, CampanhaVigenteResumo } from './precos'
 import type { SaudePreco } from './tipos'
+import { selosDoAnuncio, type SeloCampanha } from '@/lib/marketplace/seloCampanha'
 
 // O cliente do Supabase é `any` em todo o repositório: tipá-lo exigiria os
 // tipos gerados do banco, que este projeto não usa. O alias existe para a
@@ -89,6 +90,16 @@ export type ItemRecalculo = {
   estado: EstadoComercial
   flags: FlagComercial[]
   campanha: CampanhaVigenteResumo | null
+  /**
+   * Que o anúncio ESTÁ em campanha — pergunta separada de qual preço vale.
+   *
+   * `campanha` acima só existe quando a campanha manda no preço agora. O selo
+   * também aparece para campanha PROGRAMADA (preço já fechado, janela por
+   * abrir) e para anúncio com variações em preços diferentes, que
+   * `itemDoAnuncio` recusa a resumir num preço só. Sem ele, esses dois casos
+   * chegam à tela de precificação como se campanha nenhuma existisse.
+   */
+  selosCampanha: SeloCampanha[]
   oportunidades: Oportunidade[]
   /**
    * Recomendações comerciais, já sem contradição e ordenadas pela
@@ -319,6 +330,7 @@ export async function varrerRecalculo(
             estado: estrategia.estado,
             flags: estrategia.flags,
             campanha: estrategia.campanha,
+            selosCampanha: selosDoAnuncio(ctx.campanhas, a.id, resolvedor.agora),
             oportunidades: estrategia.oportunidades,
             recomendacoes: [],
             avisos: [...ctx.avisos, ...novo.resultado.avisos],

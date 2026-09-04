@@ -4,7 +4,8 @@ import {
   resolverFreteML, embalagemDoAnuncio, logisticTypeDoAnuncio, listingTypeDoAnuncio, pesoCobravelML,
 } from './mlFrete'
 import { resolverPrecoEfetivo, type PrecoResolvido } from './precos'
-import { normalizarCampanhaDoEspelho, type CampanhaDoAnuncio } from './campanhas'
+import { type CampanhaDoAnuncio } from './campanhas'
+import { campanhasDoCanalNoEspelho } from '@/lib/marketplace/campanhasEspelho'
 import { calcularKit } from '@/lib/produtos/kit'
 import { refreshAccessTokenIfNeeded } from '@/lib/mercadolivre/client'
 import type { MLChannel } from '@/lib/mercadolivre/types'
@@ -198,25 +199,10 @@ export function criarResolvedor(sb: ClienteSupabase, empresaId: string, agora: D
     const guardado = campanhasPorCanal.get(canal.id)
     if (guardado) return guardado
 
-    const { data } = await sb
-      .from('marketplace_promocoes')
-      .select(`
-        id, empresa_id, canal_id, id_externo, nome, status, inicio, fim, sincronizado_em, dados_brutos,
-        marketplace_promocao_itens (
-          id, anuncio_id, item_id_externo, model_id,
-          preco_original, preco_promocional, limite_por_compra, estoque_promocao
-        )
-      `)
-      // Empresa E canal: a campanha é da empresa da sessão, e id de canal
-      // nunca é identificador suficiente sozinho.
-      .eq('empresa_id', empresaId)
-      .eq('canal_id', canal.id)
-      // Campanha encerrada não muda preço nenhum e só faria a consulta
-      // crescer com histórico.
-      .neq('status', 'encerrada')
-
-    const normalizadas = (data ?? []).map((linha: Record<string, unknown>) =>
-      normalizarCampanhaDoEspelho(linha as never, canal, empresaId))
+    // A leitura mora em `campanhasEspelho.ts` porque a listagem de anúncios
+    // faz a MESMA consulta, e porque ela traz o `status` do item — que faltava
+    // aqui e fazia todo item virar `desconhecido`, sem nunca valer o preço.
+    const normalizadas = await campanhasDoCanalNoEspelho(sb, empresaId, canal)
     campanhasPorCanal.set(canal.id, normalizadas)
     return normalizadas
   }

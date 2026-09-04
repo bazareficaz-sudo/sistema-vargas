@@ -1,4 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
+import { campanhasDoCanalNoEspelho } from '@/lib/marketplace/campanhasEspelho'
+import { selosPorAnuncio } from '@/lib/marketplace/seloCampanha'
 import { notFound } from 'next/navigation'
 import AnunciosClient from '@/components/marketplaces/AnunciosClient'
 import { buscarConfigDoCanal } from '@/lib/precificacao/config'
@@ -84,6 +86,16 @@ export default async function AnunciosPage({ params, searchParams }: {
 
   if (!canal) notFound()
 
+  // OS SELOS: quais anúncios estão comprometidos com campanha, e até quando.
+  //
+  // Mesma leitura da precificação, mesma função de selo — as duas telas
+  // respondem a mesma pergunta e não podem divergir. Calculado no servidor
+  // para o relógio ser um só: "faltam 3 dias" medido no navegador de quem
+  // abre daria resposta diferente por fuso.
+  const campanhasComItens = await campanhasDoCanalNoEspelho(
+    supabase, empresaId, { id: canalId, plataforma: canal.plataforma })
+  const selos = selosPorAnuncio(campanhasComItens, new Date())
+
   const { data: canais } = await supabase
     .from('marketplace_canais')
     // plataforma entra pra tela saber quais canais aceitam replicação em
@@ -154,6 +166,7 @@ export default async function AnunciosPage({ params, searchParams }: {
     <AnunciosClient
       simulacaoDaEmpresa={filaCfg?.simulacao ?? true}
       campanhasAtivas={(campanhasRows ?? []).map(c => ({ idExterno: String(c.id_externo), nome: c.nome, status: c.status }))}
+      selosCampanha={selos}
       canal={canal}
       configPreco={configPreco}
       canais={canais ?? []}

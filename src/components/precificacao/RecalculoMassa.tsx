@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import SeloCampanhaChip from '@/components/marketplaces/SeloCampanha'
 import { ROTULO_CLASSIFICACAO } from '@/lib/precificacao/margens'
 import { ROTULO_PRIORIDADE } from '@/lib/precificacao/recomendacoes'
 import { ROTULO_SAUDE } from '@/lib/precificacao/motor'
@@ -543,6 +544,12 @@ export default function RecalculoMassa() {
                             <p className="text-xs text-gray-400">
                               {i.canalNome} · regra {i.regraNome} ({i.regraObjetivo})
                             </p>
+                            {/* CAMPANHA: aparece mesmo quando ela nao manda no
+                                preco de hoje. Campanha programada tem preco ja
+                                fechado — subir o preco de venda aqui nao sobe o
+                                dela, e o desconto abre mais do que se pretendia
+                                quando a janela abrir. */}
+                            <SeloCampanhaChip selos={i.selosCampanha} className="mt-0.5" />
                             {i.avisos?.length > 0 && (
                               <p className="text-[11px] text-amber-700 mt-0.5">{i.avisos[0]}</p>
                             )}
