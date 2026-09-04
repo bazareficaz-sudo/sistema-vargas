@@ -4,6 +4,7 @@ import { decidirPausa, camposPausaAutomatica, camposReativacao } from '@/lib/mar
 import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
 import { enviarParaAnuncio, canalAceitaEnvio, sleep, THROTTLE_ENVIO_MS, type CanalEnvio } from './envio'
+import { precisaEnviar } from './precisaEnviar'
 
 // FASE 3 — processador da fila de atualização (sistema → marketplace).
 //
@@ -131,7 +132,7 @@ export async function processarFilaDaEmpresa(
   for (let offset = 0; offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
     const { data: pagina, error: erroAnuncios } = await sb
       .from('marketplace_anuncios')
-      .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, regra_id, tem_variacao, status, pausa_origem')
+      .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, pausa_origem')
       .eq('empresa_id', cfg.empresa_id)
       .in('produto_id', produtoIds)
       // Ordem estável: sem ela, duas páginas podem repetir e omitir linhas.
@@ -291,19 +292,36 @@ export async function processarFilaDaEmpresa(
         }
       }
 
-      const mudouEstoque = Number(a.estoque_externo ?? -1) !== estoqueNovo
-      const mudouPreco = precoNovo != null && Number(a.preco_venda ?? -1) !== precoNovo
+      // QUEM DECIDE É `precisaEnviar`, e não a comparação com o espelho.
+      //
+      // O espelho (`estoque_externo`) é o que ACREDITAMOS ter mandado, e ele
+      // era escrito mesmo quando a Shopee recusava o item dentro de uma
+      // resposta aceita. Quando a última LEITURA da plataforma
+      // (`estoque_reservado`) contradiz o espelho, quem está errado é o
+      // espelho — e "já igual" era o que mantinha o anúncio travado.
+      const decisaoEnvio = precisaEnviar({
+        estoqueExterno: a.estoque_externo,
+        estoqueMedido: a.estoque_reservado,
+        estoqueNovo,
+        precoEspelho: a.preco_venda,
+        precoNovo,
+      })
 
-      if (!mudouEstoque && !mudouPreco) {
+      if (!decisaoEnvio.enviar) {
         semMudanca++
         linhas.push({
           empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
           anuncio_id: a.id, produto_id: produto.id, acao: 'sem_mudanca',
           estoque_sistema: estoqueBase, estoque_canal: a.estoque_externo, estoque_enviaria: estoqueNovo,
           preco_canal: a.preco_venda, preco_enviaria: precoNovo,
-          detalhe: 'o canal já está com o mesmo número',
+          detalhe: decisaoEnvio.motivo,
         })
         continue
+      }
+      if (decisaoEnvio.espelhoDivergente) {
+        // Vai para a linha da fila: é a evidência de que um envio anterior foi
+        // dado como aceito sem ter sido, e some se ninguém a escrever.
+        detalhe = `${detalhe} · ⚠ ${decisaoEnvio.motivo}`
       }
 
       enviaria++

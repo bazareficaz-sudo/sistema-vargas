@@ -108,6 +108,34 @@ export default function FilaClient({
   const [doBanco, setDoBanco] = useState<{ linhas: Simulacao[]; pendentes: PendenteDoProduto[] } | null>(null)
   const [buscando, setBuscando] = useState(false)
   const [rodando, setRodando] = useState(false)
+  // TRAVADOS: anuncios cujo espelho local discorda da ultima leitura do
+  // canal. Sao os que a fila nunca reenvia sozinha, porque ela comparava o
+  // espelho com ele mesmo e concluia "ja igual".
+  const [travados, setTravados] = useState<{ total: number; produtos: number; amostra: { titulo: string | null; idExterno: string | null; espelho: number | null; medido: number | null }[] } | null>(null)
+  const [olhandoTravados, setOlhandoTravados] = useState(false)
+
+  async function verTravados() {
+    setOlhandoTravados(true)
+    try {
+      const d = await fetch('/api/marketplace/fila/travados').then(r => r.json())
+      if (d.ok) setTravados(d); else setAviso(d.erro ?? 'Falha ao levantar travados')
+    } finally {
+      setOlhandoTravados(false)
+    }
+  }
+
+  async function reenfileirarTravados() {
+    setOlhandoTravados(true)
+    try {
+      const d = await fetch('/api/marketplace/fila/travados', { method: 'POST' }).then(r => r.json())
+      if (!d.ok) { setAviso(d.erro ?? 'Falha ao reenfileirar'); return }
+      setAviso(`${d.enfileirados} produto(s) de volta na fila (${d.anuncios} anúncio(s) travados). Clique em "Rodar a fila agora".`)
+      setTravados(null)
+      router.refresh()
+    } finally {
+      setOlhandoTravados(false)
+    }
+  }
 
   async function rodarAgora() {
     setRodando(true)
@@ -394,9 +422,59 @@ export default function FilaClient({
           {cfg.ultima_execucao && (
             <span className="text-xs text-gray-400">Última rodada {quando(cfg.ultima_execucao)}</span>
           )}
+          <button onClick={verTravados} disabled={olhandoTravados}
+            title="Anúncios cujo espelho local discorda do que o canal devolveu na última leitura"
+            className="px-3 py-2 border border-gray-300 hover:bg-gray-50 disabled:opacity-40 text-gray-600 text-xs rounded-lg">
+            {olhandoTravados ? '...' : 'Procurar travados'}
+          </button>
           {aviso && <span className="text-xs text-gray-600">{aviso}</span>}
         </div>
       </div>
+
+      {travados && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          {travados.total === 0 ? (
+            <p className="text-sm text-amber-900">
+              Nenhum anúncio travado: em todos eles o espelho local bate com a última leitura do canal.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-amber-900">
+                <strong>{travados.total} anúncio(s)</strong> em {travados.produtos} produto(s) com o espelho
+                local diferente do que o canal devolveu. A fila não reenvia esses sozinha — ela comparava o
+                espelho com ele mesmo e concluía &quot;já igual&quot;.
+              </p>
+              <table className="mt-3 w-full text-xs">
+                <thead className="text-amber-800/70">
+                  <tr>
+                    <th className="text-left font-medium py-1">Anúncio</th>
+                    <th className="text-right font-medium py-1">Espelho diz</th>
+                    <th className="text-right font-medium py-1">Canal devolveu</th>
+                  </tr>
+                </thead>
+                <tbody className="text-amber-900">
+                  {travados.amostra.map(a => (
+                    <tr key={a.idExterno ?? a.titulo} className="border-t border-amber-200/60">
+                      <td className="py-1 pr-3 truncate max-w-md">{a.titulo ?? '(sem título)'}</td>
+                      <td className="py-1 text-right font-mono">{a.espelho}</td>
+                      <td className="py-1 text-right font-mono font-semibold">{a.medido}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {travados.total > travados.amostra.length && (
+                <p className="mt-2 text-xs text-amber-800/70">
+                  e mais {travados.total - travados.amostra.length} — a amostra existe para conferir, não para listar tudo.
+                </p>
+              )}
+              <button onClick={reenfileirarTravados} disabled={olhandoTravados}
+                className="mt-3 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
+                Reenfileirar os {travados.produtos} produto(s)
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Abas */}
       <div className="flex gap-1 mb-4">

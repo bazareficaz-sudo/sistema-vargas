@@ -88,17 +88,36 @@ export async function sincronizarEstoqueAutomatico(
         : (produto.estoque ?? 0)
     }
 
-    const updates: Record<string, any> = { updated_at: new Date().toISOString(), estoque_reservado: estoqueNovo }
-    if (precoNovo !== undefined) updates.preco_venda = precoNovo
-    await sb.from('marketplace_anuncios').update(updates).eq('id', a.id)
-
+    // GRAVA DEPOIS DO ENVIO, E NA COLUNA CERTA.
+    //
+    // Isto gravava ANTES de enviar, e gravava em `estoque_reservado` — que é
+    // a coluna onde a sincronização de catálogo guarda o número que a
+    // PLATAFORMA devolveu. Duas coisas erradas de uma vez:
+    //
+    //   escrever antes    o envio podia falhar logo em seguida e o registro
+    //                     ficava dizendo que o canal tinha um número que ele
+    //                     nunca recebeu. Nada revertia.
+    //
+    //   coluna errada     `estoque_reservado` é MEDIDA. Escrever nela o que
+    //                     pretendemos mandar apaga a única resposta que a
+    //                     plataforma nos deu, e com ela a chance de perceber
+    //                     que o envio não valeu (ver `precisaEnviar`).
+    //
+    // O espelho do que MANDAMOS é `estoque_externo`, que é o que a fila usa.
+    let ok = false
     try {
       const resultadoPush = await pushPrecoEstoque({ sb, canal }, Number(a.id_externo), [{ preco: precoNovo, estoque: estoqueNovo }])
-      const ok = resultadoPush.estoqueOk && (precoNovo === undefined || resultadoPush.precoOk)
+      ok = resultadoPush.estoqueOk && (precoNovo === undefined || resultadoPush.precoOk)
       if (ok) enviados++
       else falhas++
     } catch {
       falhas++
+    }
+
+    if (ok) {
+      const updates: Record<string, any> = { updated_at: new Date().toISOString(), estoque_externo: estoqueNovo }
+      if (precoNovo !== undefined) updates.preco_venda = precoNovo
+      await sb.from('marketplace_anuncios').update(updates).eq('id', a.id)
     }
 
     if (paraPausar) { idsParaPausar.push(a.id); pausados++ }
