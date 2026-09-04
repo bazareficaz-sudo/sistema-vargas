@@ -124,6 +124,35 @@ export default function FilaClient({
     }
   }
 
+  // RECONCILIAR: pedir que a fila olhe TUDO que pode ser enviado.
+  //
+  // A fila e dirigida por evento, e mudar regra nao e evento. Depois de
+  // configurar regras, o estado normal e uma fila vazia com dezenas de
+  // anuncios desalinhados — e nada os corrige sozinho. Isto nao decide o que
+  // enviar: enfileira, e a rodada decide anuncio por anuncio, gravando
+  // `sem_mudanca` no que ja estiver certo.
+  async function reconciliarTudo() {
+    if (!confirm(
+      'Colocar na fila TODOS os produtos com anuncio em canal que aceita envio. '
+      + 'A fila decide um por um o que precisa mudar; o que ja estiver certo e registrado como "ja igual". '
+      + 'Com o envio real ligado, o que estiver diferente vai para o marketplace. Continuar?')) return
+    setOlhandoTravados(true)
+    try {
+      const d = await fetch('/api/marketplace/fila/enfileirar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tudo: true }),
+      }).then(r => r.json())
+      if (!d.ok) { setAviso(d.erro ?? 'Falha ao reconciliar'); return }
+      setAviso(`${d.enfileirados} produto(s) na fila, de ${d.anuncios} anúncio(s) em canais que aceitam envio`
+        + (d.semRegra ? ` · ${d.semRegra} sem regra (recebem só o espelho do estoque)` : '')
+        + '. A fila atende por rodada — clique em "Rodar a fila agora".')
+      setTravados(null)
+      router.refresh()
+    } finally {
+      setOlhandoTravados(false)
+    }
+  }
+
   async function reenfileirarTravados() {
     setOlhandoTravados(true)
     try {
@@ -422,6 +451,11 @@ export default function FilaClient({
           {cfg.ultima_execucao && (
             <span className="text-xs text-gray-400">Última rodada {quando(cfg.ultima_execucao)}</span>
           )}
+          <button onClick={reconciliarTudo} disabled={olhandoTravados || !cfg.ativo}
+            title="Coloca na fila todos os produtos com anúncio em canal que aceita envio. Use depois de criar ou aplicar regras."
+            className="px-3 py-2 border border-gray-300 hover:bg-gray-50 disabled:opacity-40 text-gray-600 text-xs rounded-lg">
+            Reconciliar tudo
+          </button>
           <button onClick={verTravados} disabled={olhandoTravados}
             title="Anúncios cujo espelho local discorda do que o canal devolveu na última leitura"
             className="px-3 py-2 border border-gray-300 hover:bg-gray-50 disabled:opacity-40 text-gray-600 text-xs rounded-lg">

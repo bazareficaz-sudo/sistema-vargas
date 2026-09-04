@@ -596,9 +596,38 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       if (error) { setErro(`Não foi possível vincular: ${error.message}`); return }
       setAnuncios(prev => prev.map(a => ids.includes(a.id) ? { ...a, regra_id: valor } : a))
       setSelecionados(new Set())
-      setResumoSync(valor
+
+      // PEDIR A FILA QUE OLHE ESTES PRODUTOS.
+      //
+      // Mudar a regra muda o que DEVERIA estar no canal e nao toca no estoque
+      // de ninguem — e o gatilho da fila so dispara em movimentacao de estoque
+      // ou preco. Sem este pedido, a regra recem-aplicada so passaria a valer
+      // na proxima venda de cada produto, o que para a maioria e "nunca": o
+      // anuncio fica marcado "enviando" e nada acontece.
+      //
+      // So quando VINCULA. Desvincular tira o anuncio do envio automatico;
+      // enfileirar ali seria pedir uma rodada para nao fazer nada.
+      let recado = valor
         ? `Regra "${nome}" aplicada a ${ids.length} anúncio(s).`
-        : `Regra removida de ${ids.length} anúncio(s).`)
+        : `Regra removida de ${ids.length} anúncio(s).`
+
+      if (valor) {
+        try {
+          const d = await fetch('/api/marketplace/fila/enfileirar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ anuncioIds: ids }),
+          }).then(r => r.json())
+          recado += d.ok
+            ? ` ${d.enfileirados} produto(s) na fila de atualização.`
+            : ` Mas não entraram na fila: ${d.erro ?? 'falha ao enfileirar'}`
+        } catch {
+          // Falhar aqui nao desfaz o vinculo, que ja esta gravado. Dizer e o
+          // minimo: em silencio, a pessoa esperaria um envio que ninguem pediu.
+          recado += ' Mas não foi possível colocá-los na fila — use "Rodar a fila agora" em Marketplaces → Fila.'
+        }
+      }
+      setResumoSync(recado)
     } finally {
       setVinculandoRegra(false)
     }
@@ -1550,6 +1579,19 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                 <td className="px-4 py-3 text-right">
                   <p className="text-gray-900 font-mono text-sm">{a.estoque_reservado ?? 0}</p>
                   {a.produtos && <p className="text-xs text-gray-400">estoque: {a.produtos.estoque ?? 0}</p>}
+                  {/* O QUE ACHAMOS QUE MANDAMOS, quando discorda do que o canal
+                      devolveu. Sao duas colunas diferentes e so uma aparecia:
+                      `estoque_reservado` e a LEITURA da plataforma,
+                      `estoque_externo` e o espelho do que enviamos. Quando
+                      divergem, um envio foi dado como aceito sem ter sido — e
+                      ate 04/09/2026 nada na tela deixava isso visivel. */}
+                  {a.estoque_externo != null && a.estoque_reservado != null
+                    && Number(a.estoque_externo) !== Number(a.estoque_reservado) && (
+                    <p className="text-[11px] text-amber-700 whitespace-nowrap"
+                      title={`O sistema registrou ter enviado ${a.estoque_externo}, mas a última leitura do canal trouxe ${a.estoque_reservado}. Em Marketplaces → Fila, use "Procurar travados".`}>
+                      ⚠ mandamos {a.estoque_externo}
+                    </p>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right text-gray-600 font-mono text-sm">{a.vendas ?? '—'}</td>
                 <td className="px-4 py-3 text-right">
