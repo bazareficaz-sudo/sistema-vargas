@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import type { ItemComEconomia } from '@/lib/marketplace/economiaCampanha'
 import { useRouter } from 'next/navigation'
 
 // Promoções do canal — fatia 1: ler o que a Shopee já tem.
@@ -25,10 +26,12 @@ function data(d: string | null) {
   return new Date(d).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 
-export default function PromocoesClient({ canal, promocoes }: {
+export default function PromocoesClient({ canal, promocoes, economia = {} }: {
   canal: any
   promocoes: any[]
   empresaId: string
+  /** Margem de cada item, calculada no servidor pela MESMA engine do recálculo. */
+  economia?: Record<string, ItemComEconomia>
 }) {
   const router = useRouter()
   const [sincronizando, setSincronizando] = useState(false)
@@ -197,6 +200,13 @@ export default function PromocoesClient({ canal, promocoes }: {
                             <th className="text-right px-4 py-2 text-xs font-medium text-gray-600">De</th>
                             <th className="text-right px-4 py-2 text-xs font-medium text-gray-600">Por</th>
                             <th className="text-right px-4 py-2 text-xs font-medium text-gray-600">Desconto</th>
+                            {/* AS DUAS MARGENS LADO A LADO. Desconto sozinho nao
+                                diz se vale a pena: 34% de desconto num item com
+                                margem de 40% e negocio; no de 10% e prejuizo. */}
+                            <th className="text-right px-4 py-2 text-xs font-medium text-gray-600"
+                              title="Margem líquida no preço normal e no promocional — depois de comissão, frete, imposto e embalagem">
+                              Margem antes → depois
+                            </th>
                             <th className="text-right px-4 py-2 text-xs font-medium text-gray-600">Limite</th>
                           </tr>
                         </thead>
@@ -220,6 +230,49 @@ export default function PromocoesClient({ canal, promocoes }: {
                                 <td className="px-4 py-2 text-right font-medium text-emerald-700">{fmt(i.preco_promocional)}</td>
                                 <td className="px-4 py-2 text-right text-xs text-gray-600">
                                   {desconto == null ? '—' : `${desconto.toFixed(1)}%`}
+                                </td>
+
+                                <td className="px-4 py-2 text-right">
+                                  {(() => {
+                                    const ec = economia[i.id]
+                                    // SEM ECONOMIA NAO E ZERO. Mostrar 0% num item
+                                    // sem custo cadastrado seria afirmar que ele nao
+                                    // da lucro, quando a verdade e que ninguem sabe.
+                                    if (!ec || ec.semEconomia) {
+                                      return (
+                                        <span className="text-[11px] text-amber-700" title={ec?.semEconomia ?? 'sem dados'}>
+                                          não calculável
+                                        </span>
+                                      )
+                                    }
+                                    const antes = ec.normal?.resultado.margemLiquida
+                                    const depois = ec.promocional?.resultado.margemLiquida
+                                    const cor = (m?: number) =>
+                                      m == null ? 'text-gray-400' : m < 0 ? 'text-red-600 font-semibold' : m < 5 ? 'text-amber-700' : 'text-emerald-700'
+                                    return (
+                                      <>
+                                        <span className="text-xs">
+                                          <span className={cor(antes)}>{antes == null ? '—' : `${antes.toFixed(1)}%`}</span>
+                                          <span className="text-gray-300 mx-1">→</span>
+                                          <span className={cor(depois)}>{depois == null ? '—' : `${depois.toFixed(1)}%`}</span>
+                                        </span>
+                                        {/* LUCRO EM REAIS junto do percentual: 8% de
+                                            R$ 20 e 8% de R$ 200 sao decisoes
+                                            diferentes. */}
+                                        {ec.promocional && (
+                                          <span className="block text-[10px] text-gray-400">
+                                            {fmt(ec.promocional.resultado.lucro)}/un no promocional
+                                          </span>
+                                        )}
+                                        {/* DE ONDE VIERAM COMISSAO E FRETE. Margem
+                                            calculada com frete suposto nao pode
+                                            parecer margem medida. */}
+                                        {ec.origem && (ec.origem.frete.includes('sem_medidas') || ec.origem.comissao.includes('sem_categoria')) && (
+                                          <span className="block text-[10px] text-amber-600">⚠ base não medida</span>
+                                        )}
+                                      </>
+                                    )
+                                  })()}
                                 </td>
                                 <td className="px-4 py-2 text-right text-xs text-gray-500">
                                   {/* 0 é "sem limite" na convenção da Shopee, não "nenhum permitido". */}

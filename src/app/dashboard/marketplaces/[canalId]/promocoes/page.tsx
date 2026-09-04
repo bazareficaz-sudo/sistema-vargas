@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import PromocoesClient from '@/components/marketplaces/PromocoesClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { economiaDosItens, type ItemComEconomia } from '@/lib/marketplace/economiaCampanha'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,11 +39,29 @@ export default async function PromocoesPage({ params }: { params: Promise<{ cana
     .eq('canal_id', canalId)
     .order('inicio', { ascending: false, nullsFirst: false })
 
+  // A ECONOMIA DE CADA ITEM, pela mesma engine do recalculo em massa.
+  //
+  // No servidor porque `criarResolvedor` consulta banco e a API do
+  // marketplace (comissao e frete medidos) — nada disso pode acontecer no
+  // navegador, e o motor e sincrono de proposito.
+  const todosItens = (promocoes ?? []).flatMap((p: { marketplace_promocao_itens?: unknown[] }) =>
+    (p.marketplace_promocao_itens ?? []) as {
+      id: string; anuncio_id: string | null
+      preco_original: number | null; preco_promocional: number | null
+    }[])
+
+  let economia: Record<string, ItemComEconomia> = {}
+  if (todosItens.length > 0) {
+    const mapa = await economiaDosItens(supabase, empresaId, canal, todosItens)
+    economia = Object.fromEntries(mapa)
+  }
+
   return (
     <PromocoesClient
       canal={canal}
       promocoes={promocoes ?? []}
       empresaId={empresaId}
+      economia={economia}
     />
   )
 }
