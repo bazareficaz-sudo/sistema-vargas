@@ -73,6 +73,15 @@ export default async function AnunciosPage({ params, searchParams }: {
     .from('marketplace_fila_config')
     .select('simulacao').eq('empresa_id', empresaId).maybeSingle()
 
+  // CAMPANHAS NAO ENCERRADAS deste canal, para o botao "Por em promocao".
+  // So as que ainda aceitam item: acrescentar numa encerrada seria uma
+  // chamada que a Shopee recusa, depois de a pessoa ja ter escolhido tudo.
+  const { data: campanhasRows } = await supabase
+    .from('marketplace_promocoes')
+    .select('id_externo, nome, status')
+    .eq('canal_id', canalId).neq('status', 'encerrada')
+    .order('inicio', { ascending: false })
+
   if (!canal) notFound()
 
   const { data: canais } = await supabase
@@ -144,6 +153,7 @@ export default async function AnunciosPage({ params, searchParams }: {
   return (
     <AnunciosClient
       simulacaoDaEmpresa={filaCfg?.simulacao ?? true}
+      campanhasAtivas={(campanhasRows ?? []).map(c => ({ idExterno: String(c.id_externo), nome: c.nome, status: c.status }))}
       canal={canal}
       configPreco={configPreco}
       canais={canais ?? []}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import AdicionarNaCampanhaModal from '@/components/marketplaces/AdicionarNaCampanhaModal'
 import { estadoDaRegra, ROTULO_ESTADO } from '@/lib/marketplace/estadoRegra'
 import { explicarRegraEstoque } from '@/lib/marketplace/regraEstoque'
 import AskVargas from '@/components/dashboard/AskVargas'
@@ -158,12 +159,14 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'pausa_automatica', label: 'Pausado por estoque' },
 ]
 
-export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true }: {
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true, campanhasAtivas = [] }: {
   canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
   tagInicial?: string; faltaInicial?: string; facetasIniciais?: string[]
   regras?: any[]; depositos?: { id: string; nome: string }[]
   /** `marketplace_fila_config.simulacao` — o padrao que o canal pode sobrepor. */
   simulacaoDaEmpresa?: boolean
+  /** Campanhas nao encerradas do canal, para o botao de por em promocao. */
+  campanhasAtivas?: { idExterno: string; nome: string; status: string }[]
   configPreco?: any
 }) {
   const router = useRouter()
@@ -193,6 +196,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // VINCULAR REGRA EM MASSA. Ate 03/09/2026 nao havia como: dos 9.281
   // anuncios das seis contas, ZERO tinham regra — e a unica forma de vincular
   // seria uma a uma, no formulario de edicao de cada anuncio.
+  // CAMPANHA a partir da selecao de anuncios — a "visao de oportunidade":
+  // quem esta olhando produtos e pensa "esses cinco deviam entrar na
+  // promocao". A outra porta e a tela de Promocoes, pela campanha.
+  const [campanhaAlvo, setCampanhaAlvo] = useState('')
+  const [modalCampanha, setModalCampanha] = useState(false)
+
   const [vinculandoRegra, setVinculandoRegra] = useState(false)
   const [regraParaVincular, setRegraParaVincular] = useState('')
 
@@ -1229,6 +1238,23 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               </button>
             </div>
           )}
+          {/* CAMPANHAS ATIVAS deste canal. So Shopee tem escrita hoje. */}
+          {plataforma === 'shopee' && campanhasAtivas.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <select value={campanhaAlvo} onChange={e => setCampanhaAlvo(e.target.value)}
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white">
+                <option value="">— campanha —</option>
+                {campanhasAtivas.map(c => (
+                  <option key={c.idExterno} value={c.idExterno}>{c.nome}</option>
+                ))}
+              </select>
+              <button onClick={() => setModalCampanha(true)} disabled={!campanhaAlvo}
+                title="Adiciona os anúncios selecionados a uma campanha de desconto — com simulação de margem antes"
+                className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
+                🏷️ Pôr em promoção
+              </button>
+            </div>
+          )}
           {temEscrita && (
             <a href={`/dashboard/marketplaces/${canal.id}/regras`}
               className="px-3 py-1.5 border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-medium rounded-lg">
@@ -2112,6 +2138,17 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
             )}
           </div>
         </div>
+      )}
+
+      {modalCampanha && campanhaAlvo && (
+        <AdicionarNaCampanhaModal
+          canalId={canal.id}
+          campanha={campanhasAtivas.find(c => c.idExterno === campanhaAlvo)!}
+          anuncios={anuncios.filter(a => selecionados.has(a.id))
+            .map(a => ({ id: a.id, titulo: a.titulo, preco_venda: a.preco_venda, tem_variacao: a.tem_variacao }))}
+          onFechar={() => setModalCampanha(false)}
+          onPronto={() => { setModalCampanha(false); setSelecionados(new Set()); router.refresh() }}
+        />
       )}
     </div>
   )
