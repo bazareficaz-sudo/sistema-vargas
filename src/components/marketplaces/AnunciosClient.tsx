@@ -201,6 +201,21 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // promocao". A outra porta e a tela de Promocoes, pela campanha.
   const [campanhaAlvo, setCampanhaAlvo] = useState('')
   const [modalCampanha, setModalCampanha] = useState(false)
+  const [variacoesCampanha, setVariacoesCampanha] = useState<
+    { anuncio_id: string; model_id: string; nome_variacao: string | null; preco: number | null }[]>([])
+
+  // AS VARIACOES SO SAO BUSCADAS AO ABRIR O MODAL, e so dos selecionados.
+  // Trazer na listagem custaria 225 linhas por canal numa tela que ja evita
+  // `select *` de proposito — e a maioria das sessoes nunca abre o modal.
+  async function abrirCampanha() {
+    const ids = [...selecionados]
+    const sb = createClient()
+    const { data } = await sb.from('marketplace_anuncio_variacoes')
+      .select('anuncio_id, model_id, nome_variacao, preco')
+      .in('anuncio_id', ids)
+    setVariacoesCampanha(data ?? [])
+    setModalCampanha(true)
+  }
 
   const [vinculandoRegra, setVinculandoRegra] = useState(false)
   const [regraParaVincular, setRegraParaVincular] = useState('')
@@ -1248,7 +1263,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   <option key={c.idExterno} value={c.idExterno}>{c.nome}</option>
                 ))}
               </select>
-              <button onClick={() => setModalCampanha(true)} disabled={!campanhaAlvo}
+              <button onClick={() => void abrirCampanha()} disabled={!campanhaAlvo}
                 title="Adiciona os anúncios selecionados a uma campanha de desconto — com simulação de margem antes"
                 className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white text-xs font-medium rounded-lg">
                 🏷️ Pôr em promoção
@@ -2146,6 +2161,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           campanha={campanhasAtivas.find(c => c.idExterno === campanhaAlvo)!}
           anuncios={anuncios.filter(a => selecionados.has(a.id))
             .map(a => ({ id: a.id, titulo: a.titulo, preco_venda: a.preco_venda, tem_variacao: a.tem_variacao }))}
+          variacoes={variacoesCampanha}
           onFechar={() => setModalCampanha(false)}
           onPronto={() => { setModalCampanha(false); setSelecionados(new Set()); router.refresh() }}
         />

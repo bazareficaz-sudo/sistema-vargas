@@ -112,19 +112,50 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: resultados.every(r => r.ok), acao: 'remover', resultados })
   }
 
+  // ── VARIAÇÕES: preço e CUSTO podem ser por modelo ──────────────────────
+  //
+  // `marketplace_anuncio_variacoes.produto_id` existe e esta preenchido em 49
+  // das 225 variacoes da Shp Ouro. Quando a variacao aponta para produto
+  // proprio, o custo dela e OUTRO — calcular a margem pelo produto do anuncio
+  // daria o numero errado justamente onde as variacoes diferem de preco.
+  const modelIds = itens.map(i => i.modelId).filter(Boolean).map(String)
+  const { data: variacoes } = modelIds.length
+    ? await sb.from('marketplace_anuncio_variacoes')
+        .select('anuncio_id, model_id, nome_variacao, preco, produto_id')
+        .eq('empresa_id', guarda.empresaId)
+        .in('anuncio_id', [...new Set(itens.map(i => i.anuncioId))])
+    : { data: [] }
+  type VariacaoLinha = { anuncio_id: string; model_id: string; nome_variacao: string | null; preco: number | null; produto_id: string | null }
+  const porModelo = new Map<string, VariacaoLinha>(
+    (variacoes ?? []).map((v: VariacaoLinha) => [`${v.anuncio_id}|${v.model_id}`, v]))
+
   // ── A ECONOMIA DE CADA ITEM, pela mesma engine do recálculo ─────────────
-  const paraCalculo = itens.map((i, idx) => ({
-    id: String(idx),
-    anuncio_id: i.anuncioId,
-    preco_original: porId.get(i.anuncioId)?.preco_venda ?? null,
-    preco_promocional: i.precoPromocional,
-  }))
+  const paraCalculo = itens.map((i, idx) => {
+    const vari = i.modelId ? porModelo.get(`${i.anuncioId}|${i.modelId}`) : null
+    return {
+      id: String(idx),
+      anuncio_id: i.anuncioId,
+      // O preço "de" da variação é o dela, não o do anúncio: numa tesoura com
+      // dois modelos a R$ 24,90 e R$ 21,79, comparar os dois contra um preço
+      // só faria um desconto parecer maior que o outro sem ser.
+      preco_original: vari?.preco ?? porId.get(i.anuncioId)?.preco_venda ?? null,
+      preco_promocional: i.precoPromocional,
+      produto_id_override: vari?.produto_id ?? null,
+    }
+  })
   const economia = await economiaDosItens(sb, guarda.empresaId, row, paraCalculo)
 
   const { data: regra } = await sb.from('marketplace_regras_preco')
     .select('margem_minima').eq('canal_id', canalId).eq('ativo', true)
     .order('created_at').limit(1).maybeSingle()
   const piso = regra?.margem_minima != null ? Number(regra.margem_minima) : null
+
+  /** O preço "de" é o da VARIAÇÃO quando existe; só então o do anúncio. */
+  function precoNormalDe(i: { anuncioId: string; modelId?: string | number | null }, a?: AnuncioLinha) {
+    const vari = i.modelId ? porModelo.get(`${i.anuncioId}|${i.modelId}`) : null
+    const p = vari?.preco ?? a?.preco_venda
+    return p != null ? Number(p) : null
+  }
 
   const avaliados = itens.map((i, idx) => {
     const a = porId.get(i.anuncioId)
@@ -133,13 +164,16 @@ export async function POST(req: Request) {
       precoPromocional: i.precoPromocional,
       cenario: ec?.promocional ?? null,
       pisoMargem: piso,
-      precoNormal: a?.preco_venda != null ? Number(a.preco_venda) : null,
+      precoNormal: precoNormalDe(i, a),
     })
+    const vari = i.modelId ? porModelo.get(`${i.anuncioId}|${i.modelId}`) : null
     return {
       anuncioId: i.anuncioId,
+      modelId: i.modelId ?? null,
+      variacao: vari?.nome_variacao ?? null,
       titulo: a?.titulo ?? '(anúncio não encontrado)',
       idExterno: a?.id_externo ?? null,
-      precoNormal: a?.preco_venda ?? null,
+      precoNormal: precoNormalDe(i, a),
       precoPromocional: i.precoPromocional,
       margem: ec?.promocional?.resultado.margemLiquida ?? null,
       lucro: ec?.promocional?.resultado.lucro ?? null,
@@ -181,18 +215,36 @@ export async function POST(req: Request) {
   }
   canal = await refreshAccessTokenIfNeeded(sb, canal)
 
-  const paraShopee: ItemParaCampanha[] = itens.map((i, idx) => {
+  // UM `item_id` POR ENTRADA, com todas as variacoes dentro.
+  //
+  // A primeira versao mandava uma entrada por modelo, entao um anuncio com
+  // tres variacoes virava tres entradas com o MESMO `item_id` — que e o
+  // formato que a leitura ja mostrou nao ser o dela: la o item aparece uma vez
+  // com `model_list` dentro. Mandar repetido pediria para a Shopee decidir
+  // qual vale.
+  const porItemExterno = new Map<number, ItemParaCampanha>()
+  itens.forEach((i, idx) => {
     const a = avaliados[idx]
-    const base: ItemParaCampanha = { itemId: Number(a.idExterno) }
-    if (i.limitePorCompra != null) base.limitePorCompra = i.limitePorCompra
-    if (i.modelId) {
-      base.modelos = [{ modelId: Number(i.modelId), precoPromocional: i.precoPromocional, estoquePromocao: i.estoquePromocao }]
-    } else {
-      base.precoPromocional = i.precoPromocional
-      if (i.estoquePromocao != null) base.estoquePromocao = i.estoquePromocao
+    const itemId = Number(a.idExterno)
+    let entrada = porItemExterno.get(itemId)
+    if (!entrada) {
+      entrada = { itemId }
+      if (i.limitePorCompra != null) entrada.limitePorCompra = i.limitePorCompra
+      porItemExterno.set(itemId, entrada)
     }
-    return base
+    if (i.modelId) {
+      entrada.modelos = entrada.modelos ?? []
+      entrada.modelos.push({
+        modelId: Number(i.modelId),
+        precoPromocional: i.precoPromocional,
+        estoquePromocao: i.estoquePromocao,
+      })
+    } else {
+      entrada.precoPromocional = i.precoPromocional
+      if (i.estoquePromocao != null) entrada.estoquePromocao = i.estoquePromocao
+    }
   })
+  const paraShopee: ItemParaCampanha[] = [...porItemExterno.values()]
 
   const r = acao === 'atualizar'
     ? await atualizarItens({ sb, canal }, discountId, paraShopee)

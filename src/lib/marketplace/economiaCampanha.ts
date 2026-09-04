@@ -77,6 +77,15 @@ export async function economiaDosItens(
     anuncio_id: string | null
     preco_original: number | string | null
     preco_promocional: number | string | null
+    /**
+     * Produto da VARIAÇÃO, quando ela tem um próprio.
+     *
+     * `marketplace_anuncio_variacoes.produto_id` esta preenchido em 49 das
+     * 225 variacoes da Shp Ouro. Quando existe, o custo daquela variacao e
+     * OUTRO — calcular pelo produto do anuncio daria o numero errado
+     * justamente onde as variacoes diferem.
+     */
+    produto_id_override?: string | null
   }[],
 ): Promise<Map<string, ItemComEconomia>> {
   const saida = new Map<string, ItemComEconomia>()
@@ -100,8 +109,10 @@ export async function economiaDosItens(
 
   const porAnuncio = new Map<string, AnuncioLinha>((anuncios ?? []).map((a: AnuncioLinha) => [a.id, a]))
 
-  const produtoIds = [...new Set((anuncios ?? [])
-    .map((a: AnuncioLinha) => a.produto_id).filter(Boolean))] as string[]
+  const produtoIds = [...new Set([
+    ...(anuncios ?? []).map((a: AnuncioLinha) => a.produto_id),
+    ...itens.map(i => i.produto_id_override),
+  ].filter(Boolean))] as string[]
   const { data: produtos } = produtoIds.length
     ? await sb.from('produtos')
         .select('id, nome, sku, tipo, preco_custo, peso_kg, comprimento_cm, largura_cm, altura_cm')
@@ -124,7 +135,10 @@ export async function economiaDosItens(
         semEconomia: 'Item não casou com anúncio do sistema.' })
       continue
     }
-    const produto = anuncio.produto_id ? porProduto.get(anuncio.produto_id) : null
+    // A VARIAÇÃO VENCE O ANÚNCIO quando tem produto próprio: é o custo dela
+    // que vai para a conta.
+    const produtoId = item.produto_id_override ?? anuncio.produto_id
+    const produto = produtoId ? porProduto.get(produtoId) : null
     if (!produto) {
       // É a falta mais comum e a mais consequente: sem produto não há custo,
       // e sem custo margem nenhuma é calculável. Dizer isso é melhor que

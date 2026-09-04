@@ -14,6 +14,8 @@ import { useState } from 'react'
 
 type ItemAvaliado = {
   anuncioId: string
+  modelId?: string | null
+  variacao?: string | null
   titulo: string
   precoNormal: number | null
   precoPromocional: number
@@ -43,15 +45,37 @@ const brl = (v: number | null) =>
   v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export default function AdicionarNaCampanhaModal({
-  canalId, campanha, anuncios, onFechar, onPronto,
+  canalId, campanha, anuncios, variacoes = [], onFechar, onPronto,
 }: {
   canalId: string
   campanha: { idExterno: string; nome: string; status: string }
   /** Os anúncios que o operador escolheu na tela de anúncios. */
   anuncios: { id: string; titulo: string; preco_venda: number | null; tem_variacao?: boolean | null }[]
+  /** Variações dos anúncios selecionados, quando houver. */
+  variacoes?: { anuncio_id: string; model_id: string; nome_variacao: string | null; preco: number | null }[]
   onFechar: () => void
   onPronto: () => void
 }) {
+  // UMA LINHA POR PREÇO QUE VAI AO AR.
+  //
+  // Anúncio sem variação é uma linha. Com variação, uma linha POR MODELO —
+  // porque é assim que a Shopee guarda: a tesoura da "Bota Fora" tem dois
+  // model_id, um a R$ 24,90 e outro a R$ 21,79. Um preço só para os dois
+  // aplicaria descontos diferentes sem ninguém pedir.
+  const linhas = anuncios.flatMap(a => {
+    const vs = variacoes.filter(v => v.anuncio_id === a.id)
+    if (vs.length === 0) {
+      return [{ chave: a.id, anuncioId: a.id, modelId: null as string | null,
+        titulo: a.titulo, variacao: null as string | null, precoBase: a.preco_venda }]
+    }
+    return vs.map(v => ({
+      chave: `${a.id}|${v.model_id}`, anuncioId: a.id, modelId: v.model_id,
+      titulo: a.titulo, variacao: v.nome_variacao,
+      // O preço "de" é o DA VARIAÇÃO. Usar o do anúncio faria o desconto de
+      // uma sair diferente do da outra sem motivo.
+      precoBase: v.preco ?? a.preco_venda,
+    }))
+  })
   // Desconto em % é como se pensa uma promoção — "20% off" —, não em reais.
   // O preço de cada item sai daqui, e continua editável um a um.
   const [descontoPct, setDescontoPct] = useState('10')
@@ -59,10 +83,10 @@ export default function AdicionarNaCampanhaModal({
   const [resp, setResp] = useState<Resposta | null>(null)
   const [ocupado, setOcupado] = useState(false)
 
-  function precoDe(a: { id: string; preco_venda: number | null }) {
-    const manual = precos[a.id]
+  function precoDe(l: { chave: string; precoBase: number | null }) {
+    const manual = precos[l.chave]
     if (manual !== undefined && manual !== '') return Number(manual)
-    const base = Number(a.preco_venda ?? 0)
+    const base = Number(l.precoBase ?? 0)
     const pct = Number(descontoPct) || 0
     return base > 0 ? Number((base * (1 - pct / 100)).toFixed(2)) : 0
   }
@@ -75,7 +99,11 @@ export default function AdicionarNaCampanhaModal({
         body: JSON.stringify({
           canalId, discountId: campanha.idExterno, acao: 'adicionar',
           simular, confirmado,
-          itens: anuncios.map(a => ({ anuncioId: a.id, precoPromocional: precoDe(a) })),
+          itens: linhas.map(l => ({
+            anuncioId: l.anuncioId,
+            modelId: l.modelId,
+            precoPromocional: precoDe(l),
+          })),
         }),
       }).then(x => x.json())
       setResp(r)
@@ -94,7 +122,7 @@ export default function AdicionarNaCampanhaModal({
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
       <div className="my-8 w-full max-w-3xl rounded-xl bg-white p-5 shadow-xl">
         <h3 className="text-sm font-semibold text-gray-900">
-          Adicionar {anuncios.length} anúncio(s) em &quot;{campanha.nome}&quot;
+          Adicionar {linhas.length} preço(s) em &quot;{campanha.nome}&quot;
         </h3>
         <p className="mt-1 text-xs text-gray-500">
           O preço promocional vai ao ar e vale até o fim da campanha. Simule antes de enviar.
@@ -120,13 +148,20 @@ export default function AdicionarNaCampanhaModal({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {anuncios.map(a => {
-                const avaliado = resp?.itens?.find(i => i.anuncioId === a.id)
+              {linhas.map(l => {
+                // O veredito casa por anuncio E modelo: duas variacoes do
+                // mesmo anuncio tem vereditos diferentes, e casar so pelo
+                // anuncio mostraria o mesmo numero nas duas linhas.
+                const avaliado = resp?.itens?.find(i =>
+                  i.anuncioId === l.anuncioId && String(i.modelId ?? '') === String(l.modelId ?? ''))
                 const v = avaliado?.veredito
                 return (
-                  <tr key={a.id} className={v?.bloqueado ? 'bg-red-50' : v && !v.liberado ? 'bg-amber-50' : ''}>
+                  <tr key={l.chave} className={v?.bloqueado ? 'bg-red-50' : v && !v.liberado ? 'bg-amber-50' : ''}>
                     <td className="px-3 py-2">
-                      <p className="text-xs text-gray-900 line-clamp-1">{a.titulo}</p>
+                      <p className="text-xs text-gray-900 line-clamp-1">{l.titulo}</p>
+                      {l.variacao && (
+                        <p className="text-[11px] text-purple-700">variação: {l.variacao}</p>
+                      )}
                       {/* O MOTIVO NA LINHA. Quem procura por que um item não
                           passou não vai passar o mouse em cada um. */}
                       {v?.explicacao && (
@@ -134,17 +169,12 @@ export default function AdicionarNaCampanhaModal({
                           {v.bloqueado ? '✕ ' : '⚠ '}{v.explicacao}
                         </p>
                       )}
-                      {a.tem_variacao && (
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          tem variações — o preço será aplicado ao item; conferir na Shopee
-                        </p>
-                      )}
                     </td>
-                    <td className="px-3 py-2 text-right text-xs text-gray-500">{brl(a.preco_venda)}</td>
+                    <td className="px-3 py-2 text-right text-xs text-gray-500">{brl(l.precoBase)}</td>
                     <td className="px-3 py-2 text-right">
                       <input type="number" step="0.01" min={0}
-                        value={precos[a.id] ?? String(precoDe(a))}
-                        onChange={e => { setPrecos(p => ({ ...p, [a.id]: e.target.value })); setResp(null) }}
+                        value={precos[l.chave] ?? String(precoDe(l))}
+                        onChange={e => { setPrecos(p => ({ ...p, [l.chave]: e.target.value })); setResp(null) }}
                         className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm" />
                     </td>
                     <td className="px-3 py-2 text-right text-xs">
@@ -226,7 +256,7 @@ export default function AdicionarNaCampanhaModal({
               }}
               disabled={ocupado}
               className="rounded-lg bg-red-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50">
-              {ocupado ? 'Enviando…' : `Enviar para a Shopee (${anuncios.length})`}
+              {ocupado ? 'Enviando…' : `Enviar para a Shopee (${linhas.length})`}
             </button>
           )}
         </div>
