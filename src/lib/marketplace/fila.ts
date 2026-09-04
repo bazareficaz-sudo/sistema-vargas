@@ -3,8 +3,9 @@ import { decidirSimulacao } from '@/lib/marketplace/simulacao'
 import { decidirPausa, camposPausaAutomatica, camposReativacao } from '@/lib/marketplace/pausa'
 import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
-import { enviarParaAnuncio, canalAceitaEnvio, sleep, THROTTLE_ENVIO_MS, type CanalEnvio } from './envio'
+import { enviarParaAnuncio, sleep, THROTTLE_ENVIO_MS, type CanalEnvio } from './envio'
 import { precisaEnviar } from './precisaEnviar'
+import { canalAceitaEnvio, type CanalComInterruptores } from './canais'
 
 // FASE 3 — processador da fila de atualização (sistema → marketplace).
 //
@@ -77,6 +78,25 @@ export async function processarFilaDaEmpresa(
   // não faz: ele lia "enviado_em" como texto e estourava
   // (`invalid input syntax for type timestamp`), derrubando toda rodada.
   //
+  // ANTES DE LER A FILA, ADOTAR O QUE MUDOU NO ANÚNCIO.
+  //
+  // A fila só é alimentada por movimentação de ESTOQUE ou PREÇO do produto
+  // (`trg_fila_produto`). Mas há duas coisas que mudam o que deveria estar no
+  // canal sem tocar em estoque nenhum, e as duas custaram um dia de
+  // investigação cada:
+  //
+  //   MAPEAR o anúncio a um produto. Caso real de 04/09/2026: a Pistola foi
+  //   vendida sem estar mapeada — a fila avaliou e gravou `sem_anuncio`, com
+  //   razão — e foi mapeada DEPOIS. A partir dali ninguém mais pediu nada, e
+  //   o anúncio ficou parado com a tela dizendo "enviando".
+  //
+  //   VINCULAR uma regra. A tela já pede o enfileiramento desde `2b6e7cc`,
+  //   mas são sete lugares diferentes que gravam `produto_id`, em cinco
+  //   componentes. Corrigir um por um deixaria o próximo de fora.
+  //
+  // A rodada é o único lugar por onde tudo passa, então a adoção mora aqui.
+  await adotarAnunciosAlterados(sb, cfg)
+
   // Urgente primeiro; dentro da mesma prioridade, o que está sujo há mais
   // tempo — assim nada fica para trás enquanto produtos novos furam a fila.
   const { data: pendentes, error: erroFila } = await sb
@@ -520,4 +540,92 @@ export async function processarFilaDaEmpresa(
     anunciosAvaliados, enviaria, semMudanca, semAnuncio, comVariacao,
     enviados, falhasEnvio, canalRecusou,
   }
+}
+
+
+/**
+ * Põe na fila os produtos cujo ANÚNCIO mudou depois da última vez que a fila
+ * olhou para eles.
+ *
+ * A COMPARAÇÃO É `anuncio.updated_at > fila.enviado_em`, e é ela que impede
+ * o laço infinito: depois desta rodada, `enviado_em` fica mais novo que
+ * `updated_at` e o produto não é adotado de novo. Adotar por "nunca enviado"
+ * seria mais simples e readotaria para sempre um anúncio que a plataforma
+ * recusa — passando por cima do limite de tentativas.
+ *
+ * O RECORTE de 2000 anúncios por rodada, pelos mais recentemente alterados,
+ * existe porque isto roda a cada intervalo e a tabela tem ~9.300 linhas. O
+ * atraso acumulado tem o botão "Reconciliar tudo", que é explícito e não
+ * paga esse custo em toda rodada.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function adotarAnunciosAlterados(sb: any, cfg: ConfigFila) {
+  const { data: canais } = await sb
+    .from('marketplace_canais')
+    .select('id, plataforma, sincronizar_estoque, atualizar_estoque_canal')
+    .eq('empresa_id', cfg.empresa_id)
+  const enviaveis = ((canais ?? []) as CanalComInterruptores[])
+    .filter(c => canalAceitaEnvio(c))
+    .map(c => (c as { id: string }).id)
+  if (enviaveis.length === 0) return
+
+  const { data: anuncios } = await sb
+    .from('marketplace_anuncios')
+    .select('produto_id, updated_at')
+    .in('canal_id', enviaveis)
+    .not('produto_id', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(2000)
+
+  type Recente = { produto_id: string; updated_at: string | null }
+  const maisRecente = new Map<string, string>()
+  for (const a of (anuncios ?? []) as Recente[]) {
+    if (!a.updated_at) continue
+    const atual = maisRecente.get(a.produto_id)
+    if (!atual || a.updated_at > atual) maisRecente.set(a.produto_id, a.updated_at)
+  }
+  if (maisRecente.size === 0) return
+
+  const ids = [...maisRecente.keys()]
+  const { data: naFila } = await sb
+    .from('marketplace_fila')
+    .select('produto_id, enviado_em')
+    .eq('empresa_id', cfg.empresa_id)
+    .in('produto_id', ids)
+
+  type NaFila = { produto_id: string; enviado_em: string | null }
+  const ultimoOlhar = new Map<string, string | null>(
+    ((naFila ?? []) as NaFila[]).map(f => [f.produto_id, f.enviado_em]))
+
+  const adotar: string[] = []
+  for (const [produtoId, alteradoEm] of maisRecente) {
+    // O TETO É CHECADO NO TOPO. Checar no fim deixava o caminho do `continue`
+    // passar por cima dele, e a primeira rodada de uma conta nova adotaria
+    // todos os anúncios de uma vez em vez de drenar por rodada.
+    if (adotar.length >= cfg.max_produtos_rodada) break
+
+    const visto = ultimoOlhar.get(produtoId)
+    if (!ultimoOlhar.has(produtoId)) {
+      // Nunca esteve na fila: o anúncio existe e ninguém nunca pediu nada.
+      adotar.push(produtoId)
+    } else if (visto && alteradoEm > visto) {
+      // `enviado_em` nulo = já está pendente, não precisa ser adotado.
+      adotar.push(produtoId)
+    }
+  }
+  if (adotar.length === 0) return
+
+  const agora = new Date().toISOString()
+  await sb.from('marketplace_fila').upsert(
+    adotar.map(produto_id => ({
+      empresa_id: cfg.empresa_id,
+      produto_id,
+      sujo_em: agora,
+      motivo: 'anúncio mapeado ou alterado',
+      prioridade: 0,
+      enviado_em: null,
+      tentativas: 0,
+    })),
+    { onConflict: 'empresa_id,produto_id' },
+  )
 }
