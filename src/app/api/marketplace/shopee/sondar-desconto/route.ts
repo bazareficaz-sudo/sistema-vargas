@@ -121,8 +121,17 @@ export async function GET(req: Request) {
   // P1: quais campanhas existem, e em que situação. A escrita depende disso —
   // acrescentar item numa `ongoing` pode não ser permitido.
   const campanhas = await listarDescontos({ sb, canal }, 'all').catch(() => [])
-  const ongoing = campanhas.find(c => c.status === 'ongoing')
-  const upcoming = campanhas.find(c => c.status === 'upcoming')
+
+  // `listarDescontos` JA TRADUZ o status: devolve 'ativa'/'agendada'/
+  // 'encerrada', nao o 'ongoing'/'upcoming'/'expired' cru da Shopee. A
+  // primeira versao desta sonda comparava com o nome cru, entao P2 e P3
+  // nunca dispararam — a resposta saiu so com P4/P5/P6 e o erro passou
+  // despercebido porque as tres que importavam responderam.
+  //
+  // Comparar pelo `bruto.status` seria a outra saida, e e pior: amarraria a
+  // sonda ao formato da API em vez do vocabulario do sistema.
+  const ongoing = campanhas.find(c => c.status === 'ativa')
+  const upcoming = campanhas.find(c => c.status === 'programada')
 
   // P2: a forma COMPLETA de uma campanha em andamento, com os itens. É o
   // molde do que a escrita vai ter de montar.
