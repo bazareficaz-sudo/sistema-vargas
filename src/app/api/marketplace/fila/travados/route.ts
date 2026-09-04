@@ -31,12 +31,20 @@ type Linha = {
 }
 
 async function levantarTravados(sb: ReturnType<typeof createClient> extends Promise<infer T> ? T : never, empresaId: string) {
+  const { data: canais } = await sb
+    .from('marketplace_canais').select('id').eq('empresa_id', empresaId)
+  const idsDeCanal = ((canais ?? []) as { id: string }[]).map(c => c.id)
+  if (idsDeCanal.length === 0) return []
+
   const travados: Linha[] = []
   for (let offset = 0; offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
+    // Escopo pelo CANAL, e não por `marketplace_anuncios.empresa_id`: essa
+    // coluna não é confiável e foi o que fez a fila registrar 157 de 200
+    // produtos como `sem_anuncio` em 04/09/2026. Ver o cabeçalho de fila.ts.
     const { data, error } = await sb
       .from('marketplace_anuncios')
       .select('id, produto_id, titulo, id_externo, estoque_externo, estoque_reservado, canal_id')
-      .eq('empresa_id', empresaId)
+      .in('canal_id', idsDeCanal)
       .not('produto_id', 'is', null)
       .not('estoque_externo', 'is', null)
       .not('estoque_reservado', 'is', null)

@@ -30,25 +30,51 @@ export async function POST(req: Request) {
   const guarda = await exigirPermissao(sb, 'gerenciar_marketplaces')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
-  let consulta = sb
-    .from('marketplace_anuncios')
-    .select('id, produto_id, canal_id, regra_id')
-    .eq('empresa_id', guarda.empresaId)
-    .not('produto_id', 'is', null)
-
-  if (Array.isArray(anuncioIds) && anuncioIds.length > 0) {
-    consulta = consulta.in('id', anuncioIds.slice(0, 5000))
-  } else if (canalId) {
-    consulta = consulta.eq('canal_id', canalId)
-  } else if (!tudo) {
+  if (!Array.isArray(anuncioIds) && !canalId && !tudo) {
     return NextResponse.json({ ok: false, erro: 'Diga o que enfileirar: anuncioIds, canalId ou tudo.' }, { status: 400 })
   }
 
+  // O ESCOPO VEM DO CANAL, e não de `marketplace_anuncios.empresa_id`.
+  //
+  // Essa coluna não é confiável: a listagem da tela nunca a usou (filtra por
+  // `canal_id`), e uma rodada de 04/09/2026 registrou 157 de 200 produtos
+  // como `sem_anuncio` porque a fila a exigia. `canal_id` é obrigatório para
+  // o anúncio existir, e o canal pertence à empresa por
+  // `marketplace_canais.empresa_id` — que é a coluna que sustenta o limite.
+  const { data: canais } = await sb
+    .from('marketplace_canais')
+    .select('id, plataforma, sincronizar_estoque, atualizar_estoque_canal')
+    .eq('empresa_id', guarda.empresaId)
+  const daEmpresa = (canais ?? []) as { id: string; plataforma: string | null; sincronizar_estoque: boolean | null; atualizar_estoque_canal: boolean | null }[]
+
+  // SÓ CANAIS QUE ACEITAM ENVIO. Enfileirar produto de um canal desligado
+  // encheria a fila de linhas `canal_desligado` e empurraria para trás os
+  // produtos que têm para onde ir — a rodada tem teto.
+  const enviaveis = daEmpresa.filter(c => canalAceitaEnvio(c)).map(c => c.id)
+  const alvoDeCanais = canalId
+    ? enviaveis.filter(id => id === canalId)
+    : enviaveis
+  if (alvoDeCanais.length === 0) {
+    return NextResponse.json({
+      ok: true, enfileirados: 0, anuncios: 0, semRegra: 0,
+      erro: 'Nenhum canal aceita envio automático (Configurar → canal).',
+    })
+  }
+
   // Paginado: o PostgREST corta em 1000 linhas sem avisar, e um canal grande
-  // passa disso com folga.
+  // passa disso com folga. A consulta é montada DENTRO do laço: reaproveitar
+  // o builder acumula `order` e `range` a cada volta.
   type Linha = { id: string; produto_id: string | null; canal_id: string; regra_id: string | null }
   const linhas: Linha[] = []
   for (let offset = 0; offset < 50 * 1000; offset += 1000) {
+    let consulta = sb
+      .from('marketplace_anuncios')
+      .select('id, produto_id, canal_id, regra_id')
+      .in('canal_id', alvoDeCanais)
+      .not('produto_id', 'is', null)
+    if (Array.isArray(anuncioIds) && anuncioIds.length > 0) {
+      consulta = consulta.in('id', anuncioIds.slice(0, 5000))
+    }
     const { data, error } = await consulta.order('id', { ascending: true }).range(offset, offset + 999)
     if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 500 })
     const pagina = (data ?? []) as Linha[]
@@ -56,26 +82,14 @@ export async function POST(req: Request) {
     if (pagina.length < 1000) break
   }
 
-  // SÓ CANAIS QUE ACEITAM ENVIO. Enfileirar produto de um canal desligado
-  // encheria a fila de linhas `canal_desligado` e empurraria para trás os
-  // produtos que têm para onde ir — a rodada tem teto.
-  const { data: canais } = await sb
-    .from('marketplace_canais')
-    .select('id, plataforma, sincronizar_estoque, atualizar_estoque_canal')
-    .eq('empresa_id', guarda.empresaId)
-  const enviaveis = new Set(
-    (canais ?? []).filter(c => canalAceitaEnvio(c)).map((c: { id: string }) => c.id))
-
-  const uteis = linhas.filter(l => enviaveis.has(l.canal_id))
+  const uteis = linhas
   const semRegra = uteis.filter(l => !l.regra_id).length
   const produtoIds = [...new Set(uteis.map(l => l.produto_id).filter(Boolean) as string[])]
 
   if (produtoIds.length === 0) {
     return NextResponse.json({
       ok: true, enfileirados: 0, anuncios: 0, semRegra,
-      erro: linhas.length > 0
-        ? 'Nenhum destes anúncios está em canal que aceita envio (Configurar → canal).'
-        : undefined,
+      erro: 'Nenhum anúncio vinculado a produto nos canais que aceitam envio.',
     })
   }
 

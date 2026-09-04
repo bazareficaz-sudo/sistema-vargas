@@ -127,13 +127,34 @@ export async function processarFilaDaEmpresa(
   // a fila diria "este produto não tem anúncio" sobre anúncio que existe,
   // sem errar em lugar nenhum — o mesmo quadro do defeito de 26/08 acima,
   // por outra causa.
+  //
+  // ── O LIMITE DE INQUILINO VEM DO CANAL, NAO DE `empresa_id` ─────────────
+  //
+  // Esta consulta exigia `marketplace_anuncios.empresa_id`. A LISTAGEM da tela
+  // nunca exigiu — ela filtra por `canal_id`. Anuncio com `empresa_id` nulo
+  // ou de outro valor aparecia na tela e era INVISIVEL para a fila, que
+  // registrava `sem_anuncio`: "este produto nao tem anuncio", sobre anuncio
+  // que a pessoa esta vendo na tela ao lado. Medido em 04/09/2026: 157 de 200
+  // linhas de uma rodada com `sem_anuncio`.
+  //
+  // `canal_id` e obrigatorio para um anuncio existir, e o canal e da empresa
+  // por `marketplace_canais.empresa_id` — que e a coluna confiavel. O limite
+  // continua existindo; passa a apoiar-se em quem o sustenta.
+  const { data: canaisDaEmpresa } = await sb
+    .from('marketplace_canais')
+    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, atualizar_estoque_canal, sincronizar_estoque, fila_simulacao, nome')
+    .eq('empresa_id', cfg.empresa_id)
+  type CanalLinha = CanalEnvio & { nome?: string | null }
+  const canaisLista = (canaisDaEmpresa ?? []) as CanalLinha[]
+  const idsDeCanal = canaisLista.map(c => c.id)
+
   const TAMANHO_PAGINA = 1000
   const anuncios: any[] = []
-  for (let offset = 0; offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
+  for (let offset = 0; idsDeCanal.length > 0 && offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
     const { data: pagina, error: erroAnuncios } = await sb
       .from('marketplace_anuncios')
-      .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, pausa_origem')
-      .eq('empresa_id', cfg.empresa_id)
+      .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, pausa_origem, empresa_id')
+      .in('canal_id', idsDeCanal)
       .in('produto_id', produtoIds)
       // Ordem estável: sem ela, duas páginas podem repetir e omitir linhas.
       .order('id', { ascending: true })
@@ -154,19 +175,45 @@ export async function processarFilaDaEmpresa(
     porProduto.set(a.produto_id, lista)
   }
 
+  // ── POR QUE NAO ACHOU, quando nao acha ──────────────────────────────────
+  //
+  // `sem_anuncio` era um beco sem saida: dizia "nenhum anuncio vinculado" e
+  // pronto, e a mesma frase servia para produto realmente sem anuncio e para
+  // anuncio que a consulta nao alcancou. Foram necessarias duas investigacoes
+  // (26/08 e 04/09) para separar as duas, cada uma custando dias.
+  //
+  // UMA consulta a mais por rodada, so quando sobrou produto sem anuncio, e
+  // sem NENHUM filtro de escopo: se o anuncio existe e ficou de fora, a linha
+  // passa a dizer isso, com o canal dele.
+  const semAnuncioIds = produtoIds.filter((id: string) => !porProduto.has(id))
+  const forasteiros = new Map<string, { canais: string[]; total: number }>()
+  if (semAnuncioIds.length > 0) {
+    const { data: fora } = await sb
+      .from('marketplace_anuncios')
+      .select('produto_id, canal_id, empresa_id')
+      .in('produto_id', semAnuncioIds)
+    type Forasteiro = { produto_id: string; canal_id: string; empresa_id: string | null }
+    for (const a of (fora ?? []) as Forasteiro[]) {
+      const e = forasteiros.get(a.produto_id) ?? { canais: [], total: 0 }
+      e.total++
+      if (!e.canais.includes(a.canal_id)) e.canais.push(a.canal_id)
+      forasteiros.set(a.produto_id, e)
+    }
+  }
+  const nomeDoCanal = new Map<string, string>(
+    canaisLista.map(c => [c.id, c.nome ?? c.plataforma ?? c.id]))
+
   // Estoque unificado do grupo, quando ligado: resolvido de uma vez para
   // todos os produtos da rodada, não uma consulta por anúncio.
   const cfgUnif = await buscarConfigUnificacao(sb, cfg.empresa_id)
   const mapaUnificado = await estoqueUnificadoDeProdutos(sb, cfg.empresa_id, produtoIds, cfgUnif)
 
-  // Canais da empresa: plataforma, credenciais e os interruptores que dizem
-  // se aquele canal aceita receber atualizacao.
-  const { data: canaisRows } = await sb
-    .from('marketplace_canais')
-    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, atualizar_estoque_canal, sincronizar_estoque, fila_simulacao, nome')
-    .eq('empresa_id', cfg.empresa_id)
-    .not('access_token', 'is', null)
-  const mapaCanal = new Map<string, CanalEnvio>((canaisRows ?? []).map((c: any) => [c.id, c as CanalEnvio]))
+  // Canais COM CREDENCIAL, para o envio. Sai da lista ja carregada acima: o
+  // escopo dos anuncios precisa de TODOS os canais da empresa (senao anuncio
+  // de canal sem token viraria `sem_anuncio`, que e mentira), e o envio
+  // precisa so dos que tem token.
+  const mapaCanal = new Map<string, CanalEnvio>(
+    canaisLista.filter(c => c.access_token).map(c => [c.id, c]))
 
   // Anúncios que estão numa campanha de desconto ATIVA.
   //
@@ -206,10 +253,16 @@ export async function processarFilaDaEmpresa(
       // "sem nada para fazer" pode ser falta de mapeamento, não falta de
       // movimento — e essas duas coisas pedem ações opostas.
       semAnuncio++
+      const fora = forasteiros.get(produto.id)
       linhas.push({
         empresa_id: cfg.empresa_id, rodada_em: rodadaEm, produto_id: produto.id,
         acao: 'sem_anuncio', estoque_sistema: produto.estoque,
-        detalhe: `${produto.nome} (${produto.sku ?? 's/ SKU'}) — nenhum anúncio vinculado`,
+        detalhe: fora
+          ? `${produto.nome} (${produto.sku ?? 's/ SKU'}) — ${fora.total} anúncio(s) EXISTEM `
+            + `mas ficaram fora do alcance da fila: canal `
+            + fora.canais.map(c => nomeDoCanal.get(c) ?? `desconhecido (${c})`).join(', ')
+            + '. Canal de outra empresa, ou anúncio sem canal válido.'
+          : `${produto.nome} (${produto.sku ?? 's/ SKU'}) — nenhum anúncio vinculado`,
       })
       continue
     }
