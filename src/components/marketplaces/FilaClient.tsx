@@ -92,6 +92,7 @@ export default function FilaClient({
   const [aviso, setAviso] = useState('')
   const [aba, setAba] = useState<'fila' | 'simulacao'>('simulacao')
   const [filtroAcao, setFiltroAcao] = useState('')
+  const [busca, setBusca] = useState('')
   const [pedindoConfirmacao, setPedindoConfirmacao] = useState(false)
   const [confirmacao, setConfirmacao] = useState('')
 
@@ -109,7 +110,17 @@ export default function FilaClient({
     router.refresh()
   }
 
-  const simsFiltradas = simulacoes.filter(s => !filtroAcao || s.acao === filtroAcao)
+  // BUSCA POR PRODUTO. A pergunta que traz alguem a esta tela quase nunca e
+  // "como foi a rodada"; e "por que ESTE produto nao subiu". Sem busca, a
+  // resposta existia — cada decisao vira uma linha com `acao` e `detalhe` —
+  // mas ficava perdida entre as 200 ultimas linhas da empresa inteira.
+  const alvo = busca.trim().toLowerCase()
+  const simsFiltradas = simulacoes.filter(s => {
+    if (filtroAcao && s.acao !== filtroAcao) return false
+    if (!alvo) return true
+    return [s.produtos?.nome, s.produtos?.sku, s.detalhe, s.marketplace_canais?.nome]
+      .some(v => (v ?? '').toLowerCase().includes(alvo))
+  })
   const contagem = simulacoes.reduce<Record<string, number>>((acc, s) => {
     acc[s.acao] = (acc[s.acao] ?? 0) + 1; return acc
   }, {})
@@ -334,7 +345,11 @@ export default function FilaClient({
             <h2 className="text-sm font-semibold text-gray-700">
               O que a fila enviaria {ultimaRodada && <span className="font-normal text-gray-400">· última rodada {quando(ultimaRodada)}</span>}
             </h2>
-            <div className="flex gap-1 ml-auto flex-wrap">
+            <input
+              value={busca} onChange={e => setBusca(e.target.value)}
+              placeholder="Buscar produto, SKU ou motivo..."
+              className="ml-auto w-64 px-2.5 py-1 text-xs border border-gray-300 rounded-md" />
+            <div className="flex gap-1 flex-wrap">
               <button onClick={() => setFiltroAcao('')}
                 className={`px-2 py-1 text-xs rounded-md border ${!filtroAcao ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300'}`}>
                 todos ({simulacoes.length})
@@ -350,8 +365,15 @@ export default function FilaClient({
 
           {simsFiltradas.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-gray-400">
-              Nenhuma simulação ainda. Ela aparece depois da primeira rodada com a fila ligada e algum
-              produto movimentado.
+              {simulacoes.length > 0 ? (
+                <>
+                  Nada nas {simulacoes.length} últimas linhas com esse filtro.
+                  {alvo && ' Se o produto não aparece aqui, a fila não chegou a avaliá-lo — ele não entrou na fila.'}
+                </>
+              ) : (
+                <>Nenhuma simulação ainda. Ela aparece depois da primeira rodada com a fila ligada e algum
+                produto movimentado.</>
+              )}
             </p>
           ) : (
             <div className="overflow-x-auto">

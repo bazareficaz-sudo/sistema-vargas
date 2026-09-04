@@ -39,3 +39,32 @@ export function ehLojaOnline(plataforma: string | null | undefined): boolean {
 export function ehCanalMarketplace(plataforma: string | null | undefined): boolean {
   return (PLATAFORMAS_MARKETPLACE as readonly string[]).includes(plataforma ?? '')
 }
+
+/** Os interruptores que a fila exige de um canal para enviar qualquer coisa. */
+export type CanalComInterruptores = {
+  plataforma?: string | null
+  sincronizar_estoque?: boolean | null
+  atualizar_estoque_canal?: boolean | null
+}
+
+/**
+ * O canal aceita receber atualização da fila?
+ *
+ * Reaproveita os interruptores que já existem em Configurar → canal, em vez
+ * de inventar um terceiro: é por eles que se liga a fila em um canal só,
+ * como planejado, sem precisar de tela nova.
+ *
+ * MORA AQUI, e não em `envio.ts`, porque a TELA precisa fazer a mesma
+ * pergunta e `envio.ts` arrasta os clientes de escrita das três plataformas.
+ * Duas cópias do predicado foi exatamente o que deixou a coluna "Regra"
+ * dizendo "enviando" para anúncio que a fila recusava.
+ */
+export function canalAceitaEnvio(canal: CanalComInterruptores): boolean {
+  // A Loja Online é um canal de venda, mas não tem API para receber envio:
+  // ela lê o estoque do ERP na hora de renderizar. Recusar aqui, e não
+  // confiar nos interruptores, porque um clique errado em Configurar → canal
+  // colocaria a fila para tentar publicar num destino que não existe — e a
+  // fila só desiste depois de 5 tentativas por produto.
+  if (!ehCanalMarketplace(canal.plataforma)) return false
+  return !!canal.sincronizar_estoque && !!canal.atualizar_estoque_canal
+}

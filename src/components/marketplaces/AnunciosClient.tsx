@@ -167,13 +167,15 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'campanha_acabando', label: 'Campanha acaba em 7 dias' },
 ]
 
-export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true, campanhasAtivas = [], selosCampanha = {} }: {
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true, filaAtiva, campanhasAtivas = [], selosCampanha = {} }: {
   canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
   tagInicial?: string; faltaInicial?: string; facetasIniciais?: string[]
   regras?: any[]; depositos?: { id: string; nome: string }[]
   /** `marketplace_fila_config.simulacao` — o padrao que o canal pode sobrepor. */
   simulacaoDaEmpresa?: boolean
   /** Campanhas nao encerradas do canal, para o botao de por em promocao. */
+  /** `marketplace_fila_config.ativo`. Interruptor mestre da fila. */
+  filaAtiva?: boolean | null
   campanhasAtivas?: { idExterno: string; nome: string; status: string }[]
   /** Selo de campanha por anúncio, calculado no servidor. Ver seloCampanha.ts. */
   selosCampanha?: Record<string, SeloCampanha[]>
@@ -1506,9 +1508,19 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   {(() => {
                     const e = estadoDaRegra({
                       anuncio: a,
-                      canal: { atualizar_estoque_canal: canal.atualizar_estoque_canal, fila_simulacao: canal.fila_simulacao },
+                      // Os MESMOS campos que `canalAceitaEnvio` le na fila.
+                      // Mandar so `atualizar_estoque_canal`, como antes, fazia
+                      // a etiqueta dizer "enviando" para canal que a fila
+                      // recusa por `sincronizar_estoque`.
+                      canal: {
+                        plataforma: canal.plataforma,
+                        sincronizar_estoque: canal.sincronizar_estoque,
+                        atualizar_estoque_canal: canal.atualizar_estoque_canal,
+                        fila_simulacao: canal.fila_simulacao,
+                      },
                       config: { simulacaoDaEmpresa: simulacaoDaEmpresa },
                       nomeRegra: nomeDaRegra(a.regra_id),
+                      filaAtiva,
                     })
                     const r = ROTULO_ESTADO[e.estado]
                     return (

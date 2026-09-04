@@ -73,7 +73,9 @@ export default async function AnunciosPage({ params, searchParams }: {
   // enviando — ver src/lib/marketplace/estadoRegra.ts.
   const { data: filaCfg } = await supabase
     .from('marketplace_fila_config')
-    .select('simulacao').eq('empresa_id', empresaId).maybeSingle()
+    // `ativo` junto: com a fila desligada NENHUMA rodada acontece, e a coluna
+    // "Regra" dizia "enviando" mesmo assim. Ver estadoRegra.ts.
+    .select('simulacao, ativo').eq('empresa_id', empresaId).maybeSingle()
 
   // CAMPANHAS NAO ENCERRADAS deste canal, para o botao "Por em promocao".
   // So as que ainda aceitam item: acrescentar numa encerrada seria uma
@@ -165,6 +167,7 @@ export default async function AnunciosPage({ params, searchParams }: {
   return (
     <AnunciosClient
       simulacaoDaEmpresa={filaCfg?.simulacao ?? true}
+      filaAtiva={filaCfg?.ativo ?? null}
       campanhasAtivas={(campanhasRows ?? []).map(c => ({ idExterno: String(c.id_externo), nome: c.nome, status: c.status }))}
       selosCampanha={selos}
       canal={canal}
