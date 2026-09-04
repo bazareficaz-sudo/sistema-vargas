@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { decidirSimulacao } from '@/lib/marketplace/simulacao'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -19,6 +19,12 @@ type Config = {
 type Pendente = {
   id: string; produto_id: string; sujo_em: string; motivo: string | null; prioridade: number
   produtos: { nome: string; sku: string | null; estoque: number } | null
+}
+
+/** Linha de `marketplace_fila` ainda por enviar, do produto buscado. */
+type PendenteDoProduto = {
+  produto_id: string; sujo_em: string; motivo: string | null
+  prioridade: number; tentativas: number | null
 }
 
 type Simulacao = {
@@ -93,6 +99,56 @@ export default function FilaClient({
   const [aba, setAba] = useState<'fila' | 'simulacao'>('simulacao')
   const [filtroAcao, setFiltroAcao] = useState('')
   const [busca, setBusca] = useState('')
+  // A BUSCA VAI AO BANCO, e nao so as 200 linhas carregadas. Medido em
+  // 04/09/2026: uma rodada devolveu 149 linhas `sem_anuncio`, entao as 200
+  // cobriam pouco mais de UMA rodada. Filtrar so o que ja veio responderia
+  // "nao achei" sobre produto que a fila avaliou — a mesma resposta que ela
+  // daria se ele nunca tivesse entrado na fila. Duas coisas opostas com a
+  // mesma cara e o defeito que esta tela existe para nao ter.
+  const [doBanco, setDoBanco] = useState<{ linhas: Simulacao[]; pendentes: PendenteDoProduto[] } | null>(null)
+  const [buscando, setBuscando] = useState(false)
+  const [rodando, setRodando] = useState(false)
+
+  async function rodarAgora() {
+    setRodando(true)
+    try {
+      const d = await fetch('/api/marketplace/fila/rodar', { method: 'POST' }).then(r => r.json())
+      if (!d.ok) { setAviso(d.erro ?? 'Falha ao rodar a fila'); return }
+      const r = d.resultado ?? {}
+      // O RESUMO DIZ O QUE ACONTECEU, e nao "pronto". Uma rodada que avalia
+      // 200 anuncios e envia zero e um resultado legitimo — e e exatamente o
+      // que precisa aparecer, porque e o caso em que alguem esta esperando.
+      setAviso(r.executou === false
+        ? `Não executou: ${r.motivo ?? 'sem motivo informado'}`
+        : `${r.produtosProcessados ?? 0} produto(s), ${r.anunciosAvaliados ?? 0} anúncio(s)`
+          + ` · enviados ${r.enviados ?? 0}`
+          + ` · sem anúncio ${r.semAnuncio ?? 0}`
+          + ` · já igual ${r.semMudanca ?? 0}`
+          + ` · com variação ${r.comVariacao ?? 0}`
+          + ` · falhas ${r.falhasEnvio ?? 0}`)
+      router.refresh()
+    } finally {
+      setRodando(false)
+    }
+  }
+
+  useEffect(() => {
+    // Tudo dentro do timeout: assim nada e escrito no estado durante o
+    // proprio efeito, e o debounce de 350ms serve as duas coisas — nao
+    // consultar a cada tecla e nao piscar "procurando" em busca curta.
+    const alvo = busca.trim()
+    const id = setTimeout(async () => {
+      if (alvo.length < 2) { setDoBanco(null); return }
+      setBuscando(true)
+      try {
+        const d = await fetch(`/api/marketplace/fila/historico?q=${encodeURIComponent(alvo)}`).then(r => r.json())
+        if (d.ok) setDoBanco({ linhas: d.linhas ?? [], pendentes: d.pendentes ?? [] })
+      } finally {
+        setBuscando(false)
+      }
+    }, 350)
+    return () => clearTimeout(id)
+  }, [busca])
   const [pedindoConfirmacao, setPedindoConfirmacao] = useState(false)
   const [confirmacao, setConfirmacao] = useState('')
 
@@ -115,13 +171,17 @@ export default function FilaClient({
   // resposta existia — cada decisao vira uma linha com `acao` e `detalhe` —
   // mas ficava perdida entre as 200 ultimas linhas da empresa inteira.
   const alvo = busca.trim().toLowerCase()
-  const simsFiltradas = simulacoes.filter(s => {
+  // Com busca ativa manda o banco; sem ela, as linhas da ultima rodada.
+  const fonte = doBanco ? doBanco.linhas : simulacoes
+  const simsFiltradas = fonte.filter(s => {
     if (filtroAcao && s.acao !== filtroAcao) return false
-    if (!alvo) return true
+    if (!alvo || doBanco) return true
     return [s.produtos?.nome, s.produtos?.sku, s.detalhe, s.marketplace_canais?.nome]
       .some(v => (v ?? '').toLowerCase().includes(alvo))
   })
-  const contagem = simulacoes.reduce<Record<string, number>>((acc, s) => {
+  // A contagem conta a FONTE VISIVEL. Com busca ativa, os chips passam a
+  // descrever o historico daquele produto — que e o que esta na tela.
+  const contagem = fonte.reduce<Record<string, number>>((acc, s) => {
     acc[s.acao] = (acc[s.acao] ?? 0) + 1; return acc
   }, {})
   const ultimaRodada = simulacoes[0]?.rodada_em
@@ -322,6 +382,15 @@ export default function FilaClient({
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg">
             {salvando ? 'Salvando...' : 'Salvar'}
           </button>
+          {/* RODAR AGORA: a mesma rodada do cron, sem esperar o intervalo.
+              Diagnosticar "por que este anuncio nao subiu" com 5 a 15 minutos
+              entre tentativas e o que faz alguem desistir de diagnosticar. */}
+          <button onClick={rodarAgora} disabled={rodando || !cfg.ativo}
+            title={cfg.ativo ? 'Processa os produtos pendentes agora, com a configuração salva acima'
+                             : 'Ligue a fila antes de rodar'}
+            className="px-4 py-2 border border-gray-300 hover:bg-gray-50 disabled:opacity-40 text-gray-700 text-sm font-medium rounded-lg">
+            {rodando ? 'Rodando...' : 'Rodar a fila agora'}
+          </button>
           {cfg.ultima_execucao && (
             <span className="text-xs text-gray-400">Última rodada {quando(cfg.ultima_execucao)}</span>
           )}
@@ -352,7 +421,7 @@ export default function FilaClient({
             <div className="flex gap-1 flex-wrap">
               <button onClick={() => setFiltroAcao('')}
                 className={`px-2 py-1 text-xs rounded-md border ${!filtroAcao ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300'}`}>
-                todos ({simulacoes.length})
+                todos ({fonte.length})
               </button>
               {Object.entries(contagem).map(([acao, n]) => (
                 <button key={acao} onClick={() => setFiltroAcao(acao)}
@@ -363,13 +432,32 @@ export default function FilaClient({
             </div>
           </div>
 
+          {doBanco && (
+            <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-800">
+              Histórico completo de <strong>{busca}</strong> — {doBanco.linhas.length} avaliação(ões), todas as rodadas.
+              {doBanco.pendentes.length > 0 ? (
+                // ESPERANDO e RECUSADO tinham a mesma cara na tela, e pedem
+                // acoes opostas: uma so quer tempo, a outra quer conserto.
+                <> · <strong>Está na fila agora</strong>, aguardando a próxima rodada
+                  {doBanco.pendentes[0].tentativas ? ` (${doBanco.pendentes[0].tentativas} tentativa(s) já)` : ''}.</>
+              ) : (
+                <> · Não está na fila no momento.</>
+              )}
+            </div>
+          )}
+
           {simsFiltradas.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-gray-400">
-              {simulacoes.length > 0 ? (
+              {buscando ? 'Procurando no histórico...' : doBanco ? (
+                // Agora "não achei" quer dizer alguma coisa: a consulta varreu
+                // o histórico inteiro daquele produto, e não uma janela.
                 <>
-                  Nada nas {simulacoes.length} últimas linhas com esse filtro.
-                  {alvo && ' Se o produto não aparece aqui, a fila não chegou a avaliá-lo — ele não entrou na fila.'}
+                  Nenhuma linha no histórico da fila para <strong>{busca}</strong>.
+                  <br />A fila nunca avaliou este produto — ele não chegou a ser enfileirado.
+                  <br /><span className="text-gray-300">Confira se o produto teve movimentação de estoque ou preço depois da última rodada.</span>
                 </>
+              ) : simulacoes.length > 0 ? (
+                <>Nada nas {simulacoes.length} últimas linhas com esse filtro.</>
               ) : (
                 <>Nenhuma simulação ainda. Ela aparece depois da primeira rodada com a fila ligada e algum
                 produto movimentado.</>

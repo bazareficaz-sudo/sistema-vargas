@@ -116,15 +116,35 @@ export async function processarFilaDaEmpresa(
   // Medido em 26/08/2026: 1.085 linhas em marketplace_fila_simulacao, todas
   // com acao='sem_anuncio' — e 186 daqueles produtos tinham anúncio mapeado.
   // A fila rodava a cada 5 minutos dizendo que não havia nada a fazer.
-  const { data: anuncios, error: erroAnuncios } = await sb
-    .from('marketplace_anuncios')
-    .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, regra_id, tem_variacao, status, pausa_origem')
-    .eq('empresa_id', cfg.empresa_id)
-    .in('produto_id', produtoIds)
+  //
+  // ── E PAGINA, pelo mesmo motivo que a tela de anúncios pagina ───────────
+  //
+  // O PostgREST corta em 1000 linhas SEM AVISAR — medido neste projeto:
+  // "canal com 4999 linhas na tabela só devolvia 1000". Um produto pode ter
+  // anúncio em seis canais, então uma rodada de 200 produtos pede bem mais
+  // de 1000 linhas, e tudo que ficasse além do corte viraria `sem_anuncio`:
+  // a fila diria "este produto não tem anúncio" sobre anúncio que existe,
+  // sem errar em lugar nenhum — o mesmo quadro do defeito de 26/08 acima,
+  // por outra causa.
+  const TAMANHO_PAGINA = 1000
+  const anuncios: any[] = []
+  for (let offset = 0; offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
+    const { data: pagina, error: erroAnuncios } = await sb
+      .from('marketplace_anuncios')
+      .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, regra_id, tem_variacao, status, pausa_origem')
+      .eq('empresa_id', cfg.empresa_id)
+      .in('produto_id', produtoIds)
+      // Ordem estável: sem ela, duas páginas podem repetir e omitir linhas.
+      .order('id', { ascending: true })
+      .range(offset, offset + TAMANHO_PAGINA - 1)
 
-  // Falhar alto. Foi o silêncio desta consulta que escondeu o defeito acima
-  // por rodadas inteiras: sem anúncio nenhum, a fila não erra — ela conclui.
-  if (erroAnuncios) throw new Error(`Consulta de anúncios da fila falhou: ${erroAnuncios.message}`)
+    // Falhar alto. Foi o silêncio desta consulta que escondeu o defeito acima
+    // por rodadas inteiras: sem anúncio nenhum, a fila não erra — ela conclui.
+    if (erroAnuncios) throw new Error(`Consulta de anúncios da fila falhou: ${erroAnuncios.message}`)
+
+    anuncios.push(...(pagina ?? []))
+    if (!pagina || pagina.length < TAMANHO_PAGINA) break
+  }
 
   const porProduto = new Map<string, any[]>()
   for (const a of anuncios ?? []) {
