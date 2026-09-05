@@ -122,9 +122,24 @@ compromisso escrito é pior do que não ter prometido.
 
 ## 8. Duas correções de conteúdo em relação à tentativa anterior
 
-- [ ] **Não responda com o link da página de privacidade** na pergunta de política
-      de segurança. São documentos diferentes; foi isso que o revisor apontou.
-      Anexe o PDF da política.
+- [x] **Página de segurança separada, publicada em 05/09/2026:**
+      `www.sistemavargas.com.br/seguranca`. Documento próprio, com capa e
+      endereço distintos da privacidade, ligado no rodapé do site e referenciado
+      pela página de privacidade (e ela por ele). Cobre os dez tópicos que a
+      TikTok pediu — controle de acesso, credenciais, segregação entre empresas,
+      criptografia, backups, logs, vulnerabilidades, incidentes, acesso
+      administrativo e fornecedores — mais os compromissos sobre dado de
+      plataforma, e traz um resumo em inglês para o revisor.
+
+      **Na resposta ao questionário, dê esta URL E anexe o PDF assinado.** Não
+      responda com o link da privacidade: são documentos diferentes, e foi isso
+      que o revisor apontou.
+
+      Duas coisas na página dependem de você antes do envio: ela publica
+      `security@sistemavargas.com.br` como canal de relato (item 5 abaixo — o
+      endereço ainda não existe), e declara o MFA como "em implantação", porque
+      o item 3 continua aberto. As duas afirmações são verdadeiras hoje; a
+      primeira vira problema no dia em que um revisor escrever para lá.
 - [ ] **A resposta anterior dizia Google Cloud Platform.** Não é. O pacote de
       evidências corrige isso abertamente na seção B8 — mantenha a correção. Um
       revisor que encontra uma inexatidão sozinho passa a duvidar de todo o resto.

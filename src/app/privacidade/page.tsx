@@ -388,6 +388,25 @@ export default function PrivacidadePage() {
           </div>
         </section>
 
+        {/* Ponte para a política de segurança. As duas se referenciam
+            mutuamente e nenhuma substitui a outra — responder a pergunta de
+            uma com o link da outra foi o que derrubou a primeira submissão a
+            um parceiro de comércio. */}
+        <section id="seguranca-doc">
+          <div className="rounded-2xl border border-gray-200 bg-gray-50 p-6">
+            <p className="font-bold text-gray-900 mb-2">Política de Segurança da Informação</p>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Esta página trata de dados pessoais: quais tratamos, por quê e com que base legal.
+              Os controles que protegem o ambiente — acesso, criptografia, segregação entre
+              empresas, credenciais, registros, cópias de segurança e resposta a incidentes —
+              estão num documento próprio.{' '}
+              <Link href="/seguranca" className="text-blue-600 hover:underline font-medium">
+                Ler a Política de Segurança da Informação →
+              </Link>
+            </p>
+          </div>
+        </section>
+
         {/* Mudanças */}
         <section id="mudancas">
           <h2 className="text-2xl font-black text-gray-900 mb-4">Mudanças nesta página</h2>

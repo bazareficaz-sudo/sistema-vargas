@@ -627,7 +627,7 @@ export default function LandingPage() {
             {[
               { titulo: 'Produto', links: ['Recursos', 'Planos', 'PDV Offline', 'Marketplaces', 'WhatsApp'] },
               { titulo: 'Empresa', links: ['Sobre nós', 'Blog', 'Contato', 'Suporte', 'Status'] },
-              { titulo: 'Legal', links: ['Privacidade', 'Termos de Uso', 'LGPD', 'Cookies'] },
+              { titulo: 'Legal', links: ['Privacidade', 'Segurança', 'Termos de Uso', 'LGPD', 'Cookies'] },
             ].map(col => (
               <div key={col.titulo}>
                 <p className="font-bold text-white text-sm mb-4">{col.titulo}</p>
@@ -641,6 +641,10 @@ export default function LandingPage() {
                     const destino: Record<string, string> = {
                       Blog: '/blog',
                       Privacidade: '/privacidade',
+                      // Documento PRÓPRIO, e não uma âncora dentro da
+                      // privacidade: apontar um para o outro foi o que o
+                      // revisor da TikTok Shop apontou na primeira submissão.
+                      'Segurança': '/seguranca',
                       LGPD: '/privacidade#direitos',
                       Cookies: '/privacidade#cookies',
                     }
