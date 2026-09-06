@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import CancelarVendaModal from '@/components/vendas/CancelarVendaModal'
 import { createClient } from '@/lib/supabase/client'
 import DetalheVendaModal from './DetalheVendaModal'
 import EditarItensVendaModal from './EditarItensVendaModal'
@@ -98,6 +99,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const [modoEdicaoInicial, setModoEdicaoInicial] = useState(false)
   // Correção de itens da venda — modal próprio, separado do detalhe, porque
   // mexe em estoque e não é edição de cadastro.
+  const [cancelando, setCancelando] = useState<Venda | null>(null)
   const [corrigindo, setCorrigindo] = useState<Venda | null>(null)
   const [gerandoPdfId, setGerandoPdfId] = useState<string | null>(null)
   const [wppAberto, setWppAberto] = useState(false)
@@ -857,6 +859,15 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             setDetalheAberto(prev => prev ? { ...prev, ...patch } : prev)
           }}
           onCorrigirItens={() => setCorrigindo(detalheAberto)}
+          onCancelarVenda={() => setCancelando(detalheAberto)}
+        />
+      )}
+
+      {cancelando && (
+        <CancelarVendaModal
+          venda={cancelando}
+          onFechar={() => setCancelando(null)}
+          onCancelada={() => { setCancelando(null); setDetalheAberto(null); window.location.reload() }}
         />
       )}
 

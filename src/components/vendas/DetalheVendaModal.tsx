@@ -27,6 +27,7 @@ function fmt(v: number) { return (v ?? 0).toLocaleString('pt-BR', { style: 'curr
 export default function DetalheVendaModal({
   venda, empresaId, modoEdicaoInicial, onClose, onImprimir, onWhatsapp, gerandoPdf, formatoImpressao, onAtualizado,
   onCorrigirItens,
+  onCancelarVenda,
 }: {
   venda: Venda
   empresaId: string
@@ -38,6 +39,7 @@ export default function DetalheVendaModal({
   formatoImpressao?: FormatoPapel
   onAtualizado: (patch: Partial<Venda>) => void
   onCorrigirItens?: () => void
+  onCancelarVenda?: () => void
 }) {
   const [carregando, setCarregando] = useState(true)
   const [itens, setItens] = useState<Item[]>([])
@@ -499,7 +501,17 @@ export default function DetalheVendaModal({
                 </button>
               </>
             ) : (
-              <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
+              <>
+                {/* Fica no rodapé e em vermelho de contorno, não sólido: é
+                    ação destrutiva, mas não é a ação principal desta tela. */}
+                {onCancelarVenda && venda.status !== 'cancelada' && (
+                  <button onClick={onCancelarVenda}
+                    className="px-4 py-2 border border-red-300 text-red-600 text-sm rounded-lg hover:bg-red-50">
+                    Cancelar venda
+                  </button>
+                )}
+                <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
+              </>
             )}
           </div>
         </div>
