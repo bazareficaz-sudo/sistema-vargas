@@ -147,6 +147,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [codigoVendedor, setCodigoVendedor] = useState('')
   const [erroVendedor, setErroVendedor] = useState('')
   const codigoVendedorRef = useRef<HTMLInputElement>(null)
+  const wppTelRef = useRef<HTMLInputElement>(null)
   const [formas, setFormas] = useState<FormaPag[]>([{ tipo: 'dinheiro', valor: 0 }])
   // CONFIGURAÇÃO DA EMPRESA: promoção condicionada à forma de pagamento.
   // Nula enquanto carrega, e `promocaoValeNasFormas` trata nulo como "sem
@@ -956,6 +957,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         case 'F6': e.preventDefault(); setModoDevol(m => !m); break
         case 'F8': e.preventDefault(); if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } break
         case 'F9': e.preventDefault(); setModalEntrega(true); break
+        // F7 — NOVA VENDA. Confirma só quando há o que perder: pedir
+        // confirmação com o carrinho vazio treinaria o balconista a apertar
+        // "sim" sem ler, e é justamente na venda cheia que ele precisa ler.
+        case 'F7':
+          e.preventDefault()
+          if (itens.length === 0 || confirm(`Zerar esta venda? ${itens.length} item(ns) serão perdidos.`)) limparTudo()
+          break
         case 'Escape': buscaRef.current?.focus(); setSugestoes([]); break
         case 'Delete':
           if (itemSelecionado && document.activeElement === document.body) {
@@ -976,7 +984,11 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         const idx = parseInt(e.key) - 1
         const forma = FORMAS[idx]; if (!forma) return
         e.preventDefault()
-        setFormas([{ tipo: forma.id, valor: total }]); setFormaIdx(0)
+        // PELO MESMO CAMINHO DO CLIQUE. Esta linha chamava `setFormas` direto
+        // e pulava a reprecificação: escolher Débito pela tecla 2 mostrava a
+        // tabela dizendo R$ 25,02 e o "Total a pagar" continuava R$ 22,00.
+        // Dois caminhos para a mesma decisão, e só um tinha sido atualizado.
+        aplicarFormas([{ tipo: forma.id, valor: 0 }]); setFormaIdx(0)
         setTimeout(() => { valorRefs.current[0]?.focus(); valorRefs.current[0]?.select() }, 30)
       }
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -988,6 +1000,32 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [modalPag, total, totalPago, formas, hasDevolucao])
+
+  /**
+   * ENTER na tela de venda concluída começa a próxima.
+   *
+   * É a tecla que o balconista já tem sob o dedo, vindo do ENTER que fechou o
+   * pagamento. Sem isso ele solta o teclado, procura o mouse e clica em "Nova
+   * Venda" — uma parada por venda, o dia inteiro.
+   *
+   * DENTRO DO CAMPO DE TELEFONE o ENTER envia o comprovante: quem está
+   * digitando um número espera que ENTER conclua o que está digitando, e
+   * limpar a tela ali perderia o número junto com a chance de enviar.
+   */
+  useEffect(() => {
+    if (!vendaConcluidaModal) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Enter') return
+      // Dentro do campo de telefone quem trata é o próprio campo (onKeyDown
+      // dele, abaixo): manter o envio aqui obrigaria este efeito a depender de
+      // `enviarComprovantWpp` e a se reinscrever a cada render.
+      if (document.activeElement === wppTelRef.current) return
+      e.preventDefault()
+      setVendaConcluidaModal(null); setWppStatus('idle')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [vendaConcluidaModal])
 
   useEffect(() => { buscaRef.current?.focus() }, [])
 
@@ -1032,6 +1070,11 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         <BtnToolbar onClick={() => setModalObs(true)} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F4" label="Obs" icon="💬" />
         <BtnToolbar onClick={() => { if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } }} cor="bg-white hover:bg-gray-50 text-amber-700 border border-amber-300" atalho="F8" label="Orçamento" icon="📋" />
         <BtnToolbar onClick={() => setModalEntrega(true)} cor={`bg-white hover:bg-gray-50 border border-gray-300 ${entrega ? 'text-orange-600 border-orange-300' : 'text-gray-700'}`} atalho="F9" label={entrega ? '🛵 Entrega' : 'Entregar'} />
+        {/* Zerar e começar outra. O balconista precisa disso quando o cliente
+            desiste no meio — sem ele, a saída era apagar item por item. */}
+        <BtnToolbar
+          onClick={() => { if (itens.length === 0 || confirm(`Zerar esta venda? ${itens.length} item(ns) serão perdidos.`)) limparTudo() }}
+          cor="bg-white hover:bg-gray-50 text-gray-600 border border-gray-300" atalho="F7" label="Nova venda" icon="🧹" />
         {/* Botão devolução */}
         <BtnToolbar
           onClick={() => setModoDevol(m => !m)}
@@ -1964,8 +2007,17 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                     <p className="text-sm font-medium text-gray-700 mb-3">📲 Enviar comprovante por WhatsApp?</p>
                     <div className="flex gap-2">
                       <input
+                        ref={wppTelRef}
                         value={wppTel}
                         onChange={e => setWppTel(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key !== 'Enter') return
+                          e.preventDefault()
+                          // Quem está digitando um número espera que ENTER
+                          // conclua o que está digitando. Limpar a tela aqui
+                          // perderia o número junto com a chance de enviar.
+                          if (wppTel.trim() && !wppEnviando) enviarComprovantWpp()
+                        }}
                         placeholder="(11) 99999-9999"
                         className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500"
                       />
@@ -1985,7 +2037,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
               <button
                 onClick={() => { setVendaConcluidaModal(null); setWppStatus('idle') }}
                 className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-sm">
-                🛒 Nova Venda
+                🛒 Nova Venda <span className="ml-1 text-blue-200 font-normal">(ENTER)</span>
               </button>
             </div>
           </div>
