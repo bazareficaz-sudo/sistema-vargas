@@ -7,7 +7,12 @@ import { calcSaude, type SaudeConfig, type FaixaSaude, FAIXAS_PADRAO, CONFIG_PAD
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
-import { promocaoVigente, precoPorQuantidade } from '@/lib/produtos/promocao'
+import { promocaoVigente, precoPorQuantidade, type ProdutoComFaixas } from '@/lib/produtos/promocao'
+import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
+import {
+  promocaoValeNasFormas, avisoDaRestricao,
+  type ConfigPromocaoPagamento,
+} from '@/lib/pdv/promocaoPagamento'
 
 type Produto = {
   id: string; nome: string; sku: string; ean: string | null
@@ -39,14 +44,9 @@ type Cliente = {
 }
 type FormaPag = { tipo: string; valor: number }
 
-const FORMAS = [
-  { id: 'dinheiro', label: 'Dinheiro', tecla: '1', icon: '💵' },
-  { id: 'debito',   label: 'Débito',   tecla: '2', icon: '💳' },
-  { id: 'credito',  label: 'Crédito',  tecla: '3', icon: '💳' },
-  { id: 'pix',      label: 'PIX',      tecla: '4', icon: '📱' },
-  { id: 'carteira', label: 'Carteira', tecla: '5', icon: '👛' },
-  { id: 'fiado',    label: 'Fiado',    tecla: '6', icon: '📒' },
-]
+// A lista mora em `lib/pdv/formasPagamento.ts`: a tela de configuração e a
+// rota que a valida precisam da MESMA lista, e uma cópia divergiria.
+const FORMAS = FORMAS_PAGAMENTO
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 function uid() { return Math.random().toString(36).slice(2) }
@@ -138,6 +138,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
   const [modalPag, setModalPag] = useState(false)
   const [formas, setFormas] = useState<FormaPag[]>([{ tipo: 'dinheiro', valor: 0 }])
+  // CONFIGURAÇÃO DA EMPRESA: promoção condicionada à forma de pagamento.
+  // Nula enquanto carrega, e `promocaoValeNasFormas` trata nulo como "sem
+  // restrição" — durante o carregamento o preço da etiqueta é o que vale.
+  const [cfgPdv, setCfgPdv] = useState<ConfigPromocaoPagamento | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [formaIdx, setFormaIdx] = useState(0)
 
@@ -203,6 +207,89 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const isTroca       = itensDevol.length > 0 && saldoFinal === 0
   const totalPago     = formas.reduce((s, f) => s + f.valor, 0)
   const troco2        = Math.max(0, totalPago - total)
+
+  // ── PROMOÇÃO CONDICIONADA À FORMA DE PAGAMENTO ─────────────────
+  //
+  // Fiado não é exceção: ele é um `tipo` dentro de `formas` como qualquer
+  // outro, e `isFiado` mais abaixo é derivado daqui — não o contrário.
+  const tiposEscolhidos = formas.map(f => f.tipo)
+  const veredito        = promocaoValeNasFormas(cfgPdv, tiposEscolhidos)
+  const avisoPromo      = avisoDaRestricao(cfgPdv)
+  const temItemEmPromo  = itens.some(i => i.em_promocao)
+
+  /**
+   * O subtotal que sairia se a promoção valesse (ou não).
+   *
+   * Existe para mostrar OS DOIS NÚMEROS ao vendedor antes de ele escolher a
+   * forma: "no Pix sai 140,90; no cartão, 149,20" é a frase que ele precisa
+   * dizer ao cliente. Refaz a mesma conta de `subtotal` acima, item a item,
+   * porque preço manual e devolução têm tratamento próprio e recalcular pela
+   * diferença daria erro de centavo.
+   */
+  function totalNoModo(promoOk: boolean): number {
+    let venda = 0, devol = 0
+    for (const i of itens) {
+      const preco = (i.precoManual || !i.produto)
+        ? i.preco_unitario
+        : precoPorQuantidade(i.produto as ProdutoComFaixas, i.quantidade, new Date(), promoOk)
+      const t = i.quantidade * preco * (1 - i.desconto / 100)
+      if (i.tipo === 'devolucao') devol += Math.abs(t); else venda += t
+    }
+    return Math.max(0, venda - devol - descontoGlobal)
+  }
+
+  const totalComPromo = temItemEmPromo ? totalNoModo(true) : total
+  const totalSemPromo = temItemEmPromo ? totalNoModo(false) : total
+  const diferencaPromo = Number((totalSemPromo - totalComPromo).toFixed(2))
+  /** Há desconto em jogo que depende da forma de pagamento. */
+  const promoEmJogo = !!cfgPdv?.exigirFormaPagamento && veredito.restricaoAtiva && diferencaPromo > 0
+
+  /** Reprecifica o carrinho inteiro para um modo, sem tocar em preço digitado. */
+  function itensNoModo(promoOk: boolean): ItemVenda[] {
+    return itens.map(i => {
+      if (i.precoManual || !i.produto) return i
+      const preco = precoPorQuantidade(i.produto as ProdutoComFaixas, i.quantidade, new Date(), promoOk)
+      const semFaixa = (promoOk && i.em_promocao) ? i.produto.preco_promocional! : i.produto.preco_venda
+      return {
+        ...i,
+        preco_unitario: preco,
+        faixaAplicada: preco < semFaixa,
+        total: i.quantidade * preco * (1 - i.desconto / 100),
+      }
+    })
+  }
+
+  /**
+   * Troca as formas de pagamento E reprecifica o carrinho junto.
+   *
+   * As duas coisas andam juntas de propósito: separar deixaria a tela com o
+   * total antigo ao lado da forma nova por um instante — e um instante basta
+   * para o vendedor ler o número errado em voz alta.
+   */
+  function aplicarFormas(novas: FormaPag[], distribuirTotal = true) {
+    const tipos = novas.map(f => f.tipo)
+    const promoOk = promocaoValeNasFormas(cfgPdv, tipos).vale
+    const reprecificados = itensNoModo(promoOk)
+    setItens(reprecificados)
+
+    if (!distribuirTotal || novas.length !== 1) { setFormas(novas); return }
+    // Uma forma só: ela paga o total novo, e não o de antes da reprecificação.
+    let venda = 0, devol = 0
+    for (const i of reprecificados) {
+      if (i.tipo === 'devolucao') devol += Math.abs(i.total); else venda += i.total
+    }
+    const novoTotal = Math.max(0, venda - devol - descontoGlobal)
+    setFormas([{ ...novas[0], valor: novoTotal }])
+  }
+
+  // A configuração é lida uma vez por sessão de caixa. Ela muda em Configurações
+  // → PDV, que é outra tela; recarregar o PDV pega a versão nova.
+  useEffect(() => {
+    fetch('/api/pdv/config')
+      .then(r => r.json())
+      .then(d => { if (d?.ok) setCfgPdv(d.config) })
+      .catch(() => { /* sem config, o PDV segue como sempre foi */ })
+  }, [])
 
   // ── Busca de produtos ──────────────────────────────────────────
   const buscarProdutos = useCallback(async (q: string) => {
@@ -1209,6 +1296,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 {contatosCliente.length > 3 ? ` +${contatosCliente.length - 3}` : ''}
               </span>
             )}
+            {/* A CONDIÇÃO APARECE ENQUANTO OS ITENS ENTRAM, e não só no
+                pagamento: é quando o cliente pergunta "quanto fica?" que o
+                vendedor precisa saber que o preço da etiqueta tem condição.
+                Descobrir isso só no fim é o que gera discussão no balcão. */}
+            {promoEmJogo && (
+              <span className="text-emerald-700 font-medium" title={`Sem essas formas, o total passa de ${fmt(totalComPromo)} para ${fmt(totalSemPromo)}.`}>
+                🏷 {avisoPromo} <span className="text-emerald-600">Fora delas, +{fmt(diferencaPromo)}</span>
+              </span>
+            )}
             {entrega && <span className="text-orange-600">🛵 Entrega</span>}
             {hasDevolucao && itensDevol.length > 0 && (
               <span className="text-red-500">🔄 {itensDevol.length} dev.</span>
@@ -1317,6 +1413,34 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 {descontoGlobal > 0 && <div className="flex justify-between text-orange-500"><span>Desconto</span><span>−{fmt(descontoGlobal)}</span></div>}
               </div>
             )}
+            {/* OS DOIS PREÇOS, ANTES DA ESCOLHA. É a frase que o vendedor diz
+                ao cliente: "no Pix sai 140,90; no cartão, 149,20". Depois de
+                escolhido, um dos dois vira o total e o outro explica o que
+                mudou — em vez de o número simplesmente pular na tela. */}
+            {promoEmJogo && (
+              <div className={`rounded-xl px-4 py-3 border ${veredito.vale ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-300'}`}>
+                {veredito.vale ? (
+                  <>
+                    <p className="text-sm font-bold text-emerald-800">
+                      ✓ Preço promocional aplicado — economia de {fmt(diferencaPromo)}
+                    </p>
+                    <p className="text-xs text-emerald-700 mt-1">
+                      {avisoPromo} Em outra forma, o total passa a {fmt(totalSemPromo)}.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-bold text-amber-900">
+                      ⚠ Sem o preço promocional — {fmt(diferencaPromo)} a mais
+                    </p>
+                    <p className="text-xs text-amber-800 mt-1">
+                      {veredito.motivo} Em {(cfgPdv?.formasPermitidas ?? []).map(f => FORMAS.find(x => x.id === f)?.label ?? f).join(' ou ')}, o total volta a {fmt(totalComPromo)}.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex justify-between items-center">
               <span className="text-sm text-blue-700 font-medium">{hasDevolucao ? 'Saldo a pagar' : 'Total a pagar'}</span>
               <span className="text-2xl font-bold text-blue-700">{fmt(total)}</span>
@@ -1327,12 +1451,19 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
               <div className="grid grid-cols-6 gap-2">
                 {FORMAS.map((f) => {
                   const ativa = formas.length === 1 && formas[0].tipo === f.id
+                  // Qual botão mantém o desconto: a informação tem que estar
+                  // NO botão, no momento de escolher. Num aviso à parte, ela
+                  // chega depois da decisão.
+                  const daDesconto = promoEmJogo && (cfgPdv?.formasPermitidas ?? []).includes(f.id)
                   return (
                     <button key={f.id}
-                      onClick={() => { setFormas([{ tipo: f.id, valor: total }]); setFormaIdx(0); setTimeout(() => { valorRefs.current[0]?.focus(); valorRefs.current[0]?.select() }, 30) }}
+                      onClick={() => { aplicarFormas([{ tipo: f.id, valor: 0 }]); setFormaIdx(0); setTimeout(() => { valorRefs.current[0]?.focus(); valorRefs.current[0]?.select() }, 30) }}
                       className={`flex flex-col items-center gap-1 py-3 rounded-xl border-2 text-xs font-medium transition-all ${ativa ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}>
                       <span className="text-lg">{f.icon}</span>
                       <span>{f.label}</span>
+                      {daDesconto && (
+                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1 rounded">promo</span>
+                      )}
                       <kbd className={`text-[10px] px-1 rounded ${ativa ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>{f.tecla}</kbd>
                     </button>
                   )
@@ -1349,12 +1480,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                   onFocus={e => e.target.select()}
                   className="flex-1 border-2 border-blue-300 rounded-lg px-3 py-2.5 text-sm text-right text-lg font-semibold focus:outline-none focus:border-blue-500" />
                 {formas.length > 1 && (
-                  <button onClick={() => setFormas(p => p.filter((_, xi) => xi !== i))} className="text-red-400 hover:text-red-600 text-lg">×</button>
+                  <button onClick={() => aplicarFormas(formas.filter((_, xi) => xi !== i), false)} className="text-red-400 hover:text-red-600 text-lg">×</button>
                 )}
               </div>
             ))}
             {!isFiado && (
-              <button onClick={() => setFormas(p => [...p, { tipo: 'dinheiro', valor: 0 }])} className="text-xs text-blue-600 hover:text-blue-800">+ Adicionar forma de pagamento</button>
+              <button onClick={() => aplicarFormas([...formas, { tipo: 'dinheiro', valor: 0 }], false)} className="text-xs text-blue-600 hover:text-blue-800">+ Adicionar forma de pagamento</button>
             )}
 
             {isFiado && (

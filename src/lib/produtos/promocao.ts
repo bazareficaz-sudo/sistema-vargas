@@ -44,9 +44,28 @@ export function promocaoVigente(produto: ProdutoComPromocao, agora: Date = new D
   return true
 }
 
-/** Preço que deve ser cobrado agora: o promocional se estiver vigente, senão o normal. */
-export function precoVigente(produto: ProdutoComPromocao, agora: Date = new Date()): number {
-  return promocaoVigente(produto, agora)
+/**
+ * Preço que deve ser cobrado agora: o promocional se estiver vigente, senão o
+ * normal.
+ *
+ * `promocaoPermitida` existe para a promoção condicionada à forma de pagamento
+ * (ver `pdv/promocaoPagamento.ts`): quando a venda vai em crédito e a empresa
+ * só autoriza o preço promocional em Pix ou dinheiro, a promoção do produto
+ * continua VIGENTE — a campanha não acabou — mas não se aplica a esta venda.
+ *
+ * São duas perguntas distintas de propósito. Vigência é do produto e depende
+ * de data; autorização é da venda e depende de como o cliente vai pagar.
+ * Misturar as duas faria a data de fim da campanha depender do meio de
+ * pagamento, que é absurdo.
+ *
+ * O padrão `true` mantém todo chamador existente idêntico.
+ */
+export function precoVigente(
+  produto: ProdutoComPromocao,
+  agora: Date = new Date(),
+  promocaoPermitida = true,
+): number {
+  return promocaoPermitida && promocaoVigente(produto, agora)
     ? Number(produto.preco_promocional ?? 0)
     : Number(produto.preco_venda ?? 0)
 }
@@ -95,8 +114,12 @@ export function precoPorQuantidade(
   produto: ProdutoComFaixas,
   quantidade: number,
   agora: Date = new Date(),
+  // A faixa de atacado NÃO depende da forma de pagamento: ela é política de
+  // venda, não campanha. O que muda com o pagamento é só a base sobre a qual
+  // ela compete.
+  promocaoPermitida = true,
 ): number {
-  const base = precoVigente(produto, agora)
+  const base = precoVigente(produto, agora, promocaoPermitida)
   // Devolução entra no PDV com quantidade negativa, e a faixa vale igual: quem
   // devolve 12 unidades comprou 12 e pagou o preço de 12. Sem o módulo, o
   // sistema devolveria o preço cheio e a loja pagaria a mais.
