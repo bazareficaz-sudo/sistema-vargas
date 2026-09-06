@@ -43,6 +43,7 @@ type Cliente = {
   bloqueado_fiado: boolean; permite_fiado: boolean
 }
 type FormaPag = { tipo: string; valor: number }
+type Vendedor = { id: string; codigo: string | null; nome: string }
 
 // A lista mora em `lib/pdv/formasPagamento.ts`: a tela de configuração e a
 // rota que a valida precisam da MESMA lista, e uma cópia divergiria.
@@ -137,6 +138,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [contatosCliente, setContatosCliente] = useState<any[]>([])
 
   const [modalPag, setModalPag] = useState(false)
+  // VENDEDOR DA VENDA. `vendas` já tem `vendedor_id`, `vendedor_nome` e
+  // `vendedor_codigo` — colunas que existiam e que o PDV nunca preencheu, o
+  // que deixava a comissão sem a informação mais básica dela.
+  const [vendedores, setVendedores] = useState<Vendedor[]>([])
+  const [vendedor, setVendedor] = useState<Vendedor | null>(null)
+  const [modalVendedor, setModalVendedor] = useState(false)
+  const [codigoVendedor, setCodigoVendedor] = useState('')
+  const [erroVendedor, setErroVendedor] = useState('')
+  const codigoVendedorRef = useRef<HTMLInputElement>(null)
   const [formas, setFormas] = useState<FormaPag[]>([{ tipo: 'dinheiro', valor: 0 }])
   // CONFIGURAÇÃO DA EMPRESA: promoção condicionada à forma de pagamento.
   // Nula enquanto carrega, e `promocaoValeNasFormas` trata nulo como "sem
@@ -290,6 +300,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       .then(d => { if (d?.ok) setCfgPdv(d.config) })
       .catch(() => { /* sem config, o PDV segue como sempre foi */ })
   }, [])
+
+  // Os vendedores ativos da empresa. Lista curta e estável — carrega uma vez.
+  useEffect(() => {
+    sb.from('vendedores')
+      .select('id, codigo, nome')
+      .eq('empresa_id', empresaId).eq('ativo', true)
+      .order('codigo')
+      .then(({ data }) => { if (data) setVendedores(data as Vendedor[]) })
+  }, [sb, empresaId])
 
   // ── Busca de produtos ──────────────────────────────────────────
   const buscarProdutos = useCallback(async (q: string) => {
@@ -509,12 +528,28 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null)
     setModalOrc(false); setModalPag(false); setModalTroca(false); setModalCredito(false)
     setFiadoParcelas('1'); setFiadoPrimVenc(''); setFiadoIntervalo('30'); setFiadoObs(''); setErrFiado('')
+    // O vendedor é POR VENDA: quem atendeu a anterior pode não ser quem
+    // atende a próxima, e herdar em silêncio credita comissão errada.
+    setVendedor(null); setModalVendedor(false); setCodigoVendedor(''); setErroVendedor('')
     buscaRef.current?.focus()
   }
 
   // ── Pagamento ─────────────────────────────────────────────────
   function abrirPagamento() {
     if (itens.length === 0) return
+
+    // O VENDEDOR VEM ANTES DE QUALQUER CAMINHO DE FECHAMENTO — pagamento,
+    // troca ou crédito. Perguntar só no fluxo de pagamento deixaria a troca
+    // sem dono, e troca também é atendimento de alguém.
+    //
+    // Empresa sem vendedor cadastrado não é interrompida: a venda segue como
+    // sempre seguiu, e a comissão simplesmente não tem a quem atribuir.
+    if (!vendedor && vendedores.length > 0) {
+      setCodigoVendedor(''); setErroVendedor('')
+      setModalVendedor(true)
+      setTimeout(() => codigoVendedorRef.current?.focus(), 80)
+      return
+    }
 
     // Saldo negativo → precisa de cliente para gerar crédito
     if (saldoFinal < 0) {
@@ -539,6 +574,29 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     setFormaIdx(0)
     setModalPag(true)
     setTimeout(() => valorRefs.current[0]?.focus(), 80)
+  }
+
+  /**
+   * Confirma o código digitado e segue para o pagamento.
+   *
+   * Chama `abrirPagamento` de novo em vez de abrir o modal de pagamento
+   * direto: assim os desvios de troca e de crédito continuam valendo, e não
+   * há um segundo caminho para dentro do fechamento da venda.
+   */
+  function confirmarVendedor(v?: Vendedor) {
+    const escolhido = v ?? vendedores.find(x => (x.codigo ?? '').trim() === codigoVendedor.trim())
+    if (!escolhido) {
+      setErroVendedor(`Nenhum vendedor com o código ${codigoVendedor.trim() || '(vazio)'}.`)
+      codigoVendedorRef.current?.select()
+      return
+    }
+    setVendedor(escolhido)
+    setModalVendedor(false)
+    setErroVendedor('')
+    // O estado ainda não chegou nesta volta do render, então o desvio do
+    // `abrirPagamento` acima olharia um `vendedor` nulo e reabriria este
+    // mesmo modal. Passar pelo próximo tick resolve sem duplicar a lógica.
+    setTimeout(() => abrirPagamento(), 0)
   }
 
   const isFiado = formas.length === 1 && formas[0].tipo === 'fiado'
@@ -594,6 +652,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         cliente_nome: clienteSelecionado?.nome ?? (nomeNota.trim() || null),
         cliente_cpf_cnpj: cpfNotaDigitos || null,
         operador_nome: operadorNome,
+        // Colunas que já existiam e que o PDV nunca preencheu.
+        vendedor_id: vendedor?.id ?? null,
+        vendedor_nome: vendedor?.nome ?? null,
+        vendedor_codigo: vendedor?.codigo ?? null,
         status: 'concluida',
         subtotal: totalVendas,
         desconto: totalDesc,
@@ -885,7 +947,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   // ── Atalhos globais ─────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito) return
+      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito || modalVendedor) return
       switch (e.key) {
         case 'F2': e.preventDefault(); abrirPagamento(); break
         case 'F3': e.preventDefault(); setDescontoInput(String(descontoGlobal)); setModalDesc(true); break
@@ -904,7 +966,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito,
+  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito, modalVendedor,
       itens, total, itemSelecionado, descontoGlobal, modoDevol])
 
   useEffect(() => {
@@ -1287,6 +1349,14 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             <span>{itens.length} {itens.length === 1 ? 'item' : 'itens'}</span>
             {!hasDevolucao && descontoGlobal > 0 && <span className="text-orange-600">Desc: −{fmt(descontoGlobal)}</span>}
             {clienteSelecionado && <span className="text-blue-600">👤 {clienteSelecionado.nome.split(' ')[0]}</span>}
+            {/* Depois que o modal fecha, o vendedor sumiria da tela e ninguém
+                conferiria antes de concluir. Clicar troca. */}
+            {vendedor && (
+              <button onClick={() => { setCodigoVendedor(vendedor.codigo ?? ''); setErroVendedor(''); setModalVendedor(true); setTimeout(() => codigoVendedorRef.current?.select(), 80) }}
+                className="text-indigo-600 hover:text-indigo-800" title="Trocar o vendedor desta venda">
+                🧑‍💼 {vendedor.nome.split(' ')[0]}
+              </button>
+            )}
             {/* Quem pode comprar em nome deste cliente. É lembrete pro
                 balconista conferir — não trava a venda de quem não está
                 na lista, que costuma estar desatualizada. */}
@@ -1411,9 +1481,62 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       )}
 
       {/* ── MODAL PAGAMENTO ──────────────────────────────────────── */}
+      {/* QUEM ATENDEU — antes do pagamento.
+          O campo de código é o caminho principal porque é o que o balconista
+          faz sem tirar a mão do teclado: digita e ENTER. Os botões abaixo
+          existem para quem não decorou o código, e não como caminho normal —
+          por isso ficam menores e depois. */}
+      {modalVendedor && (
+        <Modal titulo="Quem está vendendo?" onClose={() => setModalVendedor(false)} largura="max-w-sm">
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs text-gray-500">Código do vendedor</label>
+              <input
+                ref={codigoVendedorRef}
+                value={codigoVendedor}
+                onChange={e => { setCodigoVendedor(e.target.value); setErroVendedor('') }}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirmarVendedor() } }}
+                placeholder="Digite o código e tecle ENTER"
+                autoFocus
+                className="mt-1 w-full border-2 border-blue-300 rounded-lg px-3 py-3 text-2xl font-bold text-center tracking-widest focus:outline-none focus:border-blue-500" />
+              {/* O nome aparece ENQUANTO digita, antes do ENTER: confirmar às
+                  cegas e descobrir depois é o que gera venda no vendedor
+                  errado. */}
+              {(() => {
+                const previa = vendedores.find(v => (v.codigo ?? '').trim() === codigoVendedor.trim())
+                if (erroVendedor) return <p className="text-xs text-red-600 mt-2">{erroVendedor}</p>
+                if (previa) return <p className="text-sm text-emerald-700 font-medium mt-2 text-center">{previa.nome}</p>
+                if (codigoVendedor.trim()) return <p className="text-xs text-gray-400 mt-2 text-center">Código não encontrado</p>
+                return <p className="text-xs text-gray-400 mt-2 text-center">ENTER confirma e vai para o pagamento</p>
+              })()}
+            </div>
+
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-[11px] text-gray-400 mb-2">ou escolha na lista</p>
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                {vendedores.map(v => (
+                  <button key={v.id} onClick={() => confirmarVendedor(v)}
+                    className="text-left px-3 py-2 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                    <span className="block text-xs text-gray-400 font-mono">{v.codigo ?? '—'}</span>
+                    <span className="block text-sm text-gray-800 truncate">{v.nome}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {modalPag && (
         <Modal titulo="Pagamento" onClose={() => setModalPag(false)} largura="max-w-md">
           <div className="space-y-4">
+            {vendedor && (
+              <div className="flex items-center justify-between text-xs bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+                <span className="text-indigo-900">🧑‍💼 Venda de <strong>{vendedor.nome}</strong></span>
+                <button onClick={() => { setModalPag(false); setCodigoVendedor(vendedor.codigo ?? ''); setModalVendedor(true); setTimeout(() => codigoVendedorRef.current?.select(), 80) }}
+                  className="text-indigo-600 hover:text-indigo-800 underline">trocar</button>
+              </div>
+            )}
             {/* Resumo devolução abatida */}
             {hasDevolucao && (
               <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-xs space-y-1">
@@ -1894,12 +2017,17 @@ function Modal({ titulo, children, onClose, largura = 'max-w-md' }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${largura} mx-4`}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+      {/* TETO DE ALTURA E ROLAGEM INTERNA. Sem isso o modal crescia com o
+          conteúdo e passava da tela — o de Pagamento ficou alto demais quando
+          ganhou a tabela dos dois preços, e o botão de concluir saía do
+          alcance sem nada indicando que havia mais abaixo. O cabeçalho fica
+          fixo: é ele que carrega o × quando a rolagem começa. */}
+      <div className={`relative bg-white rounded-2xl shadow-2xl w-full ${largura} mx-4 max-h-[92vh] flex flex-col`}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
           <h2 className="font-semibold text-gray-900">{titulo}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className="px-5 py-4 overflow-y-auto">{children}</div>
       </div>
     </div>
   )
