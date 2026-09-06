@@ -10,7 +10,7 @@ import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { promocaoVigente, precoPorQuantidade, type ProdutoComFaixas } from '@/lib/produtos/promocao'
 import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
 import {
-  promocaoValeNasFormas, avisoDaRestricao,
+  promocaoValeNasFormas, gruposDePagamento,
   type ConfigPromocaoPagamento,
 } from '@/lib/pdv/promocaoPagamento'
 
@@ -214,7 +214,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   // outro, e `isFiado` mais abaixo é derivado daqui — não o contrário.
   const tiposEscolhidos = formas.map(f => f.tipo)
   const veredito        = promocaoValeNasFormas(cfgPdv, tiposEscolhidos)
-  const avisoPromo      = avisoDaRestricao(cfgPdv)
+  const gruposPromo     = gruposDePagamento(cfgPdv, FORMAS.map(f => f.id))
   const temItemEmPromo  = itens.some(i => i.em_promocao)
 
   /**
@@ -1300,9 +1300,18 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 pagamento: é quando o cliente pergunta "quanto fica?" que o
                 vendedor precisa saber que o preço da etiqueta tem condição.
                 Descobrir isso só no fim é o que gera discussão no balcão. */}
-            {promoEmJogo && (
-              <span className="text-emerald-700 font-medium" title={`Sem essas formas, o total passa de ${fmt(totalComPromo)} para ${fmt(totalSemPromo)}.`}>
-                🏷 {avisoPromo} <span className="text-emerald-600">Fora delas, +{fmt(diferencaPromo)}</span>
+            {promoEmJogo && gruposPromo && (
+              <span className="flex items-center gap-3 font-medium">
+                <span className="flex items-center gap-1.5 text-emerald-700">
+                  <span className="text-[10px] tracking-wide">{gruposPromo.rotuloComDesconto}</span>
+                  <span className="text-gray-300">→</span>
+                  <span className="tabular-nums">{fmt(totalComPromo)}</span>
+                </span>
+                <span className="flex items-center gap-1.5 text-gray-500">
+                  <span className="text-[10px] tracking-wide">{gruposPromo.rotuloSemDesconto}</span>
+                  <span className="text-gray-300">→</span>
+                  <span className="tabular-nums">{fmt(totalSemPromo)}</span>
+                </span>
               </span>
             )}
             {entrega && <span className="text-orange-600">🛵 Entrega</span>}
@@ -1417,27 +1426,39 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 ao cliente: "no Pix sai 140,90; no cartão, 149,20". Depois de
                 escolhido, um dos dois vira o total e o outro explica o que
                 mudou — em vez de o número simplesmente pular na tela. */}
-            {promoEmJogo && (
-              <div className={`rounded-xl px-4 py-3 border ${veredito.vale ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-300'}`}>
-                {veredito.vale ? (
-                  <>
-                    <p className="text-sm font-bold text-emerald-800">
-                      ✓ Preço promocional aplicado — economia de {fmt(diferencaPromo)}
-                    </p>
-                    <p className="text-xs text-emerald-700 mt-1">
-                      {avisoPromo} Em outra forma, o total passa a {fmt(totalSemPromo)}.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm font-bold text-amber-900">
-                      ⚠ Sem o preço promocional — {fmt(diferencaPromo)} a mais
-                    </p>
-                    <p className="text-xs text-amber-800 mt-1">
-                      {veredito.motivo} Em {(cfgPdv?.formasPermitidas ?? []).map(f => FORMAS.find(x => x.id === f)?.label ?? f).join(' ou ')}, o total volta a {fmt(totalComPromo)}.
-                    </p>
-                  </>
-                )}
+            {/* AS DUAS LINHAS DE PREÇO, como etiqueta. O lado que vale agora
+                fica destacado; o outro continua legível, porque a pergunta que
+                o cliente faz é justamente "e no cartão, quanto fica?". */}
+            {promoEmJogo && gruposPromo && (
+              <div className="rounded-xl border border-gray-200 overflow-hidden">
+                <div className={`flex items-center justify-between px-4 py-2.5 ${
+                  veredito.vale ? 'bg-emerald-50' : 'bg-white'}`}>
+                  <span className={`text-xs font-bold tracking-wide ${
+                    veredito.vale ? 'text-emerald-800' : 'text-gray-500'}`}>
+                    {veredito.vale && '✓ '}{gruposPromo.rotuloComDesconto}
+                  </span>
+                  <span className={`text-lg font-bold tabular-nums ${
+                    veredito.vale ? 'text-emerald-700' : 'text-gray-400'}`}>
+                    {fmt(totalComPromo)}
+                  </span>
+                </div>
+                <div className={`flex items-center justify-between px-4 py-2.5 border-t border-gray-200 ${
+                  !veredito.vale ? 'bg-amber-50' : 'bg-white'}`}>
+                  <span className={`text-xs font-bold tracking-wide ${
+                    !veredito.vale ? 'text-amber-900' : 'text-gray-500'}`}>
+                    {!veredito.vale && '✓ '}{gruposPromo.rotuloSemDesconto}
+                  </span>
+                  <span className={`text-lg font-bold tabular-nums ${
+                    !veredito.vale ? 'text-amber-800' : 'text-gray-400'}`}>
+                    {fmt(totalSemPromo)}
+                  </span>
+                </div>
+                <p className={`px-4 py-2 text-xs border-t border-gray-200 ${
+                  veredito.vale ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-900'}`}>
+                  {veredito.vale
+                    ? `Preço promocional aplicado — ${fmt(diferencaPromo)} de economia.`
+                    : `${fmt(diferencaPromo)} a mais: ${veredito.motivo}`}
+                </p>
               </div>
             )}
 

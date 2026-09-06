@@ -104,10 +104,86 @@ function juntar(tipos: string[], conector: string): string {
   return `${nomes.slice(0, -1).join(', ')} ${conector} ${nomes[nomes.length - 1]}`
 }
 
-/** A frase curta do aviso permanente no carrinho. */
-export function avisoDaRestricao(cfg: ConfigPromocaoPagamento | null | undefined): string | null {
+// ── OS DOIS PREÇOS, COMO ETIQUETA ───────────────────────────────────────────
+//
+// Pedido do gestor em 06/09/2026, depois de ver a frase no rodapé: ele não
+// quer ler uma sentença, quer LER DOIS PREÇOS.
+//
+//     PIX / DIN            R$ 22,00
+//     CARTÃO / CARTEIRA    R$ 25,02
+//
+// A diferença é de tempo de leitura. Com o cliente esperando, "Preços
+// promocionais valem só em Dinheiro ou PIX. Fora delas, +R$ 3,02" obriga o
+// vendedor a fazer uma subtração de cabeça para responder "quanto fica no
+// cartão?". As duas linhas já trazem a resposta.
+
+/** Rótulo curto de cada forma, para caber lado a lado no rodapé. */
+const CURTOS: Record<string, string> = {
+  dinheiro: 'DIN',
+  pix: 'PIX',
+  debito: 'DÉBITO',
+  credito: 'CRÉDITO',
+  carteira: 'CARTEIRA',
+  fiado: 'FIADO',
+}
+
+/**
+ * Junta as formas de um lado em um rótulo curto.
+ *
+ * Débito e crédito viram "CARTÃO" quando caem do MESMO lado — que é como
+ * quem está no balcão fala. Quando caem em lados diferentes (a loja autoriza
+ * débito mas não crédito), aparecem separados: fundir ali faria o rótulo
+ * mentir sobre qual cartão dá desconto.
+ */
+export function rotuloCurtoDoGrupo(tipos: string[]): string {
+  const temDebito = tipos.includes('debito')
+  const temCredito = tipos.includes('credito')
+  const juntaCartao = temDebito && temCredito
+
+  const partes: string[] = []
+  for (const t of tipos) {
+    if (juntaCartao && (t === 'debito' || t === 'credito')) {
+      if (!partes.includes('CARTÃO')) partes.push('CARTÃO')
+      continue
+    }
+    partes.push(CURTOS[t] ?? t.toUpperCase())
+  }
+  return partes.join(' / ')
+}
+
+export type GruposDePagamento = {
+  /** Formas que dão direito ao preço promocional. */
+  comDesconto: string[]
+  /** Todas as outras que o PDV oferece. */
+  semDesconto: string[]
+  rotuloComDesconto: string
+  rotuloSemDesconto: string
+}
+
+/**
+ * Divide as formas do PDV nos dois lados da regra.
+ *
+ * `todasAsFormas` vem de quem chama para o módulo não depender da lista do
+ * PDV — a ordem dela é a ordem em que os rótulos aparecem, e é a mesma ordem
+ * dos botões de pagamento. Ler o rodapé e olhar os botões tem que dar a mesma
+ * sequência, senão o vendedor procura.
+ */
+export function gruposDePagamento(
+  cfg: ConfigPromocaoPagamento | null | undefined,
+  todasAsFormas: string[],
+): GruposDePagamento | null {
   if (!cfg?.exigirFormaPagamento) return null
   const permitidas = (cfg.formasPermitidas ?? []).filter(Boolean)
   if (permitidas.length === 0) return null
-  return `Preços promocionais valem só em ${listar(permitidas)}.`
+
+  const comDesconto = todasAsFormas.filter(f => permitidas.includes(f))
+  const semDesconto = todasAsFormas.filter(f => !permitidas.includes(f))
+  if (comDesconto.length === 0 || semDesconto.length === 0) return null
+
+  return {
+    comDesconto,
+    semDesconto,
+    rotuloComDesconto: rotuloCurtoDoGrupo(comDesconto),
+    rotuloSemDesconto: rotuloCurtoDoGrupo(semDesconto),
+  }
 }

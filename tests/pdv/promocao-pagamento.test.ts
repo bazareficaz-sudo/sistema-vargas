@@ -1,7 +1,8 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  promocaoValeNasFormas, avisoDaRestricao, listar, CONFIG_PADRAO,
+  promocaoValeNasFormas, listar, CONFIG_PADRAO,
+  gruposDePagamento, rotuloCurtoDoGrupo,
 } from '../../src/lib/pdv/promocaoPagamento'
 import { precoVigente, precoPorQuantidade } from '../../src/lib/produtos/promocao'
 
@@ -88,12 +89,6 @@ describe('a frase que o vendedor lê', () => {
   test('lista com três formas usa vírgula e "ou"', () => {
     assert.equal(listar(['pix', 'dinheiro', 'debito']), 'PIX, Dinheiro ou Débito')
   })
-
-  test('aviso permanente só existe quando há restrição de verdade', () => {
-    assert.equal(avisoDaRestricao(CONFIG_PADRAO), null)
-    assert.equal(avisoDaRestricao({ exigirFormaPagamento: true, formasPermitidas: [] }), null)
-    assert.match(avisoDaRestricao(SO_PIX_E_DINHEIRO) ?? '', /só em PIX ou Dinheiro/)
-  })
 })
 
 describe('o preço que sai da decisão', () => {
@@ -131,5 +126,46 @@ describe('o preço que sai da decisão', () => {
     // Todo chamador que existia antes não passa o parâmetro e não pode mudar.
     assert.equal(precoVigente(TIJOLO), 1.60)
     assert.equal(precoPorQuantidade(TIJOLO, 1), 1.60)
+  })
+})
+
+describe('os dois preços, como etiqueta', () => {
+  // O gestor não quer ler uma sentença, quer ler dois preços:
+  //     PIX / DIN            R$ 22,00
+  //     CARTÃO / CARTEIRA    R$ 25,02
+  // Com o cliente esperando, a frase obrigava uma subtração de cabeça para
+  // responder "quanto fica no cartão?".
+  const TODAS = ['dinheiro', 'debito', 'credito', 'pix', 'carteira', 'fiado']
+
+  test('divide nos dois lados, na ordem dos botões do PDV', () => {
+    const g = gruposDePagamento(SO_PIX_E_DINHEIRO, TODAS)!
+    assert.deepEqual(g.comDesconto, ['dinheiro', 'pix'])
+    assert.equal(g.rotuloComDesconto, 'DIN / PIX')
+    assert.equal(g.rotuloSemDesconto, 'CARTÃO / CARTEIRA / FIADO')
+  })
+
+  test('débito e crédito viram CARTÃO quando caem do mesmo lado', () => {
+    assert.equal(rotuloCurtoDoGrupo(['debito', 'credito']), 'CARTÃO')
+  })
+
+  test('mas NÃO viram CARTÃO quando a loja separa os dois', () => {
+    // Autorizar débito e não crédito é legítimo: a taxa é diferente. Fundir
+    // aqui faria o rótulo mentir sobre qual cartão dá desconto.
+    const soDebito = { exigirFormaPagamento: true, formasPermitidas: ['debito'] }
+    const g = gruposDePagamento(soDebito, TODAS)!
+    assert.equal(g.rotuloComDesconto, 'DÉBITO')
+    assert.match(g.rotuloSemDesconto, /CRÉDITO/)
+    assert.doesNotMatch(g.rotuloSemDesconto, /CARTÃO/)
+  })
+
+  test('sem regra ligada não há dois preços a mostrar', () => {
+    assert.equal(gruposDePagamento(CONFIG_PADRAO, TODAS), null)
+    assert.equal(gruposDePagamento({ exigirFormaPagamento: true, formasPermitidas: [] }, TODAS), null)
+  })
+
+  test('TODAS as formas autorizadas: não há segundo preço, então não há tabela', () => {
+    // Mostrar "R$ 22,00 / R$ 22,00" seria ruído com cara de informação.
+    const todasValem = { exigirFormaPagamento: true, formasPermitidas: TODAS }
+    assert.equal(gruposDePagamento(todasValem, TODAS), null)
   })
 })
