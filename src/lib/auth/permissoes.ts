@@ -29,6 +29,10 @@ export type PermissaoCodigo =
   | 'editar_produtos'
   | 'editar_precos'
   | 'editar_credito_cliente'
+  // Terminais de PDV: autorizar, ativar e revogar. Um codigo so, e nao tres:
+  // quem pode autorizar um terminal pode revoga-lo, e separar criaria uma
+  // matriz que ninguem configura na pratica.
+  | 'gerenciar_terminais_pdv'
 
 export const PAPEIS: { valor: Papel; label: string }[] = [
   { valor: 'admin', label: 'Administrador' },
@@ -63,6 +67,7 @@ export const GRUPOS_PERMISSAO: { grupo: string; itens: { codigo: PermissaoCodigo
     itens: [
       { codigo: 'realizar_vendas', label: 'Vender no PDV', ajuda: '' },
       { codigo: 'cancelar_venda', label: 'Cancelar venda', ajuda: '' },
+      { codigo: 'gerenciar_terminais_pdv', label: 'Gerenciar terminais de PDV', ajuda: 'Autorizar, ativar e revogar os terminais de caixa da empresa.' },
       { codigo: 'gerenciar_estoque', label: 'Mexer no estoque', ajuda: 'Ajuste, transferencia e inventario.' },
       { codigo: 'gerenciar_compras', label: 'Entradas e compras', ajuda: '' },
       { codigo: 'gerenciar_financeiro', label: 'Financeiro', ajuda: 'Contas a pagar e receber, caixa.' },
@@ -88,6 +93,7 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
     'gerenciar_marketplaces', 'realizar_vendas', 'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados',
     'ver_dados_grupo', 'ver_totais_vendas', 'ver_dashboard_financeiro',
     'editar_produtos', 'editar_precos', 'editar_credito_cliente',
+    'gerenciar_terminais_pdv',
   ]),
   gerente: new Set([
     'ver_custos_margens', 'excluir_cadastros', 'gerenciar_financeiro', 'gerenciar_estoque',
@@ -95,6 +101,7 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
     'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados', 'ver_dados_grupo',
     'ver_totais_vendas', 'ver_dashboard_financeiro',
     'editar_produtos', 'editar_precos', 'editar_credito_cliente',
+    'gerenciar_terminais_pdv',
   ]),
   financeiro: new Set([
     'ver_custos_margens', 'gerenciar_financeiro', 'gerenciar_fiscal', 'exportar_dados',

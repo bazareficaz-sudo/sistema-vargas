@@ -52,6 +52,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/incentivos',             label: 'Incentivos',         icon: '🏆',  modulo: 'incentivos' },
       { href: '/dashboard/configuracoes/saude-venda', label: 'Saúde da Venda', icon: '💚', modulo: 'saude_venda' },
       { href: '/dashboard/configuracoes/pdv',      label: 'Configurações do PDV', icon: '⚙️', modulo: 'pdv' },
+      { href: '/dashboard/configuracoes/terminais-pdv', label: 'Terminais de PDV', icon: '🖧', modulo: 'pdv' },
     ],
   },
   {
