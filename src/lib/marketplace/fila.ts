@@ -150,16 +150,25 @@ export async function processarFilaDaEmpresa(
   //
   // ── O LIMITE DE INQUILINO VEM DO CANAL, NAO DE `empresa_id` ─────────────
   //
-  // Esta consulta exigia `marketplace_anuncios.empresa_id`. A LISTAGEM da tela
-  // nunca exigiu — ela filtra por `canal_id`. Anuncio com `empresa_id` nulo
-  // ou de outro valor aparecia na tela e era INVISIVEL para a fila, que
-  // registrava `sem_anuncio`: "este produto nao tem anuncio", sobre anuncio
-  // que a pessoa esta vendo na tela ao lado. Medido em 04/09/2026: 157 de 200
-  // linhas de uma rodada com `sem_anuncio`.
+  // Esta consulta exigia `marketplace_anuncios.empresa_id`; a LISTAGEM da tela
+  // nunca exigiu — ela filtra por `canal_id`. Alinhar as duas e o certo:
+  // `canal_id` e obrigatorio para um anuncio existir, e o canal pertence a
+  // empresa por `marketplace_canais.empresa_id`. O limite de inquilino
+  // continua existindo; passa a apoiar-se na coluna que o sustenta.
   //
-  // `canal_id` e obrigatorio para um anuncio existir, e o canal e da empresa
-  // por `marketplace_canais.empresa_id` — que e a coluna confiavel. O limite
-  // continua existindo; passa a apoiar-se em quem o sustenta.
+  // ── CORRECAO DE UMA CAUSA QUE ESTE COMENTARIO AFIRMOU E O BANCO DESMENTIU ─
+  //
+  // A versao anterior deste bloco dizia que anuncios com `empresa_id` nulo ou
+  // divergente ficavam invisiveis para a fila, e que era isso que produzia os
+  // 157 `sem_anuncio` de 200 medidos em 04/09/2026. Os 157 foram reais; a
+  // causa, nao. Medido depois, e reconferido em 07/09/2026:
+  //
+  //     9285 anuncios · 0 com empresa_id nulo · 0 divergentes do canal
+  //
+  // Nenhuma linha se encaixava na explicacao. Os `sem_anuncio` daquela rodada
+  // eram produtos que de fato nao tinham anuncio mapeado — a fila estava
+  // dizendo a verdade. A mudanca para `canal_id` segue valendo pelo argumento
+  // do paragrafo acima, que nao depende daquela causa.
   const { data: canaisDaEmpresa } = await sb
     .from('marketplace_canais')
     .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, atualizar_estoque_canal, sincronizar_estoque, fila_simulacao, nome')

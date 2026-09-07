@@ -38,9 +38,11 @@ async function levantarTravados(sb: ReturnType<typeof createClient> extends Prom
 
   const travados: Linha[] = []
   for (let offset = 0; offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
-    // Escopo pelo CANAL, e não por `marketplace_anuncios.empresa_id`: essa
-    // coluna não é confiável e foi o que fez a fila registrar 157 de 200
-    // produtos como `sem_anuncio` em 04/09/2026. Ver o cabeçalho de fila.ts.
+    // Escopo pelo CANAL, e não por `marketplace_anuncios.empresa_id`, para
+    // ficar igual à listagem da tela: `canal_id` é obrigatório e o canal é que
+    // carrega a empresa. (Um comentário anterior atribuía a essa coluna a
+    // causa dos 157 `sem_anuncio` de 04/09/2026; o banco desmentiu — 0 de 9285
+    // anúncios têm `empresa_id` nulo ou divergente. Ver fila.ts.)
     const { data, error } = await sb
       .from('marketplace_anuncios')
       .select('id, produto_id, titulo, id_externo, estoque_externo, estoque_reservado, canal_id')
