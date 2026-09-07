@@ -80,11 +80,26 @@ export function assinarToken(
 
 export type VerificacaoToken =
   | { ok: true; claims: ClaimsTerminal }
-  | { ok: false; erro: 'formato' | 'assinatura' | 'expirado' | 'tipo' }
+  | { ok: false; erro: 'formato' | 'assinatura' | 'expirado' | 'tipo' | 'claims' }
+
+function textoNaoVazio(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0
+}
 
 /**
  * Verifica um token. A ordem importa: assinatura ANTES de qualquer leitura do
- * conteúdo, senão estaríamos decidindo com base em dado não autenticado.
+ * conteudo, senao estariamos decidindo com base em dado nao autenticado.
+ *
+ * -- SOBRE ALGORITHM CONFUSION --------------------------------------------
+ *
+ * A familia de ataques `alg: none` / `alg: RS256` depende de a verificacao
+ * PERGUNTAR ao token qual algoritmo usar. Esta nao pergunta: ela calcula o
+ * HMAC-SHA256 e compara. Um token com `alg: none` e assinatura vazia
+ * simplesmente nao bate com o HMAC esperado e cai em 'assinatura'.
+ *
+ * A checagem explicita do header abaixo e redundante de proposito -- ela
+ * existe para que, se alguem um dia trocar esta funcao por uma biblioteca que
+ * aceite o `alg` do token, o teste que a acompanha quebre.
  */
 export function verificarToken(
   token: string,
@@ -97,11 +112,19 @@ export function verificarToken(
   const [header, payload, assinatura] = partes
   const esperada = b64url(createHmac('sha256', segredo).update(`${header}.${payload}`).digest())
 
-  // Comparação em tempo constante: comparar com `===` vaza, pelo tempo, quantos
+  // Comparacao em tempo constante: comparar com `===` vaza, pelo tempo, quantos
   // caracteres iniciais o atacante acertou.
   const a = Buffer.from(assinatura)
   const b = Buffer.from(esperada)
   if (a.length !== b.length || !timingSafeEqual(a, b)) return { ok: false, erro: 'assinatura' }
+
+  let cabecalho: { alg?: unknown }
+  try {
+    cabecalho = JSON.parse(deB64url(header).toString('utf8'))
+  } catch {
+    return { ok: false, erro: 'formato' }
+  }
+  if (cabecalho.alg !== 'HS256') return { ok: false, erro: 'assinatura' }
 
   let claims: ClaimsTerminal
   try {
@@ -113,7 +136,40 @@ export function verificarToken(
   if (claims.tipo !== 'pdv_terminal') return { ok: false, erro: 'tipo' }
   if (!claims.exp || claims.exp <= agoraSegundos) return { ok: false, erro: 'expirado' }
 
+  // Claims obrigatorias. Um token assinado por nos mas sem `terminal_id` ou sem
+  // `empresa_id` nao deveria existir -- mas se existisse, quem chama sairia
+  // consultando o banco por `undefined`, e o resultado disso e imprevisivel o
+  // bastante para nao valer o risco. Falta de claim e recusa, nao improviso.
+  if (!textoNaoVazio(claims.terminal_id) || !textoNaoVazio(claims.empresa_id) || !textoNaoVazio(claims.sub)) {
+    return { ok: false, erro: 'claims' }
+  }
+
   return { ok: true, claims }
+}
+
+/**
+ * Verifica contra varios segredos, em ordem, e devolve o primeiro que aceitar.
+ *
+ * E o que permite ROTAR o `PDV_TOKEN_SECRET` sem dia de virada: durante a
+ * janela de rotacao o servidor assina com o novo e ainda aceita o anterior,
+ * entao os tokens de ate 12 h emitidos antes da troca continuam validos ate
+ * vencerem sozinhos.
+ *
+ * So a falha de ASSINATURA faz tentar o proximo segredo. Token expirado ou
+ * malformado nao melhora com outra chave, e insistir so gastaria HMAC.
+ */
+export function verificarComRotacao(
+  token: string,
+  segredos: string[],
+  agoraSegundos = Math.floor(Date.now() / 1000),
+): VerificacaoToken {
+  let ultima: VerificacaoToken = { ok: false, erro: 'assinatura' }
+  for (const s of segredos) {
+    ultima = verificarToken(token, s, agoraSegundos)
+    if (ultima.ok) return ultima
+    if (ultima.erro !== 'assinatura') return ultima
+  }
+  return ultima
 }
 
 // ── Código de ativação ────────────────────────────────────────────────────
