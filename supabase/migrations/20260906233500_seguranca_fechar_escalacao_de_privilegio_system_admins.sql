@@ -1,0 +1,30 @@
+-- FASE 0.5 — ESCALAÇÃO DE PRIVILÉGIO EM `system_admins`.
+--
+-- Achado desta fase, e mais grave que qualquer coisa do financeiro.
+--
+-- `system_admins` está com RLS DESLIGADA (tem três policies escritas, que por
+-- isso não se aplicam) e o papel `authenticated` tinha INSERT, UPDATE, DELETE
+-- e TRUNCATE nela.
+--
+-- `is_system_admin()` é a cláusula de escape de ~40 policies do banco, na
+-- forma `... OR is_system_admin()`, e responde `true` para quem tiver linha
+-- ativa nessa tabela. Somando: qualquer usuário autenticado — um balconista
+-- com login — podia inserir o próprio `auth.uid()` e passar a enxergar e
+-- alterar os dados de TODAS as empresas do SaaS, de todos os tenants.
+--
+-- POR QUE REVOGAR NÃO QUEBRA NADA: a aplicação inteira só LÊ esta tabela.
+-- Quatro pontos, todos `.select()`, nenhuma escrita em todo o repositório:
+--   src/lib/auth/saasAdmin.ts
+--   src/app/saas-admin/layout.tsx
+--   src/lib/plans/access.ts
+--   src/app/api/saas-admin/mercadopago/criar-plano/route.ts (cliente admin)
+-- Administradores são provisionados fora da aplicação, com a chave de
+-- serviço, que GRANT de `authenticated` não afeta.
+--
+-- A LEITURA CONTINUA: `is_system_admin()` é SECURITY DEFINER e segue
+-- funcionando; as telas de saas-admin continuam se identificando.
+--
+-- COMO DESFAZER:
+--   GRANT INSERT, UPDATE, DELETE ON TABLE system_admins TO authenticated;
+
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE system_admins FROM authenticated, anon;
