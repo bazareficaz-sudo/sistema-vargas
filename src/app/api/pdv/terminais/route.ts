@@ -5,6 +5,8 @@ import {
   gerarCodigoAtivacao, hashDoCodigo, prefixoDoCodigo, CODIGO_VALIDADE_MINUTOS,
 } from '@/lib/pdv/terminalToken'
 import { segredoConfigurado } from '@/lib/pdv/segredo'
+import { saudeDoTerminal, rotuloDePresenca } from '@/lib/pdv/saudeTerminal'
+import { situacaoDaVersao, quemFicariaDeFora } from '@/lib/pdv/versaoMinima'
 
 // Administração dos terminais, pelo painel. Ao contrário das rotas de
 // ativação e de token, esta atende um usuário autenticado — então usa o
@@ -17,7 +19,7 @@ export async function GET() {
 
   const { data } = await sb
     .from('pdv_terminais')
-    .select('id, nome, status, versao_pdv, terminal_id_legado, metodo_ultima_auth, usar_rotas_novas, ativado_em, ultima_autenticacao_em, ultima_atividade_em, revogado_em, motivo_revogacao, created_at')
+    .select('id, nome, status, versao_pdv, terminal_id_legado, metodo_ultima_auth, usar_rotas_novas, ativado_em, ultima_autenticacao_em, ultima_atividade_em, ultimo_heartbeat_em, revogado_em, motivo_revogacao, created_at')
     .eq('empresa_id', guarda.empresaId)
     .order('created_at', { ascending: false })
 
@@ -31,10 +33,34 @@ export async function GET() {
     .order('criado_em', { ascending: false })
     .limit(50)
 
+  // Piso de versao: NULO = sem minimo, e nada e recusado por causa dele nesta
+  // fase. Serve para a tela poder responder "se o corte fosse hoje, quem
+  // ficaria de fora?" — pergunta que o caso PDV-002 tornou obrigatoria.
+  const { data: cfg } = await sb
+    .from('empresa_config_pdv').select('versao_minima_pdv')
+    .eq('empresa_id', guarda.empresaId).maybeSingle()
+  const versaoMinima = cfg?.versao_minima_pdv ?? null
+
+  const agora = new Date()
+  const terminais = (data ?? []).map(t => {
+    const saude = saudeDoTerminal(t, agora)
+    return {
+      ...t,
+      saude: {
+        ...saude,
+        rotulo: rotuloDePresenca(saude),
+        versao_situacao: situacaoDaVersao(t.versao_pdv, versaoMinima),
+      },
+    }
+  })
+
   return NextResponse.json({
     ok: true,
-    terminais: data ?? [],
+    terminais,
     operacoes: operacoes ?? [],
+    versao_minima_pdv: versaoMinima,
+    // Simulacao, nao acao: ninguem e bloqueado por isto hoje.
+    ficariam_de_fora: quemFicariaDeFora(data ?? [], versaoMinima),
     // Booleano, nunca o segredo. Existe para a tela avisar ANTES de alguem
     // gerar um codigo e descobrir no balcao que o servidor nao assina token.
     segredo_configurado: segredoConfigurado(),
