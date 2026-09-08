@@ -31,18 +31,25 @@ import { validarOrcamento, chaveDoOrcamento, httpDoEstado } from '@/lib/pdv/payl
 export async function POST(req: Request) {
   const corpo = await req.json().catch(() => ({}))
 
-  // A chave é derivada, não recebida: o cliente não escolhe a identidade da
-  // própria tentativa. Isso impede que duas edições diferentes reusem a mesma
-  // chave — por engano ou não — e que uma delas seja engolida como replay.
+  // A chave é DERIVADA aqui e conferida contra a que o cliente mandou.
+  //
+  // O cliente persiste a chave antes da primeira tentativa — é o que a faz
+  // sobreviver a timeout, fechamento e reinício. Mas quem manda no formato é
+  // o servidor: se a chave recebida não for a que se espera daquele documento
+  // e revisão, ela é ignorada e vale a derivada. Assim um cliente com defeito
+  // não consegue reusar a chave de outra operação e ter a sua engolida como
+  // replay.
   const id = String(corpo?.orcamento_id ?? '')
   const base = Number(corpo?.revisao_base ?? 0)
+  const acao = corpo?.acao === 'cancelar' ? 'cancelar' : 'salvar'
   const corpoComChave = {
     ...corpo,
-    idempotency_key: chaveDoOrcamento(id, Number.isFinite(base) ? base : 0),
+    idempotency_key: `${chaveDoOrcamento(id, Number.isFinite(base) ? base : 0)}:${acao}`,
   }
 
   return operacaoProtegida(req, {
-    operacao: 'orcamentos.salvar',
+    // Cancelar e salvar são intenções diferentes e ficam contadas separadas.
+    operacao: `orcamentos.${acao}`,
     flagDaOperacao: 'orcamentos',
     corpo: corpoComChave,
     httpDoResultado: (r) => httpDoEstado((r as { estado?: string })?.estado),
