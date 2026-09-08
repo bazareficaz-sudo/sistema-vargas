@@ -108,7 +108,14 @@ assinatura e recusou o token forjado — que é exatamente o que ele deve fazer.
 | em Git | NÃO — `.env*` ignorado, nenhum `.env` no histórico |
 | aparece em log | NÃO — o log traz a mensagem de erro, não o valor |
 
-O valor não foi gerado, exibido nem gravado em lugar nenhum.
+O valor foi gerado uma vez, dentro do `pipe`, e nunca materializou fora dele:
+não foi impresso, não foi salvo, não entrou no histórico do shell. Só existe
+agora dentro da Vercel, marcado como sensível.
+
+Se algum dia for preciso trocá-lo, não há como recuperá-lo — e não precisa
+haver: a rotação prevista na 0.6A gera um novo e aceita o anterior durante a
+janela (`PDV_TOKEN_SECRET_ANTERIOR`), justamente para não depender de alguém
+ter guardado o valor antigo em algum lugar.
 
 ## D. Deploy web/API
 
@@ -166,10 +173,11 @@ Suas quatro condições para aceitar isso são todas verdadeiras por construçã
 | ninguém obrigado a ativar | ativação é manual, em Configurações |
 | venda continua igual | nenhum caminho de venda foi tocado |
 
-**Mesmo assim não publiquei**, por uma razão de ordem: enquanto
-`PDV_TOKEN_SECRET` não existir, quem tentar ativar recebe erro. Publicar antes
-convida alguém a tropeçar. Publique depois do passo 1 — e me diga, que eu
-rodo `npm run publish`.
+**Mesmo assim não publiquei.** O impedimento de ordem já caiu — o segredo
+existe e a ativação funciona. O que resta é que publicar é distribuir software
+para todos os terminais de produção, e essa é uma decisão que peço em voz alta
+mesmo quando as condições estão satisfeitas. Diga a palavra e eu rodo
+`npm run publish`.
 
 ## F. Terminal piloto
 
