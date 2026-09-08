@@ -37,6 +37,16 @@ export async function operacaoProtegida<T>(
     exigirFlag?: boolean
     /** Chave em `rotas_habilitadas`. Ausente = usa o booleano antigo. */
     flagDaOperacao?: string
+    /**
+     * Status HTTP a partir do resultado. Padrão 200.
+     *
+     * Existe para o conflito de versão do orçamento, que não é erro do
+     * servidor nem sucesso: é o cliente partindo de um estado velho. Sem isto
+     * ele viraria 500, e 5xx significa "insista com a mesma chave" — o PDV
+     * ficaria repetindo para sempre um conflito que só se resolve
+     * recarregando.
+     */
+    httpDoResultado?: (r: T) => number
   },
 ): Promise<Response> {
   const acesso = await autenticarTerminalPdv(req, {
@@ -101,11 +111,24 @@ export async function operacaoProtegida<T>(
 
   try {
     const resultado = await opts.executar(ctx)
-    const corpo = { ok: true, ...(resultado as object) }
+    const http = opts.httpDoResultado?.(resultado) ?? 200
+    const ok = http < 400
+    const corpo = { ok, ...(resultado as object) }
+
+    // INVARIANTE: resposta 4xx NUNCA vira sucesso replayável.
+    //
+    // Guardar um conflito como 'sucesso' faria a chave devolvê-lo para sempre
+    // — inclusive depois de o cliente rebasear e mandar uma edição legítima
+    // com a mesma chave. Gravado como 'erro', a mesma chave pode ser
+    // reexecutada, e aí ou passa ou conflita de novo, com o estado atual.
     await sb.from('pdv_operacoes').update({
-      status: 'sucesso', resposta: corpo, concluido_em: new Date().toISOString(),
+      status: ok ? 'sucesso' : 'erro',
+      resposta: ok ? corpo : null,
+      erro: ok ? null : String((resultado as { estado?: string })?.estado ?? http).slice(0, 500),
+      concluido_em: new Date().toISOString(),
     }).match(alvo)
-    return NextResponse.json(corpo)
+
+    return NextResponse.json(corpo, { status: http })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Falha na operação'
     await sb.from('pdv_operacoes').update({
