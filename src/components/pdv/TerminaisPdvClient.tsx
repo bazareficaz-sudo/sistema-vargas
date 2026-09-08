@@ -18,6 +18,14 @@ type Terminal = {
   terminal_id_legado: string | null
   metodo_ultima_auth: string | null
   usar_rotas_novas: boolean | null
+  ultimo_heartbeat_em: string | null
+  saude?: {
+    presenca: 'online' | 'offline' | 'nunca_bateu'
+    autenticado: boolean
+    validacaoPendente: boolean
+    rotulo: string
+    versao_situacao: string
+  }
   ativado_em: string | null
   ultima_autenticacao_em: string | null
   ultima_atividade_em: string | null
@@ -224,7 +232,7 @@ export default function TerminaisPdvClient() {
           <table className="w-full text-sm min-w-[720px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['Terminal', 'Status', 'Rota nova', 'Versão', 'Última autenticação', ''].map(h => (
+                {['Terminal', 'Status', 'Presença', 'Rota nova', 'Versão', 'Última autenticação', ''].map(h => (
                   <th key={h} className="text-left font-bold text-gray-700 px-4 py-3">{h}</th>
                 ))}
               </tr>
@@ -249,6 +257,23 @@ export default function TerminaisPdvClient() {
                       <span className={`inline-block px-2 py-0.5 rounded border text-[10px] font-medium ${r.cls}`}>
                         {r.txt}
                       </span>
+                    </td>
+                    {/* Presença é pergunta SEPARADA de ativação e de
+                        autenticação. Um terminal pode estar online e ainda
+                        não ter provado que autentica depois de reiniciar —
+                        juntar as três num "status" só foi exatamente o que
+                        deixou a 0.6A cega por quatro rodadas. */}
+                    <td className="px-4 py-3">
+                      <span className={`text-xs ${
+                        t.saude?.presenca === 'online' ? 'text-emerald-700 font-medium'
+                        : t.saude?.presenca === 'offline' ? 'text-amber-700'
+                        : 'text-gray-400'
+                      }`}>
+                        {t.saude?.rotulo ?? '—'}
+                      </span>
+                      {t.saude?.validacaoPendente && (
+                        <p className="text-[10px] text-amber-700 mt-0.5">validação pós-reinício pendente</p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {t.status !== 'ativo' ? (
