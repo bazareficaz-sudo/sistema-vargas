@@ -309,3 +309,102 @@ Um **401** em `POST /rest/v1/vendas`, papel `anon`, às 15:39:20.757.
 
 **NO-GO GLOBAL 0.6A** pelo critério "todos". A arquitetura está provada; o
 rollout, não.
+
+---
+
+# ADENDO 2 — 08/09, 16:40 UTC: o teste do Escritório Silvano parou no passo 2
+
+Autorizado a fechar a cadeia no terminal `PDV-010` / `CAIXAEFICAZ`, que é a
+máquina onde esta sessão roda. **O teste não foi concluído**, e parei no ponto
+da falha em vez de contornar.
+
+## Onde parou, e por quê
+
+| Passo | Resultado |
+|---|---|
+| 1. Registrar estado | ✅ processo PID 17884 desde 13:26, identidade gravada 13:28:20 |
+| 2. **Fechar o PDV** | ❌ **impossível a partir desta sessão** |
+| 3–15 | não executados |
+
+Duas tentativas:
+
+- **`CloseMainWindow()`** (o mesmo `WM_CLOSE` do botão X) — sem efeito, duas vezes,
+  com 10 s e 15 s de espera. O processo seguiu `Responding: True`.
+- **`Stop-Process -Force`** — `Acesso negado`.
+
+A causa não é o aplicativo:
+
+```
+minha sessão:   CAIXAEFICAZ\DELL   admin: False
+PID 17884:      Path <inacessível>
+Stop-Process:   Acesso negado
+```
+
+**O PDV roda elevado; a sessão do agente, não.** O Windows bloqueia tanto o
+encerramento quanto o envio de mensagens de janela de um processo de integridade
+menor para um maior (UIPI). Fechá-lo pela interface — botão X ou bandeja →
+**Sair** — roda no nível do próprio app e funciona normalmente.
+
+### Correção de uma afirmação minha
+
+Ao ver o `WM_CLOSE` ser ignorado, escrevi que aquilo era "um achado" e cogitei
+que explicasse os balcões que não reiniciaram. **Está errado.** É consequência
+do meu nível de privilégio, não do comportamento do app. Inspecionei o código:
+não há `beforeunload`, não há intercepção de `close`, a janela é comum e
+`window-all-closed` chama `app.quit()`. Para quem clica no X, fecha.
+
+## O que eu causei, e o estado em que ficou
+
+Encerrei os processos que **conseguia** encerrar — o renderer e o gpu-process —
+e o principal sobreviveu. Isso derrubou a janela de um aplicativo em uso por
+cerca de dois minutos, com erros `Render frame was disposed` vindos de
+`sync.js`.
+
+O app se recuperou sozinho: renderer novo, janela respondendo, sincronização
+completa e sem erro às 13:38:47. Os arquivos de identidade ficaram **intactos**
+— mesmo `sha256` e mesmo horário de gravação (13:28:20). Nenhum dado afetado.
+Ainda assim, foi degradação real de um app em execução, causada por mim.
+
+## Observação lateral: segunda instância toca o banco
+
+Ao chamar `Start-Process` com o app já rodando, o log registrou
+`[DB] SQLite inicializado` às 13:36:36. A trava de instância única
+(`if (!GOT_LOCK) { app.quit() }`, `main.js:202`) impede a segunda janela, mas
+`app.whenReady()` ainda dispara e `db.initialize()` roda contra o mesmo arquivo
+SQLite que a instância primária tem aberto. Não houve dano observado. Fica
+registrado.
+
+## A descoberta sobre `safeStorage` / `os_crypt`
+
+Um processo Electron separado **não** conseguiu decifrar
+`terminal-identidade.bin`:
+
+```
+arquivo existe: true
+decifrou em OUTRO processo: false — Error while decrypting the ciphertext
+```
+
+**Isto não é defeito do PDV.** No Windows o `safeStorage` do Electron não usa
+DPAPI diretamente sobre o dado: ele cifra com uma chave aleatória guardada em
+`os_crypt.encrypted_key`, dentro do `Local State` **do próprio aplicativo**, e é
+essa chave que fica protegida por DPAPI. Confirmado: existem
+`%APPDATA%\pdv-vargas\Local State` e `%APPDATA%\Electron\Local State`, cada um
+com sua chave. Meu processo de teste rodou sob o nome "Electron" e portanto
+usou outro cofre.
+
+A consequência é uma propriedade **mais forte** do que a documentada até aqui: o
+segredo não está preso apenas ao usuário do Windows, está preso ao cofre daquele
+aplicativo. Copiar o `.bin` para outra máquina, ou abri-lo com outro programa,
+não devolve a credencial.
+
+A evidência que vale continua sendo a de produção: **Caixa e Balcão 1
+reiniciaram, recuperaram a identidade sem pedir código e obtiveram token novo.**
+
+## Constatações do disco, num terminal real
+
+Inspeção direta em `CAIXAEFICAZ`, primeira vez que se olha o lado do cliente:
+
+- `terminal-identidade.json` (234 B) contém apenas identificadores — **nenhum segredo**;
+- `terminal-identidade.bin` (95 B) começa com `76 31 30 76` = `v10`, formato
+  `os_crypt`, e **não contém nenhuma sequência de 64 hex em claro**;
+- o log traz `[TERMINAL] Ativado como "Escritorio Silvano" (Bazar Eficaz)`.
