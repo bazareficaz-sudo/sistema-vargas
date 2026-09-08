@@ -26,7 +26,7 @@ export { tokenDoCabecalho }
  */
 export async function autenticarTerminalPdv(
   req: Request,
-  { exigirFlag = true }: { exigirFlag?: boolean } = {},
+  { exigirFlag = true, operacao }: { exigirFlag?: boolean; operacao?: string } = {},
 ): Promise<Acesso> {
   const token = tokenDoCabecalho(req)
   if (!token) {
@@ -47,7 +47,7 @@ export async function autenticarTerminalPdv(
 
   const { data: terminal } = await sb
     .from('pdv_terminais')
-    .select('id, empresa_id, status, nome, versao_pdv, usar_rotas_novas')
+    .select('id, empresa_id, status, nome, versao_pdv, usar_rotas_novas, rotas_habilitadas')
     .eq('id', v.claims.terminal_id)
     .maybeSingle()
 
@@ -61,6 +61,7 @@ export async function autenticarTerminalPdv(
     tenantId: empresa?.tenant_id ?? null,
     empresaAtiva: empresa?.ativo !== false,
     exigirFlag,
+    operacao,
   })
 
   // "Visto por último" avança em toda requisição autenticada, inclusive nas

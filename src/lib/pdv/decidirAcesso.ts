@@ -16,6 +16,8 @@ export type LinhaTerminalAcesso = {
   nome: string | null
   versao_pdv: string | null
   usar_rotas_novas: boolean | null
+  /** Mapa operacao -> bool. Ausente ou false = caminho legado. */
+  rotas_habilitadas?: Record<string, boolean> | null
 }
 
 export type ContextoTerminal = {
@@ -53,8 +55,19 @@ export function decidirAcesso(params: {
   tenantId: string | null
   empresaAtiva: boolean
   exigirFlag: boolean
+  /**
+   * Qual operação está sendo pedida. Quando informada, o interruptor
+   * consultado é `rotas_habilitadas[operacao]` — granular, uma operação de
+   * cada vez. Quando ausente, cai no booleano antigo `usar_rotas_novas`, que
+   * vale só para `impressao.publicar_url`, já em produção.
+   *
+   * Sem essa separação, ligar `faltas` no Caixa ligaria junto qualquer rota
+   * futura, e o rollout deixaria de ser incremental no momento exato em que
+   * passa a importar que ele seja.
+   */
+  operacao?: string
 }): Acesso {
-  const { claims, terminal, tenantId, empresaAtiva, exigirFlag } = params
+  const { claims, terminal, tenantId, empresaAtiva, exigirFlag, operacao } = params
 
   if (!claims) {
     return { ok: false, motivo: 'token_invalido', erro: 'Credencial inválida.', status: 401 }
@@ -88,7 +101,10 @@ export function decidirAcesso(params: {
     return { ok: false, motivo: 'empresa_inativa', erro: 'A empresa deste terminal está inativa.', status: 403 }
   }
 
-  const usarRotasNovas = terminal.usar_rotas_novas === true
+  const usarRotasNovas = operacao
+    ? terminal.rotas_habilitadas?.[operacao] === true
+    : terminal.usar_rotas_novas === true
+
   if (exigirFlag && !usarRotasNovas) {
     // 409 e não 403: não é falta de permissão, é uma rota que ainda não foi
     // ligada para este terminal. O PDV lê isto e volta ao caminho legado.

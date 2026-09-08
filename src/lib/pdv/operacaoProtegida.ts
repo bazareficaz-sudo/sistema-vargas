@@ -35,9 +35,15 @@ export async function operacaoProtegida<T>(
     corpo: Record<string, unknown>
     executar: Executor<T>
     exigirFlag?: boolean
+    /** Chave em `rotas_habilitadas`. Ausente = usa o booleano antigo. */
+    flagDaOperacao?: string
   },
 ): Promise<Response> {
-  const acesso = await autenticarTerminalPdv(req, { exigirFlag: opts.exigirFlag ?? true })
+  const acesso = await autenticarTerminalPdv(req, {
+    exigirFlag: opts.exigirFlag ?? true,
+    // A flag consultada e a da PROPRIA operacao, nao uma global.
+    operacao: opts.flagDaOperacao,
+  })
   if (!acesso.ok) return respostaDeRecusa(acesso)
   const ctx = acesso.contexto
 
