@@ -228,3 +228,84 @@ Sem isso, seguimos com identidade emitida e nunca usada — que é exatamente o 
 - Um operador de PDV com senha `123456`.
 - `security@sistemavargas.com.br` publicado em `/seguranca` e inexistente; a página afirma repositório privado, e ele é público.
 - MFA ausente em 7 contas administrativas.
+
+---
+
+# ADENDO — 08/09, 16:16 UTC: a cadeia fechou
+
+A validação acima terminou em NO-GO por silêncio total. O silêncio tinha causa
+banal e a suspeita de defeito era minha, não do código.
+
+## O que aconteceu
+
+**O Balcão 1 estava desligado.** Eu havia escrito que "nenhuma explicação
+benigna cobre o Balcão 1" ao montar o raciocínio do relógio — e deixei de fora
+a explicação mais simples de todas. Máquina desligada não tem processo, não tem
+tique horário, não renova e não publica.
+
+**Os demais não haviam sido reiniciados.** A tela do terminal Caixa provou isso
+sozinha: ela dizia `Token válido`, e essa linha lê `tokenAtual`, que é memória
+do processo. Só existe se aquele processo obteve o token ele mesmo — ou seja,
+era ainda o processo da ativação das 14:32.
+
+## O que ficou provado, com dado
+
+| Elo | Evidência |
+|---|---|
+| Persistência via `safeStorage` | Caixa e Balcão 1 reabriram e seguiram identificados, sem pedir código |
+| Renovação de token | Caixa **16:00:09**, Balcão 1 **16:03:44**, ambos `metodo_ultima_auth = terminal_token` |
+| Operação protegida | `impressao.publicar_url`, **sucesso**, 113 ms |
+| UUID seguro | terminal `74f08093-ee51-43b8-831f-5a9a9a330425` |
+| Empresa pelo servidor | Bazar Eficaz, lida da linha do terminal |
+| Idempotência | chave `impressao:c21864af9a19cf91e8407b71bc87e1b7` gravada |
+| Telemetria real | 1 linha em `pdv_operacoes`, `metodo = terminal_token` |
+
+## E o bug de 11 dias morreu
+
+```
+antes   terminal_id = 'PDV-001'          updated_at = 2026-08-28 11:26
+depois  terminal_id = '74f08093-…'       updated_at = 2026-09-08 16:00:20
+        print_server_url = https://mysql-interventions-expansion-catherine.trycloudflare.com
+```
+
+`pdv_impressao.terminal_id` deixou de ser a string editável e passou a ser o
+UUID do terminal. É a primeira linha do sistema em que "qual terminal" quer
+dizer algo verificável.
+
+## Hipóteses descartadas
+
+- **Falha de persistência** — descartada; o reinício preservou a credencial.
+- **Ordem dentro do `whenReady()`** — descartada como causa. A fragilidade
+  segue real (a identidade não deveria depender de `db.initialize()`,
+  `createWindow()` e `createTray()`), mas é dívida de robustez, não bug.
+- **Falha de chamada à API** — descartada; nenhuma tentativa falhou.
+
+## O que continua verdadeiro
+
+O defeito real é o que eu já havia admitido: **o desenho não emite sinal por
+11h30 depois de ativar**, e por isso "não reiniciou" e "quebrou" ficam
+indistinguíveis de fora. Foi exatamente isso que fez este diagnóstico consumir
+quatro rodadas. A correção é heartbeat + observabilidade, ainda não autorizada.
+
+## Uma anomalia em aberto
+
+Um **401** em `POST /rest/v1/vendas`, papel `anon`, às 15:39:20.757.
+
+- A venda 201952 foi gravada com sucesso 1,1 s antes, às 15:39:19.596;
+- a numeração de PDV-001 não tem buraco (201951 → 201956);
+- `vendas_duplicidade_bloqueada` está vazia, então não foi a trava de duplicata.
+
+**Nenhuma venda foi perdida.** A causa não foi determinada. Fica em observação.
+
+## Estado do rollout
+
+| Terminal | Renovou | Operação | Situação |
+|---|---|---|---|
+| Caixa | 16:00:09 | 1 sucesso | **completo** |
+| Balcão 1 | 16:03:44 | 0 | falta subir o Tunnel |
+| Balcão 02 · 03 · 04 | não | 0 | falta reiniciar |
+| PDV-002 | — | — | fora da identidade, desligado há 5 dias |
+| PDV-010 | — | — | fora da identidade, em 1.8.23 |
+
+**NO-GO GLOBAL 0.6A** pelo critério "todos". A arquitetura está provada; o
+rollout, não.
