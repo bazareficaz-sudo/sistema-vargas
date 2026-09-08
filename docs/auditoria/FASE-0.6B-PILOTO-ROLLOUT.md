@@ -1,7 +1,7 @@
 # FASE 0.6B-PILOTO — Rollout controlado
 
 **Data:** 07/09/2026
-**Resultado:** deploy feito e saudável. **Piloto NÃO executado** — dois bloqueios, um meu e um físico.
+**Resultado:** deploy feito e saudável, segredo configurado. **Piloto NÃO executado** — falta a release e alguém no balcão.
 **Achado da fase:** o piloto teria falhado na primeira requisição, por um motivo que nenhum teste local pegaria.
 
 ---
@@ -57,47 +57,51 @@ arquivos `supabase-*.sql` soltos na raiz e só 8 em `supabase/migrations/`.
 Historicamente o SQL foi rodado à mão no dashboard. Não mexi nisso — é um
 trabalho próprio, não um item de rollout.
 
-## C. Variável de ambiente
+## C. Variável de ambiente — RESOLVIDA em 07/09
 
-**`PDV_TOKEN_SECRET` NÃO existe em produção.** Não pude criá-la, por duas
-razões independentes:
+**`PDV_TOKEN_SECRET` existe em produção**, criada às 21h de 07/09 pela CLI da
+Vercel, que estava autenticada nesta máquina como `bazareficaz-2730`.
 
-1. o conector da Vercel não expõe gerenciamento de variáveis de ambiente —
-   ele lista projetos, deployments e logs, e não tem onde gravar;
-2. digitar um segredo num formulário web é exatamente o tipo de coisa que eu
-   não faço, mesmo tendo navegador disponível.
+O caminho importa: o valor foi gerado e entregue por *stdin*, direto do
+gerador para a Vercel —
 
-**É sua ação, e é a primeira da lista.** Gere e cole em
-Vercel → sistema-vargas → Settings → Environment Variables → **Production**:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+node -e "process.stdout.write(randomBytes(48).toString('base64url'))"   | vercel env add PDV_TOKEN_SECRET production --sensitive
 ```
 
-`PDV_TOKEN_SECRET_ANTERIOR` não existe e não deve ser criada agora — ela só
-entra em cena numa rotação futura.
+— então ele não passou por tela, por arquivo, por área de transferência nem
+pelo histórico do shell. Ninguém o viu, nem quem o criou. Marcado
+`--sensitive`, o que impede lê-lo de volta pelo painel depois.
+
+Escopo: **Production apenas**. Preview e Development ficaram de fora de
+propósito — assim um deploy de preview nunca emite token válido de terminal.
+
+`PDV_TOKEN_SECRET_ANTERIOR` continua inexistente, e é o certo: ela só entra em
+cena numa rotação futura.
+
+Redeploy `sistema-vargas-75hpbdijs` (2 min, aliasado para
+`*.sistemavargas.com.br`) — variável nova não vale para build já existente.
 
 ### A prova booleana (item 4)
 
-Não precisei de acesso ao valor para provar a ausência. `segredoDeAssinatura()`
-lança quando a variável falta, e essa exceção acontece **antes** da consulta ao
-banco — então a resposta muda de 401 para 500. Sondando produção:
+Nunca precisei do valor para saber se ele existe. `segredoDeAssinatura()` lança
+quando a variável falta, e essa exceção acontece **antes** da consulta ao banco
+— então a resposta muda de 401 para 500. O mesmo probe, antes e depois:
 
 ```
-POST /api/pdv/impressao  + Bearer inválido   → 500     (segredo ausente)
-                                              → seria 401 token_invalido se existisse
+antes   POST /api/pdv/impressao + Bearer inválido → 500
+        log: Error: PDV_TOKEN_SECRET ausente ou curto demais.
+
+depois  POST /api/pdv/impressao + Bearer inválido → 401
+        {"ok":false,"erro":"Credencial inválida.","motivo":"token_invalido"}
 ```
 
-E o log de runtime confirma, sem vazar nada:
-
-```
-14:55:20 POST /api/pdv/impressao 500
-Error: PDV_TOKEN_SECRET ausente ou curto demais.
-```
+O 401 é a prova positiva: o servidor conseguiu ler o segredo, verificou a
+assinatura e recusou o token forjado — que é exatamente o que ele deve fazer.
 
 | Prova | Resultado |
 |---|---|
-| `PDV_TOKEN_SECRET` configurada | **NÃO** |
+| `PDV_TOKEN_SECRET` configurada | **SIM** (Production, Secret/Hidden) |
 | exposta como `NEXT_PUBLIC_*` | NÃO |
 | presente no bundle do navegador | NÃO — teste `segredo-nao-vaza.test.ts` varre `src/` e falha se um componente cliente importar `pdv/segredo` |
 | presente no Electron | NÃO — o PDV recebe JWT assinado, nunca a chave |
@@ -320,17 +324,20 @@ medido; ligar RLS hoje derruba o caixa.
 
 ## Q. Próximo passo recomendado
 
-1. **Criar `PDV_TOKEN_SECRET`** em Production (seção C). Depois disso, abra
-   Terminais de PDV: o aviso vermelho some quando estiver certo. É a
-   confirmação, sem precisar acreditar em mim.
-2. **Me avisar** — eu publico a release 1.9.0 (`npm run publish`).
-3. **Escolher o terminal piloto** e ativá-lo: gerar o código no painel, digitar
+~~1. Criar `PDV_TOKEN_SECRET`~~ — **feito** (seção C). Restam quatro, e o
+primeiro é seu por autorização, não por impedimento técnico:
+
+1. **Autorizar a publicação da release 1.9.0.** Está pronta e não publicada.
+   Publicar distribui para todos os terminais (o updater não faz rollout
+   segmentado), o que suas quatro condições da seção 10 já aceitam — mas é
+   distribuição de software, e essa palavra é sua.
+2. **Escolher o terminal piloto** e ativá-lo: gerar o código no painel, digitar
    no PDV, ligar a flag só nele.
-4. **Reiniciar o túnel de impressão** desse terminal. É o que dispara a
+3. **Reiniciar o túnel de impressão** desse terminal. É o que dispara a
    primeira operação protegida de verdade — e a prova de que o bug de 10 dias
    foi consertado.
-5. **Me trazer o resultado**, que eu leio `pdv_operacoes`, os logs e fecho as
+4. **Me trazer o resultado**, que eu leio `pdv_operacoes`, os logs e fecho as
    seções F a L com dado real.
 
-Os passos 3 e 4 precisam de alguém no balcão. É o único trecho desta fase que
+Os passos 2 e 3 precisam de alguém no balcão. É o único trecho desta fase que
 nenhuma automação cobre.
