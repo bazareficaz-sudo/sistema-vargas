@@ -239,6 +239,10 @@ export default function TransferenciaEstoqueClient({ empresaId, depositosProprio
 
   // ── Vínculo de produto (entre empresas) ──────────────────────
   const [vinculados, setVinculados] = useState<Set<string>>(new Set())
+  // Sobe depois de criar produtos no destino, para a consulta de vínculo
+  // refazer — senão a tela continuaria mostrando "sem vínculo" para produtos
+  // que acabaram de ganhar um.
+  const [versaoVinculos, setVersaoVinculos] = useState(0)
   useEffect(() => {
     if (modoDestino !== 'outra_empresa' || !parceriaAtiva || selecionados.size === 0) { setVinculados(new Set()); return }
     let vivo = true
@@ -255,7 +259,54 @@ export default function TransferenciaEstoqueClient({ empresaId, depositosProprio
         setVinculados(s)
       })
     return () => { vivo = false }
-  }, [modoDestino, parceriaAtiva, selecionados])
+  }, [modoDestino, parceriaAtiva, selecionados, versaoVinculos])
+
+  // ── Criar no destino o que ainda não existe lá ────────────────
+  //
+  // O caso real: entrada na Ouro e Prata com produtos novos, transferência de
+  // 100% para a Bazar Eficaz — que não tem esses produtos no catálogo dela.
+  // Antes, a única saída era ir até Empresas → Parcerias, duplicar, e voltar.
+  //
+  // Isto NÃO é parte da transferência, e por isso é um botão separado. Criar
+  // produto é ato cadastral; mover estoque é outra coisa. Se fossem um clique
+  // só, uma transferência que falhasse no meio deixaria cadastro novo criado
+  // para nada — e o motor de transferência tem uma regra explícita de nunca
+  // inventar produto do outro lado (ver o topo de lib/estoque/transferencia.ts).
+  //
+  // Reaproveita a rota de clonagem que já existe: ela recalcula os campos
+  // fiscais pelo regime da empresa DESTINO (as duas podem estar em regimes
+  // diferentes), nasce com estoque 0, pula kits e já cria o vínculo. É
+  // idempotente — clicar duas vezes não duplica.
+  const [criandoProdutos, setCriandoProdutos] = useState(false)
+  const [avisoCriacao, setAvisoCriacao] = useState('')
+
+  async function criarProdutosNoDestino() {
+    if (!parceriaAtiva || bloqueadosPorVinculo.length === 0) return
+    setCriandoProdutos(true); setAvisoCriacao(''); setErroGeral('')
+    try {
+      const resp = await fetch(`/api/empresas/parcerias/${parceriaAtiva.parceriaId}/clonar-produtos`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ produtoIds: bloqueadosPorVinculo.map(i => i.produtoId) }),
+      })
+      const d = await resp.json().catch(() => null)
+      if (!resp.ok || !d?.ok) { setErroGeral(d?.erro ?? `O servidor respondeu ${resp.status}.`); return }
+
+      const partes = []
+      if (d.clonados) partes.push(`${d.clonados} criado(s)`)
+      if (d.jaExistiam) partes.push(`${d.jaExistiam} já existia(m)`)
+      if (d.falhas) partes.push(`${d.falhas} falhou(ram)`)
+      setAvisoCriacao(
+        `${partes.join(' · ')} em ${parceriaAtiva.nome}.`
+        + (d.falhas ? ` ${(d.erros ?? []).map((e: { erro: string }) => e.erro).slice(0, 2).join(' ')}` : '')
+        + ' Os produtos nascem com estoque zero — quem põe estoque lá é esta transferência.'
+      )
+      setVersaoVinculos(v => v + 1)   // refaz a consulta de vínculo
+    } catch (e: unknown) {
+      setErroGeral(e instanceof Error ? e.message : 'Falha ao criar os produtos no destino.')
+    } finally {
+      setCriandoProdutos(false)
+    }
+  }
 
   // ── Confirmar ────────────────────────────────────────────────
   const [observacao, setObservacao] = useState('')
@@ -482,8 +533,8 @@ export default function TransferenciaEstoqueClient({ empresaId, depositosProprio
                             <div className="text-[11px] text-slate-400">{item.sku ?? '—'} · estoque no depósito: {item.estoqueOrigem} {item.unidade}</div>
                             {semVinculo && (
                               <div className="text-[11px] text-red-600 mt-0.5">
-                                Sem produto vinculado na empresa destino —{' '}
-                                <Link href="/dashboard/empresas/parcerias" className="underline">vincule em Empresas → Parcerias</Link>.
+                                Não existe em {parceriaAtiva?.nome ?? 'destino'} — use o botão abaixo para criá-lo,
+                                ou <Link href="/dashboard/empresas/parcerias" className="underline">vincule a um existente</Link>.
                               </div>
                             )}
                           </div>
@@ -517,10 +568,26 @@ export default function TransferenciaEstoqueClient({ empresaId, depositosProprio
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-3" />
 
                   {bloqueadosPorVinculo.length > 0 && (
-                    <p className="text-xs text-red-600 mb-2">
-                      {bloqueadosPorVinculo.length} produto(s) sem vínculo com a empresa destino — remova-os ou vincule antes de confirmar.
-                    </p>
+                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 mb-3">
+                      <p className="text-xs text-amber-900">
+                        <strong>{bloqueadosPorVinculo.length} produto(s)</strong> ainda não existem em{' '}
+                        <strong>{parceriaAtiva?.nome}</strong>. Crie-os lá agora, remova-os da lista, ou{' '}
+                        <Link href="/dashboard/empresas/parcerias" className="underline">vincule a um produto existente</Link>.
+                      </p>
+                      <button onClick={criarProdutosNoDestino} disabled={criandoProdutos}
+                        className="mt-2 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 disabled:opacity-50">
+                        {criandoProdutos
+                          ? 'Criando...'
+                          : `Criar ${bloqueadosPorVinculo.length} produto(s) em ${parceriaAtiva?.nome ?? 'destino'}`}
+                      </button>
+                      <p className="text-[11px] text-amber-800 mt-2">
+                        Cópia do cadastro da origem, com <strong>estoque zero</strong> e os campos fiscais
+                        recalculados pelo regime de {parceriaAtiva?.nome ?? 'destino'} — as duas empresas
+                        podem estar em regimes diferentes. Kits não são copiados.
+                      </p>
+                    </div>
                   )}
+                  {avisoCriacao && <p className="text-xs text-emerald-700 mb-2">{avisoCriacao}</p>}
                   {erroGeral && <p className="text-sm text-red-600 mb-2">{erroGeral}</p>}
 
                   <button onClick={confirmar} disabled={!prontoParaEnviar || enviando}
