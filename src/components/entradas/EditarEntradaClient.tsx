@@ -12,7 +12,26 @@ type ItemEntrada = {
   quantidade: number; preco_custo_anterior: number; preco_custo_novo: number
   markup: number; preco_venda_novo: number; subtotal: number
   atualizar_custo: boolean; atualizar_preco: boolean
+  // Entradas lancadas com rateio de despesas separam duas coisas que antes
+  // moravam no mesmo campo: o preco que estava na NOTA e o custo de
+  // AQUISICAO (nota + rateio). Entradas antigas nao tem estas colunas — daí
+  // o fallback em `custoDaNota`.
+  preco_custo_nota?: number | null
+  rateio_unitario?: number | null
 }
+
+/**
+ * Preco unitario como veio na nota do fornecedor.
+ *
+ * O total de produtos TEM de ser somado por aqui. Somar `preco_custo_novo`,
+ * que ja inclui o rateio, e depois somar o frete outra vez no total da nota
+ * contaria o frete duas vezes — a nota fecharia com um valor que o
+ * fornecedor nunca cobrou.
+ */
+const custoDaNota = (i: ItemEntrada) =>
+  Number(i.preco_custo_nota ?? i.preco_custo_novo) || 0
+
+const rateioUnit = (i: ItemEntrada) => Number(i.rateio_unitario ?? 0) || 0
 
 type ContaPagar = {
   id: string; descricao: string; valor: number; vencimento: string
@@ -102,7 +121,7 @@ export default function EditarEntradaClient({
       .filter(i => i.produto_id && produtosMap[i.produto_id])
       .map(i => {
         const prod = produtosMap[i.produto_id!]
-        const custoNovo = Number(i.preco_custo_novo)
+        const custoNovo = Number(i.preco_custo_novo)  // com rateio: e o custo que a margem enxerga
         const markup = Number(i.markup) || (prod.preco_venda > 0 && custoNovo > 0
           ? ((prod.preco_venda - custoNovo) / custoNovo) * 100
           : 30)
@@ -131,7 +150,8 @@ export default function EditarEntradaClient({
   const [editandoConta, setEditandoConta] = useState<string | null>(null)
   const [contaForm, setContaForm] = useState<Partial<ContaPagar>>({})
 
-  const totalProdutos = itens.reduce((s, i) => s + Number(i.preco_custo_novo) * Number(i.quantidade), 0)
+  const totalProdutos = itens.reduce((s, i) => s + custoDaNota(i) * Number(i.quantidade), 0)
+  const temRateio = itens.some(i => rateioUnit(i) !== 0)
   const frete = parseFloat(String(valorFrete).replace(',', '.')) || 0
   const desconto = parseFloat(String(valorDesconto).replace(',', '.')) || 0
   const outros = parseFloat(String(valorOutros).replace(',', '.')) || 0
@@ -164,24 +184,33 @@ export default function EditarEntradaClient({
   // ── Editar item ──
   function abrirEdicaoItem(item: ItemEntrada) {
     setEditandoItem(item.id)
-    setItemForm({ quantidade: item.quantidade, preco_custo_novo: item.preco_custo_novo, markup: item.markup, preco_venda_novo: item.preco_venda_novo })
+    setItemForm({ quantidade: item.quantidade, preco_custo_novo: custoDaNota(item), markup: item.markup, preco_venda_novo: item.preco_venda_novo })
   }
 
   async function salvarItem(item: ItemEntrada) {
     const qtdAntiga = item.quantidade
     const qtdNova = Number(itemForm.quantidade) || item.quantidade
-    const custoNovo = parseFloat(String(itemForm.preco_custo_novo).replace(',', '.')) || item.preco_custo_novo
+    // O campo editado e o preco DA NOTA. O custo de aquisicao e recomposto
+    // somando o rateio que ja estava atribuido a este item — reescrever
+    // `preco_custo_novo` com o valor digitado apagaria a parcela de frete
+    // que a entrada tinha calculado, sem ninguem pedir.
+    const custoNota = parseFloat(String(itemForm.preco_custo_novo).replace(',', '.')) || custoDaNota(item)
+    const custoNovo = Math.round((custoNota + rateioUnit(item)) * 100) / 100
     const markupNovo = parseFloat(String(itemForm.markup).replace(',', '.')) || item.markup
     const vendaNovo = parseFloat(String(itemForm.preco_venda_novo).replace(',', '.')) || item.preco_venda_novo
     setSalvando(true); setErro('')
     const sb = createClient()
-    const { error } = await sb.from('entrada_itens').update({
+    const patch: Record<string, unknown> = {
       quantidade: qtdNova,
       preco_custo_novo: custoNovo,
       markup: markupNovo,
       preco_venda_novo: vendaNovo,
-      subtotal: custoNovo * qtdNova,
-    }).eq('id', item.id)
+      subtotal: custoNota * qtdNova,
+    }
+    // So mexe na coluna nova se a entrada ja a tinha — banco sem a migracao
+    // recusaria o update inteiro por causa de uma coluna inexistente.
+    if (item.preco_custo_nota != null) patch.preco_custo_nota = custoNota
+    const { error } = await sb.from('entrada_itens').update(patch).eq('id', item.id)
     if (error) { setErro(error.message); setSalvando(false); return }
     if (item.produto_id) {
       const { data: prod } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
@@ -190,7 +219,11 @@ export default function EditarEntradaClient({
       }
     }
     setItens(prev => prev.map(i => i.id === item.id
-      ? { ...i, quantidade: qtdNova, preco_custo_novo: custoNovo, markup: markupNovo, preco_venda_novo: vendaNovo, subtotal: custoNovo * qtdNova }
+      ? {
+          ...i, quantidade: qtdNova, preco_custo_novo: custoNovo, markup: markupNovo,
+          preco_venda_novo: vendaNovo, subtotal: custoNota * qtdNova,
+          preco_custo_nota: i.preco_custo_nota != null ? custoNota : i.preco_custo_nota,
+        }
       : i))
     setEditandoItem(null)
     setSalvando(false)
@@ -501,6 +534,18 @@ export default function EditarEntradaClient({
             <F label="Desconto (R$)" value={valorDesconto} onChange={setValorDesconto} disabled={cancelada} />
             <F label="Outros (R$)" value={valorOutros} onChange={setValorOutros} disabled={cancelada} />
           </div>
+
+          {/* Esta tela edita a nota depois de lancada; ela nao refaz o
+              rateio. Dizer isso e melhor do que deixar quem mexe supor que
+              mudar a quantidade redistribui o frete — nao redistribui. */}
+          {temRateio && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-800">
+              <b>Esta nota teve despesas rateadas entre os itens.</b> O custo mostrado na coluna é o
+              preço da nota; abaixo dele aparece o custo de aquisição, com a parte que coube a cada
+              item. Alterar valores aqui <b>não redistribui</b> o rateio — se as despesas mudaram de
+              verdade, refaça a nota em Nova Entrada.
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Observações</label>
             <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)} rows={2} disabled={cancelada}
@@ -605,7 +650,14 @@ export default function EditarEntradaClient({
                       <td className="px-4 py-3 text-right text-xs text-gray-400">
                         {item.preco_custo_anterior > 0 ? fmt(item.preco_custo_anterior) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-900">{fmt(Number(item.preco_custo_novo))}</td>
+                      <td className="px-4 py-3 text-right text-gray-900">
+                        {fmt(custoDaNota(item))}
+                        {rateioUnit(item) !== 0 && (
+                          <span className="block text-[10px] font-normal text-gray-400">
+                            aquisição {fmt(Number(item.preco_custo_novo))}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right text-gray-500 text-xs">{Number(item.markup).toFixed(1)}%</td>
                       <td className="px-4 py-3 text-right text-gray-900">{fmt(Number(item.preco_venda_novo))}</td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(Number(item.subtotal))}</td>
