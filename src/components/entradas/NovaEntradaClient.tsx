@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
@@ -11,6 +11,14 @@ import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { sincronizarProdutosVinculadosEmLote } from '@/lib/produtos/vinculo'
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { atualizarStatusPedidoAposEntrada } from '@/lib/pedidosCompra/vincularEntrada'
+import {
+  ratear, totalDosEncargos, somaPorTipo, ENCARGO_ABATE, ENCARGO_LABEL,
+  type Encargo, type TipoEncargo,
+} from '@/lib/entradas/rateio'
+import {
+  aplicarPolitica, ehPolitica, POLITICA_PADRAO, POLITICA_LABEL, POLITICA_AJUDA,
+  markupDoPreco, precoDoMarkup, type PoliticaPreco,
+} from '@/lib/entradas/politicaPreco'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -34,6 +42,7 @@ type ItemReajuste = {
   nome_produto: string
   sku: string | null
   preco_custo_anterior: number
+  /** Custo de aquisicao: preco da nota + rateio dos encargos. */
   preco_custo_novo: number
   markup: number
   preco_venda_anterior: number
@@ -42,14 +51,116 @@ type ItemReajuste = {
   atualizar_preco: boolean
   is_kit: boolean
   kit_componentes?: string[]
+  // Promocao definida aqui mesmo, junto com o preco cheio: e no momento em
+  // que a nota chega que se sabe se o produto entrou barato o bastante para
+  // entrar em oferta. Abrir a ficha de cada produto depois e o caminho que
+  // ninguem percorre.
+  promocao_ativa: boolean
+  preco_promocional: number
+  /** Se a promocao foi digitada como preco ou como markup sobre o custo. */
+  promo_base: 'valor' | 'markup'
+  promo_markup: number
+  /**
+   * A promocao so e gravada se alguem mexeu nela AQUI. Sem esta marca, toda
+   * entrada reescreveria `promocao_ativa` de todo produto da nota com o valor
+   * que a tela carregou — inclusive nas linhas em que o operador desmarcou
+   * "Atualizar", que sao exatamente as que ele mandou nao tocar.
+   */
+  promo_alterada: boolean
 }
 
 type Parcela = { numero: number; vencimento: string; valor: number }
 
-const ETAPAS = ['dados', 'itens', 'estoque', 'reajuste', 'pagamento', 'confirmacao'] as const
+const ETAPAS = ['dados', 'itens', 'encargos', 'estoque', 'reajuste', 'pagamento', 'confirmacao'] as const
 type Etapa = typeof ETAPAS[number]
 
-const ETAPA_LABELS = ['Dados da NF', 'Itens', 'Estoque', 'Reajuste de Preços', 'Pagamento', 'Confirmação']
+const ETAPA_LABELS = ['Dados da NF', 'Itens', 'Despesas e Rateio', 'Estoque', 'Reajuste de Preços', 'Pagamento', 'Confirmação']
+
+const TIPOS_ENCARGO: TipoEncargo[] = ['frete', 'seguro', 'despesas', 'outros', 'desconto', 'bonificacao']
+
+// PIX e dinheiro sao a vista. Manter o vencimento em D+30 nesses dois casos
+// fazia o Contas a Pagar mostrar como pendente uma conta que ja tinha sido
+// paga na hora da descarga.
+const FORMAS_A_VISTA = ['pix', 'dinheiro']
+
+const hoje = () => new Date().toISOString().split('T')[0]
+
+// GRAVAR ANTES DA MIGRACAO NAO PODE QUEBRAR A TELA.
+//
+// As colunas `encargos`, `preco_custo_nota`, `rateio_unitario`,
+// `valor_seguro` e `valor_bonificacao` vem de
+// supabase-entradas-rateio-promocao-politica.sql, que e rodado a mao. O
+// deploy do site, porem, sai automatico no push. Entre um e outro existe uma
+// janela em que o codigo novo conversa com o banco velho.
+//
+// Sem tratar isso, essa janela nao degradaria o recurso novo: ela quebraria a
+// ENTRADA INTEIRA, porque o insert falha por causa de uma coluna que nao
+// existe e nada e gravado. Uma tela que funcionava pararia de funcionar por
+// causa de um recurso que ninguem ainda usou.
+//
+// A regra e: tenta com tudo; se — e SOMENTE se — o banco responder que a
+// coluna nao existe, repete sem os campos novos e avisa na tela. Nunca
+// silencioso, nunca preventivo (checar antes deixaria de gravar o rateio num
+// banco que ja o suporta, se a checagem falhasse por outro motivo).
+const CAMPOS_NOVOS_ENTRADA = ['encargos', 'valor_seguro', 'valor_bonificacao']
+const CAMPOS_NOVOS_ITEM = ['preco_custo_nota', 'rateio_unitario', 'preco_promocional']
+
+type ErroPg = { message?: string; code?: string } | null
+
+function ehColunaAusente(erro: ErroPg): boolean {
+  if (!erro) return false
+  // PGRST204 = "column of relation does not exist" no insert/update;
+  // 42703 = undefined_column do proprio Postgres.
+  return erro.code === 'PGRST204' || erro.code === '42703'
+    || /column .* does not exist|could not find the .* column/i.test(erro.message ?? '')
+}
+
+function semCamposNovos<T>(payload: T, campos: string[]): T {
+  const limpar = (o: Record<string, unknown>) => {
+    const c = { ...o }
+    for (const k of campos) delete c[k]
+    return c
+  }
+  return (Array.isArray(payload)
+    ? payload.map(x => limpar(x as Record<string, unknown>))
+    : limpar(payload as Record<string, unknown>)) as T
+}
+
+/** Executa a gravacao e, so em caso de coluna ausente, repete sem os campos novos. */
+async function gravarTolerante<P, R extends { error: ErroPg }>(
+  payload: P,
+  campos: string[],
+  executar: (p: P) => PromiseLike<R>,
+): Promise<R & { degradado: boolean }> {
+  const r = await executar(payload)
+  if (!ehColunaAusente(r.error)) return { ...r, degradado: false }
+  const r2 = await executar(semCamposNovos(payload, campos))
+  return { ...r2, degradado: true }
+}
+
+/**
+ * Media ponderada pela quantidade, por produto.
+ *
+ * Existe porque o mesmo produto pode vir em duas linhas da mesma nota com
+ * precos diferentes — e o cadastro so tem um campo de custo. Pegar a ultima
+ * linha lida faria o custo depender da ordem de digitacao.
+ */
+function mediaPonderadaPorProduto(
+  itens: { produto_id: string | null; quantidade: number }[],
+  custoDe: (indice: number) => number,
+): Record<string, number> {
+  const acc: Record<string, { qtd: number; total: number }> = {}
+  itens.forEach((it, i) => {
+    if (!it.produto_id) return
+    const a = acc[it.produto_id] ?? { qtd: 0, total: 0 }
+    a.qtd += it.quantidade
+    a.total += custoDe(i) * it.quantidade
+    acc[it.produto_id] = a
+  })
+  return Object.fromEntries(Object.entries(acc).map(
+    ([id, a]) => [id, a.qtd > 0 ? Math.round((a.total / a.qtd) * 100) / 100 : 0],
+  ))
+}
 
 const ESTADOS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
 
@@ -119,10 +230,38 @@ export default function NovaEntradaClient({
   const [numeroNf, setNumeroNf] = useState(_r?.numero_nf ?? '')
   const [serie, setSerie] = useState(_r?.serie ?? '')
   const [dataEmissao, setDataEmissao] = useState(_r?.data_emissao ?? '')
-  const [valorFrete, setValorFrete] = useState(_r?.valor_frete ? String(_r.valor_frete) : '')
-  const [valorDesconto, setValorDesconto] = useState(_r?.valor_desconto ? String(_r.valor_desconto) : '')
-  const [valorOutros, setValorOutros] = useState(_r?.valor_outros ? String(_r.valor_outros) : '')
   const [observacoes, setObservacoes] = useState(_r?.observacoes ?? '')
+
+  // ENCARGOS DA NOTA — frete, seguro, despesas, desconto, bonificacao.
+  //
+  // Antes eram tres campos soltos no cabecalho que entravam no total e nao
+  // encostavam no custo de nenhum produto. Agora sao uma lista, cada uma com
+  // escopo (nota inteira ou itens escolhidos) e base de rateio.
+  //
+  // Rascunho antigo nao tem `encargos`, mas tem os tres valores. Convertidos
+  // na leitura para que nenhum rascunho salvo perca dinheiro ao ser reaberto.
+  const [encargos, setEncargos] = useState<Encargo[]>(() => {
+    const salvos: unknown = _r?.encargos
+    if (Array.isArray(salvos) && salvos.length > 0) {
+      return (salvos as Record<string, unknown>[]).map((e, i): Encargo => ({
+        id: String(e.id ?? `e${i}`),
+        tipo: TIPOS_ENCARGO.includes(e.tipo as TipoEncargo) ? (e.tipo as TipoEncargo) : 'outros',
+        descricao: e.descricao == null ? null : String(e.descricao),
+        valor: Number(e.valor) || 0,
+        base: e.base === 'quantidade' ? 'quantidade' : 'valor',
+        itens: Array.isArray(e.itens) ? e.itens.map(Number) : [],
+      }))
+    }
+    const legado: Encargo[] = []
+    const migrar = (valor: unknown, tipo: TipoEncargo) => {
+      const v = Number(valor) || 0
+      if (v > 0) legado.push({ id: `legado-${tipo}`, tipo, descricao: null, valor: v, base: 'valor', itens: [] })
+    }
+    migrar(_r?.valor_frete, 'frete')
+    migrar(_r?.valor_desconto, 'desconto')
+    migrar(_r?.valor_outros, 'outros')
+    return legado
+  })
 
   // Inicializa nome do fornecedor no campo de busca quando vem do rascunho
   useEffect(() => {
@@ -179,17 +318,28 @@ export default function NovaEntradaClient({
   const [inputCusto, setInputCusto] = useState('')
   const buscarRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inputBuscaRef = useRef<HTMLInputElement>(null)
+  // Uma referencia por linha do dropdown. Sem isso a selecao com as setas
+  // some para fora da area rolavel e obriga a pegar o mouse — que e o
+  // contrario do que a busca por teclado existe para resolver.
+  const linhasResultadoRef = useRef<(HTMLButtonElement | null)[]>([])
   const inputQtdRef = useRef<HTMLInputElement>(null)
   const inputCustoRef = useRef<HTMLInputElement>(null)
 
   // Etapa 3: Reajuste
   const [reajustes, setReajustes] = useState<ItemReajuste[]>([])
+  // Regra da empresa, lida do servidor. Comeca no padrao historico para que
+  // a tela nunca fique travada esperando a resposta.
+  const [politica, setPolitica] = useState<PoliticaPreco>(POLITICA_PADRAO)
+  const [salvandoPolitica, setSalvandoPolitica] = useState(false)
   const [carregandoReajuste, setCarregandoReajuste] = useState(false)
   const [estoqueAgora, setEstoqueAgora] = useState<Record<string, { estoque: number; minimo: number; unidade: string }>>({})
 
   // Pagamento
   const [formaPag, setFormaPag] = useState('boleto')
   const [numParcelas, setNumParcelas] = useState(1)
+  // De 30 em 30 dias era regra fixa no codigo. Fornecedor que vende 28/56/84
+  // ou 21/42 obrigava a corrigir cada vencimento na mao, toda nota.
+  const [intervaloParcelas, setIntervaloParcelas] = useState(30)
   const [primeiroVenc, setPrimeiroVenc] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() + 30)
     return d.toISOString().split('T')[0]
@@ -205,6 +355,8 @@ export default function NovaEntradaClient({
   // botão após o próximo render, então dois cliques muito rápidos podiam
   // disparar duas inserções antes do disabled= surtir efeito).
   const enviandoRef = useRef(false)
+  // Liga quando a gravacao caiu para o formato antigo por falta de coluna.
+  const [migracaoPendente, setMigracaoPendente] = useState(false)
   const [perguntandoEtiqueta, setPerguntandoEtiqueta] = useState<ProdutoParaEtiqueta[] | null>(null)
   const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
 
@@ -221,6 +373,22 @@ export default function NovaEntradaClient({
   useEffect(() => {
     if (faseItem === 'custo') setTimeout(() => inputCustoRef.current?.focus(), 50)
   }, [faseItem])
+
+  // A SELECAO ACOMPANHA AS SETAS. `block: 'nearest'` rola o minimo necessario
+  // — a lista nao pula de posicao quando o item escolhido ja esta visivel.
+  useEffect(() => {
+    if (indiceProd < 0) return
+    linhasResultadoRef.current[indiceProd]?.scrollIntoView({ block: 'nearest' })
+  }, [indiceProd])
+
+  useEffect(() => {
+    let vivo = true
+    fetch('/api/entradas/politica-preco')
+      .then(r => r.json())
+      .then(r => { if (vivo && r?.ok && ehPolitica(r.politica)) setPolitica(r.politica) })
+      .catch(() => { /* sem resposta, segue no padrao historico */ })
+    return () => { vivo = false }
+  }, [])
 
   function buscarProdutos(q: string) {
     setBuscaProd(q)
@@ -403,18 +571,26 @@ export default function NovaEntradaClient({
     const produtosIds = itens.filter(i => i.produto_id).map(i => i.produto_id!)
 
     const { data: produtosData } = await sb.from('produtos')
-      .select('id, preco_venda, markup')
+      .select('id, preco_venda, markup, preco_promocional, promocao_ativa')
       .in('id', produtosIds)
 
-    const precoAtual = (produtosData ?? []).reduce((acc: Record<string, { preco_venda: number; markup: number }>, p) => {
-      acc[p.id] = { preco_venda: p.preco_venda ?? 0, markup: p.markup ?? 0 }
+    type PrecoAtual = { preco_venda: number; markup: number; preco_promocional: number; promocao_ativa: boolean }
+    type LinhaProduto = {
+      id: string; preco_venda: number | null; markup: number | null
+      preco_promocional: number | null; promocao_ativa: boolean | null
+    }
+    const precoAtual = ((produtosData ?? []) as LinhaProduto[]).reduce((acc: Record<string, PrecoAtual>, p) => {
+      acc[p.id] = {
+        preco_venda: p.preco_venda ?? 0, markup: p.markup ?? 0,
+        preco_promocional: p.preco_promocional ?? 0, promocao_ativa: !!p.promocao_ativa,
+      }
       return acc
     }, {})
 
     const reajustesNota: ItemReajuste[] = itens
       .filter(i => i.produto_id)
       .map(i => {
-        const atual = precoAtual[i.produto_id!] ?? { preco_venda: 0, markup: 0 }
+        const atual = precoAtual[i.produto_id!] ?? { preco_venda: 0, markup: 0, preco_promocional: 0, promocao_ativa: false }
         const mk = i.markup || atual.markup || calcMarkup(i.preco_custo_novo, atual.preco_venda)
         return {
           produto_id: i.produto_id!,
@@ -428,11 +604,17 @@ export default function NovaEntradaClient({
           atualizar_custo: true,
           atualizar_preco: true,
           is_kit: false,
+          promocao_ativa: atual.promocao_ativa,
+          preco_promocional: atual.preco_promocional,
+          promo_base: 'valor' as const,
+          promo_markup: atual.preco_promocional > 0 && i.preco_custo_novo > 0
+            ? markupDoPreco(i.preco_custo_novo, atual.preco_promocional) : 0,
+          promo_alterada: false,
         }
       })
 
     const { data: kitItens } = await sb.from('kit_itens')
-      .select('kit_id, produto_id, produtos!kit_id(id, nome, sku, preco_venda, markup, preco_custo)')
+      .select('kit_id, produto_id, produtos!kit_id(id, nome, sku, preco_venda, markup, preco_custo, preco_promocional, promocao_ativa)')
       .in('produto_id', produtosIds)
 
     const kitsMap: Record<string, { kit: any; componentes: string[] }> = {}
@@ -459,6 +641,11 @@ export default function NovaEntradaClient({
         atualizar_preco: true,
         is_kit: true,
         kit_componentes: v.componentes,
+        promocao_ativa: !!v.kit.promocao_ativa,
+        preco_promocional: v.kit.preco_promocional ?? 0,
+        promo_base: 'valor' as const,
+        promo_markup: 0,
+        promo_alterada: false,
       }))
 
     setReajustes([...reajustesNota, ...reajustesKits])
@@ -472,7 +659,57 @@ export default function NovaEntradaClient({
     ])))
 
     setCarregandoReajuste(false)
-    setEtapa('estoque')
+    setEtapa('encargos')
+  }
+
+  // ENTRAR NO REAJUSTE E RECALCULAR TUDO — de proposito, toda vez.
+  //
+  // Entre montar a lista (fim da etapa Itens) e chegar aqui, o operador
+  // passou por Despesas e Rateio: o custo de aquisicao de cada produto pode
+  // ter mudado. Reaproveitar os numeros calculados antes faria a tela
+  // precificar sobre um custo que ja nao vale — que e exatamente o defeito
+  // que o rateio veio consertar.
+  function recalcularReajustes(pol: PoliticaPreco) {
+    setReajustes(prev => prev.map(r => {
+      if (r.is_kit) return r  // kit nao tem custo vindo da nota
+      const custoNovo = custoFinalPorProduto[r.produto_id] ?? r.preco_custo_novo
+      const { precoNovo, markup } = aplicarPolitica(pol, {
+        custoAnterior: r.preco_custo_anterior,
+        custoNovo,
+        precoAtual: r.preco_venda_anterior,
+        markupAtual: r.markup,
+      })
+      const promo = r.promo_base === 'markup' && custoNovo > 0
+        ? precoDoMarkup(custoNovo, r.promo_markup)
+        : r.preco_promocional
+      return { ...r, preco_custo_novo: custoNovo, preco_venda_novo: precoNovo, markup, preco_promocional: promo }
+    }))
+  }
+
+  function entrarNoReajuste() {
+    recalcularReajustes(politica)
+    setEtapa('reajuste')
+  }
+
+  // Trocar a politica aqui vale para a empresa inteira, nao so para esta
+  // nota: e regra de negocio, e deixar cada nota com a sua faria dois
+  // compradores aplicarem criterios diferentes sem nunca perceber.
+  async function trocarPolitica(nova: PoliticaPreco) {
+    setPolitica(nova)
+    recalcularReajustes(nova)
+    setSalvandoPolitica(true)
+    try {
+      const r = await fetch('/api/entradas/politica-preco', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ politica: nova }),
+      }).then(x => x.json())
+      // Falhou = a coluna ainda nao existe. A regra vale para ESTA nota de
+      // qualquer jeito, mas dizer que virou padrao sem ter virado seria
+      // mentira — e a proxima entrada apareceria com a regra antiga sem
+      // explicacao.
+      if (!r?.ok) setMigracaoPendente(true)
+    } catch { setMigracaoPendente(true) }
+    finally { setSalvandoPolitica(false) }
   }
 
   function updateReajuste(idx: number, field: keyof ItemReajuste, value: any) {
@@ -481,6 +718,22 @@ export default function NovaEntradaClient({
       const r = { ...next[idx], [field]: value }
       if (field === 'markup') r.preco_venda_novo = calcVenda(r.preco_custo_novo, r.markup)
       if (field === 'preco_venda_novo') r.markup = calcMarkup(r.preco_custo_novo, r.preco_venda_novo)
+      // Promocao: os dois campos sao a mesma grandeza vista de dois jeitos,
+      // e quem digitou por ultimo manda. `promo_base` guarda qual dos dois
+      // foi digitado para que trocar o custo depois recalcule o certo.
+      if (field === 'preco_promocional' || field === 'promo_markup' || field === 'promocao_ativa') {
+        r.promo_alterada = true
+      }
+      if (field === 'preco_promocional') {
+        r.promo_base = 'valor'
+        r.promo_markup = r.preco_custo_novo > 0 ? markupDoPreco(r.preco_custo_novo, r.preco_promocional) : 0
+        if (r.preco_promocional > 0) r.promocao_ativa = true
+      }
+      if (field === 'promo_markup') {
+        r.promo_base = 'markup'
+        r.preco_promocional = r.preco_custo_novo > 0 ? precoDoMarkup(r.preco_custo_novo, r.promo_markup) : 0
+        if (r.preco_promocional > 0) r.promocao_ativa = true
+      }
       next[idx] = r
       return next
     })
@@ -492,17 +745,59 @@ export default function NovaEntradaClient({
     })))
   }
 
+  // ── RATEIO ────────────────────────────────────────────────────────────
+  //
+  // O custo que alimenta markup, preco de venda e `produtos.preco_custo` e o
+  // custo de AQUISICAO — preco da nota mais a parte que cabe a este item das
+  // despesas dela. `preco_custo_novo` do item continua sendo o preco da nota,
+  // e nao e sobrescrito: sao duas perguntas diferentes e as duas precisam de
+  // resposta na hora de conferir a nota contra o papel.
+  const rateio = useMemo(
+    () => ratear(itens.map(i => ({ quantidade: i.quantidade, precoUnitario: i.preco_custo_novo })), encargos),
+    [itens, encargos],
+  )
+
   const totalProdutos = itens.reduce((s, i) => s + i.preco_custo_novo * i.quantidade, 0)
-  const frete = parseFloat(valorFrete.replace(',', '.')) || 0
-  const desconto = parseFloat(valorDesconto.replace(',', '.')) || 0
-  const outros = parseFloat(valorOutros.replace(',', '.')) || 0
-  const totalGeral = totalProdutos + frete + outros - desconto
+  // As colunas antigas de `entradas` continuam sendo alimentadas pela soma
+  // por tipo — toda tela e todo relatorio que ja le `valor_frete` segue
+  // funcionando sem saber que `encargos` existe.
+  const frete = somaPorTipo(encargos, ['frete'])
+  const outros = somaPorTipo(encargos, ['seguro', 'despesas', 'outros'])
+  const desconto = somaPorTipo(encargos, ['desconto', 'bonificacao'])
+  const seguro = somaPorTipo(encargos, ['seguro'])
+  const bonificacao = somaPorTipo(encargos, ['bonificacao'])
+  const totalGeral = totalProdutos + totalDosEncargos(encargos)
+
+  // Custo por PRODUTO. Um produto pode aparecer em duas linhas da mesma nota
+  // com precos diferentes; o custo que vai para o cadastro e a media
+  // ponderada pela quantidade, e nao a ultima linha a ser lida.
+  const custoFinalPorProduto = mediaPonderadaPorProduto(itens, i => rateio.custoUnitarioFinal[i])
+
+  const custoNotaPorProduto = mediaPonderadaPorProduto(itens, i => itens[i].preco_custo_novo)
+
+  function addEncargo(tipo: TipoEncargo) {
+    setEncargos(prev => [...prev, {
+      id: `${tipo}-${Date.now()}-${prev.length}`, tipo, descricao: null,
+      valor: 0, base: 'valor', itens: [],
+    }])
+  }
+  function updEncargo(id: string, campo: Partial<Encargo>) {
+    setEncargos(prev => prev.map(e => e.id === id ? { ...e, ...campo } : e))
+  }
+  function removeEncargo(id: string) {
+    setEncargos(prev => prev.filter(e => e.id !== id))
+  }
+  function alternarItemDoEncargo(id: string, idx: number) {
+    setEncargos(prev => prev.map(e => e.id !== id ? e : {
+      ...e, itens: e.itens.includes(idx) ? e.itens.filter(i => i !== idx) : [...e.itens, idx].sort((a, b) => a - b),
+    }))
+  }
 
   function gerarParcelas() {
     const valorParcela = parseFloat((totalGeral / numParcelas).toFixed(2))
     const ps: Parcela[] = Array.from({ length: numParcelas }, (_, i) => ({
       numero: i + 1,
-      vencimento: i === 0 ? primeiroVenc : addDays(primeiroVenc, i * 30),
+      vencimento: i === 0 ? primeiroVenc : addDays(primeiroVenc, i * intervaloParcelas),
       valor: i === numParcelas - 1 ? parseFloat((totalGeral - valorParcela * (numParcelas - 1)).toFixed(2)) : valorParcela,
     }))
     setParcelas(ps); setParcelasGeradas(true)
@@ -529,30 +824,43 @@ export default function NovaEntradaClient({
         data_entrada: new Date().toISOString(),
         valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
         valor_outros: outros, valor_total: totalGeral,
+        valor_seguro: seguro, valor_bonificacao: bonificacao, encargos,
         observacoes: observacoes || null, status: 'rascunho',
         pedido_compra_id: pedidoCompraId || null,
       }
 
       let entradaId = rascunhoId
       if (entradaId) {
-        await sb.from('entradas').update(dadosEntrada).eq('id', entradaId)
+        const r = await gravarTolerante(dadosEntrada, CAMPOS_NOVOS_ENTRADA,
+          d => sb.from('entradas').update(d).eq('id', entradaId!))
+        if (r.degradado) setMigracaoPendente(true)
         await sb.from('entrada_itens').delete().eq('entrada_id', entradaId)
       } else {
-        const { data: nova, error } = await sb.from('entradas').insert(dadosEntrada).select('id').single()
-        if (error || !nova) { mostrarRascunhoMsg('❌ Erro ao salvar rascunho.'); return }
-        entradaId = nova.id
+        const r = await gravarTolerante(dadosEntrada, CAMPOS_NOVOS_ENTRADA,
+          d => sb.from('entradas').insert(d).select('id').single())
+        if (r.degradado) setMigracaoPendente(true)
+        if (r.error || !r.data) { mostrarRascunhoMsg('❌ Erro ao salvar rascunho.'); return }
+        entradaId = (r.data as { id: string }).id
         setRascunhoId(entradaId)
       }
 
       if (itens.length > 0) {
-        await sb.from('entrada_itens').insert(itens.map(i => ({
+        const linhas = itens.map((i, idx) => ({
           entrada_id: entradaId, produto_id: i.produto_id, nome_produto: i.nome_produto,
           sku: i.sku, quantidade: i.quantidade, preco_custo_anterior: i.preco_custo_anterior,
-          preco_custo_novo: i.preco_custo_novo, markup: i.markup, preco_venda_novo: i.preco_venda_novo,
+          // `preco_custo_novo` e o custo de AQUISICAO (com rateio) — e ele que
+          // vai para o cadastro. `preco_custo_nota` e o que fecha a
+          // conferencia contra o papel do fornecedor.
+          preco_custo_nota: i.preco_custo_novo,
+          rateio_unitario: i.quantidade > 0 ? rateio.porItem[idx] / i.quantidade : 0,
+          preco_custo_novo: rateio.custoUnitarioFinal[idx],
+          markup: i.markup, preco_venda_novo: i.preco_venda_novo,
           atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
           zerar_estoque_antes: !!i.zerar_estoque,
           subtotal: i.preco_custo_novo * i.quantidade,
-        })))
+        }))
+        const r = await gravarTolerante(linhas, CAMPOS_NOVOS_ITEM, l => sb.from('entrada_itens').insert(l))
+        if (r.degradado) setMigracaoPendente(true)
       }
 
       mostrarRascunhoMsg('✓ Rascunho salvo! Você pode continuar depois em Entradas.')
@@ -574,39 +882,61 @@ export default function NovaEntradaClient({
       let entrada: any
       if (rascunhoId) {
         // Atualiza o rascunho existente para confirmada
-        const { data, error: errEntrada } = await sb.from('entradas').update({
+        const r = await gravarTolerante({
           fornecedor_id: fornecedorId,
           numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
           data_entrada: agora,
           valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
           valor_outros: outros, valor_total: totalGeral,
+          valor_seguro: seguro, valor_bonificacao: bonificacao, encargos,
           observacoes: observacoes || null, status: 'confirmada',
           pedido_compra_id: pedidoCompraId || null,
-        }).eq('id', rascunhoId).select().single()
-        if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao confirmar.'); return }
-        entrada = data
+        }, CAMPOS_NOVOS_ENTRADA, d => sb.from('entradas').update(d).eq('id', rascunhoId).select().single())
+        if (r.degradado) setMigracaoPendente(true)
+        if (r.error || !r.data) { setErro(r.error?.message ?? 'Erro ao confirmar.'); return }
+        entrada = r.data
         await sb.from('entrada_itens').delete().eq('entrada_id', rascunhoId)
       } else {
-        const { data, error: errEntrada } = await sb.from('entradas').insert({
+        const r = await gravarTolerante({
           empresa_id: empresaId, fornecedor_id: fornecedorId,
           numero_nf: numeroNf || null, serie: serie || null, data_emissao: dataEmissao || null,
           data_entrada: agora,
           valor_produtos: totalProdutos, valor_frete: frete, valor_desconto: desconto,
           valor_outros: outros, valor_total: totalGeral,
+          valor_seguro: seguro, valor_bonificacao: bonificacao, encargos,
           observacoes: observacoes || null, status: 'confirmada',
           pedido_compra_id: pedidoCompraId || null,
-        }).select().single()
-        if (errEntrada || !data) { setErro(errEntrada?.message ?? 'Erro ao salvar.'); return }
-        entrada = data
+        }, CAMPOS_NOVOS_ENTRADA, d => sb.from('entradas').insert(d).select().single())
+        if (r.degradado) setMigracaoPendente(true)
+        if (r.error || !r.data) { setErro(r.error?.message ?? 'Erro ao salvar.'); return }
+        entrada = r.data
       }
 
-      await sb.from('entrada_itens').insert(itens.map(i => ({
+      // A promocao definida na etapa de Reajuste fica registrada na propria
+      // entrada: seis meses depois, "por que este produto entrou em oferta"
+      // tem resposta na nota que o fez entrar.
+      const promoPorProduto: Record<string, number | null> = Object.fromEntries(
+        reajustes.filter(r => r.promo_alterada).map(r => [
+          r.produto_id, r.promocao_ativa && r.preco_promocional > 0 ? r.preco_promocional : null,
+        ]),
+      )
+
+      const linhasItens = itens.map((i, idx) => ({
         entrada_id: entrada.id, produto_id: i.produto_id, nome_produto: i.nome_produto,
         sku: i.sku, quantidade: i.quantidade, preco_custo_anterior: i.preco_custo_anterior,
-        preco_custo_novo: i.preco_custo_novo, markup: i.markup, preco_venda_novo: i.preco_venda_novo,
+        preco_custo_nota: i.preco_custo_novo,
+        rateio_unitario: i.quantidade > 0 ? rateio.porItem[idx] / i.quantidade : 0,
+        preco_custo_novo: rateio.custoUnitarioFinal[idx],
+        markup: i.markup, preco_venda_novo: i.preco_venda_novo,
         atualizar_custo: i.atualizar_custo, atualizar_preco: i.atualizar_preco,
+        zerar_estoque_antes: !!i.zerar_estoque,
+        preco_promocional: i.produto_id ? (promoPorProduto[i.produto_id] ?? null) : null,
         subtotal: i.preco_custo_novo * i.quantidade,
-      })))
+      }))
+      {
+        const r = await gravarTolerante(linhasItens, CAMPOS_NOVOS_ITEM, l => sb.from('entrada_itens').insert(l))
+        if (r.degradado) setMigracaoPendente(true)
+      }
 
       // Fecha o laço com o pedido de compra: marca recebido/parcialmente
       // recebido e passa a alimentar o prazo real do fornecedor. Erro aqui
@@ -674,6 +1004,12 @@ export default function NovaEntradaClient({
         const upd: any = { updated_at: new Date().toISOString() }
         if (r.atualizar_custo && !r.is_kit) upd.preco_custo = r.preco_custo_novo
         if (r.atualizar_preco) { upd.preco_venda = r.preco_venda_novo; upd.markup = r.markup }
+        // So grava promocao onde alguem mexeu — ver `promo_alterada`.
+        if (r.promo_alterada) {
+          const vale = r.promocao_ativa && r.preco_promocional > 0
+          upd.promocao_ativa = vale
+          upd.preco_promocional = vale ? r.preco_promocional : null
+        }
         return { produtoId: r.produto_id, upd }
       }).filter(x => Object.keys(x.upd).length > 1)
 
@@ -770,6 +1106,15 @@ export default function NovaEntradaClient({
       </div>
 
       {erro && <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">{erro}</div>}
+      {migracaoPendente && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg mb-4">
+          <b>A nota foi gravada, mas sem o detalhamento das despesas.</b> O banco ainda não tem as
+          colunas do rateio — o total, o estoque e os preços estão corretos, o que não ficou
+          registrado foi a repartição de cada despesa por item. Rode
+          <code className="mx-1 px-1 bg-amber-100 rounded text-xs">supabase-entradas-rateio-promocao-politica.sql</code>
+          para que as próximas entradas guardem isso.
+        </div>
+      )}
       {rascunhoMsg && (
         <div className={`text-sm px-4 py-3 rounded-lg mb-4 ${rascunhoMsg.startsWith('✓') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-yellow-50 border border-yellow-200 text-yellow-700'}`}>
           {rascunhoMsg}
@@ -846,10 +1191,14 @@ export default function NovaEntradaClient({
             <F label="Série" value={serie} onChange={setSerie} placeholder="1" />
             <F label="Data de emissão" value={dataEmissao} onChange={setDataEmissao} type="date" />
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <F label="Frete (R$)" value={valorFrete} onChange={setValorFrete} placeholder="0,00" />
-            <F label="Desconto (R$)" value={valorDesconto} onChange={setValorDesconto} placeholder="0,00" />
-            <F label="Outros (R$)" value={valorOutros} onChange={setValorOutros} placeholder="0,00" />
+          <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+            <p className="text-xs text-slate-600">
+              <b>Frete, seguro, despesas, desconto e bonificação</b> passaram para a etapa
+              <b> Despesas e Rateio</b>, depois dos itens — é lá que dá para dizer sobre quais
+              produtos cada valor incide. Digitá-los aqui não teria como encostar no custo de
+              produto nenhum, que é justamente o que fazia o markup ser calculado sobre um
+              custo menor do que o real.
+            </p>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Observações</label>
@@ -896,7 +1245,8 @@ export default function NovaEntradaClient({
                     )}
                     <div className="max-h-80 overflow-y-auto">
                     {resultados.map((r, i) => (
-                      <button key={r.id} onClick={() => selecionarProduto(r)} onMouseEnter={() => setIndiceProd(i)}
+                      <button key={r.id} ref={el => { linhasResultadoRef.current[i] = el }}
+                        onClick={() => selecionarProduto(r)} onMouseEnter={() => setIndiceProd(i)}
                         className={`w-full text-left px-4 py-3 transition-colors border-b border-gray-100 last:border-0 ${indiceProd === i ? 'bg-blue-600' : 'hover:bg-blue-50'}`}>
                         <p className={`text-sm font-medium ${indiceProd === i ? 'text-white' : 'text-gray-900'}`}>{r.nome}</p>
                         <p className={`text-xs ${indiceProd === i ? 'text-blue-100' : 'text-gray-400'}`}>
@@ -905,7 +1255,8 @@ export default function NovaEntradaClient({
                       </button>
                     ))}
                     </div>
-                    <button onClick={selecionarManual} onMouseEnter={() => setIndiceProd(resultados.length)}
+                    <button ref={el => { linhasResultadoRef.current[resultados.length] = el }}
+                      onClick={selecionarManual} onMouseEnter={() => setIndiceProd(resultados.length)}
                       className={`w-full text-left px-4 py-2.5 text-xs transition-colors border-t border-gray-100 flex-shrink-0 ${indiceProd === resultados.length ? 'bg-gray-700 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
                       + Cadastrar &quot;{buscaProd}&quot; como produto novo e adicionar
                     </button>
@@ -1033,13 +1384,190 @@ export default function NovaEntradaClient({
             </button>
             <button onClick={avancarParaReajuste} disabled={carregandoReajuste || itens.length === 0}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-              {carregandoReajuste ? 'Carregando...' : 'Próximo: Estoque →'}
+              {carregandoReajuste ? 'Carregando...' : 'Próximo: Despesas e Rateio →'}
             </button>
           </div>
         </div>
       )}
 
-      {/* ── ETAPA 3: Estoque ── */}
+      {/* ── ETAPA 3: Despesas e Rateio ── */}
+      {etapa === 'encargos' && (
+        <div className="space-y-4">
+          <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+            <div>
+              <h2 className="font-semibold text-gray-800">Despesas, abatimentos e rateio</h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Tudo o que a nota cobra além dos produtos — e tudo o que ela abate. Cada valor pode
+                incidir sobre a nota inteira ou só sobre os itens que você escolher, e vira custo de
+                aquisição do produto.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {TIPOS_ENCARGO.map(t => (
+                <button key={t} type="button" onClick={() => addEncargo(t)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                    ENCARGO_ABATE[t]
+                      ? 'border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                      : 'border-blue-300 text-blue-700 hover:bg-blue-50'}`}>
+                  + {ENCARGO_LABEL[t]}
+                </button>
+              ))}
+            </div>
+
+            {encargos.length === 0 && (
+              <p className="text-sm text-gray-400 border border-dashed border-gray-300 rounded-lg px-4 py-6 text-center">
+                Nenhuma despesa nesta nota. Pode seguir direto.
+              </p>
+            )}
+
+            {encargos.map(e => {
+              const abate = ENCARGO_ABATE[e.tipo]
+              const escopoTodos = e.itens.length === 0
+              return (
+                <div key={e.id} className={`rounded-xl border p-4 space-y-3 ${abate ? 'border-emerald-200 bg-emerald-50/40' : 'border-blue-200 bg-blue-50/40'}`}>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${abate ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {abate ? '−' : '+'} {ENCARGO_LABEL[e.tipo]}
+                    </span>
+                    <div className="flex-1 min-w-[10rem]">
+                      <label className="block text-[10px] font-medium text-gray-500 uppercase mb-0.5">Descrição (opcional)</label>
+                      <input value={e.descricao ?? ''} onChange={ev => updEncargo(e.id, { descricao: ev.target.value })}
+                        placeholder={e.tipo === 'frete' ? 'Ex: transportadora X, CTe 4432' : ''}
+                        className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-medium text-gray-500 uppercase mb-0.5">Valor (R$)</label>
+                      <input value={e.valor ? String(e.valor) : ''} inputMode="decimal" placeholder="0,00"
+                        onChange={ev => updEncargo(e.id, { valor: parseFloat(ev.target.value.replace(',', '.')) || 0 })}
+                        className="w-28 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm text-right font-mono bg-white focus:outline-none focus:border-blue-500" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-medium text-gray-500 uppercase mb-0.5">Ratear por</label>
+                      <select value={e.base} onChange={ev => updEncargo(e.id, { base: ev.target.value as 'valor' | 'quantidade' })}
+                        className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500">
+                        <option value="valor">Valor do item</option>
+                        <option value="quantidade">Quantidade</option>
+                      </select>
+                    </div>
+                    <button type="button" onClick={() => removeEncargo(e.id)}
+                      className="text-gray-400 hover:text-red-500 text-xl leading-none px-1 pb-1.5">×</button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-4 text-xs">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" checked={escopoTodos} onChange={() => updEncargo(e.id, { itens: [] })} className="accent-blue-600" />
+                      <span className="text-gray-700">Todos os itens da nota</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" checked={!escopoTodos}
+                        onChange={() => updEncargo(e.id, { itens: itens.map((_, i) => i) })} className="accent-blue-600" />
+                      <span className="text-gray-700">Somente os itens que eu escolher</span>
+                    </label>
+                  </div>
+
+                  {!escopoTodos && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {itens.map((it, i) => {
+                        const dentro = e.itens.includes(i)
+                        return (
+                          <button key={i} type="button" onClick={() => alternarItemDoEncargo(e.id, i)}
+                            className={`text-[11px] px-2 py-1 rounded-lg border transition-colors max-w-[16rem] truncate ${
+                              dentro ? 'border-blue-500 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'}`}>
+                            {dentro ? '✓ ' : ''}{it.nome_produto}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
+            {rateio.alertas.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-1">
+                {rateio.alertas.map((a, i) => <p key={i} className="text-xs text-amber-800">⚠ {a}</p>)}
+              </div>
+            )}
+
+            <div className="border-t border-gray-200 pt-3 grid grid-cols-2 gap-x-8 gap-y-1 text-sm max-w-md ml-auto">
+              <span className="text-gray-500">Produtos</span>
+              <span className="text-right text-gray-900">{fmt(totalProdutos)}</span>
+              <span className="text-gray-500">Despesas e abatimentos</span>
+              <span className={`text-right ${totalDosEncargos(encargos) < 0 ? 'text-emerald-600' : 'text-gray-900'}`}>
+                {totalDosEncargos(encargos) >= 0 ? '+' : ''}{fmt(totalDosEncargos(encargos))}
+              </span>
+              {rateio.naoRateado !== 0 && (
+                <>
+                  <span className="text-amber-700">…sem incidir em item algum</span>
+                  <span className="text-right text-amber-700">{fmt(rateio.naoRateado)}</span>
+                </>
+              )}
+              <span className="font-semibold text-gray-800 pt-1 border-t border-gray-200">Total da nota</span>
+              <span className="text-right font-bold text-blue-700 pt-1 border-t border-gray-200">{fmt(totalGeral)}</span>
+            </div>
+          </div>
+
+          {itens.length > 0 && (
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                <h3 className="text-sm font-semibold text-gray-700">Custo de aquisição por item</h3>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  É este custo — e não o preço da nota — que alimenta o markup, o preço de venda e o cadastro do produto.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Produto</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500 w-20">Qtd</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500 w-28">Custo da nota</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-gray-500 w-28">Rateio/un</th>
+                      <th className="text-right px-4 py-2 text-xs font-medium text-gray-500 w-32">Custo de aquisição</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {itens.map((it, i) => {
+                      const unit = it.quantidade > 0 ? rateio.porItem[i] / it.quantidade : 0
+                      return (
+                        <tr key={i}>
+                          <td className="px-4 py-2">
+                            <p className="text-gray-800 text-xs">{it.nome_produto}</p>
+                            {it.sku && <p className="text-gray-400 text-[11px] font-mono">{it.sku}</p>}
+                          </td>
+                          <td className="px-3 py-2 text-right text-xs text-gray-600 font-mono">{it.quantidade}</td>
+                          <td className="px-3 py-2 text-right text-xs text-gray-500 font-mono">{fmt(it.preco_custo_novo)}</td>
+                          <td className={`px-3 py-2 text-right text-xs font-mono ${unit > 0 ? 'text-blue-600' : unit < 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
+                            {unit === 0 ? '—' : `${unit > 0 ? '+' : ''}${unit.toFixed(4)}`}
+                          </td>
+                          <td className="px-4 py-2 text-right text-xs font-bold text-gray-900 font-mono">
+                            {fmt(rateio.custoUnitarioFinal[i])}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center">
+            <button onClick={() => setEtapa('itens')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
+            <button onClick={salvarRascunho} disabled={salvandoRascunho}
+              className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
+              {salvandoRascunho ? '⏳ Salvando...' : '💾 Salvar Rascunho'}
+            </button>
+            <button onClick={() => setEtapa('estoque')}
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+              Próximo: Estoque →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ETAPA 4: Estoque ── */}
       {etapa === 'estoque' && (
         <div className="space-y-4">
           <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
@@ -1117,8 +1645,8 @@ export default function NovaEntradaClient({
           </div>
 
           <div className="flex justify-between">
-            <button onClick={() => setEtapa('itens')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
-            <button onClick={() => setEtapa('reajuste')}
+            <button onClick={() => setEtapa('encargos')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
+            <button onClick={entrarNoReajuste}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
               Próximo: Reajuste de Preços →
             </button>
@@ -1130,10 +1658,13 @@ export default function NovaEntradaClient({
       {etapa === 'reajuste' && (
         <div className="space-y-4">
           <div className="bg-white border border-gray-200 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center justify-between mb-1 flex-wrap gap-3">
               <div>
                 <h2 className="font-semibold text-gray-800">Reajuste de Preços de Venda</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Defina o markup e preço de venda para cada produto. Kits com componentes na nota também são listados.</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Markup, preço e promoção de cada produto — todos os campos são editáveis e o TAB
+                  passa de um para o outro. O custo mostrado já inclui o rateio das despesas da nota.
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500">Aplicar markup em todos:</span>
@@ -1150,6 +1681,36 @@ export default function NovaEntradaClient({
                 <span className="text-xs text-gray-400">% + Enter</span>
               </div>
             </div>
+
+            {/* QUANDO O CUSTO MUDA, O QUE ACONTECE COM O PREÇO.
+                Escolha da empresa, e não da nota: fica gravada e vale para a
+                próxima entrada, de quem quer que a lance. */}
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-xs font-medium text-gray-600">Quando o custo do produto mudar:</p>
+                {salvandoPolitica && <span className="text-[11px] text-gray-400">salvando…</span>}
+              </div>
+              <div className="grid gap-2 md:grid-cols-3">
+                {(['manter_markup', 'manter_preco', 'so_aumentar'] as PoliticaPreco[]).map(op => (
+                  <label key={op}
+                    className={`cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${
+                      politica === op ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                    <div className="flex items-start gap-2">
+                      <input type="radio" name="politica-preco" checked={politica === op}
+                        onChange={() => void trocarPolitica(op)} className="mt-0.5 accent-blue-600" />
+                      <div>
+                        <p className="text-xs font-medium text-gray-800 leading-snug">{POLITICA_LABEL[op]}</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">{POLITICA_AJUDA[op]}</p>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Vale como padrão da empresa nas próximas entradas. Em qualquer linha você ainda pode
+                editar o número na mão, ou desmarcar <b>Preço</b> para não tocar naquele produto.
+              </p>
+            </div>
           </div>
 
           {reajustes.filter(r => !r.is_kit).length > 0 && (
@@ -1157,7 +1718,7 @@ export default function NovaEntradaClient({
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
                 <h3 className="text-sm font-semibold text-gray-700">Produtos da nota ({reajustes.filter(r => !r.is_kit).length})</h3>
               </div>
-              <TabelaReajuste itens={reajustes.filter(r => !r.is_kit)} todos={reajustes} onUpdate={updateReajuste} />
+              <TabelaReajuste itens={reajustes.filter(r => !r.is_kit)} todos={reajustes} onUpdate={updateReajuste} custoNota={custoNotaPorProduto} />
             </div>
           )}
 
@@ -1169,12 +1730,12 @@ export default function NovaEntradaClient({
                   Kits afetados ({reajustes.filter(r => r.is_kit).length}) — contêm produtos desta nota
                 </h3>
               </div>
-              <TabelaReajuste itens={reajustes.filter(r => r.is_kit)} todos={reajustes} onUpdate={updateReajuste} isKit />
+              <TabelaReajuste itens={reajustes.filter(r => r.is_kit)} todos={reajustes} onUpdate={updateReajuste} custoNota={custoNotaPorProduto} isKit />
             </div>
           )}
 
           <div className="flex justify-between items-center">
-            <button onClick={() => setEtapa('itens')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
+            <button onClick={() => setEtapa('estoque')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
             <button onClick={salvarRascunho} disabled={salvandoRascunho}
               className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
               {salvandoRascunho ? '⏳ Salvando...' : '💾 Salvar Rascunho'}
@@ -1194,10 +1755,19 @@ export default function NovaEntradaClient({
             <span className="text-sm text-gray-700">Total da entrada</span>
             <span className="text-xl font-bold text-blue-700">{fmt(totalGeral)}</span>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Forma de pagamento</label>
-              <select value={formaPag} onChange={e => setFormaPag(e.target.value)}
+              <select value={formaPag}
+                onChange={e => {
+                  const f = e.target.value
+                  setFormaPag(f)
+                  setParcelasGeradas(false)
+                  // PIX e dinheiro sao pagos na hora: o vencimento e hoje, e
+                  // nao D+30. Manter D+30 fazia o Contas a Pagar cobrar uma
+                  // conta que ja estava quitada na descarga.
+                  if (FORMAS_A_VISTA.includes(f)) { setPrimeiroVenc(hoje()); setNumParcelas(1) }
+                }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
                 {['boleto','pix','transferência','dinheiro','cartão','cheque'].map(f => (
                   <option key={f} value={f}>{f.charAt(0).toUpperCase() + f.slice(1)}</option>
@@ -1211,10 +1781,23 @@ export default function NovaEntradaClient({
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
             </div>
             <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Intervalo (dias)</label>
+              <input type="number" min={1} max={365} value={intervaloParcelas}
+                onChange={e => { setIntervaloParcelas(Math.max(1, parseInt(e.target.value) || 1)); setParcelasGeradas(false) }}
+                disabled={numParcelas < 2}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-400" />
+              <p className="text-[10px] text-gray-400 mt-1">
+                {numParcelas < 2 ? 'Parcela única' : `28/56 ou 21/42 — o que o fornecedor combinou`}
+              </p>
+            </div>
+            <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">1º vencimento</label>
               <input type="date" value={primeiroVenc}
                 onChange={e => { setPrimeiroVenc(e.target.value); setParcelasGeradas(false) }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+              {FORMAS_A_VISTA.includes(formaPag) && primeiroVenc === hoje() && (
+                <p className="text-[10px] text-emerald-600 mt-1">À vista — vencimento hoje.</p>
+              )}
             </div>
           </div>
           <button onClick={gerarParcelas} className="px-4 py-2 border border-blue-300 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-50 transition-colors">
@@ -1274,8 +1857,11 @@ export default function NovaEntradaClient({
               </div>
               <div className="space-y-2">
                 <Row label="Produtos" value={fmt(totalProdutos)} />
-                {frete > 0 && <Row label="Frete" value={fmt(frete)} />}
-                {desconto > 0 && <Row label="Desconto" value={`-${fmt(desconto)}`} />}
+                {encargos.filter(e => e.valor > 0).map(e => (
+                  <Row key={e.id}
+                    label={`${ENCARGO_LABEL[e.tipo]}${e.descricao ? ` (${e.descricao})` : ''}${e.itens.length > 0 ? ` · ${e.itens.length} item(ns)` : ''}`}
+                    value={`${ENCARGO_ABATE[e.tipo] ? '-' : '+'}${fmt(e.valor)}`} />
+                ))}
                 <Row label="Total" value={fmt(totalGeral)} bold />
               </div>
             </div>
@@ -1449,74 +2035,150 @@ export default function NovaEntradaClient({
   )
 }
 
-function TabelaReajuste({ itens, todos, onUpdate, isKit = false }: {
+// A TABELA DEIXOU DE SER UM VISOR COM BOTOES.
+//
+// Antes, cada numero era um <button>: para editar o preco era preciso clicar
+// nele, digitar, e clicar no proximo. TAB nao passava de um campo para o
+// outro porque nao havia campo nenhum ate o clique — o que, numa nota de 40
+// itens, e 80 cliques que nao deveriam existir.
+//
+// Agora sao inputs de verdade, sempre. A ordem de tabulacao segue a ordem em
+// que se decide: markup, preco, promocao.
+function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
   itens: ItemReajuste[]
   todos: ItemReajuste[]
   onUpdate: (idx: number, field: keyof ItemReajuste, value: any) => void
+  /** Preco unitario que estava na nota, por produto — para mostrar o rateio. */
+  custoNota: Record<string, number>
   isKit?: boolean
 }) {
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="bg-gray-50 border-b border-gray-200">
-          <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Produto</th>
-          <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Custo novo</th>
-          <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Markup %</th>
-          <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço anterior</th>
-          <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço novo</th>
-          <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-20">Variação</th>
-          <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Atualizar</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-gray-100">
-        {itens.map(item => {
-          const idx = todos.indexOf(item)
-          const variacao = item.preco_venda_anterior > 0
-            ? ((item.preco_venda_novo - item.preco_venda_anterior) / item.preco_venda_anterior) * 100
-            : 0
-          return (
-            <tr key={item.produto_id} className="group hover:bg-gray-50">
-              <td className="px-4 py-3">
-                <p className="font-medium text-gray-900">{item.nome_produto}</p>
-                {item.sku && <p className="text-xs text-gray-400 font-mono">{item.sku}</p>}
-                {item.kit_componentes && (
-                  <p className="text-xs text-orange-500 mt-0.5">Contém: {item.kit_componentes.join(', ')}</p>
-                )}
-              </td>
-              <td className="px-4 py-3 text-right text-xs text-gray-500">
-                {!isKit ? (
-                  <span className="font-mono">{fmt(item.preco_custo_novo)}</span>
-                ) : <span className="text-gray-300">—</span>}
-              </td>
-              <td className="px-4 py-3 text-right">
-                <InlineNum value={item.markup} onChange={v => onUpdate(idx, 'markup', v)} suffix="%" />
-              </td>
-              <td className="px-4 py-3 text-right text-gray-400 text-xs line-through">
-                {item.preco_venda_anterior > 0 ? fmt(item.preco_venda_anterior) : '—'}
-              </td>
-              <td className="px-4 py-3 text-right font-semibold text-gray-900">
-                <InlineNum value={item.preco_venda_novo} onChange={v => onUpdate(idx, 'preco_venda_novo', v)} />
-              </td>
-              <td className="px-4 py-3 text-right">
-                {variacao !== 0 && (
-                  <span className={`text-xs font-medium ${variacao > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                    {variacao > 0 ? '+' : ''}{variacao.toFixed(1)}%
-                  </span>
-                )}
-              </td>
-              <td className="px-4 py-3 text-center">
-                <label className="flex items-center justify-center gap-1 cursor-pointer">
-                  <input type="checkbox" checked={item.atualizar_preco}
-                    onChange={e => onUpdate(idx, 'atualizar_preco', e.target.checked)}
-                    className="w-4 h-4 accent-blue-600" />
-                  <span className="text-xs text-gray-500">Preço</span>
-                </label>
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-200">
+            <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Produto</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Custo aquisição</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Markup %</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Preço anterior</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Preço novo</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-36">Promoção</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-20">Variação</th>
+            <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Atualizar</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {itens.map(item => {
+            const idx = todos.indexOf(item)
+            const variacao = item.preco_venda_anterior > 0
+              ? ((item.preco_venda_novo - item.preco_venda_anterior) / item.preco_venda_anterior) * 100
+              : 0
+            const daNota = custoNota[item.produto_id]
+            const rateado = !isKit && daNota !== undefined
+              ? Math.round((item.preco_custo_novo - daNota) * 100) / 100
+              : 0
+            const promoValendo = item.promocao_ativa && item.preco_promocional > 0
+            const promoAbaixoDoCusto = promoValendo && item.preco_custo_novo > 0 && item.preco_promocional < item.preco_custo_novo
+            const promoNaoDesconta = promoValendo && item.preco_promocional >= item.preco_venda_novo && item.preco_venda_novo > 0
+            return (
+              <tr key={item.produto_id} className="group hover:bg-gray-50/60">
+                <td className="px-4 py-2.5">
+                  <p className="font-medium text-gray-900 text-[13px] leading-snug">{item.nome_produto}</p>
+                  {item.sku && <p className="text-xs text-gray-400 font-mono">{item.sku}</p>}
+                  {item.kit_componentes && (
+                    <p className="text-xs text-orange-500 mt-0.5">Contém: {item.kit_componentes.join(', ')}</p>
+                  )}
+                </td>
+
+                <td className="px-3 py-2.5 text-right">
+                  {!isKit ? (
+                    <>
+                      <span className="font-mono text-xs text-gray-700">{fmt(item.preco_custo_novo)}</span>
+                      {rateado !== 0 && (
+                        <p className="text-[10px] text-gray-400 font-mono">
+                          nota {fmt(daNota)} {rateado > 0 ? '+' : '−'} {fmt(Math.abs(rateado))} rateio
+                        </p>
+                      )}
+                    </>
+                  ) : <span className="text-gray-300">—</span>}
+                </td>
+
+                <td className="px-3 py-2.5">
+                  <CampoNum value={item.markup} onCommit={v => onUpdate(idx, 'markup', v)} sufixo="%" />
+                </td>
+
+                <td className="px-3 py-2.5 text-right text-gray-400 text-xs line-through">
+                  {item.preco_venda_anterior > 0 ? fmt(item.preco_venda_anterior) : '—'}
+                </td>
+
+                <td className="px-3 py-2.5">
+                  <CampoNum value={item.preco_venda_novo} onCommit={v => onUpdate(idx, 'preco_venda_novo', v)} forte />
+                </td>
+
+                {/* PROMOÇÃO POR VALOR OU POR MARKUP.
+                    O botão R$/% troca o que o campo significa; os dois são a
+                    mesma grandeza e um recalcula o outro. */}
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center justify-end gap-1">
+                    <button type="button" tabIndex={-1}
+                      onClick={() => onUpdate(idx, 'promo_base', item.promo_base === 'valor' ? 'markup' : 'valor')}
+                      title="Alternar entre preço promocional e markup da promoção"
+                      className="w-7 shrink-0 rounded border border-gray-300 bg-gray-50 py-0.5 text-[10px] font-semibold text-gray-500 hover:bg-gray-100">
+                      {item.promo_base === 'valor' ? 'R$' : '%'}
+                    </button>
+                    <CampoNum
+                      value={item.promo_base === 'valor' ? item.preco_promocional : item.promo_markup}
+                      onCommit={v => onUpdate(idx, item.promo_base === 'valor' ? 'preco_promocional' : 'promo_markup', v)}
+                      sufixo={item.promo_base === 'valor' ? '' : '%'}
+                      placeholder="—"
+                    />
+                  </div>
+                  {promoValendo && (
+                    <p className="text-[10px] text-right mt-0.5 font-mono text-gray-400">
+                      {item.promo_base === 'valor'
+                        ? `${item.promo_markup.toFixed(1)}% sobre o custo`
+                        : fmt(item.preco_promocional)}
+                    </p>
+                  )}
+                  {promoAbaixoDoCusto && (
+                    <p className="text-[10px] text-right text-red-500 font-medium">abaixo do custo</p>
+                  )}
+                  {!promoAbaixoDoCusto && promoNaoDesconta && (
+                    <p className="text-[10px] text-right text-amber-600">não desconta nada</p>
+                  )}
+                </td>
+
+                <td className="px-3 py-2.5 text-right">
+                  {variacao !== 0 && (
+                    <span className={`text-xs font-medium ${variacao > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {variacao > 0 ? '+' : ''}{variacao.toFixed(1)}%
+                    </span>
+                  )}
+                </td>
+
+                <td className="px-4 py-2.5">
+                  <div className="flex flex-col items-center gap-1">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={item.atualizar_preco} tabIndex={-1}
+                        onChange={e => onUpdate(idx, 'atualizar_preco', e.target.checked)}
+                        className="w-4 h-4 accent-blue-600" />
+                      <span className="text-xs text-gray-500">Preço</span>
+                    </label>
+                    <label className={`flex items-center gap-1 ${item.preco_promocional > 0 ? 'cursor-pointer' : 'opacity-40'}`}>
+                      <input type="checkbox" checked={item.promocao_ativa} tabIndex={-1}
+                        disabled={item.preco_promocional <= 0}
+                        onChange={e => onUpdate(idx, 'promocao_ativa', e.target.checked)}
+                        className="w-4 h-4 accent-orange-500" />
+                      <span className="text-xs text-gray-500">Promo</span>
+                    </label>
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -1532,22 +2194,54 @@ function F({ label, value, onChange, placeholder, type = 'text' }: {
   )
 }
 
-function InlineNum({ value, onChange, decimals = 2, suffix = '' }: {
-  value: number; onChange: (v: number) => void; decimals?: number; suffix?: string
+// Campo numerico sempre editavel.
+//
+// O rascunho local existe para que digitar "1," ou "12." nao seja apagado a
+// cada tecla pelo `toFixed` do valor confirmado — o numero so volta a ser
+// formatado quando o campo perde o foco. Enter confirma e sai; Esc devolve o
+// valor anterior; TAB confirma e ja esta no proximo campo.
+function CampoNum({ value, onCommit, decimais = 2, sufixo = '', forte = false, placeholder = '' }: {
+  value: number
+  onCommit: (v: number) => void
+  decimais?: number
+  sufixo?: string
+  forte?: boolean
+  placeholder?: string
 }) {
-  const [editing, setEditing] = useState(false)
-  const [val, setVal] = useState('')
-  return editing ? (
-    <input value={val} onChange={e => setVal(e.target.value)}
-      onBlur={() => { onChange(parseFloat(val.replace(',', '.')) || 0); setEditing(false) }}
-      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditing(false) }}
-      className="w-full border border-blue-400 rounded px-1 py-0.5 text-xs text-right focus:outline-none"
-      autoFocus onFocus={e => e.target.select()} />
-  ) : (
-    <button onClick={() => { setVal(value.toFixed(decimals)); setEditing(true) }}
-      className="w-full text-right text-xs text-gray-900 hover:text-blue-600 hover:underline transition-colors">
-      {value.toFixed(decimals)}{suffix}
-    </button>
+  const [rascunho, setRascunho] = useState<string | null>(null)
+  const formatado = value ? value.toFixed(decimais) : ''
+  const texto = rascunho ?? formatado
+
+  function confirmar(t: string) {
+    const n = parseFloat(t.replace(',', '.'))
+    setRascunho(null)
+    const limpo = isNaN(n) ? 0 : Math.round(n * 10000) / 10000
+    if (limpo !== value) onCommit(limpo)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        value={texto}
+        inputMode="decimal"
+        placeholder={placeholder}
+        onChange={e => setRascunho(e.target.value)}
+        onFocus={e => { setRascunho(formatado); e.target.select() }}
+        onBlur={e => confirmar(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() }
+          if (e.key === 'Escape') { setRascunho(null); (e.target as HTMLInputElement).blur() }
+        }}
+        className={`w-full rounded border border-gray-200 bg-white px-1.5 py-1 text-right font-mono text-xs
+          hover:border-gray-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-200
+          ${forte ? 'font-semibold text-gray-900' : 'text-gray-700'} ${sufixo ? 'pr-4' : ''}`}
+      />
+      {sufixo && (
+        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400">
+          {sufixo}
+        </span>
+      )}
+    </div>
   )
 }
 
