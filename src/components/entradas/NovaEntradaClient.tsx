@@ -19,6 +19,7 @@ import {
   aplicarPolitica, ehPolitica, POLITICA_PADRAO, POLITICA_LABEL, POLITICA_AJUDA,
   markupDoPreco, precoDoMarkup, type PoliticaPreco,
 } from '@/lib/entradas/politicaPreco'
+import { paraNumeroBr, formatarNumeroBr, paraEdicaoBr } from '@/lib/entradas/numeroBr'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -530,14 +531,14 @@ export default function NovaEntradaClient({
   }
 
   function confirmarQtd() {
-    const qtd = parseFloat(inputQtd.replace(',', '.'))
+    const qtd = paraNumeroBr(inputQtd)
     if (!qtd || qtd <= 0) return
     setItemAtual(prev => prev ? { ...prev, quantidade: qtd } : prev)
     setFaseItem('custo')
   }
 
   function confirmarCusto() {
-    const custo = parseFloat(inputCusto.replace(',', '.'))
+    const custo = paraNumeroBr(inputCusto)
     if (isNaN(custo) || custo < 0) return
     const item: ItemEntrada = { ...itemAtual!, preco_custo_novo: custo }
     setItens(prev => [...prev, item])
@@ -1438,9 +1439,10 @@ export default function NovaEntradaClient({
                     </div>
                     <div>
                       <label className="block text-[10px] font-medium text-gray-500 uppercase mb-0.5">Valor (R$)</label>
-                      <input value={e.valor ? String(e.valor) : ''} inputMode="decimal" placeholder="0,00"
-                        onChange={ev => updEncargo(e.id, { valor: parseFloat(ev.target.value.replace(',', '.')) || 0 })}
-                        className="w-28 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm text-right font-mono bg-white focus:outline-none focus:border-blue-500" />
+                      <div className="w-32">
+                        <CampoNum value={e.valor} onCommit={v => updEncargo(e.id, { valor: Math.abs(v) })}
+                          placeholder="0,00" compacto={false} />
+                      </div>
                     </div>
                     <div>
                       <label className="block text-[10px] font-medium text-gray-500 uppercase mb-0.5">Ratear por</label>
@@ -1673,8 +1675,8 @@ export default function NovaEntradaClient({
                   className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500 text-right"
                   onKeyDown={e => {
                     if (e.key === 'Enter') {
-                      const mk = parseFloat((e.target as HTMLInputElement).value.replace(',', '.'))
-                      if (!isNaN(mk)) { aplicarMarkupGlobal(mk); (e.target as HTMLInputElement).value = '' }
+                      const bruto = (e.target as HTMLInputElement).value.trim()
+                      if (bruto) { aplicarMarkupGlobal(paraNumeroBr(bruto)); (e.target as HTMLInputElement).value = '' }
                     }
                   }}
                 />
@@ -1821,9 +1823,10 @@ export default function NovaEntradaClient({
                           className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400" />
                       </td>
                       <td className="px-4 py-2 text-right">
-                        <input value={p.valor.toFixed(2)}
-                          onChange={e => setParcelas(prev => prev.map((x, j) => j === i ? { ...x, valor: parseFloat(e.target.value) || 0 } : x))}
-                          className="border border-gray-300 rounded px-2 py-1 text-xs text-right w-28 focus:outline-none focus:border-blue-400" />
+                        <div className="w-28 ml-auto">
+                          <CampoNum value={p.valor}
+                            onCommit={v => setParcelas(prev => prev.map((x, j) => j === i ? { ...x, valor: v } : x))} />
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2200,22 +2203,30 @@ function F({ label, value, onChange, placeholder, type = 'text' }: {
 // cada tecla pelo `toFixed` do valor confirmado — o numero so volta a ser
 // formatado quando o campo perde o foco. Enter confirma e sai; Esc devolve o
 // valor anterior; TAB confirma e ja esta no proximo campo.
-function CampoNum({ value, onCommit, decimais = 2, sufixo = '', forte = false, placeholder = '' }: {
+function CampoNum({ value, onCommit, decimais = 2, sufixo = '', forte = false, placeholder = '', compacto = true }: {
   value: number
   onCommit: (v: number) => void
   decimais?: number
   sufixo?: string
   forte?: boolean
   placeholder?: string
+  /**
+   * true = celula de tabela; false = campo de formulario.
+   *
+   * Duas variantes explicitas em vez de sobrepor classe por fora: o Tailwind
+   * v4 mudou o modificador `!` de prefixo para sufixo, e um override que
+   * silenciosamente nao aplica deixa o campo minusculo sem erro nenhum.
+   */
+  compacto?: boolean
 }) {
   const [rascunho, setRascunho] = useState<string | null>(null)
-  const formatado = value ? value.toFixed(decimais) : ''
-  const texto = rascunho ?? formatado
+  // Parado: 1.234,50. Em edição: 1234,50 — sem o separador de milhar que a
+  // própria tela escreveria e depois teria de reinterpretar.
+  const texto = rascunho ?? (value ? formatarNumeroBr(value, decimais) : '')
 
   function confirmar(t: string) {
-    const n = parseFloat(t.replace(',', '.'))
     setRascunho(null)
-    const limpo = isNaN(n) ? 0 : Math.round(n * 10000) / 10000
+    const limpo = Math.round(paraNumeroBr(t) * 10000) / 10000
     if (limpo !== value) onCommit(limpo)
   }
 
@@ -2226,14 +2237,17 @@ function CampoNum({ value, onCommit, decimais = 2, sufixo = '', forte = false, p
         inputMode="decimal"
         placeholder={placeholder}
         onChange={e => setRascunho(e.target.value)}
-        onFocus={e => { setRascunho(formatado); e.target.select() }}
+        onFocus={e => { setRascunho(value ? paraEdicaoBr(value, decimais) : ''); e.target.select() }}
         onBlur={e => confirmar(e.target.value)}
         onKeyDown={e => {
           if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() }
           if (e.key === 'Escape') { setRascunho(null); (e.target as HTMLInputElement).blur() }
         }}
-        className={`w-full rounded border border-gray-200 bg-white px-1.5 py-1 text-right font-mono text-xs
+        className={`w-full border bg-white text-right font-mono
           hover:border-gray-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-200
+          ${compacto
+            ? 'rounded border-gray-200 px-1.5 py-1 text-xs'
+            : 'rounded-lg border-gray-300 px-2.5 py-1.5 text-sm'}
           ${forte ? 'font-semibold text-gray-900' : 'text-gray-700'} ${sufixo ? 'pr-4' : ''}`}
       />
       {sufixo && (
