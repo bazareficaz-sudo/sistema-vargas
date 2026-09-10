@@ -29,6 +29,28 @@ import type { ContextoTerminal } from './decidirAcesso'
 // autenticada, inclusive nas recusadas. É a observabilidade que a leitura tem,
 // e é observacional — nunca mecanismo de idempotência.
 
+// ── CACHE ───────────────────────────────────────────────────────────────
+//
+// Medido em produção: toda rota do PDV sai com o padrão do framework,
+// `public, max-age=0, must-revalidate`. Nas rotas de escrita isso é inócuo.
+// Aqui não: esta é a primeira rota GET que devolve SNAPSHOT DE NEGÓCIO de uma
+// empresa específica, e `public` autoriza cache compartilhado a guardá-lo.
+//
+// Hoje nada guarda — `x-vercel-cache: MISS`, `age: 0`, e o `must-revalidate`
+// obriga revalidação. Mas essa proteção depende de duas coisas que não são
+// nossas. `private, no-store` não depende de nenhuma.
+//
+// Fica no MOLDE, não na rota, pelo mesmo motivo que o filtro de empresa mora
+// dentro da RPC: uma futura rota de leitura não pode conseguir esquecer.
+const SEM_CACHE = { 'Cache-Control': 'private, no-store' } as const
+
+/** Acrescenta o cabeçalho sem tocar em `respostaDeRecusa`, que é compartilhada. */
+function semCache(res: Response): Response {
+  const h = new Headers(res.headers)
+  h.set('Cache-Control', SEM_CACHE['Cache-Control'])
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h })
+}
+
 export type LeitorDeTerminal<T> = (ctx: ContextoTerminal) => Promise<T>
 
 export async function leituraProtegida<T>(
@@ -46,14 +68,15 @@ export async function leituraProtegida<T>(
     exigirFlag: opts.exigirFlag ?? true,
     operacao: opts.flagDaOperacao,
   })
-  if (!acesso.ok) return respostaDeRecusa(acesso)
+  if (!acesso.ok) return semCache(respostaDeRecusa(acesso))
 
   try {
     const resultado = await opts.ler(acesso.contexto)
     const http = opts.httpDoResultado?.(resultado) ?? 200
-    return NextResponse.json({ ok: http < 400, ...(resultado as object) }, { status: http })
+    return NextResponse.json({ ok: http < 400, ...(resultado as object) },
+      { status: http, headers: SEM_CACHE })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Falha na leitura'
-    return NextResponse.json({ ok: false, erro: msg }, { status: 500 })
+    return NextResponse.json({ ok: false, erro: msg }, { status: 500, headers: SEM_CACHE })
   }
 }

@@ -329,3 +329,49 @@ desde a 0.6C, e encosta em `registrarVenda`.
    o documento não vira local, e a idempotência continua com a chave em disco)
 
 Com essas duas respostas, isto vira PRONTO e eu implemento.
+
+---
+
+## 15. Hardening antes do piloto e dívida aberta
+
+**Feito (0.6C.5):** `GET /api/pdv/orcamentos/[id]` declara
+`Cache-Control: private, no-store` em **toda** resposta — sucesso, 404 e recusa.
+O cabeçalho fica em `leituraProtegida`, não na rota, pelo mesmo motivo que o
+filtro de empresa mora dentro da RPC: uma futura rota de leitura não pode
+conseguir esquecer.
+
+**DÍVIDA SEPARADA — padronização de cache nas demais rotas autenticadas do PDV.**
+
+Medido em produção em 10/09/2026:
+
+```
+GET  /api/pdv/orcamentos/[id]   public, max-age=0, must-revalidate  → corrigido
+POST /api/pdv/orcamentos        public, max-age=0, must-revalidate
+POST /api/pdv/faltas            public, max-age=0, must-revalidate
+GET  /api/pdv/config            public, max-age=0, must-revalidate
+```
+
+É o padrão do framework, não regressão. Nas rotas de escrita é inócuo; em
+`/api/pdv/config`, que é GET, merece a mesma revisão que a rota nova recebeu.
+Não foi tocado nesta fase de propósito — ampliar o escopo no fim de um gate é
+como se perde a capacidade de dizer o que quebrou.
+
+## 16. Cobertura das evidências — o que é medido e o que é herdado
+
+Correção de registro pedida na aprovação, e ela é justa:
+
+| Ponto | Status honesto |
+|---|---|
+| recusa sem token / token forjado / expirado / `alg:none` | **medido ponta a ponta** na rota real |
+| inexistente ≡ outra empresa | **medido**, campo a campo, via RPC |
+| leitura não grava `pdv_operacoes` | **medido** (11 → 11) |
+| `orcamento_itens` intocado | **medido** (225 → 225) |
+| rotas de escrita sem regressão | **medido** (heartbeats 22:09:59 → 22:14:59) |
+| **terminal revogado → recusado** | **coberto por componente compartilhado** (`decidirAcesso`), NÃO exercitado no GET |
+| **flag desligada → recusado** | **coberto por componente compartilhado**, NÃO exercitado no GET |
+| **200 com payload real** | **não medido** — depende do Electron 1.9.8, que é o consumidor real |
+
+Terminal revogado não é o mesmo teste que token inválido, e flag desligada foi
+inferida do uso de `decidirAcesso`. Ambos são governados pelo mesmo código que
+já protege as rotas de escrita em produção — o que é uma garantia real, mas de
+outra natureza. Ficam registrados como herdados, não como medidos.
