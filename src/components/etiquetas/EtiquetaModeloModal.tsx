@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { seloDasFormas } from '@/lib/pdv/formasPagamento'
 import { CAMPOS_DISPONIVEIS, FABRICANTES, PRESETS, type CampoEtiqueta, type Fabricante, type ModeloEtiqueta, type TipoCampo } from '@/lib/etiquetas/tipos'
 
 const INPUT = 'w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500'
@@ -40,6 +41,30 @@ export default function EtiquetaModeloModal({ modelo, empresaId, onClose, onSalv
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   const [novoCampo, setNovoCampo] = useState<TipoCampo>('marca')
+
+  // AS FORMAS QUE A EMPRESA REALMENTE EXIGE, e não um exemplo inventado.
+  //
+  // Se o balcão só dá o preço promocional em Pix e dinheiro
+  // (empresa_config_pdv), a sugestão de selo tem de ser exatamente essa —
+  // uma etiqueta dizendo "Pix / Din" numa loja que também aceita débito na
+  // promoção manda o cliente para a fila errada.
+  const [seloSugerido, setSeloSugerido] = useState('')
+  useEffect(() => {
+    let vivo = true
+    createClient().from('empresa_config_pdv')
+      .select('promocao_exige_forma, promocao_formas')
+      .eq('empresa_id', empresaId).maybeSingle()
+      .then(({ data }) => {
+        const cfg = data as { promocao_exige_forma?: boolean; promocao_formas?: string[] } | null
+        if (vivo && cfg?.promocao_exige_forma) setSeloSugerido(seloDasFormas(cfg.promocao_formas ?? []))
+      })
+    return () => { vivo = false }
+  }, [empresaId])
+
+  // A sugestão da empresa vem primeiro; as outras são atalhos comuns de
+  // gôndola. `filter(Boolean)` porque a primeira só existe se a loja
+  // configurou a restrição.
+  const sugestoesSelo = [...new Set([seloSugerido, 'Pix / Din', 'à vista'].filter(Boolean))]
 
   function set<K extends keyof FormState>(campo: K, valor: FormState[K]) {
     setForm(prev => ({ ...prev, [campo]: valor }))
@@ -215,6 +240,13 @@ export default function EtiquetaModeloModal({ modelo, empresaId, onClose, onSalv
               <button type="button" onClick={adicionarCampo} className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium whitespace-nowrap">+ Adicionar</button>
             </div>
 
+            {form.campos.some(c => c.campo === 'preco_promocional') && seloSugerido && !form.campos.some(c => c.campo === 'preco_promocional' && (c.selo ?? '').trim()) && (
+              <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                Nesta empresa o preço promocional só vale em <b>{seloSugerido}</b>. Este modelo imprime a
+                promoção sem dizer isso — quem vê a etiqueta na gôndola não fica sabendo da condição.
+              </p>
+            )}
+
             {form.campos.length === 0 ? (
               <p className="text-xs text-gray-400 text-center py-4 border border-dashed border-gray-200 rounded-lg">Nenhum campo adicionado ainda.</p>
             ) : (
@@ -230,6 +262,28 @@ export default function EtiquetaModeloModal({ modelo, empresaId, onClose, onSalv
                       <span className="text-sm text-gray-700 font-medium min-w-[140px]">{info?.label ?? c.campo}</span>
                       {c.campo === 'texto_livre' && (
                         <input value={c.textoLivre ?? ''} onChange={e => atualizarCampo(i, { textoLivre: e.target.value })} placeholder="Texto..." className="border border-gray-300 rounded-lg px-2 py-1 text-xs flex-1 min-w-[100px]" />
+                      )}
+                      {c.campo === 'preco_promocional' && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <input value={c.selo ?? ''} maxLength={20}
+                            onChange={e => atualizarCampo(i, { selo: e.target.value })}
+                            placeholder="ao lado do preço: Pix / Din"
+                            title="Palavra impressa ao lado do preço promocional. Só sai quando a promoção está valendo."
+                            className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-44" />
+                          {sugestoesSelo.map(sug => (
+                            <button key={sug} type="button" onClick={() => atualizarCampo(i, { selo: sug })}
+                              className={`px-1.5 py-1 text-[11px] rounded border transition-colors ${
+                                (c.selo ?? '') === sug
+                                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                                  : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                              {sug}
+                            </button>
+                          ))}
+                          {c.selo && (
+                            <button type="button" onClick={() => atualizarCampo(i, { selo: '' })}
+                              className="px-1 text-[11px] text-gray-400 hover:text-red-500" title="Sem selo">✕</button>
+                          )}
+                        </div>
                       )}
                       {c.campo !== 'codigo_barras' && c.campo !== 'qrcode' && c.campo !== 'logo_empresa' && (
                         <input type="number" value={c.fontSize} onChange={e => atualizarCampo(i, { fontSize: parseInt(e.target.value) || 8 })} className="w-14 border border-gray-300 rounded-lg px-1.5 py-1 text-xs" title="Tamanho da fonte" />

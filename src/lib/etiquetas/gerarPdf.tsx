@@ -1,8 +1,8 @@
 import { Document, Page, View, Text, Image, StyleSheet, pdf } from '@react-pdf/renderer'
 import JsBarcode from 'jsbarcode'
 import QRCode from 'qrcode'
-import { promocaoVigente } from '@/lib/produtos/promocao'
-import type { CampoEtiqueta, ModeloEtiqueta, ProdutoParaEtiqueta, TipoCampo } from './tipos'
+import { linhaDoCampo } from './conteudoCampo'
+import type { ModeloEtiqueta, ProdutoParaEtiqueta } from './tipos'
 
 const MM_PARA_PT = 2.83464567
 
@@ -35,32 +35,6 @@ async function gerarQrDataUrl(valor: string): Promise<string | null> {
   }
 }
 
-function fmtPreco(v: number) {
-  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-}
-
-// `agora` vem de fora, uma vez por impressão: um lote grande demora, e a
-// etiqueta da prateleira não pode mudar de preço no meio da fila só porque a
-// promoção venceu entre a primeira folha e a última.
-function valorCampo(campo: TipoCampo, produto: ProdutoParaEtiqueta, agora: Date): string {
-  switch (campo) {
-    case 'nome': return produto.nome
-    case 'sku': return produto.sku ?? ''
-    case 'ean': return produto.ean ?? ''
-    case 'preco_venda': return fmtPreco(produto.preco_venda)
-    // Promoção vencida, desligada ou mais cara que o preço normal não
-    // imprime: a gôndola anunciaria um desconto que o caixa não dá.
-    case 'preco_promocional':
-      return promocaoVigente(produto, agora) ? fmtPreco(produto.preco_promocional!) : ''
-    case 'marca': return produto.marca ?? ''
-    case 'unidade': return produto.unidade ?? ''
-    case 'categoria': return produto.categoria ?? ''
-    case 'localizacao': return produto.localizacao ?? ''
-    case 'data_impressao': return agora.toLocaleDateString('pt-BR')
-    default: return ''
-  }
-}
-
 const styles = StyleSheet.create({
   celula: { flexDirection: 'column', justifyContent: 'center', overflow: 'hidden' },
   linha: { marginBottom: 1 },
@@ -74,9 +48,6 @@ function EtiquetaConteudo({ modelo, produto, empresa, barcodes, qrcodes, agora }
   return (
     <View style={[styles.celula, { width: mm(modelo.largura_mm), height: mm(modelo.altura_mm), padding: 2 }]}>
       {modelo.campos.map((c, i) => {
-        if (c.campo === 'texto_livre') {
-          return <Text key={i} style={[styles.linha, { fontSize: c.fontSize, fontFamily: c.bold ? 'Helvetica-Bold' : 'Helvetica', textAlign: c.align }]}>{c.textoLivre ?? ''}</Text>
-        }
         if (c.campo === 'logo_empresa') {
           if (!empresa.logo_url) return null
           return <Image key={i} src={empresa.logo_url} style={{ height: mm(c.fontSize / 2), alignSelf: c.align === 'center' ? 'center' : c.align === 'right' ? 'flex-end' : 'flex-start' }} />
@@ -94,9 +65,21 @@ function EtiquetaConteudo({ modelo, produto, empresa, barcodes, qrcodes, agora }
           const tam = mm(Math.min(modelo.largura_mm, modelo.altura_mm) * 0.5)
           return <Image key={i} src={dataUrl} style={{ width: tam, height: tam, alignSelf: c.align === 'center' ? 'center' : c.align === 'right' ? 'flex-end' : 'flex-start' }} />
         }
-        const texto = valorCampo(c.campo, produto, agora)
-        if (!texto) return null
-        return <Text key={i} style={[styles.linha, { fontSize: c.fontSize, fontFamily: c.bold ? 'Helvetica-Bold' : 'Helvetica', textAlign: c.align }]}>{texto}</Text>
+        // Texto e selo saem juntos ou não saem — ver `linhaDoCampo`.
+        const linha = linhaDoCampo(c, produto, agora)
+        if (!linha) return null
+        return (
+          <Text key={i} style={[styles.linha, { fontSize: c.fontSize, fontFamily: c.bold ? 'Helvetica-Bold' : 'Helvetica', textAlign: c.align }]}>
+            {linha.texto}
+            {linha.selo ? (
+              // Menor e sem negrito de propósito: quem olha a gôndola de longe
+              // tem de ler o PREÇO primeiro. A condição é a letra miúda.
+              <Text style={{ fontSize: Math.max(4, Math.round(c.fontSize * 0.62)), fontFamily: 'Helvetica' }}>
+                {` ${linha.selo}`}
+              </Text>
+            ) : null}
+          </Text>
+        )
       })}
     </View>
   )

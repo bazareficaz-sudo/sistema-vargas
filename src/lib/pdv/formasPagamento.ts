@@ -28,3 +28,30 @@ export const FORMAS_PAGAMENTO_VALIDAS: string[] = FORMAS_PAGAMENTO.map(f => f.id
 export function rotuloDaForma(tipo: string): string {
   return FORMAS_PAGAMENTO.find(f => f.id === tipo)?.label ?? tipo
 }
+
+// SELO CURTO — o rótulo cabe na tela, mas não numa etiqueta de 63 mm.
+//
+// "Dinheiro" ao lado de um preço em corpo 11 empurra o preço para fora da
+// etiqueta. A abreviação vive aqui, e não no módulo de etiquetas, pelo mesmo
+// motivo que a lista acima vive aqui: uma forma nova precisa aparecer inteira
+// num lugar só.
+const SELO_CURTO: Record<string, string> = {
+  dinheiro: 'Din',
+  debito: 'Débito',
+  credito: 'Crédito',
+  pix: 'Pix',
+  carteira: 'Carteira',
+  fiado: 'Fiado',
+}
+
+export function seloCurtoDaForma(tipo: string): string {
+  return SELO_CURTO[tipo] ?? rotuloDaForma(tipo)
+}
+
+/** Ex.: ['pix','dinheiro'] → "Pix / Din". Lista vazia devolve string vazia. */
+export function seloDasFormas(formas: string[]): string {
+  return (formas ?? [])
+    .filter(Boolean)
+    .map(seloCurtoDaForma)
+    .join(' / ')
+}

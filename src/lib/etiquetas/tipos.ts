@@ -9,6 +9,21 @@ export type CampoEtiqueta = {
   bold: boolean
   align: 'left' | 'center' | 'right'
   textoLivre?: string // só usado quando campo === 'texto_livre'
+  /**
+   * Palavra impressa AO LADO do preço promocional — "Pix / Din", "à vista".
+   *
+   * Existe porque a etiqueta é a única parte da promoção que fica sozinha na
+   * gôndola. A loja pode condicionar o preço promocional à forma de pagamento
+   * (empresa_config_pdv.promocao_formas, ver lib/pdv/promocaoPagamento.ts), e
+   * quando isso está ligado a etiqueta anuncia um preço que o caixa só dá em
+   * Pix ou dinheiro. Sem dizer isso na própria etiqueta, a discussão sobra
+   * para o operador com o cliente na frente.
+   *
+   * Só vale para `preco_promocional`, e só é impresso quando o preço
+   * promocional é impresso — ver `valorCampo` em gerarPdf.tsx. Um selo
+   * sozinho na etiqueta prometeria um desconto que não existe.
+   */
+  selo?: string
 }
 
 export type Fabricante = 'pimaco' | 'colacril' | 'a4_generica' | 'termica' | 'zebra' | 'argox' | 'elgin' | 'brother' | 'personalizada'
