@@ -10,7 +10,7 @@ Caixa/Tesouraria, conversão em venda, `faltas`.
 ## 1. O defeito, reproduzido
 
 `UNIQUE constraint failed: orcamentos.remote_id`, a cada ciclo de sync (2 min),
-desde 08/09/2026 — **988 ocorrências** até 10/09.
+desde 08/09/2026 — **1081 ocorrências** até a correção entrar.
 
 Reproduzido contra cópia do banco real (`VACUUM INTO`; o banco vivo só foi
 aberto em `readonly`):
@@ -78,17 +78,15 @@ Resolver a identidade **antes** de escrever, com a mesma regra que o resto do
 sistema já usa (`remote_id ?? id`), e então UPDATE ou INSERT:
 
 ```sql
-SELECT id, remote_id, sync_status FROM orcamentos
+SELECT id, remote_id, numero, sync_status FROM orcamentos
  WHERE remote_id = ? OR id = ?
- ORDER BY (remote_id = ?) DESC
- LIMIT 1
+ ORDER BY id
 ```
+
+Sem `LIMIT`: a **contagem** de correspondências é a informação — ver §7b.
 
 Preservado: `id_local`, `remote_id`, número comercial oficial, revisões, itens,
 referências locais, fila, histórico. Nenhuma linha é recriada ou apagada.
-
-Quando o id do cloud é PK de uma linha **e** `remote_id` de outra, o
-`remote_id` vence — determinístico, e a mesma regra de identidade efetiva.
 
 ## 4. Transação: de lote para linha
 
@@ -171,6 +169,101 @@ tela: 58 linhas para 58 identidades
 Zero `UNIQUE`. O histórico reconciliado. Contagem de documentos inalterada.
 Fila intocada.
 
+## 7b. Guardrail de identidade ambígua
+
+Pedido antes de publicar, e o reconciliador **não** cobria: ele localizava a
+linha com `LIMIT 1` e um critério de desempate, escolhendo em silêncio quando
+duas linhas locais casassem com o mesmo `cloud.id`. Pior: o teste que eu tinha
+escrito — *"o remote_id vence"* — **consagrava** a escolha silenciosa.
+
+Agora a contagem de correspondências é a informação:
+
+```
+0 linhas   → INSERT
+1 linha    → UPDATE nessa identidade
+2 ou mais  → nada é escrito
+```
+
+No caso ambíguo nada é apagado, fundido, recriado ou alterado. A linha do lote
+sai como conflito/preservada e o caso vai inteiro para o log:
+
+```
+[SYNC] Orçamentos: identidade_ambigua — cloud X (nº99)
+       casa com ids locais [A, X]  remote_ids [X, null]  números [11, 22]
+       — nada alterado
+```
+
+O restante do lote continua, linha a linha, por SAVEPOINT.
+
+**Teste** (`local A: id=A, remote_id=X` · `local B: id=X` · `cloud: id=X`):
+nenhuma linha apagada, nenhuma sobrescrita — comparação campo a campo do antes
+e do depois, não amostragem —, nenhuma terceira criada, itens intactos, o resto
+do lote aplicado, e rerun com relato idêntico. **58 testes verdes**; este falha
+com o `LIMIT 1` de volta.
+
+Nos dados reais: `ambiguos = 0`. O guardrail é para o caso que hoje não existe
+— que é exatamente quando ele vale.
+
+## 7c. Validação em produção — Escritório Silvano, 1.9.6
+
+Publicada em 10/09/2026 17:02 (BRT). Terminal atualizado às 17:13, confirmado
+pelo próprio app: *"Update for version 1.9.6 is not available (latest version:
+1.9.6)"*. SQLite inicializado sem erro, sem warn novo.
+
+### Quatro ciclos normais, sem falha provocada
+
+```
+17:14:03  57 do servidor — 56 atualizados, 1 novos, 0 preservados, 0 ambíguos, 0 falhas
+17:15:59  57 do servidor — 57 atualizados, 0 novos, 0 preservados, 0 ambíguos, 0 falhas
+17:17:59  57 do servidor — 57 atualizados, 0 novos, 0 preservados, 0 ambíguos, 0 falhas
+17:19:59  57 do servidor — 57 atualizados, 0 novos, 0 preservados, 0 ambíguos, 0 falhas
+```
+
+Do segundo ciclo em diante: **zero inserções**. Idempotente.
+
+### O `UNIQUE` parou
+
+```
+última ocorrência ....... 17:13:22   (35 s ANTES da instalação da 1.9.6)
+contador ................ 1081, parado
+falhas desde a 1.9.6 .... 0
+ambiguidades ............ 0
+```
+
+### Contagens
+
+```
+                  ANTES (17:02)   DEPOIS (17:20)
+orçamentos             57              58
+identidades            57              58        1:1, sem duplicata
+itens                   4               4
+fila (total/pend.)    52 / 0          52 / 0
+pendentes / abertos   3 / 54          3 / 55
+com telefone            1               1
+id ≠ remote_id          2               2        preservados
+integridade            ok              ok
+```
+
+### O `1 novos` do primeiro ciclo
+
+É o **nº61** (`b29d4bb2…`, R$ 274,50), criado **por outro terminal** às 16:01
+do mesmo dia pelo caminho legado (`terminal_id = null`). Não é documento
+inventado pela reconciliação: existe no servidor, `id = remote_id`, e as
+identidades locais subiram de 57 para 58 junto com as do servidor.
+
+Vale registrar o que isso revela: este terminal levou **1h13** para saber de um
+orçamento criado em outro, porque a descida estava morta desde 08/09. O custo do
+defeito não era só o erro no log.
+
+### Os dois documentos sob observação
+
+```
+nº58  d87547a7 / ee29e3b9   numero 58 → 59, rev 0, R$ 389,00     reconciliado
+nº60  1a4ca66e / 1a4ca66e   numero 60, rev 3, R$ 276,30          intacto
+```
+
+57 linhas com `synced_at` das rodadas. Antes da correção esse número era zero.
+
 ## 8. Riscos residuais
 
 1. **O resquício Base44** (`fe3fd121…` / `6a481d1dc98da82e12921a85`, nº1)
@@ -183,14 +276,16 @@ Fila intocada.
    separada, não corrigida nesta subfase.
 3. **A descida segue trazendo só o cabeçalho.** Itens de outro terminal não
    chegam. É o que torna correto não adotar a revisão.
-4. **Não rodou no app real ainda** — a prova é contra cópia. O terminal
-   continua em 1.9.5; a 1.9.6 está construída e **não publicada**.
+4. **Os outros cinco terminais seguem na versão anterior.** A 1.9.6 está
+   publicada e disponível, mas nenhum foi forçado. Enquanto não subirem, cada
+   um continua com a descida quebrada e com a lista possivelmente duplicada.
 5. **`pdv_operacoes` e `pdv_terminais` seguem sem leitura** nesta sessão (o
    conector Supabase precisa ser reautorizado; a chave `anon` é barrada nas
    duas, corretamente).
 
 ## 9. Entrega
 
-`vargasnexus-pdv` — commit `8ff3f5b`, versão **1.9.6**, instalador
-`dist/VargasNexus PDV Setup 1.9.6.exe` (82.762.242 bytes).
-**Não publicado. Nenhuma flag alterada.**
+`vargasnexus-pdv` — commits `8ff3f5b` (correção) e `7a9de16` (guardrail),
+versão **1.9.6**, release `v1.9.6` publicada em 10/09/2026 17:02 (BRT).
+Validada em produção só no **Escritório Silvano**.
+`orcamentos = true` continua apenas nele. Nenhuma outra flag alterada.
