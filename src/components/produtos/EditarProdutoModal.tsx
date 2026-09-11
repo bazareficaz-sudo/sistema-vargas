@@ -1182,10 +1182,16 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Estoque atual</label>
-                  <input type="number" value={form.estoque}
-                    disabled={form.tipo === 'kit'}
-                    onChange={e => campo('estoque', parseFloat(e.target.value) || 0)}
-                    className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${form.tipo === 'kit' ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed' : 'border-gray-300 text-gray-900 focus:border-blue-500'}`} />
+                  <input type="number" value={form.estoque} disabled readOnly
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-500 cursor-not-allowed" />
+                  {/* Editar aqui pulava o motivo e o extrato — a mesma alteração some do
+                      histórico de movimentação. Estoque só muda por venda/entrada
+                      registrada ou pelo ajuste com motivo, na tela de Estoque Detalhado. */}
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    {form.tipo === 'kit'
+                      ? 'Calculado a partir dos componentes.'
+                      : 'Ajuste pela tela de Estoque Detalhado — fica registrado o motivo.'}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Estoque mínimo</label>

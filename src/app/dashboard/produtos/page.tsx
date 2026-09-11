@@ -157,6 +157,36 @@ export default async function ProdutosPage({
     for (const img of imgs ?? []) imagensMap[img.produto_id] = img.url
   }
 
+  // Endereço cadastrado do produto dentro do depósito, se houver.
+  //
+  // `produto_estoque.localizacao` é por depósito — a maioria das empresas
+  // opera com um só, mas quando há mais de um endereçado, a lista junta os
+  // dois em vez de escolher um e esconder o outro.
+  const enderecosMap: Record<string, string> = {}
+  if (produtoIds.length > 0) {
+    const { data: locs } = await supabase
+      .from('produto_estoque')
+      .select('produto_id, localizacao, depositos(nome)')
+      .in('produto_id', produtoIds)
+      .not('localizacao', 'is', null)
+    const porProduto = new Map<string, { localizacao: string; deposito: string }[]>()
+    for (const l of (locs ?? []) as any[]) {
+      if (!l.localizacao) continue
+      const deposito = Array.isArray(l.depositos) ? l.depositos[0] : l.depositos
+      const lista = porProduto.get(l.produto_id) ?? []
+      lista.push({ localizacao: l.localizacao, deposito: deposito?.nome ?? '' })
+      porProduto.set(l.produto_id, lista)
+    }
+    for (const [produtoId, enderecos] of porProduto) {
+      // O nome do depósito só aparece quando o PRÓPRIO produto está
+      // endereçado em mais de um — com um só, ele não desambigua nada e só
+      // repetiria a mesma informação em cada linha da lista.
+      enderecosMap[produtoId] = enderecos.length > 1
+        ? enderecos.map(e => e.deposito ? `${e.localizacao} (${e.deposito})` : e.localizacao).join(' · ')
+        : enderecos[0].localizacao
+    }
+  }
+
   // Onde cada produto desta página está anunciado.
   //
   // Conta os anúncios diretos e também as variações — uma variação é um
@@ -255,6 +285,7 @@ export default async function ProdutosPage({
       envioMensagem={envioMensagem}
       produtos={produtos ?? []}
       imagensMap={imagensMap}
+      enderecosMap={enderecosMap}
       total={total}
       totalAtivos={total}
       totalInativos={0}

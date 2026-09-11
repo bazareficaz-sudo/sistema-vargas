@@ -54,6 +54,10 @@ type Props = {
   envioMensagem?: EnvioMensagem
   produtos: Produto[]
   imagensMap?: Record<string, string>
+  // Endereço(s) cadastrado(s) do produto dentro do(s) depósito(s) — vem de
+  // `produto_estoque.localizacao`. Ausente quando o produto nunca foi
+  // endereçado.
+  enderecosMap?: Record<string, string>
   total: number
   totalAtivos: number
   totalInativos: number
@@ -109,7 +113,7 @@ const ABAS = [
 ]
 
 export default function ProdutosClient({
-  produtos: inicial, imagensMap = {}, total, totalTodos, totalSimples, totalKits,
+  produtos: inicial, imagensMap = {}, enderecosMap = {}, total, totalTodos, totalSimples, totalKits,
   pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, apenasAtivos: apenasAtivosInicial, empresaId,
   anunciosMap, abrirProdutoId, abrirProdutoAba,
   categoriasRaiz, categoriasTodas, marcas,
@@ -495,6 +499,7 @@ export default function ProdutosClient({
           produto={vendoEstoque}
           empresaId={empresaId}
           onAtualizado={(novoEstoque) => setProdutos(prev => prev.map(p => p.id === vendoEstoque.id ? { ...p, estoque: novoEstoque } : p))}
+          onEstoqueMinimoAtualizado={(novoMinimo) => setProdutos(prev => prev.map(p => p.id === vendoEstoque.id ? { ...p, estoque_minimo: novoMinimo } : p))}
           onClose={() => setVendoEstoque(null)}
         />
       )}
@@ -864,6 +869,7 @@ export default function ProdutosClient({
                 <td className="px-3 py-4 align-middle">
                   <button onClick={() => setVendoEstoque(p)} className={`font-medium hover:underline ${estoque < 0 ? 'text-red-600' : estoque === 0 ? 'text-amber-700' : 'text-gray-900'}`}>{estoque.toLocaleString('pt-BR')} {p.unidade.toLowerCase()}</button>
                   <p className="mt-1 text-xs text-gray-400">{estoque < 0 ? 'Reposição urgente' : estoque === 0 ? 'Sem disponibilidade' : estoque <= p.estoque_minimo ? 'Abaixo do mínimo' : 'Estoque disponível'}</p>
+                  {enderecosMap[p.id] && <p className="mt-0.5 text-xs text-gray-400" title="Endereço no depósito">📍 {enderecosMap[p.id]}</p>}
                 </td>
                 <td className="px-3 py-4 align-middle"><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${situacao.cls}`}>{situacao.texto}</span></td>
                 <td className="px-3 py-4 align-middle">

@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produtos/movimentacao'
 import { ajustarDepositoPrincipal, definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 
-type Produto = { id: string; nome: string; sku: string | null; unidade: string; estoque: number }
+type Produto = { id: string; nome: string; sku: string | null; unidade: string; estoque: number; estoque_minimo: number }
 
 type PorDeposito = { deposito_id: string; nome: string; quantidade: number; estoque_minimo: number; localizacao: string | null }
 
@@ -49,11 +49,12 @@ const FILTROS: { key: string; label: string }[] = [
 function fmtDT(s: string) { return new Date(s).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) }
 function fmtMoeda(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 
-export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onAtualizado }: {
+export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onAtualizado, onEstoqueMinimoAtualizado }: {
   produto: Produto
   empresaId: string
   onClose: () => void
   onAtualizado?: (novoEstoque: number) => void
+  onEstoqueMinimoAtualizado?: (novoMinimo: number) => void
 }) {
   const [carregando, setCarregando] = useState(true)
   const [porDeposito, setPorDeposito] = useState<PorDeposito[]>([])
@@ -66,7 +67,10 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
     estoquePorDeposito: { depositoNome: string; quantidade: number }[]
   }[]>([])
 
-  const [ajustando, setAjustando] = useState(false)
+  // 'contagem' pede o NÚMERO FINAL na prateleira (o que já existia).
+  // 'adicionar'/'subtrair' pedem uma QUANTIDADE — o operador não precisa
+  // saber nem calcular o total, só o que entrou ou saiu.
+  const [modoAjuste, setModoAjuste] = useState<'contagem' | 'adicionar' | 'subtrair' | null>(null)
   const [novaQtd, setNovaQtd] = useState('')
   const [motivoAjuste, setMotivoAjuste] = useState('')
   const [salvandoAjuste, setSalvandoAjuste] = useState(false)
@@ -74,6 +78,13 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
   // Fica visível depois do ajuste quando o depósito não pôde receber a
   // contagem — sem isso o operador não teria como saber.
   const [avisoDeposito, setAvisoDeposito] = useState('')
+
+  // Estoque mínimo — edição rápida, sem abrir o cadastro completo do produto.
+  const [estoqueMinimo, setEstoqueMinimo] = useState(produto.estoque_minimo)
+  const [minimoForm, setMinimoForm] = useState('')
+  const [editandoMinimo, setEditandoMinimo] = useState(false)
+  const [salvandoMinimo, setSalvandoMinimo] = useState(false)
+  const [erroMinimo, setErroMinimo] = useState('')
 
   async function carregarPorDeposito() {
     const sb = createClient()
@@ -91,15 +102,28 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
       })))
   }
 
-  function abrirAjuste() {
-    setNovaQtd(String(estoqueAtual)); setMotivoAjuste(''); setErroAjuste(''); setAjustando(true)
+  function abrirAjuste(modo: 'contagem' | 'adicionar' | 'subtrair') {
+    // Só a contagem parte do valor atual — é uma correção do número inteiro.
+    // Adicionar/subtrair partem de vazio: o operador informa o quanto mexeu,
+    // não o total resultante.
+    setNovaQtd(modo === 'contagem' ? String(estoqueAtual) : '')
+    setMotivoAjuste(''); setErroAjuste(''); setModoAjuste(modo)
   }
 
   async function salvarAjuste() {
-    const nova = parseFloat(novaQtd)
-    if (!Number.isFinite(nova)) { setErroAjuste('Informe uma quantidade válida.'); return }
+    const valor = parseFloat(novaQtd)
+    if (!Number.isFinite(valor)) { setErroAjuste('Informe uma quantidade válida.'); return }
+
+    let nova: number
+    if (modoAjuste === 'contagem') {
+      nova = valor
+      if (nova === estoqueAtual) { setErroAjuste('A quantidade informada é igual ao estoque atual.'); return }
+    } else {
+      if (valor <= 0) { setErroAjuste('Informe uma quantidade maior que zero.'); return }
+      nova = modoAjuste === 'adicionar' ? estoqueAtual + valor : estoqueAtual - valor
+    }
+
     if (!motivoAjuste.trim()) { setErroAjuste('Informe o motivo do ajuste — fica registrado no extrato.'); return }
-    if (nova === estoqueAtual) { setErroAjuste('A quantidade informada é igual ao estoque atual.'); return }
 
     setSalvandoAjuste(true); setErroAjuste('')
     const sb = createClient()
@@ -146,7 +170,21 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
     await carregarPorDeposito()
     onAtualizado?.(nova)
 
-    setSalvandoAjuste(false); setAjustando(false); setNovaQtd(''); setMotivoAjuste('')
+    setSalvandoAjuste(false); setModoAjuste(null); setNovaQtd(''); setMotivoAjuste('')
+  }
+
+  async function salvarEstoqueMinimo() {
+    const novo = parseFloat(minimoForm)
+    if (!Number.isFinite(novo) || novo < 0) { setErroMinimo('Informe uma quantidade válida.'); return }
+    setSalvandoMinimo(true); setErroMinimo('')
+    const sb = createClient()
+    const { error } = await sb.from('produtos')
+      .update({ estoque_minimo: novo, updated_at: new Date().toISOString() }).eq('id', produto.id)
+    setSalvandoMinimo(false)
+    if (error) { setErroMinimo(error.message); return }
+    setEstoqueMinimo(novo)
+    onEstoqueMinimoAtualizado?.(novo)
+    setEditandoMinimo(false)
   }
 
   useEffect(() => {
@@ -361,28 +399,47 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
             <span className="text-sm text-blue-900 font-medium">Estoque atual</span>
             <div className="flex items-center gap-3">
               <span className="text-xl font-bold text-blue-700">{estoqueAtual} {produto.unidade}</span>
-              {!ajustando && (
-                <button onClick={abrirAjuste} className="text-xs px-2.5 py-1 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors">
-                  ⚙ Ajustar
-                </button>
+              {!modoAjuste && (
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => abrirAjuste('adicionar')} title="Adicionar estoque"
+                    className="text-xs px-2.5 py-1 border border-green-300 text-green-700 rounded-lg hover:bg-green-100 transition-colors">
+                    + Adicionar
+                  </button>
+                  <button onClick={() => abrirAjuste('subtrair')} title="Subtrair estoque"
+                    className="text-xs px-2.5 py-1 border border-red-300 text-red-700 rounded-lg hover:bg-red-100 transition-colors">
+                    − Subtrair
+                  </button>
+                  <button onClick={() => abrirAjuste('contagem')} title="Definir a quantidade exata (contagem física)"
+                    className="text-xs px-2.5 py-1 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors">
+                    ⚙ Contagem
+                  </button>
+                </div>
               )}
             </div>
           </div>
 
-          {ajustando && (
+          {modoAjuste && (
             <div className="mt-3 bg-white border border-blue-200 rounded-lg p-3 space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] text-gray-500 mb-1">Nova quantidade</label>
-                  <input type="number" step="0.001" value={novaQtd} onChange={e => setNovaQtd(e.target.value)}
+                  <label className="block text-[11px] text-gray-500 mb-1">
+                    {modoAjuste === 'contagem' ? 'Nova quantidade' : modoAjuste === 'adicionar' ? 'Quantidade a adicionar' : 'Quantidade a subtrair'}
+                  </label>
+                  <input type="number" step="0.001" autoFocus value={novaQtd} onChange={e => setNovaQtd(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500" />
                 </div>
-                {novaQtd !== '' && Number.isFinite(parseFloat(novaQtd)) && parseFloat(novaQtd) !== estoqueAtual && (
+                {novaQtd !== '' && Number.isFinite(parseFloat(novaQtd)) && (
                   <div className="flex items-end pb-1.5">
                     <p className="text-xs text-gray-500">
-                      {parseFloat(novaQtd) > estoqueAtual
-                        ? <>Entrada de <strong className="text-green-600">{(parseFloat(novaQtd) - estoqueAtual).toLocaleString('pt-BR')}</strong></>
-                        : <>Saída de <strong className="text-red-600">{(estoqueAtual - parseFloat(novaQtd)).toLocaleString('pt-BR')}</strong></>}
+                      {modoAjuste === 'contagem' ? (
+                        parseFloat(novaQtd) === estoqueAtual ? null : parseFloat(novaQtd) > estoqueAtual
+                          ? <>Entrada de <strong className="text-green-600">{(parseFloat(novaQtd) - estoqueAtual).toLocaleString('pt-BR')}</strong></>
+                          : <>Saída de <strong className="text-red-600">{(estoqueAtual - parseFloat(novaQtd)).toLocaleString('pt-BR')}</strong></>
+                      ) : (
+                        <>Fica em <strong className={modoAjuste === 'adicionar' ? 'text-green-600' : 'text-red-600'}>
+                          {(modoAjuste === 'adicionar' ? estoqueAtual + parseFloat(novaQtd) : estoqueAtual - parseFloat(novaQtd)).toLocaleString('pt-BR')}
+                        </strong> {produto.unidade}</>
+                      )}
                     </p>
                   </div>
                 )}
@@ -395,7 +452,7 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
               </div>
               {erroAjuste && <p className="text-xs text-red-600">{erroAjuste}</p>}
               <div className="flex justify-end gap-2">
-                <button onClick={() => setAjustando(false)} className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50">
+                <button onClick={() => setModoAjuste(null)} className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50">
                   Cancelar
                 </button>
                 <button onClick={salvarAjuste} disabled={salvandoAjuste}
@@ -405,6 +462,30 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
               </div>
             </div>
           )}
+
+          <div className="mt-3 flex items-center justify-between border-t border-blue-100 pt-3">
+            <span className="text-xs text-blue-900">Estoque mínimo</span>
+            {editandoMinimo ? (
+              <div className="flex items-center gap-1.5">
+                <input type="number" step="0.001" autoFocus value={minimoForm} onChange={e => setMinimoForm(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') salvarEstoqueMinimo(); if (e.key === 'Escape') setEditandoMinimo(false) }}
+                  className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-xs font-mono focus:outline-none focus:border-blue-500" />
+                <button onClick={salvarEstoqueMinimo} disabled={salvandoMinimo}
+                  className="px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+                  {salvandoMinimo ? '...' : 'Salvar'}
+                </button>
+                <button onClick={() => setEditandoMinimo(false)} className="px-2 py-1 border border-gray-300 text-gray-500 text-xs rounded-lg hover:bg-gray-50">
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => { setMinimoForm(String(estoqueMinimo)); setErroMinimo(''); setEditandoMinimo(true) }}
+                className="text-xs font-medium text-blue-700 hover:underline">
+                {estoqueMinimo} {produto.unidade} <span className="text-blue-400">✎ editar</span>
+              </button>
+            )}
+          </div>
+          {erroMinimo && <p className="text-xs text-red-600 mt-1">{erroMinimo}</p>}
         </div>
 
         {carregando ? (
