@@ -401,3 +401,28 @@ quantidade de documentos alheios distintos abertos, não por cliques.
 
 Contar tudo junto superestimaria a dependência do `anon` e adiaria um corte que
 os dados já autorizariam.
+
+---
+
+## 18. "Revogado" ≠ "incapaz de operar" — enquanto o `anon` estiver aberto
+
+O Balcão 1 foi revogado em 11/09/2026. Vale fixar o que isso significa hoje, e
+o que só significará depois do corte do `anon`.
+
+| | Hoje | Depois do corte do `anon` |
+|---|---|---|
+| rotas autenticadas | **bloqueadas** — `decidirAcesso` devolve 403 `terminal_revogado` | bloqueadas |
+| caminho legado | **continua funcionando** — o `anon` não sabe quem é quem | bloqueado |
+| efeito prático | o terminal perde a **identidade**, não o **acesso** | o terminal para de operar |
+
+Revogar hoje resolve o caso "a máquina está fora de uso". Não resolve o caso
+"a máquina volta a ser usada": ela continua vendendo pelo `anon`, e agora sem
+nenhuma chance de se identificar — ou seja, **menos visível**, não mais contida.
+
+É o mesmo padrão do `PDV-001` duplicado em duas máquinas, que deixou 95 vendas
+inatribuíveis.
+
+**Consequência para o corte do `anon`:** a revogação só vira bloqueio efetivo
+depois dele. Até lá, os dois conceitos precisam aparecer separados em qualquer
+relatório de frota — um terminal revogado que ainda opera pelo legado não é uma
+contradição, é o estado esperado.
