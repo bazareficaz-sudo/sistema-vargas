@@ -90,6 +90,22 @@ segundo existem no banco — ou seja, não protegeu.
 ele arbitra tarde demais — as duas vendas já commitaram localmente com estoque
 baixado duas vezes. O `UNIQUE` precisa existir **nos dois lados**.
 
+> ### CORREÇÃO (11/09/2026)
+>
+> A tabela acima vale **apenas para o mesmo terminal**. Uma versão anterior
+> deste documento estendeu a conclusão para a corrida offline entre dois
+> terminais, e isso está **errado**.
+>
+> **Cada terminal tem um SQLite independente.** O `UNIQUE` local de A não
+> enxerga o banco de B. Se A e B estiverem offline, os dois vão commitar suas
+> vendas para o mesmo orçamento, e os dois vão baixar estoque localmente. Nada
+> local impede isso, e nada local pode impedir.
+>
+> A proteção local serve para: **duplo clique, retry local, crash/restart e
+> duas tentativas no mesmo terminal.** Só.
+>
+> A autoridade **global** é, e continua sendo, o Postgres.
+
 ## 4. Como o servidor distingue retry de segunda venda concorrente
 
 **Hoje: não distingue.** Só existe a heurística de 2 minutos por
@@ -214,10 +230,16 @@ remotas — mas é a tabela de vendas, e a autorização precisa ser explícita.
 autorização explícita.
 
 As cinco perguntas estão respondidas e o desenho está determinado. Mas a
-auditoria mostrou que **o `UNIQUE` remoto sozinho não basta**: sem o `UNIQUE`
-local, o duplo clique e a corrida offline continuam baixando estoque duas vezes
-antes de qualquer arbitragem. E a regra que você não negocia — a perdedora não
-pode ficar silenciosa — exige estado explícito na tabela `vendas` local.
+auditoria mostrou que **o `UNIQUE` remoto sozinho não basta para o duplo clique
+no mesmo terminal**: sem o `UNIQUE` local, duas vendas commitam antes de
+qualquer arbitragem, com estoque baixado duas vezes.
+
+**Para a corrida entre DOIS terminais offline, o `UNIQUE` local não ajuda em
+nada** — bancos independentes não se enxergam, e os dois vão baixar estoque
+localmente. Lá a arbitragem é do Postgres, e o que a fase precisa garantir é o
+desfecho da perdedora, não a prevenção. E a regra que você não negocia — a
+perdedora não pode ficar silenciosa — exige estado explícito na tabela `vendas`
+local.
 
 Ou seja: **a menor correção segura toca a tabela `vendas`**, que está fenceada
 desde a 0.6C. Não vou fazer isso por conta própria.
