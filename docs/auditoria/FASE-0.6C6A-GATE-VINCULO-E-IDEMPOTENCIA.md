@@ -247,3 +247,77 @@ desde a 0.6C. Não vou fazer isso por conta própria.
 Se a autorização não vier, a alternativa é 0.6C.6A ficar só com o lado remoto —
 o que eu **não recomendo**, porque entregaria a aparência de proteção enquanto o
 estoque continua duplicando localmente.
+
+---
+
+## 10. Guardrail de processo — sonda de autorização
+
+**Uma sonda de escrita tem que ser desenhada para o caso de SUCESSO, não só
+para o de negação.**
+
+Em 11/09/2026, testando se `anon` alcançava `orcamentos.venda_id`, mandei um
+`PATCH` real contra o orçamento nº60 esperando um 403. Voltou **204**: a escrita
+passou, e um documento comercial real foi alterado. Foi revertido em seguida e
+o estado conferido (`venda_id` nulo, status e revisão intactos, zero vínculos no
+banco), mas o dano só não existiu por sorte do que a coluna era.
+
+A sonda correta, usada depois, mira um **id inexistente**: a checagem de
+permissão acontece igual, e nenhuma linha pode ser tocada em nenhum dos dois
+desfechos.
+
+Vale para qualquer teste de permissão, não só para este.
+
+## 11. A exposição, e a correção
+
+A sonda achou o buraco que eu mesmo tinha aberto: pôr a arbitragem numa coluna
+de uma tabela onde `anon` tinha `UPDATE` de tabela inteira. A garantia era de
+convenção, não de permissão — e o commit dizia "o servidor arbitra", o que era
+forte demais.
+
+Detalhe que quase fez a correção falhar: **`REVOKE UPDATE (coluna)` não subtrai
+de um `UPDATE` de tabela já concedido.** Provado em transação revertida:
+
+```
+antes ............................ tabela=true   venda_id=true
+após REVOKE UPDATE (venda_id) .... tabela=true   venda_id=TRUE   ← não bloqueou
+após REVOKE UPDATE ON orcamentos . tabela=false  venda_id=false
+após GRANT UPDATE (status) ....... status=true   venda_id=false
+```
+
+### Matriz final
+
+| coluna | anon | authenticated | service_role |
+|---|---|---|---|
+| **venda_id** | **não** | **não** | sim |
+| **revisao** | **não** | **não** | sim |
+| status, cliente_nome, subtotal, desconto, total, observacao, validade | sim | sim | sim |
+| cliente_id, updated_at, enviado_em, condições à vista | não | sim | sim |
+| id, empresa_id, numero, operador_nome, created_at, terminal_id | não | não | sim |
+
+### Provas por HTTP, contra id inexistente
+
+```
+anon {status} ............................ 204 PERMITIDO
+anon {6 colunas do payload real} ......... 204 PERMITIDO
+anon {venda_id} .......................... 401 NEGADO (42501)
+anon {status + venda_id} ................. 401 NEGADO   ← a mistura também cai
+anon {revisao} ........................... 401 NEGADO
+anon {numero} ............................ 401 NEGADO
+orçamentos com venda_id depois ........... 0
+```
+
+### Arbitragem, executando como os papéis reais
+
+```
+current_user = service_role
+1 livre -> converter ....... convertido        revisão 0 → 1
+2 retry mesma venda ........ ja_convertido     revisão CONTINUA 1
+3 outra venda .............. conflito_conversao, vencedora identificada
+4 revisão após os três ..... 1
+current_user = anon
+5 executar a RPC ........... permission denied for function converter_orcamento_pdv
+6 gravar venda_id .......... permission denied for table orcamentos
+```
+
+Tudo em transação revertida: 58 orçamentos, 0 vínculos, 0 convertidos, nenhum
+documento descartável sobrou.
