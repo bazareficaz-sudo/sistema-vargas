@@ -375,3 +375,29 @@ Terminal revogado não é o mesmo teste que token inválido, e flag desligada fo
 inferida do uso de `decidirAcesso`. Ambos são governados pelo mesmo código que
 já protege as rotas de escrita em produção — o que é uma garantia real, mas de
 outra natureza. Ficam registrados como herdados, não como medidos.
+
+---
+
+## 17. Critério para o corte do `anon` — o que `pdv_operacoes` passa a misturar
+
+A partir da 1.9.9, abrir um orçamento de outro terminal num PDV **sem** a flag
+`orcamentos` registra um `legacy_fallback` com operação `orcamentos.ler`.
+
+Isso engorda `pdv_operacoes`, que é a tabela cujo número autoriza o corte do
+`anon`. **Crescimento por `orcamentos.ler` NÃO significa terminal ainda
+escrevendo pelo `anon`.**
+
+Qualquer critério futuro de corte precisa separar três coisas:
+
+| Categoria | Como identificar | Significa |
+|---|---|---|
+| **escrita legada real** | `metodo = 'legacy_fallback'` e operação de escrita (`.salvar`, `.cancelar`, `faltas.registrar`, …) | terminal ainda grava pelo `anon` — **bloqueia o corte** |
+| **leitura autenticada** | `metodo = 'terminal_token'`, operação `orcamentos.ler` | não aparece aqui: leitura não usa o ledger (`leituraProtegida`) |
+| **fallback de leitura** | `metodo = 'legacy_fallback'`, operação `orcamentos.ler` | terminal sem a flag **lendo** pelo `anon` — não é escrita, **não bloqueia o corte** pelo mesmo motivo |
+
+O `upsert` por `(terminal_id, operacao, idempotency_key)` com chave `ler:<id>`
+dedupa aberturas repetidas do mesmo documento, então o volume é limitado pela
+quantidade de documentos alheios distintos abertos, não por cliques.
+
+Contar tudo junto superestimaria a dependência do `anon` e adiaria um corte que
+os dados já autorizariam.
