@@ -3,9 +3,13 @@ import { decidirSimulacao } from '@/lib/marketplace/simulacao'
 import { decidirPausa, camposPausaAutomatica, camposReativacao } from '@/lib/marketplace/pausa'
 import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produtos/estoqueUnificado'
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
-import { enviarParaAnuncio, sleep, THROTTLE_ENVIO_MS, type CanalEnvio } from './envio'
+import { enviarParaAnuncio, sleep, THROTTLE_ENVIO_MS, type AlvoVariacao, type CanalEnvio } from './envio'
 import { precisaEnviar } from './precisaEnviar'
 import { canalAceitaEnvio, type CanalComInterruptores } from './canais'
+import {
+  variacoesElegiveis, decidirPausaComVariacoes, rotuloDaVariacao, resumoDosAlvos,
+  type AlvoCalculado, type VariacaoDoAnuncio,
+} from './estoqueVariacoes'
 
 // FASE 3 — processador da fila de atualização (sistema → marketplace).
 //
@@ -197,12 +201,69 @@ export async function processarFilaDaEmpresa(
     if (!pagina || pagina.length < TAMANHO_PAGINA) break
   }
 
+  // ── ANÚNCIO COM VARIAÇÃO ENTRA POR OUTRA PORTA ──────────────────────────
+  //
+  // A consulta acima acha anúncios por `marketplace_anuncios.produto_id`. Num
+  // anúncio com variação esse campo não é o que manda: o produto do ERP mora
+  // em CADA variação (`marketplace_anuncio_variacoes.produto_id`), e é o
+  // estoque dele que precisa subir. Medido em 12/09/2026: 594 anúncios com
+  // variação, 193 variações mapeadas, e só 115 daqueles anúncios têm produto
+  // no pai — ou seja, buscar só pelo pai deixaria a maioria de fora.
+  //
+  // Sem este bloco, mexer no estoque de "Camiseta azul M" enfileirava o
+  // produto, a fila não achava anúncio nenhum para ele e gravava
+  // `sem_anuncio` — dizendo que um produto anunciado não está anunciado.
+  const variacoesDaRodada: any[] = []
+  for (let offset = 0; offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
+    const { data: pagina, error } = await sb
+      .from('marketplace_anuncio_variacoes')
+      .select('id, anuncio_id, produto_id')
+      .in('produto_id', produtoIds)
+      .order('id', { ascending: true })
+      .range(offset, offset + TAMANHO_PAGINA - 1)
+    if (error) throw new Error(`Consulta de variações da fila falhou: ${error.message}`)
+    variacoesDaRodada.push(...(pagina ?? []))
+    if (!pagina || pagina.length < TAMANHO_PAGINA) break
+  }
+
+  const idsAnunciosPorVariacao = [...new Set<string>(variacoesDaRodada.map(v => v.anuncio_id))]
+  const jaCarregados = new Set<string>((anuncios ?? []).map((a: any) => a.id))
+  const faltantes = idsAnunciosPorVariacao.filter(id => !jaCarregados.has(id))
+  if (faltantes.length > 0 && idsDeCanal.length > 0) {
+    for (let i = 0; i < faltantes.length; i += TAMANHO_PAGINA) {
+      const { data: extras, error } = await sb
+        .from('marketplace_anuncios')
+        .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, pausa_origem, empresa_id')
+        .in('id', faltantes.slice(i, i + TAMANHO_PAGINA))
+        // O limite de inquilino continua vindo do canal, como na consulta
+        // principal: sem isto, um id de variação de outra empresa traria o
+        // anúncio dela para dentro desta rodada.
+        .in('canal_id', idsDeCanal)
+      if (error) throw new Error(`Consulta de anúncios com variação falhou: ${error.message}`)
+      anuncios.push(...(extras ?? []))
+    }
+  }
+
+  // Anúncio com variação sai do mapa por produto: ele é processado UMA vez
+  // por rodada, não uma vez por produto da fila que caia nele. Dois produtos
+  // enfileirados que sejam variações do mesmo anúncio pediriam o mesmo envio
+  // duas vezes — e a segunda veria o espelho já atualizado pela primeira.
   const porProduto = new Map<string, any[]>()
+  const anunciosComVariacao = new Map<string, any>()
   for (const a of anuncios ?? []) {
+    if (a.tem_variacao) { anunciosComVariacao.set(a.id, a); continue }
+    if (!a.produto_id) continue
     const lista = porProduto.get(a.produto_id) ?? []
     lista.push(a)
     porProduto.set(a.produto_id, lista)
   }
+
+  // Quais produtos da fila estão cobertos por um anúncio com variação —
+  // para não caírem em `sem_anuncio` mais abaixo.
+  const cobertosPorVariacao = new Set<string>(
+    variacoesDaRodada
+      .filter(v => anunciosComVariacao.has(v.anuncio_id))
+      .map(v => v.produto_id))
 
   // ── POR QUE NAO ACHOU, quando nao acha ──────────────────────────────────
   //
@@ -214,7 +275,7 @@ export async function processarFilaDaEmpresa(
   // UMA consulta a mais por rodada, so quando sobrou produto sem anuncio, e
   // sem NENHUM filtro de escopo: se o anuncio existe e ficou de fora, a linha
   // passa a dizer isso, com o canal dele.
-  const semAnuncioIds = produtoIds.filter((id: string) => !porProduto.has(id))
+  const semAnuncioIds = produtoIds.filter((id: string) => !porProduto.has(id) && !cobertosPorVariacao.has(id))
   const forasteiros = new Map<string, { canais: string[]; total: number }>()
   if (semAnuncioIds.length > 0) {
     const { data: fora } = await sb
@@ -276,6 +337,9 @@ export async function processarFilaDaEmpresa(
     if (!produto) continue
 
     const lista = porProduto.get(item.produto_id) ?? []
+    // Coberto por anúncio com variação: o trabalho dele acontece no bloco
+    // próprio, depois deste laço, uma vez por anúncio.
+    if (lista.length === 0 && cobertosPorVariacao.has(item.produto_id)) continue
     if (lista.length === 0) {
       // Movimentação de produto sem anúncio mapeado. Registrar em vez de
       // ignorar calado: com ~91% dos anúncios sem produto vinculado, uma fila
@@ -298,20 +362,6 @@ export async function processarFilaDaEmpresa(
 
     for (const a of lista) {
       anunciosAvaliados++
-
-      if (a.tem_variacao) {
-        // Anúncio com variação distribui estoque por variação; mandar um
-        // número só sobrescreveria a distribuição inteira. Fica de fora até
-        // existir tratamento por variação.
-        comVariacao++
-        linhas.push({
-          empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
-          anuncio_id: a.id, produto_id: produto.id, acao: 'com_variacao',
-          estoque_sistema: produto.estoque, estoque_canal: a.estoque_externo,
-          detalhe: 'anúncio com variação — fora do escopo da fila',
-        })
-        continue
-      }
 
       // Unificado do grupo, kit calculado pelos componentes, ou o estoque da
       // própria empresa — a decisão mora em `estoqueDoSistema`, o mesmo lugar
@@ -505,6 +555,289 @@ export async function processarFilaDaEmpresa(
     }
   }
 
+  // ── ANÚNCIOS COM VARIAÇÃO ───────────────────────────────────────────────
+  //
+  // Uma passada por ANÚNCIO (não por produto): o envio é uma chamada só com
+  // a lista de modelos, e dois produtos da fila que sejam variações do mesmo
+  // anúncio têm de virar um envio, não dois.
+  for (const a of anunciosComVariacao.values()) {
+    const { data: todasVariacoes } = await sb
+      .from('marketplace_anuncio_variacoes')
+      .select('id, model_id, nome_variacao, sku_variacao, produto_id, preco, estoque')
+      .eq('anuncio_id', a.id)
+      .order('nome_variacao', { ascending: true })
+
+    const { elegiveis, ignoradas } = variacoesElegiveis((todasVariacoes ?? []) as VariacaoDoAnuncio[])
+    anunciosAvaliados++
+    comVariacao++
+
+    // Produtos da FILA que dependem deste anúncio — é para eles que uma
+    // falha aqui precisa voltar como pendência.
+    //
+    // O produto do anúncio-pai entra junto quando está na fila: há 115
+    // anúncios com variação que TÊM produto no pai, e foi por ele que alguns
+    // chegaram até aqui. Sem esta linha, um envio que falhasse marcaria esse
+    // produto como resolvido — a falha mais cara que uma fila pode ter.
+    const produtosDaFilaNesteAnuncio = [...new Set<string>([
+      ...elegiveis.map(v => v.produto_id!),
+      ...(a.produto_id ? [a.produto_id as string] : []),
+    ])].filter((id: string) => produtoIds.includes(id))
+
+    // As linhas do que ficou de fora vão para o log com o motivo: "sem
+    // produto vinculado" é acionável no Mapa de anúncios, e some se ninguém
+    // a escrever.
+    for (const ig of ignoradas) {
+      linhas.push({
+        empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
+        anuncio_id: a.id, variacao_id: ig.variacao.id, produto_id: null,
+        acao: 'variacao_sem_produto', estoque_canal: ig.variacao.estoque,
+        detalhe: ig.detalhe,
+      })
+    }
+
+    if (elegiveis.length === 0) {
+      // `com_variacao` e não `sem_anuncio`: o anúncio existe e está mapeado —
+      // o que falta é vincular produto às variações dele. Chamar isso de "sem
+      // anúncio" mandaria quem lê para o lugar errado.
+      linhas.push({
+        empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
+        anuncio_id: a.id, produto_id: a.produto_id ?? null, acao: 'com_variacao',
+        detalhe: `${a.titulo ?? 'anúncio'} — com variação, e nenhuma variação tem produto vinculado. `
+          + 'Mapeie as variações no Mapa de anúncios para a fila poder mandar estoque.',
+      })
+      continue
+    }
+
+    // Produtos das variações: podem não estar na rodada (uma variação do
+    // mesmo anúncio cujo produto não se mexeu). Precisam vir assim mesmo —
+    // o envio manda a lista inteira de modelos controlados, e omitir os
+    // parados faria a plataforma ficar sem o número deles.
+    const idsProdutoVariacao = [...new Set<string>(elegiveis.map(v => v.produto_id!))]
+    const faltando = idsProdutoVariacao.filter(id => !mapaProduto.has(id))
+    if (faltando.length > 0) {
+      const { data: extras } = await sb
+        .from('produtos')
+        .select('id, nome, sku, estoque, preco_venda, preco_custo, tipo')
+        .in('id', faltando)
+      for (const p of (extras ?? []) as ProdutoFila[]) mapaProduto.set(p.id, p)
+    }
+
+    // Estoque unificado do grupo para os produtos que não vieram na conta da
+    // rodada — mesma função, mesma configuração. Entra NO MESMO mapa: escolher
+    // um dos dois deixaria metade das variações sem o número unificado.
+    if (faltando.length > 0) {
+      const extra = await estoqueUnificadoDeProdutos(sb, cfg.empresa_id, faltando, cfgUnif)
+      if (extra && mapaUnificado) for (const [k, v] of extra) mapaUnificado.set(k, v)
+    }
+
+    let regraDoAnuncio: any = null
+    if (a.regra_id) {
+      if (!regrasUsadas.has(a.regra_id)) {
+        const { data } = await sb.from('marketplace_regras_preco').select('*').eq('id', a.regra_id).maybeSingle()
+        regrasUsadas.set(a.regra_id, data ?? null)
+      }
+      regraDoAnuncio = regrasUsadas.get(a.regra_id)
+    }
+
+    const alvos: AlvoCalculado[] = []
+    const porVariacao = new Map<string, { estoqueSistema: number; origem: string; motivo: string; variacao: VariacaoDoAnuncio }>()
+
+    for (const v of elegiveis) {
+      const produtoDaVariacao = mapaProduto.get(v.produto_id!)
+      if (!produtoDaVariacao) {
+        linhas.push({
+          empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
+          anuncio_id: a.id, variacao_id: v.id, produto_id: v.produto_id,
+          acao: 'erro', detalhe: `${rotuloDaVariacao(v)}: produto vinculado não existe mais`,
+        })
+        continue
+      }
+
+      const base = await estoqueDoSistema(sb, produtoDaVariacao, mapaUnificado)
+      let estoqueNovo: number | undefined = base.estoque
+      let precoNovo: number | null = null
+      let emRisco = false
+      let detalheVar = base.origem
+
+      if (regraDoAnuncio) {
+        let estoquePorDeposito: number | undefined
+        if (!base.kitInfo && regraDoAnuncio.modo_estoque === 'deposito' && regraDoAnuncio.deposito_id) {
+          const { data: pe } = await sb.from('produto_estoque').select('quantidade')
+            .eq('deposito_id', regraDoAnuncio.deposito_id).eq('produto_id', produtoDaVariacao.id).maybeSingle()
+          estoquePorDeposito = pe?.quantidade ?? 0
+        }
+
+        // O PREÇO BASE É O DA VARIAÇÃO, não o do anúncio. Num anúncio com
+        // variação, `marketplace_anuncios.preco_venda` é o preço de alguma
+        // delas (ou o menor) — usar esse número no modo percentual faria
+        // todas as variações convergirem para o preço de uma só.
+        const r = calcularPrecoEstoquePorRegra(
+          regraDoAnuncio,
+          {
+            preco_venda: v.preco ?? a.preco_venda,
+            produtos: {
+              id: produtoDaVariacao.id, preco_venda: produtoDaVariacao.preco_venda,
+              preco_custo: produtoDaVariacao.preco_custo, estoque: base.estoque,
+            },
+          },
+          { estoquePorDeposito, kitInfo: base.kitInfo },
+        )
+
+        if (r.aplicavel) {
+          if (typeof r.estoqueNovo === 'number') estoqueNovo = r.estoqueNovo
+          if (typeof r.precoNovo === 'number') precoNovo = r.precoNovo
+          emRisco = !!r.paraPausar
+          detalheVar = `regra aplicada${emRisco ? ' · variação no estoque de risco' : ''}`
+        } else {
+          estoqueNovo = undefined
+          detalheVar = `regra não pôde ser aplicada: ${r.motivo}`
+        }
+      }
+
+      // A variação tem UMA coluna de estoque (`estoque`), escrita pela
+      // sincronização de catálogo com o que a plataforma devolveu. Não existe
+      // o par espelho/medida que o anúncio simples tem, então `estoqueMedido`
+      // vai nulo: inventar uma segunda fonte a partir da mesma coluna faria o
+      // detector de divergência concordar consigo mesmo.
+      const decisao = precisaEnviar({
+        estoqueExterno: v.estoque,
+        estoqueMedido: null,
+        estoqueNovo,
+        precoEspelho: v.preco,
+        precoNovo,
+      })
+
+      alvos.push({
+        variacaoId: v.id, modelId: v.model_id!, rotulo: rotuloDaVariacao(v),
+        produtoId: v.produto_id!, estoqueNovo, precoNovo, emRisco, enviar: decisao.enviar,
+      })
+      porVariacao.set(v.id, {
+        estoqueSistema: base.estoque, origem: base.origem,
+        motivo: decisao.enviar ? detalheVar : decisao.motivo, variacao: v,
+      })
+    }
+
+    const aEnviar = alvos.filter(x => x.enviar && (x.estoqueNovo !== undefined || x.precoNovo != null))
+
+    if (aEnviar.length === 0) {
+      semMudanca++
+      for (const alvo of alvos) {
+        const ctx = porVariacao.get(alvo.variacaoId)!
+        linhas.push({
+          empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
+          anuncio_id: a.id, variacao_id: alvo.variacaoId, produto_id: alvo.produtoId,
+          acao: 'sem_mudanca', estoque_sistema: ctx.estoqueSistema,
+          estoque_canal: ctx.variacao.estoque, estoque_enviaria: alvo.estoqueNovo,
+          preco_canal: ctx.variacao.preco, preco_enviaria: alvo.precoNovo,
+          detalhe: `${alvo.rotulo}: ${ctx.motivo}`,
+        })
+      }
+      continue
+    }
+
+    enviaria += aEnviar.length
+
+    const canalDoAnuncio = mapaCanal.get(a.canal_id)
+    const sim = decidirSimulacao(canalDoAnuncio, { simulacaoDaEmpresa: cfg.simulacao })
+    const pausaVar = decidirPausaComVariacoes(alvos)
+    const decisaoPausa = decidirPausa({
+      anuncio: a, paraPausar: pausaVar.pausar,
+      estoqueEnviado: null, risco: regraDoAnuncio?.estoque_risco ?? null,
+    })
+
+    let acaoAnuncio = 'enviaria'
+    let detalheAnuncio = `${resumoDosAlvos(alvos, ignoradas)} · ${pausaVar.porque}`
+    let enviouOk = false
+
+    if (!sim.simula) {
+      const emPromocao = anunciosComPromocao.has(String(a.id))
+      if (!canalDoAnuncio) {
+        acaoAnuncio = 'erro'; detalheAnuncio = 'canal nao encontrado ou sem token'
+        falhasEnvio++
+        for (const id of produtosDaFilaNesteAnuncio) comFalha.set(id, detalheAnuncio)
+      } else if (!canalAceitaEnvio(canalDoAnuncio)) {
+        acaoAnuncio = 'canal_desligado'
+        detalheAnuncio = 'canal nao aceita atualizacao automatica (Configurar → canal)'
+        canalRecusou++
+      } else if (!a.id_externo) {
+        acaoAnuncio = 'erro'; detalheAnuncio = 'anuncio sem id no canal'
+        falhasEnvio++
+        for (const id of produtosDaFilaNesteAnuncio) comFalha.set(id, detalheAnuncio)
+      } else if (a.status === 'encerrado') {
+        acaoAnuncio = 'encerrado'
+        detalheAnuncio = 'anuncio encerrado no canal — enviar estoque poderia reabri-lo'
+      } else {
+        const variacoesEnvio: AlvoVariacao[] = aEnviar.map(x => ({
+          modelId: x.modelId,
+          estoque: x.estoqueNovo ?? null,
+          preco: emPromocao ? null : (x.precoNovo ?? null),
+        }))
+
+        const r = await enviarParaAnuncio(sb, canalDoAnuncio, String(a.id_externo), {
+          variacoes: variacoesEnvio,
+          pausar: decisaoPausa.acao === 'pausar',
+          reativar: decisaoPausa.acao === 'reativar',
+        })
+        await sleep(THROTTLE_ENVIO_MS)
+
+        if (r.ok) {
+          acaoAnuncio = 'enviado'; enviados++; enviouOk = true
+          detalheAnuncio = `${detalheAnuncio}`
+            + (emPromocao ? ' · preco retido: item em campanha de desconto' : '')
+            + (r.pausado ? ' · anuncio pausado (todas as variações em risco)' : '')
+            + (r.reativado ? ' · anuncio reativado (estoque voltou)' : '')
+
+          // O espelho de cada variação recebe o que acabou de ser mandado.
+          // Sem isto, a rodada seguinte veria o número antigo e reenviaria o
+          // mesmo estoque para sempre.
+          for (const x of aEnviar) {
+            await sb.from('marketplace_anuncio_variacoes').update({
+              ...(x.estoqueNovo !== undefined ? { estoque: x.estoqueNovo } : {}),
+              ...(x.precoNovo != null && !emPromocao ? { preco: x.precoNovo } : {}),
+              updated_at: new Date().toISOString(),
+            }).eq('id', x.variacaoId)
+          }
+          await sb.from('marketplace_anuncios').update({
+            ...(decisaoPausa.acao === 'pausar' ? camposPausaAutomatica(decisaoPausa.motivo) : {}),
+            ...(decisaoPausa.acao === 'reativar' ? camposReativacao() : {}),
+          }).eq('id', a.id)
+        } else {
+          acaoAnuncio = 'erro'; falhasEnvio++
+          detalheAnuncio = r.erro ?? 'falha ao enviar'
+          for (const id of produtosDaFilaNesteAnuncio) comFalha.set(id, detalheAnuncio)
+        }
+      }
+    }
+
+    // Uma linha por variação, para o extrato dizer qual modelo recebeu o quê.
+    for (const alvo of alvos) {
+      const ctx = porVariacao.get(alvo.variacaoId)!
+      const mandou = aEnviar.some(x => x.variacaoId === alvo.variacaoId)
+      linhas.push({
+        empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
+        anuncio_id: a.id, variacao_id: alvo.variacaoId, produto_id: alvo.produtoId,
+        acao: mandou ? acaoAnuncio : 'sem_mudanca',
+        estoque_sistema: ctx.estoqueSistema,
+        estoque_canal: ctx.variacao.estoque,
+        estoque_enviaria: alvo.estoqueNovo,
+        preco_canal: ctx.variacao.preco,
+        preco_enviaria: alvo.precoNovo,
+        detalhe: mandou
+          ? `${alvo.rotulo}: ${enviouOk || sim.simula ? ctx.motivo : detalheAnuncio}`
+          : `${alvo.rotulo}: ${ctx.motivo}`,
+      })
+    }
+
+    // E uma linha do anúncio, com o resumo — é ela que responde "o que
+    // aconteceu com este anúncio nesta rodada".
+    linhas.push({
+      empresa_id: cfg.empresa_id, rodada_em: rodadaEm, canal_id: a.canal_id,
+      anuncio_id: a.id, produto_id: a.produto_id ?? null, acao: acaoAnuncio,
+      estoque_canal: a.estoque_externo,
+      detalhe: `anúncio com variação · ${detalheAnuncio}`,
+    })
+  }
+
   if (linhas.length) {
     await sb.from('marketplace_fila_simulacao').insert(linhas)
   }
@@ -586,9 +919,24 @@ async function adotarAnunciosAlterados(sb: any, cfg: ConfigFila) {
     .order('updated_at', { ascending: false })
     .limit(2000)
 
+  // E as VARIAÇÕES mapeadas, pelo mesmo motivo e com a mesma regra.
+  //
+  // Num anúncio com variação, quem carrega o produto é a variação. Mapear uma
+  // variação é exatamente o caso da Pistola descrito acima — muda o que
+  // deveria estar no canal sem tocar em estoque nenhum — e sem esta consulta
+  // a fila só descobriria isso na próxima movimentação do produto, que pode
+  // não vir nunca.
+  const { data: variacoes } = await sb
+    .from('marketplace_anuncio_variacoes')
+    .select('produto_id, updated_at, marketplace_anuncios!inner(canal_id)')
+    .in('marketplace_anuncios.canal_id', enviaveis)
+    .not('produto_id', 'is', null)
+    .order('updated_at', { ascending: false })
+    .limit(2000)
+
   type Recente = { produto_id: string; updated_at: string | null }
   const maisRecente = new Map<string, string>()
-  for (const a of (anuncios ?? []) as Recente[]) {
+  for (const a of [...((anuncios ?? []) as Recente[]), ...((variacoes ?? []) as Recente[])]) {
     if (!a.updated_at) continue
     const atual = maisRecente.get(a.produto_id)
     if (!atual || a.updated_at > atual) maisRecente.set(a.produto_id, a.updated_at)

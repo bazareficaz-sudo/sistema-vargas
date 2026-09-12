@@ -27,6 +27,41 @@ export async function atualizarPrecoEstoque(
   return atualizarItem(sb, canal, itemId, body)
 }
 
+export type AlvoVariacaoML = { variationId: string; preco?: number; estoque?: number }
+
+/**
+ * Preço e estoque de VARIAÇÕES de um anúncio.
+ *
+ * Num item com variações, `available_quantity` no nível do item é derivado —
+ * a quantidade mora em cada `variations[].available_quantity`, e é por isso
+ * que `atualizarPrecoEstoque` não serve aqui: ele mandaria um número só para
+ * o item e o Mercado Livre recusaria (ou, pior, redistribuiria).
+ *
+ * MANDA SÓ AS VARIAÇÕES INFORMADAS. O `id` de cada uma é o endereço dela no
+ * anúncio; as que não entram na lista ficam como estão. É essa propriedade
+ * que deixa sincronizar um anúncio parcialmente mapeado sem destruir a
+ * distribuição que o vendedor fez no resto.
+ */
+export function corpoDeVariacoes(variacoes: AlvoVariacaoML[]): { variations: Record<string, any>[] } | null {
+  const lista = variacoes
+    .filter(v => v.variationId && (v.preco != null || v.estoque != null))
+    .map(v => ({
+      id: Number(v.variationId),
+      ...(v.estoque != null ? { available_quantity: v.estoque } : {}),
+      ...(v.preco != null ? { price: v.preco } : {}),
+    }))
+
+  return lista.length === 0 ? null : { variations: lista }
+}
+
+export async function atualizarVariacoes(
+  sb: any, canal: MLChannel, itemId: string, variacoes: AlvoVariacaoML[],
+): Promise<ResultadoAtualizarML> {
+  const corpo = corpoDeVariacoes(variacoes)
+  if (!corpo) return { ok: true }
+  return atualizarItem(sb, canal, itemId, corpo)
+}
+
 export function pausarAnuncio(sb: any, canal: MLChannel, itemId: string): Promise<ResultadoAtualizarML> {
   return atualizarItem(sb, canal, itemId, { status: 'paused' })
 }

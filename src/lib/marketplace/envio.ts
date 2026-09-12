@@ -1,5 +1,5 @@
 import { pushPrecoEstoque, unlistItems } from '@/lib/shopee/write'
-import { atualizarPrecoEstoque, pausarAnuncio, reativarAnuncio } from '@/lib/mercadolivre/write'
+import { atualizarPrecoEstoque, atualizarVariacoes, pausarAnuncio, reativarAnuncio } from '@/lib/mercadolivre/write'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
 import { atualizarPrecoEstoque as atualizarPrecoEstoqueNuvemshop, publicarProduto } from '@/lib/nuvemshop/write'
@@ -27,12 +27,32 @@ export type CanalEnvio = {
   nome?: string | null
 }
 
+/**
+ * Uma variação a atualizar dentro do anúncio.
+ *
+ * `modelId` é o endereço dela NA PLATAFORMA (`model_id` na Shopee, `id` da
+ * variation no Mercado Livre). Quem não está nesta lista não é tocado — é o
+ * que permite sincronizar um anúncio parcialmente mapeado sem sobrescrever a
+ * distribuição de estoque que o vendedor fez nas outras.
+ */
+export type AlvoVariacao = {
+  modelId: string
+  preco?: number | null
+  estoque?: number | null
+}
+
 export type AlvoEnvio = {
   preco?: number | null
   estoque?: number | null
   pausar?: boolean
   /** O par de `pausar`. Sem ele, `pausar: false` era "nao faca nada". */
   reativar?: boolean
+  /**
+   * Anúncio com variação: o estoque vai POR MODELO. Quando vem preenchido,
+   * `preco`/`estoque` do nível do item são ignorados — num item com variação
+   * eles não são o lugar certo do número em nenhuma das duas plataformas.
+   */
+  variacoes?: AlvoVariacao[]
 }
 export type ResultadoEnvio = { ok: boolean; erro?: string; pausado?: boolean; reativado?: boolean }
 
@@ -49,11 +69,13 @@ export async function enviarParaAnuncio(
 ): Promise<ResultadoEnvio> {
   const preco = alvo.preco != null ? Number(alvo.preco) : undefined
   const estoque = alvo.estoque != null ? Number(alvo.estoque) : undefined
+  const variacoes = (alvo.variacoes ?? []).filter(v => v.modelId && (v.preco != null || v.estoque != null))
+  const porVariacao = variacoes.length > 0
 
   // `reativar` e o par que faltava de `pausar`. Antes, `pausar: false` nao
   // significava "religar" — significava "nao fazer nada", e o anuncio ficava
   // fora do ar para sempre depois de uma falta de estoque.
-  if (preco == null && estoque == null && !alvo.pausar && !alvo.reativar) return { ok: true }
+  if (!porVariacao && preco == null && estoque == null && !alvo.pausar && !alvo.reativar) return { ok: true }
 
   try {
     if (canal.plataforma === 'shopee') {
@@ -66,7 +88,17 @@ export async function enviarParaAnuncio(
       const ctx = { sb, canal: c }
       const itemId = Number(idExterno)
 
-      const r = await pushPrecoEstoque(ctx, itemId, [{ preco, estoque }])
+      // Com variação, uma chamada por endpoint com a lista de modelos —
+      // `pushPrecoEstoque` já monta `price_list`/`stock_list` com `model_id`.
+      const alvosShopee = porVariacao
+        ? variacoes.map(v => ({
+            modelId: v.modelId,
+            preco: v.preco != null ? Number(v.preco) : undefined,
+            estoque: v.estoque != null ? Number(v.estoque) : undefined,
+          }))
+        : [{ preco, estoque }]
+
+      const r = await pushPrecoEstoque(ctx, itemId, alvosShopee)
       if (!r.precoOk || !r.estoqueOk) {
         // Preço e estoque são chamadas separadas na Shopee — uma pode falhar
         // sozinha. Junta os dois motivos para não esconder metade do problema.
@@ -94,7 +126,15 @@ export async function enviarParaAnuncio(
         tokenExpiraEm: canal.token_expira_em,
       } as MLChannel
 
-      const r = await atualizarPrecoEstoque(sb, c, idExterno, { preco, estoque })
+      // Num item com variação a quantidade mora em `variations[]`, não no
+      // item — mandar `available_quantity` no item seria recusado.
+      const r = porVariacao
+        ? await atualizarVariacoes(sb, c, idExterno, variacoes.map(v => ({
+            variationId: v.modelId,
+            preco: v.preco != null ? Number(v.preco) : undefined,
+            estoque: v.estoque != null ? Number(v.estoque) : undefined,
+          })))
+        : await atualizarPrecoEstoque(sb, c, idExterno, { preco, estoque })
       if (!r.ok) return { ok: false, erro: r.erro ?? 'O Mercado Livre recusou a atualização' }
       if (alvo.pausar) {
         await sleep(THROTTLE_ENVIO_MS)
@@ -121,6 +161,31 @@ export async function enviarParaAnuncio(
       // chamada a mais, contra duas consultas ao banco pra chegar no mesmo
       // lugar. Se isso pesar quando a fila crescer, o caminho é passar o
       // anúncio inteiro pra cá, não remendar aqui.
+      //
+      // COM VARIAÇÃO, UMA CHAMADA POR VARIANTE, cada uma com o SEU número.
+      // A função aplica o mesmo corpo a todas as variantes que recebe, então
+      // mandar a lista inteira de uma vez daria a todas o estoque da primeira
+      // — exatamente o que este trabalho existe para não fazer.
+      if (porVariacao) {
+        const falhas: string[] = []
+        for (const v of variacoes) {
+          const rv = await atualizarPrecoEstoqueNuvemshop(c, {
+            produtoExternoId: idExterno,
+            variantesConhecidas: [v.modelId],
+            preco: v.preco != null ? Number(v.preco) : null,
+            estoque: v.estoque != null ? Number(v.estoque) : null,
+          })
+          if (!rv.ok) falhas.push(`variante ${v.modelId}: ${rv.erro ?? 'recusada'}`)
+          await sleep(THROTTLE_ENVIO_MS)
+        }
+        if (falhas.length > 0) return { ok: false, erro: falhas.join(' · ') }
+        if (alvo.pausar) {
+          await publicarProduto(c, idExterno, false)
+          return { ok: true, pausado: true }
+        }
+        return { ok: true }
+      }
+
       const r = await atualizarPrecoEstoqueNuvemshop(c, {
         produtoExternoId: idExterno, preco, estoque,
       })

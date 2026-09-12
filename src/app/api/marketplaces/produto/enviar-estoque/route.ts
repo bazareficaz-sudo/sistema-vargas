@@ -55,7 +55,39 @@ export async function POST(req: Request) {
     .eq('produto_id', produtoId)
 
   if (erroAnuncios) return NextResponse.json({ ok: false, erro: erroAnuncios.message }, { status: 400 })
-  if (!anuncios?.length) {
+
+  // ANÚNCIO COM VARIAÇÃO ENTRA PELA VARIAÇÃO.
+  //
+  // Num anúncio com variação, o produto do ERP mora em cada
+  // `marketplace_anuncio_variacoes.produto_id` — buscar só por
+  // `marketplace_anuncios.produto_id` deixa de fora justamente os anúncios em
+  // que este produto é uma das variações.
+  const { data: variacoesDoProduto } = await sb
+    .from('marketplace_anuncio_variacoes')
+    .select('id, anuncio_id, model_id, nome_variacao, sku_variacao, preco, estoque')
+    .eq('empresa_id', empresaId)
+    .eq('produto_id', produtoId)
+
+  const porAnuncio = new Map<string, any[]>()
+  for (const v of (variacoesDoProduto ?? []) as any[]) {
+    const lista = porAnuncio.get(v.anuncio_id) ?? []
+    lista.push(v)
+    porAnuncio.set(v.anuncio_id, lista)
+  }
+
+  const listaAnuncios: any[] = [...(anuncios ?? [])]
+  const jaTem = new Set<string>(listaAnuncios.map(a => a.id))
+  const faltantes = [...porAnuncio.keys()].filter(id => !jaTem.has(id))
+  if (faltantes.length > 0) {
+    const { data: extras } = await sb
+      .from('marketplace_anuncios')
+      .select('id, canal_id, id_externo, titulo, tem_variacao, status, estoque_externo, marketplace_canais(nome)')
+      .eq('empresa_id', empresaId)
+      .in('id', faltantes)
+    listaAnuncios.push(...(extras ?? []))
+  }
+
+  if (!listaAnuncios.length) {
     return NextResponse.json({ ok: false, erro: 'Nenhum anúncio vinculado a este produto.' }, { status: 400 })
   }
 
@@ -73,18 +105,25 @@ export async function POST(req: Request) {
   const resultados: Resultado[] = []
   let enviados = 0
 
-  for (const a of anuncios as any[]) {
+  for (const a of listaAnuncios) {
     const canal = a.canal_id ? mapaCanal.get(a.canal_id) : undefined
     const canalNome = canal?.nome
       ?? (Array.isArray(a.marketplace_canais) ? a.marketplace_canais[0]?.nome : a.marketplace_canais?.nome)
       ?? '—'
     const linha = { anuncioId: a.id, titulo: a.titulo ?? '—', canalNome }
 
-    if (a.tem_variacao) {
-      // Mesma exclusão da fila: um anúncio com variação distribui o estoque
-      // entre as variações, e mandar um número só sobrescreveria a
-      // distribuição inteira — transformando "atualizar" em "achatar".
-      resultados.push({ ...linha, situacao: 'ignorado', detalhe: 'anúncio com variação — o estoque mora em cada variação' })
+    const variacoesDesteProduto = porAnuncio.get(a.id) ?? []
+
+    if (a.tem_variacao && variacoesDesteProduto.length === 0) {
+      // O anúncio tem variação e NENHUMA delas é deste produto. Mandar o
+      // número no nível do item achataria a distribuição inteira — que é o
+      // que esta exclusão sempre evitou. O que mudou é que agora ela só vale
+      // quando realmente não há variação mapeada para cá.
+      resultados.push({
+        ...linha, situacao: 'ignorado',
+        detalhe: 'anúncio com variação e nenhuma variação vinculada a este produto — '
+          + 'mapeie a variação no Mapa de anúncios',
+      })
       continue
     }
     if (a.status === 'encerrado') {
@@ -108,19 +147,48 @@ export async function POST(req: Request) {
       resultados.push({ ...linha, situacao: 'erro', detalhe: 'anúncio sem ID no canal — nunca foi sincronizado' })
       continue
     }
-    if (Number(a.estoque_externo ?? -1) === estoque) {
-      resultados.push({ ...linha, situacao: 'sem_mudanca', detalhe: `o canal já está com ${estoque}` })
+    const comVariacao = variacoesDesteProduto.length > 0
+
+    // O espelho a comparar é o da VARIAÇÃO quando é por variação. O do
+    // anúncio é a soma (ou o de alguma delas) e nunca bateria com o estoque
+    // de um produto só — o botão reenviaria o mesmo número para sempre.
+    const jaIgual = comVariacao
+      ? variacoesDesteProduto.every(v => Number(v.estoque ?? -1) === estoque)
+      : Number(a.estoque_externo ?? -1) === estoque
+
+    if (jaIgual) {
+      resultados.push({
+        ...linha, situacao: 'sem_mudanca',
+        detalhe: comVariacao
+          ? `${variacoesDesteProduto.length} variação(ões) já com ${estoque}`
+          : `o canal já está com ${estoque}`,
+      })
       continue
     }
 
-    const r = await enviarParaAnuncio(sb, canal, String(a.id_externo), { estoque })
+    const r = await enviarParaAnuncio(sb, canal, String(a.id_externo), comVariacao
+      ? { variacoes: variacoesDesteProduto.map(v => ({ modelId: String(v.model_id), estoque })) }
+      : { estoque })
     await sleep(THROTTLE_ENVIO_MS)
 
     if (r.ok) {
       enviados++
-      await sb.from('marketplace_anuncios')
-        .update({ estoque_externo: estoque, ultima_atualizacao: new Date().toISOString() })
-        .eq('id', a.id)
+      if (comVariacao) {
+        // Só as variações DESTE produto — as outras não receberam número
+        // nenhum e o espelho delas não pode dizer que receberam.
+        for (const v of variacoesDesteProduto) {
+          await sb.from('marketplace_anuncio_variacoes')
+            .update({ estoque, updated_at: new Date().toISOString() })
+            .eq('id', v.id)
+        }
+        await sb.from('marketplace_anuncios')
+          .update({ ultima_atualizacao: new Date().toISOString() })
+          .eq('id', a.id)
+      } else {
+        await sb.from('marketplace_anuncios')
+          .update({ estoque_externo: estoque, ultima_atualizacao: new Date().toISOString() })
+          .eq('id', a.id)
+      }
       // O interruptor de Configurar → canal governa a fila AUTOMÁTICA. Aqui
       // alguém clicou: o pedido explícito vale mais que o padrão. Mas o
       // envio diz que o automático está desligado, senão o operador conclui
@@ -128,7 +196,10 @@ export async function POST(req: Request) {
       const automatico = canalAceitaEnvio(canal)
       resultados.push({
         ...linha, situacao: 'enviado',
-        detalhe: `${a.estoque_externo ?? '—'} → ${estoque}`
+        detalhe: (comVariacao
+          ? `${variacoesDesteProduto.length} variação(ões) → ${estoque}: `
+            + variacoesDesteProduto.map(v => v.nome_variacao || v.sku_variacao || `modelo ${v.model_id}`).join(', ')
+          : `${a.estoque_externo ?? '—'} → ${estoque}`)
           + (automatico ? '' : ' · atenção: atualização automática deste canal está desligada'),
       })
     } else {
@@ -137,10 +208,10 @@ export async function POST(req: Request) {
   }
 
   await sb.from('marketplace_sync_log').insert({
-    canal_id: (anuncios as any[])[0]?.canal_id ?? null,
+    canal_id: listaAnuncios[0]?.canal_id ?? null,
     tipo: 'push_estoque_manual',
     status: resultados.some(r => r.situacao === 'erro') ? 'erro' : 'ok',
-    mensagem: `${produto.nome}: estoque ${estoque} (${origem}) — ${enviados} anúncio(s) atualizado(s) de ${anuncios.length}`,
+    mensagem: `${produto.nome}: estoque ${estoque} (${origem}) — ${enviados} anúncio(s) atualizado(s) de ${listaAnuncios.length}`,
     detalhes: { produtoId, estoque, origem, resultados },
   })
 
