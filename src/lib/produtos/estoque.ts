@@ -1,5 +1,6 @@
 import { recalcularKitsQueUsam } from './kit'
 import { notificarMovimentoProduto } from './monitoramento'
+import { ajustarDepositoPrincipal } from './depositoPrincipal'
 
 // Baixa de estoque de um item de pedido de marketplace. Evita o risco real
 // de baixar duas vezes o mesmo item quando cron automático e botão manual
@@ -24,7 +25,7 @@ type ResultadoDecremento = { ok: true; estoqueAnterior: number; estoqueNovo: num
 
 async function decrementarEstoqueAtomico(sb: any, produtoId: string, quantidade: number): Promise<ResultadoDecremento> {
   for (let tentativa = 0; tentativa < 3; tentativa++) {
-    const { data: produto } = await sb.from('produtos').select('estoque').eq('id', produtoId).single()
+    const { data: produto } = await sb.from('produtos').select('estoque, empresa_id').eq('id', produtoId).single()
     if (!produto) return { ok: false, motivo: 'Produto não encontrado' }
     // Decide deixar ir negativo em vez de bloquear a baixa — pedido de
     // marketplace vendido sem saldo (overselling entre canais) não pode
@@ -36,16 +37,56 @@ async function decrementarEstoqueAtomico(sb: any, produtoId: string, quantidade:
       .update({ estoque: estoqueNovo })
       .eq('id', produtoId).eq('estoque', produto.estoque)
       .select('id').maybeSingle()
-    if (atualizado) return { ok: true, estoqueAnterior: produto.estoque, estoqueNovo }
+    if (atualizado) {
+      await espelharNoDeposito(sb, produto.empresa_id, produtoId, -quantidade)
+      return { ok: true, estoqueAnterior: produto.estoque, estoqueNovo }
+    }
     // conflito de concorrência — outro processo alterou o estoque entre a leitura e a escrita; tenta de novo
   }
   return { ok: false, motivo: 'Conflito de concorrência ao atualizar estoque — tente novamente' }
 }
 
 async function incrementarEstoque(sb: any, produtoId: string, quantidade: number): Promise<void> {
-  const { data: produto } = await sb.from('produtos').select('estoque').eq('id', produtoId).single()
+  const { data: produto } = await sb.from('produtos').select('estoque, empresa_id').eq('id', produtoId).single()
   if (!produto) return
   await sb.from('produtos').update({ estoque: produto.estoque + quantidade }).eq('id', produtoId)
+  await espelharNoDeposito(sb, produto.empresa_id, produtoId, quantidade)
+}
+
+/**
+ * A BAIXA DE MARKETPLACE TAMBÉM PRECISA CHEGAR AO DEPÓSITO.
+ *
+ * `produtos.estoque` e `produto_estoque` são dois registros independentes —
+ * não há gatilho no banco ligando um ao outro. A venda no PDV e a entrada de
+ * mercadoria já escreviam nos dois (`ajustarDepositoPrincipal`, criado para
+ * isso). A venda de marketplace escrevia só no primeiro, e por isso os dois
+ * números afastavam-se um pouco a cada pedido.
+ *
+ * MEDIDO EM 13/09/2026, no produto em que o gestor reparou: desde a contagem
+ * de 27/08 que acertou os dois, 9 unidades saíram por marketplace e 2 pelo
+ * PDV. O depósito ficou em 6 e o produto em −3 — diferença de exatamente 9,
+ * as nove do marketplace. Na empresa inteira: 613 produtos divergentes, 450
+ * deles com o depósito MAIOR que o produto.
+ *
+ * Isso não é cosmético. A sincronização com os canais lê o depósito (estoque
+ * unificado aponta para ele), então o número publicado era o que não tinha
+ * baixado as vendas de marketplace — o sistema anunciava estoque que não
+ * existia e alimentava a própria sobrevenda que produziu o saldo negativo.
+ *
+ * Fica AQUI, e não em quem chama, porque estes dois são o ponto por onde toda
+ * baixa e todo estorno de pedido passam — inclusive os componentes de kit e o
+ * desfazimento quando um componente falha. Em quem chama, o próximo caminho
+ * novo esqueceria de novo.
+ */
+async function espelharNoDeposito(sb: any, empresaId: string | null, produtoId: string, delta: number): Promise<void> {
+  if (!empresaId || delta === 0) return
+  try {
+    await ajustarDepositoPrincipal(sb, empresaId, produtoId, delta)
+  } catch {
+    // O espelho não pode derrubar a baixa: o pedido já foi vendido e o
+    // estoque do produto já caiu. Falhar aqui recriaria a divergência, mas
+    // desfazer a baixa por causa dela seria pior.
+  }
 }
 
 // Registra a baixa em estoque_movimentacoes com tipo próprio
