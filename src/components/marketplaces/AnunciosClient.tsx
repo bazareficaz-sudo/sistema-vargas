@@ -1536,7 +1536,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                 <td className="px-4 py-3">
                   {(() => {
                     const e = estadoDaRegra({
-                      anuncio: a,
+                      // Num anúncio com variação quem carrega o produto é a
+                      // variação — sem esta lista, a coluna não tem como saber
+                      // se há mapeamento e diria "parado" sobre anúncio que a
+                      // fila está sincronizando.
+                      anuncio: { ...a, variacoes: a.marketplace_anuncio_variacoes ?? [] },
                       // Os MESMOS campos que `canalAceitaEnvio` le na fila.
                       // Mandar so `atualizar_estoque_canal`, como antes, fazia
                       // a etiqueta dizer "enviando" para canal que a fila
@@ -1566,6 +1570,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                             passa o mouse em 500 linhas. */}
                         {e.estado === 'parado' && (
                           <p className="text-[10px] text-gray-400 leading-tight mt-0.5">{e.falta}</p>
+                        )}
+                        {/* Mapeamento parcial: a fila anda, mas nem todo
+                            modelo recebe. Sem esta linha, "enviando" seria
+                            verdade pela metade. */}
+                        {e.estado !== 'parado' && e.observacao && (
+                          <p className="text-[10px] text-gray-400 leading-tight mt-0.5">{e.observacao}</p>
                         )}
                       </>
                     )

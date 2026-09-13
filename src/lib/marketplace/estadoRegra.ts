@@ -41,12 +41,30 @@ import { canalAceitaEnvio, type CanalComInterruptores } from './canais'
 //      A fila pula anúncio com variação na primeira linha do laço
 //      ("distribui estoque por variação; mandar um número só sobrescreveria a
 //      distribuição inteira") e grava `com_variacao`. Nada é enviado, nunca.
+//
+// ── 13/09/2026: O SÉTIMO DEIXOU DE SER "TEM VARIAÇÃO" ──────────────────────
+//
+// A fila passou a enviar POR MODELO (Shopee `stock_list[].model_id`, Mercado
+// Livre `variations[].id`), então "tem variação" não impede mais nada. O que
+// impede é outra coisa, e é ela que precisa aparecer aqui:
+//
+//   7'. pelo menos UMA variação com produto vinculado
+//       (marketplace_anuncio_variacoes.produto_id)
+//
+// Num anúncio com variação o produto do ERP mora em cada variação, não no pai
+// — e a fila só toca no que está mapeado, justamente para não sobrescrever a
+// distribuição que o vendedor fez. Sem nenhuma variação mapeada não há número
+// nosso para mandar, e aí sim está parado. Com uma que seja, está andando.
+//
+// Pela mesma razão, o interruptor 2 (produto no anúncio-pai) não se aplica a
+// anúncio com variação: exigir o pai marcaria como parado justamente os
+// anúncios em que o mapeamento foi feito no lugar certo.
 
 export type EstadoRegra =
   /** Os sete em ordem: a fila envia este anúncio. */
-  | { estado: 'enviando'; regra: string }
+  | { estado: 'enviando'; regra: string; observacao?: string }
   /** Tudo pronto, mas o canal só simula — calcula e não envia. */
-  | { estado: 'simulando'; regra: string; porque: string }
+  | { estado: 'simulando'; regra: string; porque: string; observacao?: string }
   /** Falta alguma coisa. `falta` diz o quê, em português. */
   | { estado: 'parado'; regra: string | null; falta: string }
 
@@ -54,8 +72,17 @@ export type AnuncioParaEstado = {
   regra_id?: string | null
   produto_id?: string | null
   status?: string | null
-  /** A fila pula anúncio com variação. Ver o laço em `fila.ts`. */
   tem_variacao?: boolean | null
+  /**
+   * As variações do anúncio, quando ele tem. O que importa aqui é só se
+   * alguma tem `produto_id` — é o mapeamento que decide se a fila tem número
+   * para mandar.
+   *
+   * Ausente conta como NENHUMA mapeada, de propósito: sem a lista não há
+   * evidência de mapeamento, e prometer "enviando" sem evidência é o erro
+   * caro desta coluna.
+   */
+  variacoes?: { produto_id?: string | null }[] | null
 }
 
 export type CanalParaEstado = CanalSimulacao & CanalComInterruptores
@@ -86,7 +113,13 @@ export function estadoDaRegra(params: {
   const { anuncio, canal, config } = params
   const nome = params.nomeRegra ?? null
 
-  if (!anuncio.produto_id) {
+  const comVariacao = !!anuncio.tem_variacao
+  const variacoesMapeadas = (anuncio.variacoes ?? []).filter(v => v.produto_id).length
+
+  // Num anúncio com variação quem carrega o produto é a variação. Cobrar o
+  // produto do pai aqui marcaria como parado exatamente os anúncios cujo
+  // mapeamento foi feito no lugar certo.
+  if (!comVariacao && !anuncio.produto_id) {
     return { estado: 'parado', regra: nome, falta: 'sem produto do catálogo vinculado' }
   }
   if (!anuncio.regra_id) {
@@ -103,25 +136,41 @@ export function estadoDaRegra(params: {
   if (!canalAceitaEnvio(canal)) {
     return { estado: 'parado', regra: nome, falta: faltaDoCanal(canal) }
   }
-  // A fila pula este anúncio antes de calcular qualquer coisa, e ainda tira o
-  // produto da fila como se tivesse resolvido. Dizer "enviando" aqui é a
-  // promessa mais cara que esta coluna pode fazer.
-  if (anuncio.tem_variacao) {
-    return { estado: 'parado', regra: nome, falta: 'anúncio com variação — a fila ainda não envia por variação' }
+  // A fila envia por modelo desde 12/09/2026, então ter variação não para
+  // mais nada. O que para é não haver mapeamento: sem variação vinculada a um
+  // produto, não existe número nosso para mandar, e a fila não toca no que
+  // não é dela.
+  if (comVariacao && variacoesMapeadas === 0) {
+    return {
+      estado: 'parado', regra: nome,
+      falta: 'nenhuma variação com produto vinculado — mapeie as variações no Mapa de anúncios',
+    }
   }
   if (params.filaAtiva === false) {
     return { estado: 'parado', regra: nome, falta: 'fila de atualização desligada (Marketplaces → Fila)' }
   }
+
+  // MAPEAMENTO PARCIAL NÃO É "TUDO CERTO". Com 2 de 5 variações vinculadas, a
+  // fila anda — e três modelos continuam com o estoque que o vendedor deixou
+  // lá. "Enviando" sozinho esconderia isso até alguém perguntar por que o
+  // estoque de um dos modelos nunca muda.
+  const total = (anuncio.variacoes ?? []).length
+  const observacao = comVariacao && variacoesMapeadas < total
+    ? `${variacoesMapeadas} de ${total} variações mapeadas — as demais não recebem estoque`
+    : comVariacao
+      ? `${variacoesMapeadas} variação(ões), todas mapeadas`
+      : undefined
 
   const sim = decidirSimulacao(canal, config)
   if (sim.simula) {
     return {
       estado: 'simulando', regra: nome ?? 'regra',
       porque: sim.origem === 'canal' ? 'este canal está em simulação' : 'a empresa está em simulação',
+      observacao,
     }
   }
 
-  return { estado: 'enviando', regra: nome ?? 'regra' }
+  return { estado: 'enviando', regra: nome ?? 'regra', observacao }
 }
 
 /** Qual dos interruptores do canal está faltando, dito por nome. */

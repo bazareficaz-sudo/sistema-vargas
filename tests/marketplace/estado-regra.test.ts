@@ -133,13 +133,64 @@ describe('os três interruptores que faltavam — e que a fila sempre exigiu', (
     assert.match(e.estado === 'parado' ? e.falta : '', /atualizar estoque do canal/)
   })
 
-  test('anúncio com variação: a fila pula antes de calcular', () => {
+  test('anúncio com variação e NENHUMA mapeada: parado, e diz onde mapear', () => {
+    // A fila passou a enviar por modelo em 12/09/2026, entao "tem variacao"
+    // nao para mais nada. O que para e nao haver variacao vinculada a um
+    // produto: sem isso nao existe numero nosso para mandar.
     const e = estadoDaRegra({
-      anuncio: { ...PRONTO, tem_variacao: true }, canal: CANAL_OK,
-      config: EMPRESA_ENVIANDO,
+      anuncio: { ...PRONTO, tem_variacao: true, variacoes: [{ produto_id: null }, { produto_id: null }] },
+      canal: CANAL_OK, config: EMPRESA_ENVIANDO,
     })
     assert.equal(e.estado, 'parado')
-    assert.match(e.estado === 'parado' ? e.falta : '', /variação/)
+    assert.match(e.estado === 'parado' ? e.falta : '', /nenhuma variação com produto vinculado/)
+    assert.match(e.estado === 'parado' ? e.falta : '', /Mapa de anúncios/)
+  })
+
+  test('anúncio com variação MAPEADA: enviando — era isto que dizia "parado"', () => {
+    // O caso que o gestor mostrou em 13/09/2026: anuncio com regra, com
+    // variacoes mapeadas, a fila sincronizando, e a coluna dizendo "parado"
+    // com um texto que descrevia o codigo de antes.
+    const e = estadoDaRegra({
+      anuncio: { ...PRONTO, tem_variacao: true, variacoes: [{ produto_id: 'p1' }, { produto_id: 'p2' }] },
+      canal: CANAL_OK, config: EMPRESA_ENVIANDO, nomeRegra: 'Est +1000',
+    })
+    assert.equal(e.estado, 'enviando')
+    assert.equal(e.regra, 'Est +1000')
+  })
+
+  test('MAPEAMENTO PARCIAL anda, mas a tela nao chama isso de "tudo certo"', () => {
+    // 2 de 5 mapeadas: a fila envia as duas e as outras tres ficam com o
+    // estoque que o vendedor deixou la. Dizer so "enviando" esconderia isso
+    // ate alguem perguntar por que um modelo nunca muda.
+    const e = estadoDaRegra({
+      anuncio: {
+        ...PRONTO, tem_variacao: true,
+        variacoes: [{ produto_id: 'p1' }, { produto_id: 'p2' }, { produto_id: null }, { produto_id: null }, { produto_id: null }],
+      },
+      canal: CANAL_OK, config: EMPRESA_ENVIANDO,
+    })
+    assert.equal(e.estado, 'enviando')
+    assert.match(e.estado === 'enviando' ? (e.observacao ?? '') : '', /2 de 5/)
+  })
+
+  test('variacao mapeada dispensa produto no anuncio-pai', () => {
+    // Num anuncio com variacao o produto mora na variacao. Exigir o pai
+    // marcaria como parado exatamente quem mapeou no lugar certo.
+    const e = estadoDaRegra({
+      anuncio: { regra_id: 'r1', produto_id: null, status: 'ativo', tem_variacao: true, variacoes: [{ produto_id: 'p1' }] },
+      canal: CANAL_OK, config: EMPRESA_ENVIANDO,
+    })
+    assert.equal(e.estado, 'enviando')
+  })
+
+  test('sem a lista de variacoes, NAO promete "enviando"', () => {
+    // Quem chama sem passar as variacoes nao deu evidencia de mapeamento.
+    // Errar para "enviando" e o erro caro desta coluna.
+    const e = estadoDaRegra({
+      anuncio: { ...PRONTO, tem_variacao: true },
+      canal: CANAL_OK, config: EMPRESA_ENVIANDO,
+    })
+    assert.equal(e.estado, 'parado')
   })
 
   test('fila da empresa desligada: nenhuma rodada acontece', () => {
