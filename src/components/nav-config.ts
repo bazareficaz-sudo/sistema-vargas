@@ -143,6 +143,7 @@ export const NAV: NavGroup[] = [
         label: 'Visão Geral',
         items: [
           { href: '/dashboard/financeiro', label: 'Hub Financeiro', icon: '⚖️', modulo: 'financeiro' },
+          { href: '/dashboard/caixa', label: 'Caixa da Empresa', icon: '🏦', modulo: 'financeiro' },
         ],
       },
       {
