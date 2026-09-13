@@ -10,10 +10,6 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
 }) {
   const plataforma: 'shopee' | 'mercadolivre' = canal.plataforma === 'mercadolivre' ? 'mercadolivre' : 'shopee'
   const nomePlataforma = plataforma === 'mercadolivre' ? 'o Mercado Livre' : 'a Shopee'
-  // Atualização de preço/estoque de anúncio com variação só está implementada
-  // pra Shopee nesta fase — o Mercado Livre ainda não tem write por variação
-  // (ver src/lib/mercadolivre/write.ts), só o item inteiro.
-  const variacaoBloqueadaML = plataforma === 'mercadolivre' && anuncio.tem_variacao
 
   const [carregando, setCarregando] = useState(true)
   const [precoAnuncio, setPrecoAnuncio] = useState(String(anuncio.preco_venda ?? 0))
@@ -23,12 +19,37 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
   const [resultado, setResultado] = useState<{ ok: boolean; erroPreco?: string; erroEstoque?: string; erro?: string } | null>(null)
+  /** O que a sincronização mandaria, por variação (ou do anúncio, se simples). */
+  const [sugestao, setSugestao] = useState<Record<string, any>>({})
 
   useEffect(() => {
     let ativo = true
     async function carregar() {
-      if (!anuncio.tem_variacao || variacaoBloqueadaML) { setCarregando(false); return }
       const sb = createClient()
+
+      // O QUE O CAMPO PROPÕE É O QUE A SINCRONIZAÇÃO MANDARIA, e não o
+      // espelho. Preencher com o espelho fazia o modal propor de volta o
+      // número velho do canal — quem corrigisse o estoque no ERP e clicasse
+      // aqui reenviaria exatamente o valor que acabou de corrigir.
+      const sug = await fetch(`/api/marketplaces/anuncios/${anuncio.id}/estoque-sugerido`)
+        .then(r => r.json()).catch(() => null)
+      if (!ativo) return
+
+      const porVariacao: Record<string, any> = {}
+      for (const l of sug?.linhas ?? []) {
+        if (l.variacaoId) porVariacao[l.variacaoId] = l
+      }
+      setSugestao(porVariacao)
+
+      if (!anuncio.tem_variacao) {
+        const linha = (sug?.linhas ?? [])[0]
+        if (linha && linha.estoqueSugerido != null) setEstoqueAnuncio(String(linha.estoqueSugerido))
+        if (linha && linha.precoSugerido != null) setPrecoAnuncio(String(linha.precoSugerido))
+        setSugestao(linha ? { anuncio: linha } : {})
+        setCarregando(false)
+        return
+      }
+
       const { data } = await sb.from('marketplace_anuncio_variacoes')
         .select('id, model_id, nome_variacao, sku_variacao, preco, estoque')
         .eq('anuncio_id', anuncio.id)
@@ -37,7 +58,15 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
       const vars = data ?? []
       setVariacoes(vars)
       const inicial: Record<string, { preco: string; estoque: string }> = {}
-      for (const v of vars) inicial[v.id] = { preco: String(v.preco ?? 0), estoque: String(v.estoque ?? 0) }
+      for (const v of vars) {
+        const s = porVariacao[v.id]
+        inicial[v.id] = {
+          // Sem produto vinculado não há número do sistema — aí o espelho é o
+          // único valor que existe, e mexer nele é decisão de quem clicou.
+          preco: String(s?.precoSugerido ?? v.preco ?? 0),
+          estoque: String(s?.estoqueSugerido ?? v.estoque ?? 0),
+        }
+      }
       setFormVariacoes(inicial)
       setCarregando(false)
     }
@@ -46,7 +75,6 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
   }, [anuncio.id, anuncio.tem_variacao])
 
   async function enviar() {
-    if (variacaoBloqueadaML) return
     setEnviando(true); setErro(''); setResultado(null)
     const sb = createClient()
 
@@ -108,18 +136,28 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
             ⚠️ Isso atualiza o preço/estoque direto n{plataforma === 'mercadolivre' ? 'o Mercado Livre' : 'a Shopee'} — a mudança fica visível para os clientes imediatamente.
           </div>
 
-          {variacaoBloqueadaML ? (
-            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              Anúncios com variação no Mercado Livre ainda não têm atualização automática de preço/estoque por aqui — atualize direto no Mercado Livre por enquanto.
-            </p>
-          ) : carregando ? (
+          {carregando ? (
             <p className="text-sm text-gray-400">Carregando...</p>
           ) : anuncio.tem_variacao ? (
             <div className="space-y-2">
               <p className="text-xs font-medium text-gray-500">Variações</p>
               {variacoes.map(v => (
                 <div key={v.id} className="border border-gray-200 rounded-xl px-3 py-2.5 grid grid-cols-3 gap-2 items-center">
-                  <div className="text-xs text-gray-700 truncate">{v.nome_variacao || v.sku_variacao || 'Variação'}</div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-700 truncate">{v.nome_variacao || v.sku_variacao || 'Variação'}</p>
+                    {/* DE ONDE VEIO O NUMERO. Sem isto, o campo e so um numero
+                        numa caixa — e foi assim que o espelho velho passou por
+                        proposta do sistema. */}
+                    {sugestao[v.id]?.semProduto ? (
+                      <p className="text-[10px] text-amber-600 leading-tight">sem produto vinculado — valor do canal</p>
+                    ) : sugestao[v.id] ? (
+                      <p className="text-[10px] text-gray-400 leading-tight">
+                        ERP {sugestao[v.id].estoqueSistema ?? '—'}
+                        {sugestao[v.id].espelhoEstoque != null && sugestao[v.id].espelhoEstoque !== sugestao[v.id].estoqueSugerido
+                          ? ` · canal tem ${sugestao[v.id].espelhoEstoque}` : ' · canal já igual'}
+                      </p>
+                    ) : null}
+                  </div>
                   <div>
                     <label className="text-xs text-gray-400">Preço (R$)</label>
                     <input type="number" step="0.01" value={formVariacoes[v.id]?.preco ?? ''}
@@ -168,7 +206,7 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
-          <button onClick={enviar} disabled={enviando || carregando || variacaoBloqueadaML}
+          <button onClick={enviar} disabled={enviando || carregando}
             className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
             {enviando ? 'Enviando...' : `Enviar para ${nomePlataforma}`}
           </button>
