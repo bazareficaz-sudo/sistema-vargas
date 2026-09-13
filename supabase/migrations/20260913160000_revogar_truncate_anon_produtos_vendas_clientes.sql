@@ -1,0 +1,33 @@
+-- TRUNCATE não é usado por ninguém, e não deveria estar concedido.
+--
+-- O PostgREST não expõe TRUNCATE e o supabase-js não tem o verbo, então
+-- nenhum caminho do sistema usa este privilégio — ele veio do `GRANT ALL`
+-- padrão do Supabase, que o espalhou por ~120 tabelas.
+--
+-- ── POR QUE SÓ ESTAS TRÊS ───────────────────────────────────────────────
+--
+-- A auditoria do `anon` de 13/09/2026 mediu quem ainda depende dele:
+--
+--   produtos  28.676 linhas legíveis sem login, COM preco_custo
+--   vendas     3.104
+--   clientes     103, com cpf_cnpj
+--
+-- e mapeou 21 pontos do PDV presos a elas (leitura de catálogo, baixa de
+-- estoque, registro de venda e de cliente). Fechar qualquer um dos outros
+-- exige migrar caminho; este é o único item da lista com custo zero, porque
+-- ninguém o usa.
+--
+-- A vitrine da Loja Online NÃO entra na conta: ela renderiza no servidor com
+-- chave de serviço e lê apenas a view `loja_vitrine_produtos`. O ERP web
+-- também não: o navegador manda o JWT da sessão e roda como `authenticated`.
+-- O PDV é o único consumidor do papel `anon` nessas tabelas.
+--
+-- Restrito de propósito às três. Revogar nas ~120 seria mexer em grants de
+-- forma genérica, que é justamente o que esta série de fases não faz sem
+-- medir antes.
+--
+-- `service_role` e o dono do banco não são tocados: é por eles que migração
+-- e manutenção passam.
+REVOKE TRUNCATE ON public.produtos FROM anon, authenticated;
+REVOKE TRUNCATE ON public.vendas   FROM anon, authenticated;
+REVOKE TRUNCATE ON public.clientes FROM anon, authenticated;
