@@ -5,6 +5,8 @@ import {
   type VariacaoDoAnuncio, type AlvoCalculado,
 } from '../../src/lib/marketplace/estoqueVariacoes'
 import { corpoDeVariacoes } from '../../src/lib/mercadolivre/write'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // A fila tratava anúncio com variação como fora de escopo, e o comentário
 // dizia por quê: "mandar um número só sobrescreveria a distribuição inteira".
@@ -167,5 +169,59 @@ describe('corpo da atualização de variações no Mercado Livre', () => {
     // é justamente o que a sincronização precisa conseguir fazer.
     const corpo = corpoDeVariacoes([{ variationId: '111', estoque: 0 }])
     assert.equal(corpo?.variations[0].available_quantity, 0)
+  })
+})
+
+// ── ESTOQUE DE RISCO NUMA VARIAÇÃO ──────────────────────────────────────
+//
+// `estoque_risco` nunca mexeu no número enviado: ele liga a PAUSA. Num
+// anúncio simples isso basta, porque a pausa tira o item da venda. Numa
+// variação não: a pausa é do ITEM e exige unanimidade (uma cor esgotada não
+// pode derrubar as outras quatro), então a variação esgotada não pausava nada
+// E seguia anunciada com o complemento somado.
+//
+// MEDIDO EM 13/09/2026: 9 variações com estoque real 0 publicadas com 1.000
+// unidades cada. Zero é o equivalente por modelo da pausa.
+
+describe('a variação em risco sai de venda, o anúncio não', () => {
+  const linhaDaFila = (fonte: string, marcador: string) => {
+    const i = fonte.indexOf(marcador)
+    assert.ok(i > 0, `trecho não encontrado: ${marcador}`)
+    return fonte.slice(i, i + 1600)
+  }
+
+  test('a fila zera o estoque da variação em risco', () => {
+    const fila = readFileSync(
+      resolve(import.meta.dirname, '../../src/lib/marketplace/fila.ts'), 'utf8')
+    const trecho = linhaDaFila(fila, 'ESTOQUE DE RISCO NUMA VARIAÇÃO')
+    assert.match(trecho, /if \(emRisco && estoqueNovo !== undefined\)/)
+    assert.match(trecho, /estoqueNovo = 0/)
+  })
+
+  test('a rota do envio manual propõe o MESMO zero', () => {
+    // Dois caminhos com contas diferentes fariam o botão manual desfazer o que
+    // a fila acabou de mandar.
+    const rota = readFileSync(
+      resolve(import.meta.dirname, '../../src/app/api/marketplaces/anuncios/[id]/estoque-sugerido/route.ts'), 'utf8')
+    assert.match(rota, /r\.paraPausar/)
+    assert.match(rota, /estoque = 0/)
+  })
+
+  test('uma em risco NÃO pausa o anúncio — continua sendo unanimidade', () => {
+    // O zero tira aquele modelo de venda; o anúncio só sai do ar quando todos
+    // acabarem. As duas coisas convivem e não se substituem.
+    const d = decidirPausaComVariacoes([
+      alvo({ emRisco: true, estoqueNovo: 0 }),
+      alvo({ variacaoId: 'var-2', emRisco: false, estoqueNovo: 1023 }),
+    ])
+    assert.equal(d.pausar, false)
+  })
+
+  test('todas em risco: zera todas E pausa o anúncio', () => {
+    const d = decidirPausaComVariacoes([
+      alvo({ emRisco: true, estoqueNovo: 0 }),
+      alvo({ variacaoId: 'var-2', emRisco: true, estoqueNovo: 0 }),
+    ])
+    assert.equal(d.pausar, true)
   })
 })

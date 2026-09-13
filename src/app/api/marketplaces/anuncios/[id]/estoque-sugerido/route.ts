@@ -100,6 +100,17 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         if (typeof r.estoqueNovo === 'number') estoque = r.estoqueNovo
         if (typeof r.precoNovo === 'number') preco = r.precoNovo
         detalhe = `${base.origem} · regra aplicada`
+
+        // MESMA REGRA DA FILA: variação no estoque de risco vai com 0.
+        //
+        // A pausa é do item e exige unanimidade entre as variações; zero é o
+        // equivalente por modelo. Se esta rota propusesse o número cheio
+        // enquanto a fila manda 0, o botão manual desfaria o que a fila
+        // acabou de fazer — e ninguém saberia qual dos dois está certo.
+        if (anuncio!.tem_variacao && r.paraPausar && estoque !== null) {
+          detalhe = `${base.origem} · no estoque de risco (${estoque}) — propõe 0 para tirar de venda`
+          estoque = 0
+        }
       } else {
         detalhe = `regra não pôde ser aplicada: ${r.motivo}`
       }

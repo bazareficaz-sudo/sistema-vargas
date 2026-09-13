@@ -687,7 +687,28 @@ export async function processarFilaDaEmpresa(
           if (typeof r.estoqueNovo === 'number') estoqueNovo = r.estoqueNovo
           if (typeof r.precoNovo === 'number') precoNovo = r.precoNovo
           emRisco = !!r.paraPausar
-          detalheVar = `regra aplicada${emRisco ? ' · variação no estoque de risco' : ''}`
+
+          // ESTOQUE DE RISCO NUMA VARIAÇÃO: MANDA ZERO.
+          //
+          // `estoque_risco` nunca mexeu no número — ele liga a PAUSA, e num
+          // anúncio simples é a pausa que tira o item da venda. Só que a
+          // pausa é do ITEM: com cinco cores, uma esgotada não pode derrubar
+          // as outras quatro, e por isso a pausa aqui exige unanimidade.
+          //
+          // O resultado era o pior dos dois mundos: a variação esgotada não
+          // pausava nada E continuava anunciada com o complemento somado.
+          // Medido em 13/09/2026: 9 variações com estoque real 0 seguiam
+          // publicadas com 1.000 unidades cada.
+          //
+          // Zero é o equivalente por modelo da pausa — a plataforma aceita por
+          // `model_id`, aquele modelo sai de venda e os outros seguem. É o que
+          // "pausa quando o estoque chegar a X" quer dizer numa variação.
+          if (emRisco && estoqueNovo !== undefined) {
+            detalheVar = `regra aplicada · variação no estoque de risco (${estoqueNovo}) — enviando 0 para tirá-la de venda`
+            estoqueNovo = 0
+          } else {
+            detalheVar = 'regra aplicada'
+          }
         } else {
           estoqueNovo = undefined
           detalheVar = `regra não pôde ser aplicada: ${r.motivo}`
