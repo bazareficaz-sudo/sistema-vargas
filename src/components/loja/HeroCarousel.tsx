@@ -92,19 +92,22 @@ export default function HeroCarousel({ slides, politica, permiteSemEstoque }: {
           ))}
         </div>
 
+        {/* Fundo escuro atrás das bolinhas: sem ele, bolinha branca some em
+            cima de banner claro — já aconteceu num teste real. */}
         {multiplo && (
-          <div className="absolute inset-x-0 bottom-3 flex justify-center gap-1.5">
-            {slides.map((s, i) => (
-              <button
-                key={s.id}
-                aria-label={`Ir para o destaque ${i + 1}`}
-                onClick={() => setIndice(i)}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === indice ? 'w-6 bg-white' : 'w-1.5 bg-white/60'
-                }`}
-                style={{ boxShadow: '0 0 0 1px rgb(0 0 0 / 0.15)' }}
-              />
-            ))}
+          <div className="absolute inset-x-0 bottom-3 flex justify-center">
+            <div className="flex items-center gap-2 rounded-full bg-black/25 px-2.5 py-1.5 backdrop-blur-sm">
+              {slides.map((s, i) => (
+                <button
+                  key={s.id}
+                  aria-label={`Ir para o destaque ${i + 1}`}
+                  onClick={() => setIndice(i)}
+                  className={`h-2 rounded-full transition-all ${
+                    i === indice ? 'w-6 bg-white' : 'w-2 bg-white/50 hover:bg-white/80'
+                  }`}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>

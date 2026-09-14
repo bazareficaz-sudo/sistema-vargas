@@ -6,10 +6,11 @@
 // `categorias`, `marcas`) simplesmente ignora o que vier em `config` e grava
 // `{}`: são os tipos automáticos, o conteúdo já vem do catálogo.
 
-const TIPOS = ['destaques', 'ofertas', 'novidades', 'mais_vendidos', 'categorias', 'marcas', 'selecao', 'destaque_tag'] as const
+const TIPOS = ['destaques', 'ofertas', 'novidades', 'mais_vendidos', 'categorias', 'marcas', 'selecao', 'destaque_tag', 'secao_filtro'] as const
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 // Mesmo alfabeto que `GerenciarTagsModal` aceita ao criar uma tag nova.
 const TAG = /^.{1,60}$/
+const CRITERIOS = ['tag', 'marca', 'categoria', 'subcategoria'] as const
 
 export function validarBloco(corpo: any): { erro: string } | { valores: Record<string, unknown> } {
   const tipo = TIPOS.includes(corpo.tipo) ? corpo.tipo : undefined
@@ -39,6 +40,12 @@ export function validarBloco(corpo: any): { erro: string } | { valores: Record<s
     const tag = typeof corpo.tag === 'string' ? corpo.tag.trim() : ''
     if (!tag || !TAG.test(tag)) return { erro: 'Escolha uma tag' }
     config = { tag }
+  } else if (tipo === 'secao_filtro') {
+    const criterio = CRITERIOS.includes(corpo.criterio) ? corpo.criterio : undefined
+    if (!criterio) return { erro: `Critério inválido (aceita: ${CRITERIOS.join(', ')})` }
+    const valor = typeof corpo.valor === 'string' ? corpo.valor.trim().slice(0, 120) : ''
+    if (!valor) return { erro: 'Escolha um valor para o critério' }
+    config = { criterio, valor }
   }
 
   return { valores: { tipo, titulo, subtitulo, limite, ordem, ativo, config } }

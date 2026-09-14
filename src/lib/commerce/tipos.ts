@@ -148,7 +148,7 @@ export type Categoria = {
 
 export type BlocoHome = {
   id: string
-  tipo: 'destaques' | 'ofertas' | 'novidades' | 'mais_vendidos' | 'categorias' | 'marcas' | 'selecao' | 'destaque_tag'
+  tipo: 'destaques' | 'ofertas' | 'novidades' | 'mais_vendidos' | 'categorias' | 'marcas' | 'selecao' | 'destaque_tag' | 'secao_filtro'
   titulo: string
   subtitulo: string | null
   limite: number
