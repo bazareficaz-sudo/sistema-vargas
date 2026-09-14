@@ -1,5 +1,6 @@
 import { contextoAdmin } from '@/lib/commerce/admin'
 import FormularioLoja, { type Secao } from '@/components/loja-admin/FormularioLoja'
+import DominioProprioClient from '@/components/loja-admin/DominioProprioClient'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,9 +13,6 @@ const SECOES: Secao[] = [
     campos: [
       { nome: 'subdominio', rotulo: 'Subdomínio', max: 63, placeholder: 'minhaloja',
         ajuda: 'Só letras minúsculas, números e hífen. Trocar depois de divulgar quebra todo link já compartilhado.' },
-      { nome: 'dominio_proprio', rotulo: 'Domínio próprio (opcional)', max: 253,
-        placeholder: 'loja.suaempresa.com.br',
-        ajuda: 'Precisa apontar para a plataforma no DNS antes de funcionar. Enquanto não apontar, o subdomínio continua valendo.' },
     ],
   },
   {
@@ -39,16 +37,11 @@ export default async function Dominio() {
     <div className="space-y-4">
       <FormularioLoja lojaId={ctx.lojaId} secoes={SECOES} valores={(data ?? {}) as Record<string, unknown>} />
 
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
-        <p className="font-medium text-gray-900">Para o endereço funcionar de verdade</p>
-        <ul className="mt-2 list-inside list-disc space-y-1">
-          <li>O domínio curinga (<code className="font-mono text-xs">*.seu-dominio</code>) precisa estar
-              cadastrado no projeto da Vercel — uma vez só, e vale para todas as lojas.</li>
-          <li>A variável <code className="font-mono text-xs">NEXT_PUBLIC_LOJA_DOMINIO_RAIZ</code> precisa
-              conter o domínio raiz, sem <code className="font-mono text-xs">www</code>.</li>
-          <li>Domínio próprio exige, além disso, um CNAME apontando para a Vercel.</li>
-        </ul>
-      </div>
+      {/* Domínio próprio ganhou tela própria: diferente do subdomínio (que só
+          grava um campo), ativar um domínio de cliente depende do DNS dele e
+          da Vercel reconhecer o domínio — por isso o assistente, e não um
+          campo de texto que "parece salvo" e não funciona. */}
+      <DominioProprioClient lojaId={ctx.lojaId} dominioAtivo={(data as any)?.dominio_proprio ?? null} />
     </div>
   )
 }
