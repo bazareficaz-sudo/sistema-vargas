@@ -6,10 +6,11 @@ import { createClient } from '@/lib/supabase/client'
 import { botao } from '@/components/ui/botao'
 
 // Gestão de `loja_banners` (posição "hero", a única que a vitrine lê hoje —
-// ver src/lib/commerce/catalogo.ts). Só o PRIMEIRO banner ativo e dentro da
-// vigência aparece na loja; os outros existem para agendar a troca com
-// antecedência (cadastrar a campanha de amanhã hoje, com `inicio_em` de
-// amanhã, sem apagar a de hoje).
+// ver src/lib/commerce/catalogo.ts). TODOS os banners ativos e dentro da
+// vigência entram no carrossel do topo, dividindo espaço com os destaques
+// por tag (ver BlocosHomeClient) — um só carrossel, não banner e depois uma
+// seção separada. `inicio_em`/`fim_em` continuam servindo para agendar: uma
+// campanha de amanhã pode ser cadastrada hoje sem aparecer antes da hora.
 
 type Banner = {
   id: string
@@ -50,16 +51,6 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
   const [editandoId, setEditandoId] = useState<string | null>(null)
   const [criando, setCriando] = useState(false)
 
-  const noAr = [...banners]
-    .filter(b => b.ativo)
-    .sort((a, b) => a.ordem - b.ordem)
-    .find(b => {
-      const agora = Date.now()
-      const comecou = !b.inicio_em || new Date(b.inicio_em).getTime() <= agora
-      const naoAcabou = !b.fim_em || new Date(b.fim_em).getTime() >= agora
-      return comecou && naoAcabou
-    })
-
   async function excluir(id: string) {
     if (!confirm('Excluir este banner?')) return
     const r = await fetch(`/api/loja-admin/banners/${id}?lojaId=${lojaId}`, { method: 'DELETE' })
@@ -71,10 +62,10 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
     <section className="rounded-xl border border-gray-200 bg-white">
       <div className="flex items-center justify-between border-b border-gray-200 p-4">
         <div>
-          <h2 className="font-semibold text-gray-900">Banner de abertura</h2>
+          <h2 className="font-semibold text-gray-900">Carrossel do topo — banners</h2>
           <p className="mt-0.5 text-sm text-gray-500">
-            Só o primeiro <strong>No ar</strong> (ativo, dentro da vigência, menor ordem) aparece na loja.
-            Cadastre vários para agendar trocas sem apagar o atual.
+            Todo banner <strong>No ar</strong> (ativo, dentro da vigência) entra no carrossel do topo da
+            loja, dividindo espaço com os destaques por tag. A ordem decide a sequência.
           </p>
         </div>
         {!criando && (
@@ -100,7 +91,6 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
 
         {banners.map(b => {
           const s = situacao(b)
-          const ehEsteNoAr = noAr?.id === b.id
           return (
             <div key={b.id} className="p-4">
               {editandoId === b.id ? (
@@ -123,7 +113,7 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
                     <div className="flex items-center gap-2">
                       <p className="truncate font-medium text-gray-900">{b.titulo || '(sem título)'}</p>
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${s.cor}`}>
-                        {ehEsteNoAr && s.texto === 'No ar' ? 'No ar agora' : s.texto}
+                        {s.texto}
                       </span>
                     </div>
                     <p className="truncate text-xs text-gray-500">

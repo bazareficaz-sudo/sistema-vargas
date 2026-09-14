@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { lojaObrigatoria } from '@/lib/commerce/loja'
 import { banners, blocosHome, categorias, marcasEmDestaque } from '@/lib/commerce/catalogo'
 import CardProduto from '@/components/loja/CardProduto'
-import BannerDestaqueProduto from '@/components/loja/BannerDestaqueProduto'
+import HeroCarousel, { type Slide } from '@/components/loja/HeroCarousel'
 import { TituloSecao, classesBotao, estiloPrimario } from '@/components/loja/ds'
 
 // Home.
@@ -29,35 +29,40 @@ export default async function Home() {
     marcasEmDestaque(loja.id, 12),
   ])
 
-  const hero = faixas[0] ?? null
   const comImagem = arvore.filter(c => c.imagemUrl).slice(0, 8)
   const paraMostrar = comImagem.length >= 4 ? comImagem : arvore.slice(0, 8)
 
+  // ── Carrossel do topo ─────────────────────────────────────────
+  //
+  // Um carrossel só, dois tipos de slide: o banner estático de sempre
+  // (`loja_banners`) e o destaque por tag (`loja_blocos_home`, tipo
+  // `destaque_tag`) — que por isso SAI da lista de blocos abaixo, senão
+  // apareceria duas vezes. Antes só o primeiro banner ativo entrava; agora
+  // TODOS os banners "no ar" e todos os produtos destacados dividem o mesmo
+  // espaço, alternando — foi o ajuste pedido depois de a primeira versão pôr
+  // o destaque como uma seção separada mais abaixo.
+  const blocosDestaque = blocos.filter(b => b.tipo === 'destaque_tag')
+  const blocosNormais = blocos.filter(b => b.tipo !== 'destaque_tag')
+
+  const slides: Slide[] = [
+    ...faixas.map((f): Slide => ({
+      tipo: 'banner', id: f.id, imagemUrl: f.imagemUrl ?? f.imagemMobileUrl ?? '',
+      imagemMobileUrl: f.imagemMobileUrl, linkUrl: f.linkUrl, titulo: f.titulo,
+    })),
+    ...blocosDestaque.flatMap((b, bi) => b.produtos.map((p): Slide => ({
+      tipo: 'produto', id: p.lojaProdutoId, produto: p, titulo: b.titulo, subtitulo: b.subtitulo,
+      // Alterna entre as duas cores da loja — cada BLOCO fica numa cor fixa
+      // (todos os produtos do mesmo destaque com a mesma cor), e o próximo
+      // bloco troca. Evita um carrossel piscando cor a cada slide.
+      cor: bi % 2 === 0 ? 'primaria' : 'destaque',
+    }))),
+  ]
+
   return (
     <>
-      {/* ── Hero ──────────────────────────────────────────────
-          Banner deliberadamente contido. Hero de tela cheia empurra o
-          catálogo para baixo da dobra, e num celular isso significa que a
-          primeira coisa que o cliente vê não é produto. */}
-      {hero ? (
-        <section className="loja-container pt-4">
-          <Link
-            href={hero.linkUrl || '#'}
-            className="block overflow-hidden rounded-[var(--raio)]"
-            aria-label={hero.titulo ?? 'Destaque'}
-          >
-            <picture>
-              {hero.imagemMobileUrl && <source media="(max-width: 639px)" srcSet={hero.imagemMobileUrl} />}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={hero.imagemUrl ?? hero.imagemMobileUrl ?? ''}
-                alt={hero.titulo ?? ''}
-                className="h-auto w-full object-cover"
-                fetchPriority="high"
-              />
-            </picture>
-          </Link>
-        </section>
+      {/* ── Topo: carrossel, ou abertura automática sem conteúdo nenhum ── */}
+      {slides.length > 0 ? (
+        <HeroCarousel slides={slides} politica={loja.politicaPreco} permiteSemEstoque={loja.permitirVendaSemEstoque} />
       ) : (
         <section className="loja-container pt-8">
           <div className="rounded-[var(--raio)] bg-[var(--fundo-suave)] px-6 py-10 md:px-10 md:py-14">
@@ -103,43 +108,27 @@ export default async function Home() {
       )}
 
       {/* ── Blocos de produto ─────────────────────────────── */}
-      {blocos.map((b, i) => (
+      {blocosNormais.map(b => (
         <section key={b.id} className="loja-container pt-12">
           <TituloSecao
             titulo={b.titulo}
             subtitulo={b.subtitulo}
-            // Não existe página de busca por tag hoje — "Ver tudo" não teria
-            // para onde ir.
-            href={b.tipo === 'destaque_tag' ? undefined : b.tipo === 'ofertas' ? '/buscar?promocao=1' : '/buscar'}
+            href={b.tipo === 'ofertas' ? '/buscar?promocao=1' : '/buscar'}
           />
 
-          {b.tipo === 'destaque_tag' ? (
-            // Visual de banner, não de grade: um produto por faixa, imagem
-            // grande ao lado do preço. Ver BannerDestaqueProduto.
-            <div className="space-y-4">
-              {b.produtos.map(p => (
-                <BannerDestaqueProduto
-                  key={p.lojaProdutoId}
-                  p={p}
-                  permiteSemEstoque={loja.permitirVendaSemEstoque}
-                  politica={loja.politicaPreco}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="loja-trilho">
-              {b.produtos.map((p, j) => (
-                <CardProduto
-                  key={p.lojaProdutoId}
-                  p={p}
-                  permiteSemEstoque={loja.permitirVendaSemEstoque}
-                  politica={loja.politicaPreco}
-                  // Só os primeiros do primeiro bloco escapam do lazy loading.
-                  prioridade={i === 0 && j < 4}
-                />
-              ))}
-            </div>
-          )}
+          <div className="loja-trilho">
+            {b.produtos.map(p => (
+              <CardProduto
+                key={p.lojaProdutoId}
+                p={p}
+                permiteSemEstoque={loja.permitirVendaSemEstoque}
+                politica={loja.politicaPreco}
+                // Slides do carrossel já cobrem a prioridade do topo; aqui
+                // nenhum card precisa escapar do lazy loading.
+                prioridade={false}
+              />
+            ))}
+          </div>
         </section>
       ))}
 

@@ -7,8 +7,13 @@ import { botao } from '@/components/ui/botao'
 // Gestão dos blocos "Destaque por tag" — o banner dinâmico pedido: em vez de
 // arte estática, mostra ao vivo os produtos que têm uma TAG (a mesma que a
 // tela Dashboard → Produtos já usa para marcar produtos manualmente), com
-// imagem, nome e preço vindos do catálogo. Muda o preço do produto, o banner
-// muda sozinho — nada para reeditar.
+// imagem, nome, preço e descrição vindos do catálogo. Muda o preço do
+// produto, o banner muda sozinho — nada para reeditar.
+//
+// NÃO é uma seção separada da home: cada produto vira um SLIDE do mesmo
+// carrossel do banner principal, em `src/components/loja/HeroCarousel.tsx` —
+// ocupa o mesmo espaço, dividindo com os banners estáticos. Foi um ajuste
+// pedido depois da primeira versão, que colocava isto mais abaixo na página.
 //
 // Escopo desta tela DE PROPÓSITO limitado a `destaque_tag`: os outros tipos
 // de `loja_blocos_home` (ofertas, novidades, seleção manual...) já têm
@@ -48,11 +53,12 @@ export default function BlocosHomeClient({ lojaId, blocos, tagsDisponiveis }: {
     <section className="rounded-xl border border-gray-200 bg-white">
       <div className="flex items-center justify-between border-b border-gray-200 p-4">
         <div>
-          <h2 className="font-semibold text-gray-900">Destaque por tag</h2>
+          <h2 className="font-semibold text-gray-900">Destaque por tag (carrossel do topo)</h2>
           <p className="mt-0.5 text-sm text-gray-500">
-            Um banner com visual de banner, mas o conteúdo é ao vivo do catálogo: escolha uma tag
-            e os produtos marcados com ela aparecem na home com imagem, nome e preço atuais —
-            nunca desatualizado, porque não é uma arte, é o próprio produto.
+            Escolha uma tag e os produtos marcados com ela entram no carrossel do topo da loja —
+            no mesmo espaço do banner principal, com imagem, preço grande e uma cor de destaque,
+            alternando com os banners estáticos. Preço e nome vêm ao vivo do catálogo: nunca
+            desatualizado, porque não é uma arte, é o próprio produto.
           </p>
         </div>
         {!criando && tagsDisponiveis.length > 0 && (
@@ -134,8 +140,29 @@ function BlocoForm({ lojaId, id, tagsDisponiveis, inicial, aoSalvar, aoCancelar 
   const [form, setForm] = useState(inicial)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  const [gerandoIa, setGerandoIa] = useState(false)
+  const [avisoIa, setAvisoIa] = useState<string | null>(null)
 
   const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm(f => ({ ...f, [k]: v }))
+
+  async function gerarDescricaoComIa() {
+    setGerandoIa(true)
+    setAvisoIa(null)
+    try {
+      const r = await fetch('/api/loja-admin/blocos/gerar-descricao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lojaId, tag: form.tag }),
+      })
+      const dados = await r.json()
+      if (!r.ok) throw new Error(dados.erro ?? 'Não foi possível gerar')
+      setAvisoIa(dados.aviso ?? `${dados.geradas} de ${dados.total} produto(s) sem descrição ganharam uma frase gerada por IA.`)
+    } catch (e) {
+      setAvisoIa(e instanceof Error ? e.message : 'Não foi possível gerar')
+    } finally {
+      setGerandoIa(false)
+    }
+  }
 
   async function salvar() {
     setSalvando(true)
@@ -185,16 +212,34 @@ function BlocoForm({ lojaId, id, tagsDisponiveis, inicial, aoSalvar, aoCancelar 
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className="block text-sm font-medium text-gray-700">Título na home</label>
+          <label className="block text-sm font-medium text-gray-700">Manchete do slide</label>
           <input value={form.titulo} onChange={e => set('titulo', e.target.value)} maxLength={120}
             placeholder="Ex.: Ofertas da semana"
             className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm" />
+          <p className="mt-1 text-xs text-gray-500">Aparece pequeno, acima do nome do produto, em cada slide.</p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700">Subtítulo (opcional)</label>
+          <label className="block text-sm font-medium text-gray-700">Descrição padrão (opcional)</label>
           <input value={form.subtitulo} onChange={e => set('subtitulo', e.target.value)} maxLength={200}
+            placeholder="Usada só quando o produto não tem descrição própria"
             className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm" />
+          <p className="mt-1 text-xs text-gray-500">
+            Cada produto pode ter sua própria descrição (gerada abaixo ou escrita em Loja Online →
+            Produtos); esta aqui é o texto de reserva para quem ainda não tem.
+          </p>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={gerarDescricaoComIa} disabled={gerandoIa || !form.tag} className={botao('secundario', 'sm')}>
+            {gerandoIa ? 'Gerando…' : '✨ Gerar descrição com IA'}
+          </button>
+          <span className="text-xs text-gray-500">
+            Escreve uma frase curta só para os produtos desta tag que ainda não têm descrição própria — nunca substitui a que já existe.
+          </span>
+        </div>
+        {avisoIa && <p className="mt-2 text-sm text-gray-700">{avisoIa}</p>}
       </div>
 
       <div className="flex items-center gap-4">
