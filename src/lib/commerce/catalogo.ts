@@ -30,6 +30,7 @@ function paraCard(r: Record<string, any>): ProdutoCard {
     precoPix: r.preco_pix != null ? Number(r.preco_pix) : null,
     estoquePublicavel: Number(r.estoque_publicavel ?? 0),
     destaque: !!r.destaque,
+    descricaoCurta: r.descricao_curta ?? null,
   }
 }
 
@@ -315,6 +316,23 @@ async function montarBlocosHome(loja: Loja): Promise<BlocoHome[]> {
         const { data: linhas } = await db()
           .from('loja_vitrine_produtos').select('*')
           .eq('loja_id', loja.id).eq('status', 'publicado').in('produto_id', ids.slice(0, limite))
+        produtos = ((linhas ?? []) as Record<string, any>[]).map(l => paraCard(limpar(l)))
+      }
+    } else if (d.tipo === 'destaque_tag') {
+      // Quem entra é decidido pela TAG do produto (`produtos.tags`, a mesma
+      // que a tela de Produtos já usa) — não por id escolhido um a um, e não
+      // pelo que o catálogo tem de promoção/novidade. `estoque_publicavel`
+      // maior que zero: banner de produto esgotado é a pior primeira
+      // impressão, então some em vez de mostrar "Indisponível" em destaque.
+      const tag = typeof d.config?.tag === 'string' ? d.config.tag.trim() : ''
+      if (tag) {
+        const { data: linhas } = await db()
+          .from('loja_vitrine_produtos').select('*')
+          .eq('loja_id', loja.id).eq('status', 'publicado')
+          .contains('tags', [tag])
+          .gt('estoque_publicavel', 0)
+          .order('ordem')
+          .limit(limite)
         produtos = ((linhas ?? []) as Record<string, any>[]).map(l => paraCard(limpar(l)))
       }
     } else {

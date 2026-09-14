@@ -31,6 +31,7 @@ function paraCard(r: Record<string, any>): ProdutoCard {
     precoPix: r.preco_pix != null ? Number(r.preco_pix) : null,
     estoquePublicavel: Number(r.estoque_publicavel ?? 0),
     destaque: !!r.destaque,
+    descricaoCurta: r.descricao_curta ?? null,
   }
 }
 

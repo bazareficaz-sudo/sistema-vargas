@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { lojaObrigatoria } from '@/lib/commerce/loja'
 import { banners, blocosHome, categorias, marcasEmDestaque } from '@/lib/commerce/catalogo'
 import CardProduto from '@/components/loja/CardProduto'
+import BannerDestaqueProduto from '@/components/loja/BannerDestaqueProduto'
 import { TituloSecao, classesBotao, estiloPrimario } from '@/components/loja/ds'
 
 // Home.
@@ -107,20 +108,38 @@ export default async function Home() {
           <TituloSecao
             titulo={b.titulo}
             subtitulo={b.subtitulo}
-            href={b.tipo === 'ofertas' ? '/buscar?promocao=1' : '/buscar'}
+            // Não existe página de busca por tag hoje — "Ver tudo" não teria
+            // para onde ir.
+            href={b.tipo === 'destaque_tag' ? undefined : b.tipo === 'ofertas' ? '/buscar?promocao=1' : '/buscar'}
           />
-          <div className="loja-trilho">
-            {b.produtos.map((p, j) => (
-              <CardProduto
-                key={p.lojaProdutoId}
-                p={p}
-                permiteSemEstoque={loja.permitirVendaSemEstoque}
-                politica={loja.politicaPreco}
-                // Só os primeiros do primeiro bloco escapam do lazy loading.
-                prioridade={i === 0 && j < 4}
-              />
-            ))}
-          </div>
+
+          {b.tipo === 'destaque_tag' ? (
+            // Visual de banner, não de grade: um produto por faixa, imagem
+            // grande ao lado do preço. Ver BannerDestaqueProduto.
+            <div className="space-y-4">
+              {b.produtos.map(p => (
+                <BannerDestaqueProduto
+                  key={p.lojaProdutoId}
+                  p={p}
+                  permiteSemEstoque={loja.permitirVendaSemEstoque}
+                  politica={loja.politicaPreco}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="loja-trilho">
+              {b.produtos.map((p, j) => (
+                <CardProduto
+                  key={p.lojaProdutoId}
+                  p={p}
+                  permiteSemEstoque={loja.permitirVendaSemEstoque}
+                  politica={loja.politicaPreco}
+                  // Só os primeiros do primeiro bloco escapam do lazy loading.
+                  prioridade={i === 0 && j < 4}
+                />
+              ))}
+            </div>
+          )}
         </section>
       ))}
 

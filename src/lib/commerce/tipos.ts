@@ -110,6 +110,10 @@ export type ProdutoCard = {
   precoPix: number | null
   estoquePublicavel: number
   destaque: boolean
+  /** Só vem preenchida quando a consulta de origem já trazia a coluna (ex:
+   *  `loja_vitrine_produtos.*`). Os cards de listagem/busca não precisam
+   *  dela e ficam com `null` — é o banner de destaque por tag que usa. */
+  descricaoCurta: string | null
 }
 
 /** A página do produto. Aqui a disponibilidade é AO VIVO, não cache. */
@@ -144,7 +148,7 @@ export type Categoria = {
 
 export type BlocoHome = {
   id: string
-  tipo: 'destaques' | 'ofertas' | 'novidades' | 'mais_vendidos' | 'categorias' | 'marcas' | 'selecao'
+  tipo: 'destaques' | 'ofertas' | 'novidades' | 'mais_vendidos' | 'categorias' | 'marcas' | 'selecao' | 'destaque_tag'
   titulo: string
   subtitulo: string | null
   limite: number
