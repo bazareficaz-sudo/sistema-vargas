@@ -9,6 +9,7 @@ const CAMPOS = [
   'instagram', 'facebook', 'tiktok', 'horario_atendimento',
   'seo_title', 'meta_description', 'og_image_url', 'indexavel',
   'notificar_loja', 'notificar_cliente', 'notificar_numero',
+  'mostrar_botao_comprar_listagem',
 ] as const
 
 const SECOES: Secao[] = [
@@ -60,6 +61,15 @@ const SECOES: Secao[] = [
         ajuda: 'Vazio usa o WhatsApp de atendimento acima. Preencha se quem separa o pedido não é quem atende.' },
       { nome: 'notificar_cliente', rotulo: 'Confirmar o pedido para o cliente', tipo: 'bool',
         ajuda: 'Manda uma confirmação no WhatsApp dele. Respeita quem pediu para não receber mensagens.' },
+    ],
+  },
+  {
+    titulo: 'Listagem de produtos',
+    campos: [
+      { nome: 'mostrar_botao_comprar_listagem', rotulo: 'Botão de compra rápida nos cards', tipo: 'bool',
+        ajuda: 'Hoje o "Comprar" só existe na página do produto (com escolha de quantidade). '
+          + 'Ligar aqui acrescenta um botão de compra rápida (1 unidade) direto no card da busca, '
+          + 'categoria e home — sem tirar o fluxo normal da página do produto.' },
     ],
   },
   {

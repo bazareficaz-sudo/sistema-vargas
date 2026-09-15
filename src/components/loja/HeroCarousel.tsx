@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ImagemProduto, classesBotao, real } from './ds'
 import { PRECO_UNICO, exibicaoPreco, rotuloAVista, textoAVista, textoParcelamento } from '@/lib/commerce/precos'
 import type { PoliticaPreco, ProdutoCard } from '@/lib/commerce/tipos'
@@ -45,46 +45,58 @@ export default function HeroCarousel({ slides, politica, permiteSemEstoque }: {
   politica?: PoliticaPreco
   permiteSemEstoque: boolean
 }) {
-  const trilhoRef = useRef<HTMLDivElement>(null)
   const [indice, setIndice] = useState(0)
-  const [pausado, setPausado] = useState(false)
+  const [arrastoX, setArrastoX] = useState<number | null>(null)
 
   const multiplo = slides.length > 1
 
-  // Autoplay: para no hover/toque, e para de vez se a aba está oculta —
-  // trocar de slide numa aba que ninguém vê só gasta ciclo.
+  // Sem pausa no hover, e sem sincronizar por `scrollLeft`: a primeira
+  // versão usava `overflow-x-auto` + `scrollIntoView` + `onScroll` para
+  // saber em qual slide estava, e testado ao vivo isso travava — o
+  // navegador às vezes restaura a posição de rolagem sozinho ao recarregar,
+  // o `onScroll` lia isso e brigava com o estado do React, e o carrossel
+  // ficava preso num slide ou pulava vários de uma vez. Também pausava com
+  // `onMouseEnter`/`onMouseLeave`, e clicar numa bolinha deixa o cursor em
+  // cima do carrossel sem o `mouseleave` disparar — autoplay parado pra
+  // sempre naquele carregamento.
+  //
+  // Agora É SÓ ESTADO: `indice` manda, um `translateX` obedece. Sem
+  // segunda fonte de verdade, não tem como as duas discordarem. O gesto de
+  // arrastar (celular) veio de volta como `onTouchStart/Move/End` medindo
+  // a distância, não como rolagem nativa.
   useEffect(() => {
-    if (!multiplo || pausado) return
-    const id = setInterval(() => {
-      setIndice(i => (i + 1) % slides.length)
-    }, 6000)
+    if (!multiplo) return
+    const id = setInterval(() => setIndice(i => (i + 1) % slides.length), 6000)
     return () => clearInterval(id)
-  }, [multiplo, pausado, slides.length])
-
-  useEffect(() => {
-    trilhoRef.current?.children[indice]?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
-  }, [indice])
+  }, [multiplo, slides.length])
 
   if (slides.length === 0) return null
+
+  const irPara = (i: number) => setIndice(((i % slides.length) + slides.length) % slides.length)
 
   return (
     <section className="loja-container pt-4">
       <div
-        className="relative overflow-hidden rounded-[var(--raio)]"
-        onMouseEnter={() => setPausado(true)}
-        onMouseLeave={() => setPausado(false)}
+        className="relative touch-pan-y overflow-hidden rounded-[var(--raio)]"
+        onTouchStart={e => setArrastoX(e.touches[0].clientX)}
+        onTouchMove={e => {
+          if (arrastoX == null) return
+          const delta = e.touches[0].clientX - arrastoX
+          // Limiar de 50px: sem ele, um toque para clicar no card já dispara
+          // "arrasto" e troca de slide sozinho.
+          if (Math.abs(delta) > 50) {
+            irPara(indice + (delta < 0 ? 1 : -1))
+            setArrastoX(null)
+          }
+        }}
+        onTouchEnd={() => setArrastoX(null)}
       >
         <div
-          ref={trilhoRef}
-          onScroll={e => {
-            const el = e.currentTarget
-            const novo = Math.round(el.scrollLeft / el.clientWidth)
-            if (novo !== indice) setIndice(novo)
-          }}
-          className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex transition-transform duration-500 ease-out"
+          style={{ transform: `translateX(-${indice * 100}%)` }}
         >
           {slides.map(s => (
-            <div key={s.id} className="w-full shrink-0 snap-start">
+            <div key={s.id} className="w-full shrink-0">
               {s.tipo === 'banner' ? <SlideBannerView s={s} /> : (
                 <SlideProdutoView s={s} politica={politica} permiteSemEstoque={permiteSemEstoque} />
               )}
@@ -92,19 +104,22 @@ export default function HeroCarousel({ slides, politica, permiteSemEstoque }: {
           ))}
         </div>
 
+        {/* Fundo escuro atrás das bolinhas: sem ele, bolinha branca some em
+            cima de banner claro — já aconteceu num teste real. */}
         {multiplo && (
-          <div className="absolute inset-x-0 bottom-3 flex justify-center gap-1.5">
-            {slides.map((s, i) => (
-              <button
-                key={s.id}
-                aria-label={`Ir para o destaque ${i + 1}`}
-                onClick={() => setIndice(i)}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === indice ? 'w-6 bg-white' : 'w-1.5 bg-white/60'
-                }`}
-                style={{ boxShadow: '0 0 0 1px rgb(0 0 0 / 0.15)' }}
-              />
-            ))}
+          <div className="absolute inset-x-0 bottom-3 flex justify-center">
+            <div className="flex items-center gap-2 rounded-full bg-black/25 px-2.5 py-1.5 backdrop-blur-sm">
+              {slides.map((s, i) => (
+                <button
+                  key={s.id}
+                  aria-label={`Ir para o destaque ${i + 1}`}
+                  onClick={() => setIndice(i)}
+                  className={`h-2 rounded-full transition-all ${
+                    i === indice ? 'w-6 bg-white' : 'w-2 bg-white/50 hover:bg-white/80'
+                  }`}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>

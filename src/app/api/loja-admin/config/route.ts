@@ -101,6 +101,7 @@ const CAMPOS: Record<string, Regra> = {
   reserva_minutos: { tipo: 'inteiro', min: 5, max: 1440 },
   entrega_ativa: { tipo: 'bool' },
   retirada_ativa: { tipo: 'bool' },
+  mostrar_botao_comprar_listagem: { tipo: 'bool' },
 }
 
 /** Devolve o valor validado, ou o símbolo `RECUSA` se o valor não serve. */

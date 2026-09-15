@@ -335,6 +335,26 @@ async function montarBlocosHome(loja: Loja): Promise<BlocoHome[]> {
           .limit(limite)
         produtos = ((linhas ?? []) as Record<string, any>[]).map(l => paraCard(limpar(l)))
       }
+    } else if (d.tipo === 'secao_filtro') {
+      // Seção genérica por critério — o pedido foi "Categoria Destaques,
+      // Novidades, Chuveiros..." configurável por TAG, MARCA, CATEGORIA ou
+      // SUBCATEGORIA, sem exigir escolher produto por produto. `categoria`/
+      // `subcategoria` casam com o texto do ERP (`produtos.categoria` /
+      // `.subcategoria`, expostos na view como `categoria_erp`/
+      // `subcategoria_erp`) — o mesmo campo que o resto do painel já usa
+      // para filtrar, não a árvore própria da loja.
+      const criterio = d.config?.criterio as string | undefined
+      const valor = typeof d.config?.valor === 'string' ? d.config.valor : ''
+      if (criterio && valor) {
+        let q = db().from('loja_vitrine_produtos').select('*')
+          .eq('loja_id', loja.id).eq('status', 'publicado').gt('estoque_publicavel', 0)
+        if (criterio === 'tag') q = q.contains('tags', [valor])
+        else if (criterio === 'marca') q = q.eq('marca', valor)
+        else if (criterio === 'categoria') q = q.eq('categoria_erp', valor)
+        else if (criterio === 'subcategoria') q = q.eq('subcategoria_erp', valor)
+        const { data: linhas } = await q.order('ordem').limit(limite)
+        produtos = ((linhas ?? []) as Record<string, any>[]).map(l => paraCard(limpar(l)))
+      }
     } else {
       const r = await buscar(loja, {
         soPromocao: d.tipo === 'ofertas',

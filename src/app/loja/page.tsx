@@ -113,7 +113,10 @@ export default async function Home() {
           <TituloSecao
             titulo={b.titulo}
             subtitulo={b.subtitulo}
-            href={b.tipo === 'ofertas' ? '/buscar?promocao=1' : '/buscar'}
+            // Seção por critério não tem link de "ver tudo" hoje — não existe
+            // busca por tag/categoria bruta do ERP, só por marca (que já usa
+            // /buscar?marca=, mas o valor exato não chega até aqui).
+            href={b.tipo === 'secao_filtro' ? undefined : b.tipo === 'ofertas' ? '/buscar?promocao=1' : '/buscar'}
           />
 
           <div className="loja-trilho">
@@ -123,6 +126,7 @@ export default async function Home() {
                 p={p}
                 permiteSemEstoque={loja.permitirVendaSemEstoque}
                 politica={loja.politicaPreco}
+                mostrarBotaoComprar={loja.mostrarBotaoComprarListagem}
                 // Slides do carrossel já cobrem a prioridade do topo; aqui
                 // nenhum card precisa escapar do lazy loading.
                 prioridade={false}

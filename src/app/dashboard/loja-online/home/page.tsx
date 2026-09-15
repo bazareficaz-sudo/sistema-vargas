@@ -1,6 +1,7 @@
 import { contextoAdmin } from '@/lib/commerce/admin'
 import BannersClient from '@/components/loja-admin/BannersClient'
 import BlocosHomeClient from '@/components/loja-admin/BlocosHomeClient'
+import SecoesHomeClient from '@/components/loja-admin/SecoesHomeClient'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,16 +17,32 @@ export default async function HomeLoja() {
   const ctx = await contextoAdmin()
   if (!ctx?.lojaId) return null
 
-  const [{ data: banners }, { data: blocos }, { data: tagsRows }] = await Promise.all([
+  const [{ data: banners }, { data: blocos }, { data: tagsRows }, { data: marcasRows }, { data: categoriasRows }] = await Promise.all([
     ctx.sb.from('loja_banners').select('*').eq('loja_id', ctx.lojaId).order('ordem'),
     ctx.sb.from('loja_blocos_home').select('*').eq('loja_id', ctx.lojaId).order('ordem'),
     // Mesma consulta que alimenta o filtro de tags em Dashboard → Produtos:
     // é o inventário de tags que já existe, não uma lista nova.
     ctx.sb.from('produtos').select('tags').eq('empresa_id', ctx.empresaId).not('tags', 'eq', '{}'),
+    ctx.sb.from('produtos').select('marca').eq('empresa_id', ctx.empresaId).eq('ativo', true).not('marca', 'is', null),
+    // Categoria e subcategoria vêm do texto de `produtos`, não da tabela
+    // `categorias` do ERP — é o mesmo campo que `montarBlocosHome` filtra,
+    // então toda opção da lista tem produto de verdade por trás. A tabela
+    // `categorias` tem grafia duplicada (ver CONTINUIDADE.md) e escolher
+    // por ela podia oferecer um valor que bate zero produto.
+    ctx.sb.from('produtos').select('categoria, subcategoria').eq('empresa_id', ctx.empresaId).eq('ativo', true),
   ])
 
   const tagsDisponiveis = Array.from(
     new Set<string>((tagsRows ?? []).flatMap((r: any) => (r.tags ?? []) as string[])),
+  ).sort()
+  const marcasDisponiveis = Array.from(
+    new Set<string>((marcasRows ?? []).map((r: any) => (r.marca as string)?.trim()).filter(Boolean)),
+  ).sort()
+  const categoriasDisponiveis = Array.from(
+    new Set<string>((categoriasRows ?? []).map((r: any) => (r.categoria as string)?.trim()).filter(Boolean)),
+  ).sort()
+  const subcategoriasDisponiveis = Array.from(
+    new Set<string>((categoriasRows ?? []).map((r: any) => (r.subcategoria as string)?.trim()).filter(Boolean)),
   ).sort()
 
   return (
@@ -36,8 +53,9 @@ export default async function HomeLoja() {
           <li className="flex gap-2">
             <span className="text-gray-400">1.</span>
             <span>
-              <strong>Abertura</strong> — o banner ativo com a menor ordem, dentro da vigência.
-              Sem nenhum, mostra o nome da loja, a descrição e um botão para o catálogo.
+              <strong>Carrossel do topo</strong> — todo banner ativo (dentro da vigência) e todo produto de
+              um "Destaque por tag" ativo, dividindo o mesmo espaço. Sem nenhum dos dois, mostra o nome da
+              loja, a descrição e um botão para o catálogo.
             </span>
           </li>
           <li className="flex gap-2">
@@ -47,8 +65,8 @@ export default async function HomeLoja() {
           <li className="flex gap-2">
             <span className="text-gray-400">3.</span>
             <span>
-              <strong>Blocos de produto</strong> — os configurados abaixo, na ordem escolhida.
-              Sem nenhum, monta "Ofertas" e "Novidades" automaticamente.
+              <strong>Seções de produto</strong> — as criadas em "Seções da home" abaixo, na ordem escolhida.
+              Sem nenhuma, monta "Ofertas" e "Novidades" automaticamente.
             </span>
           </li>
           <li className="flex gap-2">
@@ -60,6 +78,14 @@ export default async function HomeLoja() {
 
       <BannersClient lojaId={ctx.lojaId} banners={banners ?? []} />
       <BlocosHomeClient lojaId={ctx.lojaId} blocos={blocos ?? []} tagsDisponiveis={tagsDisponiveis} />
+      <SecoesHomeClient
+        lojaId={ctx.lojaId}
+        blocos={blocos ?? []}
+        tagsDisponiveis={tagsDisponiveis}
+        marcasDisponiveis={marcasDisponiveis}
+        categoriasDisponiveis={categoriasDisponiveis}
+        subcategoriasDisponiveis={subcategoriasDisponiveis}
+      />
     </div>
   )
 }
