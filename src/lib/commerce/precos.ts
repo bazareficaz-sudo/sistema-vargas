@@ -121,6 +121,19 @@ export function textoParcelamento(p: Parcelamento): string {
 }
 
 /**
+ * "no cartão, em até 10x de R$ 10,00 sem juros" — ou "no cartão, em 1x" sem
+ * parcelamento a oferecer.
+ *
+ * Existe porque o preço riscado/normal, sozinho, não diz a quem paga: ao
+ * lado de um preço em destaque no Pix, "R$ 25,02" sem rótulo lê-se como "o
+ * preço antigo", não como "é isto que o cartão cobra". Pedido depois de ver
+ * a loja no ar — o cliente perguntou.
+ */
+export function textoCartaoNormal(p: Parcelamento | null): string {
+  return p ? `no cartão, ${textoParcelamento(p)}` : 'no cartão, em 1x'
+}
+
+/**
  * "no Pix" — o rótulo curto, da linha secundária.
  *
  * É o texto que a Fase 1 já mostrava, e continua sendo, para uma loja no ar

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import {
-  PRECO_UNICO, brl, exibicaoPreco, rotuloAVista, textoAVista, textoParcelamento,
+  PRECO_UNICO, brl, exibicaoPreco, rotuloAVista, textoAVista, textoCartaoNormal, textoParcelamento,
 } from '@/lib/commerce/precos'
 import type { PoliticaPreco } from '@/lib/commerce/tipos'
 
@@ -150,17 +150,23 @@ export function Preco({ valor, de, pix, politica, tamanho = 'card' }: {
       {e.aVistaEmDestaque ? (
         <>
           {riscado}
-          {/* O preço normal, que é o que vale em qualquer outra forma de
-              pagamento. Sem parcelamento configurado sai só o valor — e
-              continua legível, porque o "De" logo acima dá o contexto. */}
+          {/* "no cartão" existe porque, sozinho, "R$ 25,02" ao lado de um
+              preço em destaque no Pix lê-se como "o preço antigo" — o
+              cliente perguntou. Sempre aparece aqui: esta linha SÓ existe
+              quando há um Pix em destaque pra contrastar. */}
           <div className={`text-[var(--tinta-media)] ${miudo}`}>
-            <span className="font-semibold">{real(e.normal ?? valor)}</span>
-            {e.parcelamento && <> {textoParcelamento(e.parcelamento)}</>}
+            <span className="font-semibold">{real(e.normal ?? valor)}</span> {textoCartaoNormal(e.parcelamento)}
           </div>
         </>
       ) : (
         <>
-          {e.parcelamento && (
+          {e.aVista != null ? (
+            // Mesmo rótulo do outro ramo, e pelo mesmo motivo: existe um Pix
+            // alternativo logo abaixo, então o preço em destaque aqui precisa
+            // dizer que é o do cartão — sem isso, "R$ 22,00" e "R$ 20,00 no
+            // Pix" lado a lado não dizem qual é qual.
+            <div className={`text-[var(--tinta-media)] ${miudo}`}>{textoCartaoNormal(e.parcelamento)}</div>
+          ) : e.parcelamento && (
             <div className={`text-[var(--tinta-media)] ${miudo}`}>
               {textoParcelamento(e.parcelamento)}
             </div>
@@ -171,6 +177,16 @@ export function Preco({ valor, de, pix, politica, tamanho = 'card' }: {
             </div>
           )}
         </>
+      )}
+
+      {/* Só na página do produto, e só quando há de fato dois preços pra
+          explicar — o card já diz "no cartão"/"no Pix" em cada linha; aqui
+          o cliente tem espaço (e motivo) pra entender o porquê. */}
+      {grande && e.aVista != null && (
+        <p className="mt-2 text-xs text-[var(--tinta-fraca)]">
+          O valor {rotuloAVista(pol)} é à vista; vale {textoCartaoNormal(e.parcelamento)}.
+          O parcelamento é só informativo — a loja não cobra pelo site.
+        </p>
       )}
     </div>
   )
