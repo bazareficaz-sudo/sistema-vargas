@@ -125,6 +125,7 @@ export default function Listagem({
             p={p}
             permiteSemEstoque={loja.permitirVendaSemEstoque}
             politica={loja.politicaPreco}
+            mostrarBotaoComprar={loja.mostrarBotaoComprarListagem}
             prioridade={i < 4}
           />
         ))}

@@ -1,16 +1,20 @@
 import Link from 'next/link'
 import { ImagemProduto, Preco, SeloDisponibilidade } from './ds'
+import BotaoComprarRapido from './BotaoComprarRapido'
 import { descontoPercentual } from '@/lib/commerce/precos'
 import type { PoliticaPreco, ProdutoCard } from '@/lib/commerce/tipos'
 
 // O card existe para uma decisão só: vale a pena abrir este produto?
 //
 // Por isso ele mostra imagem, nome, preço e disponibilidade — e nada mais.
-// SKU, EAN, marca em destaque, ficha técnica e botão de comprar direto foram
-// deixados de fora de propósito: informação técnica no card é ruído para o
-// consumidor, e "comprar" sem escolher quantidade leva de volta para trás.
+// SKU, EAN, marca em destaque e ficha técnica ficam de fora de propósito:
+// informação técnica no card é ruído para o consumidor. O botão de comprar
+// direto TAMBÉM ficava de fora pelo mesmo motivo original — "comprar sem
+// escolher quantidade leva de volta pra trás" — mas virou opção em Loja
+// Online → Configurações (`mostrarBotaoComprar`), a pedido: quem quiser
+// venda mais rápida liga, sabendo a troca.
 
-export default function CardProduto({ p, permiteSemEstoque, politica, prioridade = false }: {
+export default function CardProduto({ p, permiteSemEstoque, politica, prioridade = false, mostrarBotaoComprar = false }: {
   p: ProdutoCard
   permiteSemEstoque: boolean
   /**
@@ -23,6 +27,8 @@ export default function CardProduto({ p, permiteSemEstoque, politica, prioridade
   politica?: PoliticaPreco
   /** Só para os primeiros da primeira dobra: carrega a imagem sem lazy. */
   prioridade?: boolean
+  /** `loja.mostrarBotaoComprarListagem`. Padrão desligado. */
+  mostrarBotaoComprar?: boolean
 }) {
   const semSaldo = p.estoquePublicavel <= 0 && !permiteSemEstoque
   // A mesma conta do bloco de preço, pela mesma função — o selo e o "De"
@@ -78,6 +84,7 @@ export default function CardProduto({ p, permiteSemEstoque, politica, prioridade
           <div className="mt-1">
             <SeloDisponibilidade disponivel={p.estoquePublicavel} permiteSemEstoque={permiteSemEstoque} />
           </div>
+          {mostrarBotaoComprar && !semSaldo && <BotaoComprarRapido p={p} />}
         </div>
       </div>
     </Link>

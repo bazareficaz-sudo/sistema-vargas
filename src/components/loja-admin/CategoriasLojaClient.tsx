@@ -2,12 +2,14 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { botao } from '@/components/ui/botao'
 import ArvoreCategorias from './ArvoreCategorias'
 
 type Cat = {
   id: string; nome: string; slug: string; paiId: string | null
   ativo: boolean; destaque: boolean; ordem: number; produtos: number
+  imagemUrl: string | null
 }
 
 export default function CategoriasLojaClient({ lojaId, categorias, semCategoria }: {
@@ -18,6 +20,25 @@ export default function CategoriasLojaClient({ lojaId, categorias, semCategoria 
   const [aviso, setAviso] = useState<string | null>(null)
   const [editando, setEditando] = useState<string | null>(null)
   const [nome, setNome] = useState('')
+  const [enviandoImagem, setEnviandoImagem] = useState<string | null>(null)
+
+  async function enviarImagem(categoriaId: string, arquivo: File) {
+    setEnviandoImagem(categoriaId)
+    setAviso(null)
+    try {
+      const sb = createClient()
+      const ext = arquivo.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const path = `categorias/${lojaId}/${categoriaId}-${Date.now()}.${ext}`
+      const { error: erroUpload } = await sb.storage.from('produto-imagens').upload(path, arquivo, { upsert: false })
+      if (erroUpload) throw erroUpload
+      const { data } = sb.storage.from('produto-imagens').getPublicUrl(path)
+      await chamar({ acao: 'definir_imagem', id: categoriaId, imagemUrl: data.publicUrl }, 'Imagem salva.')
+    } catch (e) {
+      setAviso(e instanceof Error ? `Não deu certo: ${e.message}` : 'Não deu certo.')
+    } finally {
+      setEnviandoImagem(null)
+    }
+  }
 
   async function chamar(corpo: Record<string, unknown>, mensagem: string) {
     setOcupado(true)
@@ -47,6 +68,19 @@ export default function CategoriasLojaClient({ lojaId, categorias, semCategoria 
     return (
       <>
         <tr className={c.ativo ? '' : 'opacity-50'}>
+          <td className="p-3">
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+              {c.imagemUrl
+                /* eslint-disable-next-line @next/next/no-img-element */
+                ? <img src={c.imagemUrl} alt="" className="h-full w-full object-cover" />
+                : <span className="text-xs text-gray-400">{c.nome.trim()[0]?.toUpperCase()}</span>}
+            </div>
+            <label className={`${botao('sutil', 'sm')} mt-1 block w-fit cursor-pointer !px-1.5 text-[11px]`}>
+              {enviandoImagem === c.id ? 'Enviando…' : (c.imagemUrl ? 'Trocar' : 'Adicionar')}
+              <input type="file" accept="image/*" className="hidden" disabled={enviandoImagem === c.id}
+                onChange={e => { const a = e.target.files?.[0]; if (a) enviarImagem(c.id, a) }} />
+            </label>
+          </td>
           <td className="p-3" style={{ paddingLeft: 12 + nivel * 20 }}>
             {editando === c.id ? (
               <div className="flex items-center gap-2">
@@ -154,6 +188,7 @@ export default function CategoriasLojaClient({ lojaId, categorias, semCategoria 
           </caption>
           <thead className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
+              <th className="p-3">Imagem</th>
               <th className="p-3">Categoria</th>
               <th className="p-3">Produtos</th>
               <th className="p-3">Ações</th>
@@ -162,7 +197,7 @@ export default function CategoriasLojaClient({ lojaId, categorias, semCategoria 
           <tbody className="divide-y divide-gray-100">
             {raizes.map(c => <Linha key={c.id} c={c} nivel={0} />)}
             {raizes.length === 0 && (
-              <tr><td colSpan={3} className="p-8 text-center text-sm text-gray-500">
+              <tr><td colSpan={4} className="p-8 text-center text-sm text-gray-500">
                 Nenhuma categoria ainda. Use &quot;Gerar a partir do catálogo&quot;.
               </td></tr>
             )}

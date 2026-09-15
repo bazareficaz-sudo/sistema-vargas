@@ -13,6 +13,7 @@ export async function POST(req: Request) {
     {
       lojaId?: string; acao?: string; id?: string; nome?: string; valor?: boolean
       arvore?: { id?: string; paiId?: string | null; ordem?: number }[]
+      imagemUrl?: string | null
     } | null
   if (!c?.lojaId || !UUID.test(c.lojaId)) {
     return NextResponse.json({ erro: 'Loja inválida' }, { status: 400 })
@@ -59,6 +60,17 @@ export async function POST(req: Request) {
       if (!c.id || !UUID.test(c.id)) return NextResponse.json({ erro: 'Categoria inválida' }, { status: 400 })
       const { error } = await ctx.sb
         .from('loja_categorias').update({ ativo: !!c.valor })
+        .eq('id', c.id).eq('loja_id', c.lojaId).eq('empresa_id', ctx.empresaId)
+      if (error) return NextResponse.json({ erro: error.message }, { status: 500 })
+      invalidarVitrine(c.lojaId)
+      return NextResponse.json({ ok: true })
+    }
+
+    case 'definir_imagem': {
+      if (!c.id || !UUID.test(c.id)) return NextResponse.json({ erro: 'Categoria inválida' }, { status: 400 })
+      const url = typeof c.imagemUrl === 'string' ? c.imagemUrl.trim().slice(0, 500) || null : null
+      const { error } = await ctx.sb
+        .from('loja_categorias').update({ imagem_url: url })
         .eq('id', c.id).eq('loja_id', c.lojaId).eq('empresa_id', ctx.empresaId)
       if (error) return NextResponse.json({ erro: error.message }, { status: 500 })
       invalidarVitrine(c.lojaId)

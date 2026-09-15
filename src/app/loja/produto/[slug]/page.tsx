@@ -211,6 +211,7 @@ export default async function PaginaProduto({ params }: Props) {
                   p={s}
                   permiteSemEstoque={loja.permitirVendaSemEstoque}
                   politica={loja.politicaPreco}
+                  mostrarBotaoComprar={loja.mostrarBotaoComprarListagem}
                 />
               ))}
             </div>

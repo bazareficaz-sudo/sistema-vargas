@@ -82,6 +82,9 @@ export type Loja = {
   limiteMaximoPorCompra: number | null
   entregaAtiva: boolean
   retiradaAtiva: boolean
+  /** Botão de compra rápida (quantidade 1) no card da listagem/busca, além
+   *  do fluxo normal na página do produto. Desligado por padrão. */
+  mostrarBotaoComprarListagem: boolean
   /**
    * O que o cliente pode escolher no checkout. NÃO cobra nada — diz à loja o
    * que levar na entrega. A loja não tem gateway; ver supabase-loja-checkout.sql.

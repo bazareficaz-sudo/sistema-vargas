@@ -126,6 +126,7 @@ export default async function Home() {
                 p={p}
                 permiteSemEstoque={loja.permitirVendaSemEstoque}
                 politica={loja.politicaPreco}
+                mostrarBotaoComprar={loja.mostrarBotaoComprarListagem}
                 // Slides do carrossel já cobrem a prioridade do topo; aqui
                 // nenhum card precisa escapar do lazy loading.
                 prioridade={false}

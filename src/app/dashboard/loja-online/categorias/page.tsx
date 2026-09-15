@@ -16,7 +16,7 @@ export default async function CategoriasLoja() {
 
   const { data: categorias } = await ctx.sb
     .from('loja_categorias')
-    .select('id, nome, slug, pai_id, ativo, destaque, ordem')
+    .select('id, nome, slug, pai_id, ativo, destaque, ordem, imagem_url')
     .eq('loja_id', ctx.lojaId)
     .order('ordem').order('nome')
 
@@ -43,6 +43,7 @@ export default async function CategoriasLoja() {
         id: c.id, nome: c.nome, slug: c.slug, paiId: c.pai_id,
         ativo: c.ativo, destaque: c.destaque, ordem: c.ordem,
         produtos: porCategoria.get(c.id) ?? 0,
+        imagemUrl: c.imagem_url ?? null,
       }))}
       semCategoria={porCategoria.size > 0 ? (contagem ?? []).filter((l: any) => !l.loja_categoria_id).length : 0}
     />
