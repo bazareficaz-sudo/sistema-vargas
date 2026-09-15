@@ -5,6 +5,7 @@ import { lojaObrigatoria } from '@/lib/commerce/loja'
 import { produtoPorSlug, relacionados } from '@/lib/commerce/catalogo'
 import CardProduto from '@/components/loja/CardProduto'
 import ComprarProduto from '@/components/loja/ComprarProduto'
+import CompartilharProduto from '@/components/loja/CompartilharProduto'
 import Galeria from '@/components/loja/Galeria'
 import { Preco, SeloDisponibilidade, TituloSecao, real } from '@/components/loja/ds'
 
@@ -128,6 +129,8 @@ export default async function PaginaProduto({ params }: Props) {
             )}
 
             <ComprarProduto produto={p} permiteSemEstoque={loja.permitirVendaSemEstoque} />
+
+            <CompartilharProduto nome={p.nome} />
 
             {(loja.whatsapp || loja.telefone) && (
               <div className="rounded-[var(--raio)] border border-[var(--borda)] bg-[var(--fundo-suave)] p-4 text-sm">
