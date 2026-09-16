@@ -3,7 +3,19 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
-const PLATAFORMAS_CONFIG = [
+type Campo = {
+  key: string
+  label: string
+  placeholder: string
+  tipo: string
+  dica: string
+  // Campo sem coluna própria em sistema_integracoes — vai dentro do JSONB
+  // `extra`, indexado pelo próprio `key`. Hoje só o service_id da TikTok
+  // Shop precisa disso; os outros usam as colunas fixas de sempre.
+  coluna?: 'extra'
+}
+
+const PLATAFORMAS_CONFIG: { id: string; label: string; emoji: string; cor: string; descricao: string; campos: Campo[]; link: string; linkLabel: string }[] = [
   {
     id: 'shopee',
     label: 'Shopee',
@@ -44,6 +56,20 @@ const PLATAFORMAS_CONFIG = [
     linkLabel: 'Abrir Portal de Parceiros',
   },
   {
+    id: 'tiktok',
+    label: 'TikTok Shop',
+    emoji: '🎵',
+    cor: 'border-gray-300 bg-gray-50',
+    descricao: 'Credenciais do App cadastrado como ISV no TikTok Shop Partner Center. Únicas para o sistema.',
+    campos: [
+      { key: 'app_id', label: 'App key', placeholder: 'Ex: 6k63nslih1hqg', tipo: 'text', dica: 'Encontre em: Partner Center → Aplicativos e serviços → seu app → Credenciais' },
+      { key: 'app_secret', label: 'App secret', placeholder: 'Cole a chave secreta aqui', tipo: 'password', dica: 'Gerado junto com a App key, no mesmo lugar' },
+      { key: 'service_id', label: 'Service ID', placeholder: 'Ex: 7644377737113798408', tipo: 'text', coluna: 'extra', dica: 'É o mesmo número que aparece como "ID" no topo da página do app — usado só para montar o link de autorização do vendedor' },
+    ],
+    link: 'https://partner.tiktokshop.com',
+    linkLabel: 'Abrir TikTok Shop Partner Center',
+  },
+  {
     id: 'amazon',
     label: 'Amazon',
     emoji: '📦',
@@ -71,7 +97,7 @@ const PLATAFORMAS_CONFIG = [
   },
 ]
 
-type IntRow = { id: string; plataforma: string; partner_id?: string; partner_key?: string; app_id?: string; app_secret?: string; ativo: boolean }
+type IntRow = { id: string; plataforma: string; partner_id?: string; partner_key?: string; app_id?: string; app_secret?: string; extra?: Record<string, string> | null; ativo: boolean }
 
 export default function IntegracoesClient({ integracoes: inicial }: { integracoes: IntRow[] }) {
   const [integracoes, setIntegracoes] = useState<IntRow[]>(inicial)
@@ -87,6 +113,12 @@ export default function IntegracoesClient({ integracoes: inicial }: { integracoe
 
   function iniciarEdicao(platId: string) {
     const int = getIntegracao(platId)
+    const plat = PLATAFORMAS_CONFIG.find(p => p.id === platId)
+    const camposExtra = Object.fromEntries(
+      (plat?.campos ?? [])
+        .filter(c => c.coluna === 'extra')
+        .map(c => [c.key, int?.extra?.[c.key] ?? ''])
+    )
     setForms(prev => ({
       ...prev,
       [platId]: {
@@ -94,6 +126,7 @@ export default function IntegracoesClient({ integracoes: inicial }: { integracoe
         partner_key: int?.partner_key ?? '',
         app_id: int?.app_id ?? '',
         app_secret: int?.app_secret ?? '',
+        ...camposExtra,
       }
     }))
     setEditando(platId)
@@ -106,12 +139,18 @@ export default function IntegracoesClient({ integracoes: inicial }: { integracoe
   async function salvar(platId: string) {
     setSalvando(true)
     const sb = createClient()
+    const plat = PLATAFORMAS_CONFIG.find(p => p.id === platId)
+    const camposExtra = (plat?.campos ?? []).filter(c => c.coluna === 'extra')
+    const extra = camposExtra.length > 0
+      ? Object.fromEntries(camposExtra.map(c => [c.key, forms[platId]?.[c.key] || '']))
+      : null
     const dados = {
       plataforma: platId,
       partner_id: forms[platId]?.partner_id || null,
       partner_key: forms[platId]?.partner_key || null,
       app_id: forms[platId]?.app_id || null,
       app_secret: forms[platId]?.app_secret || null,
+      extra,
       ativo: true,
       updated_at: new Date().toISOString(),
     }

@@ -13,10 +13,9 @@ Os campos entre colchetes são sempre os mesmos quatro:
 - `Ouro e Prata Elétrica` — razão social
 - `Silvano Nunes Vargas` / `Owner` — quem assina como responsável pela segurança
 - `2 August 2026` — data de adoção da política (a mesma que estiver assinada)
-- `[PHONE]` — telefone do contato de segurança
 
-O e-mail já está preenchido: `security@sistemavargas.com.br`. Crie a caixa antes
-de enviar — se o revisor escrever e voltar, o efeito é pior do que não ter posto.
+O telefone (`+55 21 98294-9060`) e o e-mail (`security@sistemavargas.com.br`)
+já estão preenchidos nos blocos abaixo.
 
 ---
 
@@ -142,7 +141,7 @@ Yes, with committed timelines:
 - Written post-incident review within 10 business days
 
 Security contact for TikTok Shop:
-Silvano Nunes Vargas — security@sistemavargas.com.br — [PHONE]
+Silvano Nunes Vargas — security@sistemavargas.com.br — +55 21 98294-9060
 Monitored during business hours (UTC-3), with out-of-hours escalation to the
 same number.
 ```

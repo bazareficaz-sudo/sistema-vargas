@@ -939,7 +939,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       // Uma rota por plataforma: a Nuvemshop também tem `sync` desde a
       // importação do catálogo, e mandá-la para a rota da Shopee só produzia
       // "canal não encontrado".
-      const PLATAFORMAS_COM_SYNC = ['shopee', 'mercadolivre', 'nuvemshop']
+      const PLATAFORMAS_COM_SYNC = ['shopee', 'mercadolivre', 'nuvemshop', 'tiktok']
       const endpoint = `/api/marketplace/${PLATAFORMAS_COM_SYNC.includes(canal.plataforma) ? canal.plataforma : 'shopee'}/sync`
       const resp = await fetch(endpoint, {
         method: 'POST',

@@ -188,7 +188,7 @@ An **incident** is any suspected or confirmed unauthorized access to, disclosure
 of, alteration of, or loss of data, or any compromise of a credential.
 
 **Anyone who suspects an incident reports it immediately to
-Silvano Nunes Vargas at [security@DOMAIN] / [PHONE]. There is no penalty for a
+Silvano Nunes Vargas at security@sistemavargas.com.br / +55 21 98294-9060. There is no penalty for a
 report that turns out to be a false alarm; there is one for staying silent.**
 
 | Phase | Action | Target |

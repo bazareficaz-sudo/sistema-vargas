@@ -22,7 +22,7 @@
 export const PLATAFORMA_LOJA_ONLINE = 'loja_online'
 
 /** Plataformas que têm integração de verdade (OAuth, anúncio, sincronização). */
-export const PLATAFORMAS_MARKETPLACE = ['shopee', 'mercadolivre', 'nuvemshop'] as const
+export const PLATAFORMAS_MARKETPLACE = ['shopee', 'mercadolivre', 'nuvemshop', 'tiktok'] as const
 
 export function ehLojaOnline(plataforma: string | null | undefined): boolean {
   return plataforma === PLATAFORMA_LOJA_ONLINE

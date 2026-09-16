@@ -47,6 +47,18 @@ function NuvemshopIcon({ className }: { className?: string }) {
   )
 }
 
+function TiktokIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="46" height="46" rx="12" fill="#000000" />
+      <path
+        d="M27 12h4.2c.3 2.3 1.8 4.2 4.8 4.6v4.3c-1.8.1-3.5-.4-4.9-1.3v8.6c0 4.6-3.4 7.8-7.7 7.8-4.4 0-7.8-3.3-7.8-7.6 0-4.5 3.8-7.9 8.6-7.5v4.4c-2.1-.3-3.9 1.2-3.9 3.2 0 1.9 1.6 3.3 3.4 3.3 2.1 0 3.6-1.6 3.6-3.9V12z"
+        fill="#fff"
+      />
+    </svg>
+  )
+}
+
 function AmazonIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 48 48" className={className} xmlns="http://www.w3.org/2000/svg">
@@ -93,6 +105,17 @@ const PLATAFORMAS = [
     linkLoja: 'https://www.nuvemshop.com.br',
   },
   {
+    id: 'tiktok',
+    label: 'TikTok Shop',
+    emoji: '🎵',
+    Icone: TiktokIcon,
+    cor: 'border-gray-400 bg-gray-50',
+    corAtivo: 'border-gray-900 bg-gray-100 ring-2 ring-gray-400',
+    badge: 'bg-black',
+    labelSeller: 'Shop ID (obtido automaticamente ao conectar)',
+    linkLoja: 'https://seller-br.tiktok.com',
+  },
+  {
     id: 'amazon',
     label: 'Amazon',
     emoji: '📦',
@@ -127,7 +150,7 @@ const PLATAFORMAS = [
   },
 ]
 
-function platInfo(id: string) { return PLATAFORMAS.find(p => p.id === id) ?? PLATAFORMAS[4] }
+function platInfo(id: string) { return PLATAFORMAS.find(p => p.id === id) ?? PLATAFORMAS[PLATAFORMAS.length - 1] }
 function PlatIcon({ p, className }: { p: typeof PLATAFORMAS[number]; className?: string }) {
   return p.Icone ? <p.Icone className={className} /> : <span className="text-2xl leading-none">{p.emoji}</span>
 }
@@ -163,6 +186,7 @@ export default function MarketplacesClient({
       const nomes: Record<string, string> = {
         shopee: 'Shopee', mercadolivre: 'Mercado Livre',
         nuvemshop: 'Nuvemshop', 'nuvemshop-reconectado': 'Nuvemshop (reconectada)',
+        tiktok: 'TikTok Shop',
       }
       setToast({ tipo: 'ok', msg: `✓ ${nomes[sucesso] ?? sucesso} conectado com sucesso!` })
       router.replace('/dashboard/marketplaces')
@@ -194,7 +218,7 @@ export default function MarketplacesClient({
   })
 
   // Plataformas que suportam OAuth automático
-  const OAUTH_PLATAFORMAS = ['shopee', 'mercadolivre', 'nuvemshop']
+  const OAUTH_PLATAFORMAS = ['shopee', 'mercadolivre', 'nuvemshop', 'tiktok']
 
   function f(k: string, v: any) { setForm(p => ({ ...p, [k]: v })) }
 
@@ -229,14 +253,17 @@ export default function MarketplacesClient({
     try {
       const url = new URL(urlRetorno.trim())
       const code = url.searchParams.get('code')
+      // shop_id só vem no retorno da Shopee — Mercado Livre e TikTok Shop
+      // não mandam esse parâmetro na URL (a loja é resolvida dentro do
+      // próprio callback), então não pode ser obrigatório aqui.
       const shopId = url.searchParams.get('shop_id')
       const state = url.searchParams.get('state')
-      if (!code || !shopId) {
-        setErro('URL inválida — verifique se copiou a URL completa após o login na Shopee.')
+      if (!code) {
+        setErro('URL inválida — verifique se copiou a URL completa após o login.')
         setProcessando(false); return
       }
       // Chama o callback localmente com os parâmetros extraídos
-      const callbackUrl = `/api/marketplace/${form.plataforma}/callback?code=${code}&shop_id=${shopId}&state=${state ?? ''}&via=fetch`
+      const callbackUrl = `/api/marketplace/${form.plataforma}/callback?code=${code}${shopId ? `&shop_id=${shopId}` : ''}&state=${state ?? ''}&via=fetch`
       const r = await fetch(callbackUrl)
       const json = await r.json()
       if (json.ok) {

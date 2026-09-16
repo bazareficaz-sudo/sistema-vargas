@@ -2,7 +2,7 @@
 
 **Applicant:** Ouro e Prata Elétrica
 **Application:** Sistema Vargas — ERP / point-of-sale integration for TikTok Shop sellers
-**Contact:** Silvano Nunes Vargas, security@sistemavargas.com.br, [PHONE]
+**Contact:** Silvano Nunes Vargas, security@sistemavargas.com.br, +55 21 98294-9060
 **Date:** 2 August 2026
 
 The previous submission was declined for *"lack of evidence of policy
@@ -115,7 +115,7 @@ confirming that platform data or credentials are involved, ANPD/data-subject
 notification within the statutory LGPD deadline, and a written post-incident
 review within 10 business days.
 
-**Security contact for TikTok Shop:** Silvano Nunes Vargas — [security@DOMAIN] — [PHONE],
+**Security contact for TikTok Shop:** Silvano Nunes Vargas — security@sistemavargas.com.br — +55 21 98294-9060,
 monitored during business hours UTC-3, Brazil, with out-of-hours escalation to the
 same number.
 

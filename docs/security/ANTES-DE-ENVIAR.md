@@ -2,6 +2,12 @@
 
 Este arquivo é interno. Não vai junto com o envio.
 
+> ✅ **APROVADO em 15/09/2026.** O Partner Center mostra "Você passou na
+> avaliação de segurança e privacidade de dados". Este arquivo fica como
+> histórico do que foi preciso para chegar lá. Os próximos passos de
+> publicação (avaliação de anúncios e avaliação de aplicativo) não são mais
+> sobre segurança — ver nota no rodapé.
+
 A política e o pacote de evidências foram escritos para descrever a realidade —
 não uma realidade desejada. Os itens abaixo são as afirmações que **ainda não são
 verdade hoje**. Cada um precisa estar feito antes de a resposta ser enviada, senão
@@ -9,6 +15,19 @@ estaremos atestando controle inexistente a um parceiro — que é exatamente o t
 de coisa que, se o revisor descobrir depois, encerra a conversa de vez.
 
 Ordem pensada para o risco cair primeiro.
+
+> **Achado em 13/09/2026:** o formulário ao vivo no Partner Center ainda tem
+> as respostas da tentativa rejeitada — em português, uma delas ainda citando
+> Google Cloud Platform, e o link da pergunta 1 apontando para a página de
+> privacidade em vez da de segurança (com o anexo errado: print da política
+> de privacidade, não da política de segurança assinada). A correção já
+> existe nos documentos deste diretório, mas nunca foi colada no formulário.
+> Guia campo a campo, com o texto pronto para colar, em
+> [PREENCHER-FORMULARIO-TIKTOK.md](PREENCHER-FORMULARIO-TIKTOK.md). Dois
+> pontos daquele guia pedem uma decisão sua antes de colar: a pergunta 3
+> (antivírus, item 3 do guia) e principalmente a pergunta 9 (se a exposição
+> contínua da tabela `clientes` sem RLS conta como violação a notificar —
+> não decidi isso por vocês).
 
 > **Domínio:** em 02/08/2026 o sistema passou de `vargasnexus.com.br` para
 > `www.sistemavargas.com.br`. Toda URL citada nos outros dois documentos já está
@@ -27,11 +46,11 @@ Aplicado e reconferido na produção: a consulta de verificação devolveu as 9
 linhas esperadas. Nenhum DELETE em lugar nenhum, `vendas` e `venda_itens` só
 aceitam INSERT, e `usuarios_pdv`/`vendedores`/`depositos` não aceitam escrita.
 
-**Falta ainda:** a venda de teste no PDV externo (produto, pagamento, fecha), para
-confirmar que nada travou no balcão. Se travar, o rollback está no rodapé do
-próprio arquivo.
+**Fechado em 13/09/2026:** confirmado com o Silvano que o PDV externo evoluiu
+e vende normalmente todo dia desde a mudança — não travou o balcão. Item 1
+concluído, nenhuma ação restante.
 
-## 2. Credenciais expostas — decidido em 02/08/2026
+## 2. Credenciais expostas — decidido em 02/08/2026 ✅ RESOLVIDO
 
 A tabela `sistema_integracoes` esteve legível sem login. O acesso foi fechado e
 conferido no mesmo dia.
@@ -79,6 +98,12 @@ provedor e:
 - se tiver: nada a fazer;
 - se não tiver: ou sobe o plano, ou **corrija a §12** antes de enviar.
 
+**Checado em 13/09/2026 via API do provedor:** a organização está no plano
+**pago** (não é o gratuito), o que já descarta o pior caso. Mas a API não
+expõe se o complemento de *point-in-time recovery* está de fato contratado —
+isso só aparece no painel, em Database → Backups. Confirme lá especificamente
+a linha de PITR antes de assinar a §12 como está.
+
 ## 5. Preencher e assinar a política
 
 Preenchido em 02/08/2026 nos três documentos e na página pública:
@@ -87,9 +112,19 @@ Preenchido em 02/08/2026 nos três documentos e na página pública:
 - [x] Responsável pela segurança: **Silvano Nunes Vargas**, Owner
 - [x] Data de adoção: **2 de agosto de 2026**
 - [x] Prazos da seção C: 31/10/2026 para guarda de permissão e CSP
-- [ ] **Telefone** de contato de segurança — único campo ainda em aberto
-- [ ] Criar `security@sistemavargas.com.br` e `privacidade@sistemavargas.com.br`
-- [ ] Assinar e datar
+- [x] **Telefone** de contato de segurança: **+55 21 98294-9060** — preenchido
+      em 13/09/2026 nos três documentos
+- [x] Criar `security@sistemavargas.com.br` e `privacidade@sistemavargas.com.br`
+      — feito em 13/09/2026, confirmado pelo Silvano. (A checagem de DNS logo
+      depois ainda não achou o registro MX — o serial do SOA mudou, sinal de
+      DNS atualizado há pouco, então é provavelmente só propagação. Vale
+      mandar um e-mail de teste para as duas caixas antes de confiar nelas
+      nas respostas do questionário.)
+- [ ] Assinar e datar — PDF gerado em 13/09/2026
+      ([Information-Security-Policy-v1.0.pdf](Information-Security-Policy-v1.0.pdf)),
+      falta só o Silvano assinar (nome, cargo, assinatura e data em branco na
+      última página) e depois subir esse PDF assinado na pergunta 1 do
+      formulário, no lugar do print errado da política de privacidade
 
 **Confira duas coisas antes de assinar:**
 
@@ -115,10 +150,21 @@ compromisso escrito é pior do que não ter prometido.
 ## 7. Tirar os prints dos anexos
 
 1. Cabeçalhos HTTP (rode `curl -sI https://www.sistemavargas.com.br` — o resultado tem
-   que bater com a tabela da seção A).
-2. Arquivo da matriz de permissões (6 papéis).
-3. Tabela de auditoria com registros reais, com dado sensível tapado.
-4. MFA ligado nas contas do item 3.
+   que bater com a tabela da seção A). **Já rodei em 13/09/2026: bate exatamente**
+   com a tabela — HSTS, nosniff, X-Frame-Options, CSP frame-ancestors,
+   referrer-policy, permissions-policy, sem x-powered-by, redirect 308 de HTTP
+   e redirect 307 de `/dashboard` para `/login` sem dado nenhum. Só falta
+   printar essa saída.
+2. Arquivo da matriz de permissões (6 papéis). É
+   [`src/lib/auth/permissoes.ts`](../../src/lib/auth/permissoes.ts), linhas
+   89–118 (`PERMISSOES_POR_PAPEL`) — bate exatamente com o que a política e o
+   pacote de evidências descrevem. Print dessas linhas resolve.
+3. Tabela de auditoria com registros reais, com dado sensível tapado. Confirmado
+   em 13/09/2026 que `empresa_auditoria` tem linhas reais (RLS ligada na
+   tabela). Nenhum dado sensível aparece nas colunas usadas, então nem precisa
+   tapar nada — print direto do Table Editor do Supabase em `empresa_auditoria`
+   resolve.
+4. MFA ligado nas contas do item 3. Continua pendente — depende do item 3.
 
 ## 8. Duas correções de conteúdo em relação à tentativa anterior
 
@@ -154,6 +200,34 @@ compromisso escrito é pior do que não ter prometido.
 - Content-Security-Policy completa, primeiro em modo `report-only`.
 - Fechar a leitura anônima do catálogo e dos clientes — depende de o PDV externo
   passar a autenticar via `autenticar_operador_pdv()`. É o único item que exige
-  mudança fora deste repositório.
+  mudança fora deste repositório. Reconfirmado em 13/09/2026 pelo advisor do
+  Supabase: 97 tabelas sem RLS, `clientes` (103 linhas) entre elas. A política
+  e o pacote de evidências não afirmam RLS nessa tabela — só nas de
+  credenciais, pedidos, anúncios, preços e auditoria — então isso não é uma
+  inexatidão no que já foi enviado, é o mesmo item de sempre.
 - Tirar o `senha_hash` do alcance do anônimo (bloco separado no fim do SQL do
   item 1, para rodar com a loja fechada, depois do PDV externo atualizado).
+
+## Depois da aprovação de segurança (15/09/2026)
+
+Faltam duas avaliações antes de "Publicar" ficar disponível, nenhuma delas
+sobre segurança:
+
+- **Avaliação de anúncios** — quase pronta (imagens 5:3 e descrição de 200+
+  caracteres resolvidas em 15/09/2026).
+- **Avaliação de aplicativo** — exigia integração de verdade. Construída em
+  15/09/2026: OAuth de vendedor + importação de catálogo
+  (`src/lib/tiktok/`, rotas `src/app/api/marketplace/tiktok/*`), seguindo o
+  mesmo padrão de Shopee/Mercado Livre/Nuvemshop. Falta testar ao vivo (ver
+  item de segurança abaixo antes de conectar uma loja de verdade).
+
+**⛔ Achado de segurança em 15/09/2026, antes de testar:** a mesma app key da
+TikTok (`6k63nslih1hqg`) já está em uso num app Electron irmão
+(`sistemavargas`/`vargasnexus-pdv`, fora deste repositório), com o **app
+secret gravado em texto puro no código-fonte**
+(`src/main/tiktok.js`). Mesma classe de risco já registrada no item 2 deste
+arquivo para Shopee/Mercado Livre/WhatsApp. **Rotacione o app secret no
+Partner Center antes de conectar qualquer loja de verdade** — sem isso, o
+segredo em uso na integração nova é o mesmo que já está exposto em outro
+lugar. Depois de rotacionado, o valor novo entra em Configurações →
+Integrações → TikTok Shop, nunca no código.
