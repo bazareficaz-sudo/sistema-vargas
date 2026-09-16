@@ -73,6 +73,11 @@ export async function tiktokGet(path: string, params: Record<string, string | nu
     Object.fromEntries(Object.entries({ ...query, sign: assinatura }).map(([k, v]) => [k, String(v)]))
   )
 
+  // DEBUG TEMPORÁRIO (13/09/2026) — nada sensível aqui: nem o secret nem o
+  // access_token aparecem. Serve só para comparar contra a Ferramenta de
+  // Teste de API oficial enquanto o erro "sign inválido" não é resolvido.
+  console.log('[tiktok debug] GET', path, 'query assinada:', JSON.stringify(query), 'sign:', assinatura)
+
   const res = await fetch(`${API_BASE}${path}?${qs.toString()}`, {
     headers: {
       'content-type': 'application/json',
