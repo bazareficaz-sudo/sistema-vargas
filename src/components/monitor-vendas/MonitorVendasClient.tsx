@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { criarClienteSemCache } from '@/lib/monitor-vendas/clienteSemCache'
 import { buscarTudo } from '@/lib/supabase/paginar'
 import { inicioDoDia, inicioDeDiasAtras } from '@/lib/datas'
 import {
@@ -9,6 +9,7 @@ import {
   corMarkup, corMargem, situacaoEstoque, sugestaoDeCompra,
   type ProdutoCache, type ItemVendido, type KitComponente, type IndiceProdutos, type CorBadge,
 } from '@/lib/monitor-vendas/calculos'
+import { inserirNoInventarioMonitor } from '@/lib/monitor-vendas/inventarioMonitor'
 import FaltaModal, { type AlvoFalta, type FaltaResumo } from './FaltaModal'
 
 // Monitor de Vendas — acompanhamento quase em tempo real, pensado tanto para
@@ -69,7 +70,7 @@ export default function MonitorVendasClient({
   operador: string
   limiteVendas: number
 }) {
-  const sb = createClient()
+  const sb = criarClienteSemCache()
 
   const [vendas, setVendas] = useState(vendasIniciais)
   const [produtos, setProdutos] = useState(produtosIniciais)
@@ -97,6 +98,7 @@ export default function MonitorVendasClient({
 
   const [expandidas, setExpandidas] = useState<Set<string>>(new Set())
   const [modalFalta, setModalFalta] = useState<AlvoFalta | null>(null)
+  const [ordenacaoProduto, setOrdenacaoProduto] = useState<'tempo' | 'quantidade' | 'valor'>('quantidade')
 
   // ── Índices derivados do catálogo ───────────────────────────────────────
   const indice: IndiceProdutos = useMemo(() => construirIndiceProdutos(produtos), [produtos])
@@ -203,6 +205,7 @@ export default function MonitorVendasClient({
     chave: string; nome: string; sku: string | null; produtoId: string | null
     qtd: number; totalVendido: number; custoTotal: number; lucro: number
     estoqueAtual: number; estoqueMinimo: number; achouNoCadastro: boolean
+    ultimaVenda: string
   }
   const porProduto = useMemo<LinhaProduto[]>(() => {
     const mapa = new Map<string, LinhaProduto>()
@@ -219,17 +222,25 @@ export default function MonitorVendasClient({
             estoqueAtual: produto ? estoqueDoProduto(produto, componentesPorKit, indice) : 0,
             estoqueMinimo: produto?.estoqueMinimo ?? 0,
             achouNoCadastro: !!produto,
+            ultimaVenda: vc.venda.created_at,
           }
           mapa.set(chave, linha)
         }
         linha.qtd += qtd
         linha.totalVendido += Number(it.subtotal) || 0
         linha.custoTotal += custo * qtd
+        // `filtradas` já vem da mais recente para a mais antiga (ordem de
+        // `vendas`), então a primeira vez que a chave aparece já é a venda
+        // mais recente — mas o max() abaixo é defensivo contra isso mudar.
+        if (vc.venda.created_at > linha.ultimaVenda) linha.ultimaVenda = vc.venda.created_at
       }
     }
     for (const linha of mapa.values()) linha.lucro = linha.totalVendido - linha.custoTotal
-    return [...mapa.values()].sort((a, b) => b.qtd - a.qtd)
-  }, [filtradas, indice, componentesPorKit])
+    const linhas = [...mapa.values()]
+    if (ordenacaoProduto === 'tempo') return linhas.sort((a, b) => b.ultimaVenda.localeCompare(a.ultimaVenda))
+    if (ordenacaoProduto === 'valor') return linhas.sort((a, b) => b.totalVendido - a.totalVendido)
+    return linhas.sort((a, b) => b.qtd - a.qtd)
+  }, [filtradas, indice, componentesPorKit, ordenacaoProduto])
 
   // ── Carregar dados de novo (auto-refresh + botão manual) ────────────────
   async function carregarDados() {
@@ -247,7 +258,7 @@ export default function MonitorVendasClient({
         ),
         buscarTudo<any>(
           (de, ate) => sb.from('produtos')
-            .select('id, nome, sku, preco_custo, estoque, estoque_minimo, tipo, ativo')
+            .select('id, nome, sku, ean, categoria, marca, unidade, preco_custo, estoque, estoque_minimo, tipo, ativo')
             .eq('empresa_id', empresaId)
             .order('id', { ascending: true })
             .range(de, ate) as any,
@@ -262,7 +273,9 @@ export default function MonitorVendasClient({
       ])
       setVendas(novasVendas)
       setProdutos(novosProdutos.map(p => ({
-        id: p.id, nome: p.nome, sku: p.sku ?? null, custo: Number(p.preco_custo ?? 0),
+        id: p.id, nome: p.nome, sku: p.sku ?? null,
+        ean: p.ean ?? null, categoria: p.categoria ?? null, marca: p.marca ?? null, unidade: p.unidade ?? 'UN',
+        custo: Number(p.preco_custo ?? 0),
         estoque: Number(p.estoque ?? 0), estoqueMinimo: Number(p.estoque_minimo ?? 0),
         tipo: p.tipo ?? 'simples', ativo: p.ativo !== false,
       })))
@@ -416,7 +429,7 @@ export default function MonitorVendasClient({
       </div>
 
       {/* ── Abas ────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 border-b border-slate-200">
+      <div className="flex items-center gap-1 border-b border-slate-200">
         <button onClick={() => setAba('venda')}
           className={`px-4 py-2 text-sm border-b-2 ${aba === 'venda' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500'}`}>
           Por Venda
@@ -425,6 +438,19 @@ export default function MonitorVendasClient({
           className={`px-4 py-2 text-sm border-b-2 ${aba === 'produto' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500'}`}>
           Por Produto
         </button>
+        {aba === 'produto' && (
+          <div className="ml-auto flex items-center gap-1.5 pb-1.5 text-[11px]">
+            <span className="text-slate-400">Ordenar por</span>
+            {(['tempo', 'quantidade', 'valor'] as const).map(opcao => (
+              <button key={opcao} onClick={() => setOrdenacaoProduto(opcao)}
+                className={`px-2 py-1 rounded-md font-medium border ${
+                  ordenacaoProduto === opcao ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200'
+                }`}>
+                {opcao === 'tempo' ? 'Mais recente' : opcao === 'quantidade' ? 'Quantidade' : 'Valor'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {aba === 'venda' ? (
@@ -508,6 +534,7 @@ export default function MonitorVendasClient({
                   <th className="text-right px-3 py-2 font-medium">Estoque Mínimo</th>
                   <th className="text-right px-3 py-2 font-medium">Sugestão de Compra</th>
                   <th className="w-24"></th>
+                  <th className="w-32"></th>
                 </tr>
               </thead>
               <tbody>
@@ -516,6 +543,7 @@ export default function MonitorVendasClient({
                   const fundo = sit === 'zerado' ? 'bg-red-50' : sit === 'baixo' ? 'bg-amber-50' : ''
                   const sugestao = sugestaoDeCompra(p.estoqueAtual, p.estoqueMinimo, p.qtd)
                   const chave = chaveProduto(p.produtoId, p.nome)
+                  const produtoCache = p.produtoId ? indice.porId.get(p.produtoId) : undefined
                   return (
                     <tr key={p.chave} className={`border-t border-slate-100 ${fundo}`}>
                       <td className="px-3 py-2">
@@ -532,6 +560,9 @@ export default function MonitorVendasClient({
                       <td className="px-3 py-2 text-center">
                         <BotaoFalta chave={chave} pendente={faltasPendentesPorProduto.get(chave)}
                           onClick={() => abrirFalta({ produtoId: p.produtoId, produtoNome: p.nome, produtoSku: p.sku, quantidadeSugerida: sugestao || p.qtd })} />
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <BotaoConferirEstoque produto={produtoCache} sb={sb} empresaId={empresaId} operador={operador} />
                       </td>
                     </tr>
                   )
@@ -606,6 +637,48 @@ function BotaoFalta({ chave, pendente, onClick }: {
         pendente ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
       }`}>
       {pendente ? `Falta (${pendente.quantidade})` : 'Falta'}
+    </button>
+  )
+}
+
+/**
+ * "Conferir estoque" — manda o produto para o inventário MONITOR DE VENDA
+ * (cria o inventário na primeira vez, reaproveita nas próximas). Estado é
+ * local ao botão de propósito: cada linha da tabela tem sua própria viagem
+ * ao banco, sem afetar as outras.
+ */
+function BotaoConferirEstoque({ produto, sb, empresaId, operador }: {
+  produto: ProdutoCache | undefined; sb: any; empresaId: string; operador: string
+}) {
+  const [estado, setEstado] = useState<'ocioso' | 'enviando' | 'ok' | 'ja_estava' | 'erro'>('ocioso')
+
+  async function clicar() {
+    if (!produto || estado === 'enviando') return
+    setEstado('enviando')
+    const r = await inserirNoInventarioMonitor(sb, empresaId, operador, {
+      id: produto.id, nome: produto.nome, sku: produto.sku, ean: produto.ean,
+      categoria: produto.categoria, marca: produto.marca, unidade: produto.unidade,
+      custo: produto.custo, estoque: produto.estoque,
+    })
+    if (!r.ok) { setEstado('erro'); return }
+    setEstado(r.jaEstavaNaLista ? 'ja_estava' : 'ok')
+  }
+
+  if (!produto) {
+    return <span className="text-[11px] text-slate-300" title="Produto não está no cadastro — não dá para conferir">—</span>
+  }
+  if (estado === 'ok' || estado === 'ja_estava') {
+    return (
+      <span className="text-[11px] text-emerald-600" title={estado === 'ja_estava' ? 'Já estava na lista do MONITOR DE VENDA' : 'Inserido no MONITOR DE VENDA'}>
+        ✓ {estado === 'ja_estava' ? 'já na lista' : 'inserido'}
+      </span>
+    )
+  }
+  return (
+    <button onClick={clicar} disabled={estado === 'enviando'}
+      title="Colocar este produto na lista de conferência MONITOR DE VENDA"
+      className="px-2 py-1 rounded-md text-[11px] font-medium border bg-white text-slate-500 border-slate-200 hover:bg-slate-50 disabled:opacity-50">
+      {estado === 'enviando' ? 'Enviando...' : estado === 'erro' ? 'Tentar de novo' : 'Conferir estoque'}
     </button>
   )
 }

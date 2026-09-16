@@ -7,7 +7,8 @@ import {
 } from '../../src/lib/monitor-vendas/calculos'
 
 const produto = (p: Partial<ProdutoCache> & { id: string }): ProdutoCache => ({
-  nome: 'Produto', sku: null, custo: 0, estoque: 0, estoqueMinimo: 0, tipo: 'simples', ativo: true, ...p,
+  nome: 'Produto', sku: null, ean: null, categoria: null, marca: null, unidade: 'UN',
+  custo: 0, estoque: 0, estoqueMinimo: 0, tipo: 'simples', ativo: true, ...p,
 })
 
 const item = (i: Partial<ItemVendido> & { produto_nome: string }): ItemVendido => ({

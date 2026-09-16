@@ -11,6 +11,10 @@ export type ProdutoCache = {
   id: string
   nome: string
   sku: string | null
+  ean: string | null
+  categoria: string | null
+  marca: string | null
+  unidade: string
   custo: number
   estoque: number
   estoqueMinimo: number

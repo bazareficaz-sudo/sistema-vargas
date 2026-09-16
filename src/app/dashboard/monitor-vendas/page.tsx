@@ -43,7 +43,7 @@ export default async function MonitorVendasPage() {
     // venda (ver `buscarProduto` em lib/monitor-vendas/calculos.ts).
     buscarTudo(
       (de, ate) => sb.from('produtos')
-        .select('id, nome, sku, preco_custo, estoque, estoque_minimo, tipo, ativo')
+        .select('id, nome, sku, ean, categoria, marca, unidade, preco_custo, estoque, estoque_minimo, tipo, ativo')
         .eq('empresa_id', empresaId)
         .order('id', { ascending: true })
         .range(de, ate),
@@ -61,6 +61,10 @@ export default async function MonitorVendasPage() {
     id: p.id as string,
     nome: p.nome as string,
     sku: (p.sku as string | null) ?? null,
+    ean: (p.ean as string | null) ?? null,
+    categoria: (p.categoria as string | null) ?? null,
+    marca: (p.marca as string | null) ?? null,
+    unidade: (p.unidade as string | null) ?? 'UN',
     custo: Number(p.preco_custo ?? 0),
     estoque: Number(p.estoque ?? 0),
     estoqueMinimo: Number(p.estoque_minimo ?? 0),
