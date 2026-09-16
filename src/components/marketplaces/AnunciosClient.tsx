@@ -1100,7 +1100,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               🏷️ Promoções
             </a>
           )}
-          {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre' || canal.plataforma === 'nuvemshop') && (
+          {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre' || canal.plataforma === 'nuvemshop' || canal.plataforma === 'tiktok') && (
             <button onClick={sincronizar} disabled={sincronizando}
               className="px-4 py-2 border border-blue-300 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors">
               {sincronizando ? 'Sincronizando...' : '↺ Sincronizar agora'}
