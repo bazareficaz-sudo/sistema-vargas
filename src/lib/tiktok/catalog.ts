@@ -29,7 +29,7 @@ export async function* paginarProdutos(
     const resp = await tiktokPost(
       '/product/202502/products/search',
       { status: 'ALL' },
-      { appKey, appSecret, accessToken: canal.accessToken, shopCipher: canal.shopCipher },
+      { appKey, appSecret, accessToken: canal.accessToken, shopCipher: canal.shopCipher, version: '202502' },
       extraQuery,
     )
 

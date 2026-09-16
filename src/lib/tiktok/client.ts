@@ -44,6 +44,15 @@ async function parseResposta(res: Response, path: string) {
 type CallOpts = {
   appKey: string
   appSecret: string
+  // Versão do endpoint (ex: '202309', '202502') — sai do próprio path
+  // (/authorization/202309/shops), mas a TikTok também exige como parâmetro
+  // de query assinado. Não é opcional: sem ele a assinatura é calculada
+  // sobre um conjunto de parâmetros diferente do que o servidor usa para
+  // validar, e toda chamada volta com "sign inválido" mesmo com a fórmula
+  // certa — foi exatamente o bug encontrado ao testar contra a Ferramenta
+  // de teste de API oficial (a doc de "Sign your API request" mostra um
+  // exemplo simplificado sem esse campo).
+  version: string
   accessToken?: string
   shopCipher?: string
 }
@@ -55,6 +64,7 @@ export async function tiktokGet(path: string, params: Record<string, string | nu
   const query: Record<string, string | number> = {
     app_key: opts.appKey,
     timestamp: timestamp(),
+    version: opts.version,
     ...(opts.shopCipher ? { shop_cipher: opts.shopCipher } : {}),
     ...params,
   }
@@ -81,6 +91,7 @@ export async function tiktokPost(
   const query: Record<string, string | number> = {
     app_key: opts.appKey,
     timestamp: timestamp(),
+    version: opts.version,
     ...(opts.shopCipher ? { shop_cipher: opts.shopCipher } : {}),
     ...extraQuery,
   }
@@ -141,7 +152,7 @@ export async function getAuthorizedShops(accessToken: string): Promise<Array<{
   code?: string
 }>> {
   const { appKey, appSecret } = await getIntegracaoCredentials()
-  const data = await tiktokGet('/authorization/202309/shops', {}, { appKey, appSecret, accessToken })
+  const data = await tiktokGet('/authorization/202309/shops', {}, { appKey, appSecret, accessToken, version: '202309' })
   const shops = data?.data?.shops ?? []
   return shops.map((s: any) => ({
     id: String(s.id ?? s.shop_id ?? ''),
