@@ -1,4 +1,4 @@
-import { tiktokPost, getIntegracaoCredentials } from './client'
+import { tiktokGet, tiktokPost, getIntegracaoCredentials } from './client'
 import type { TiktokChannel, TiktokProduct } from './types'
 
 export const PAGE_SIZE = 100 // teto aceito pela API (1-100)
@@ -43,6 +43,25 @@ export async function* paginarProdutos(
     pageToken = proximo
     pagina += 1
   }
+}
+
+/**
+ * Detalhe completo de um produto — confirmado ao vivo que Search Products
+ * (paginarProdutos acima) NÃO devolve `main_images` de jeito nenhum, só
+ * id/título/skus/preço/estoque. Get Product é a única forma de obter a
+ * imagem, mas só aceita um product_id por chamada (sem lote), então é
+ * usado como busca extra por produto — não como fonte principal — pra não
+ * multiplicar por 2 o número de chamadas quando a imagem não é o que
+ * falhou.
+ */
+export async function getDetalheProduto(canal: TiktokChannel, productId: string): Promise<TiktokProduct | null> {
+  const { appKey, appSecret } = await getIntegracaoCredentials()
+  const resp = await tiktokGet(
+    `/product/202309/products/${productId}`,
+    {},
+    { appKey, appSecret, accessToken: canal.accessToken, shopCipher: canal.shopCipher },
+  )
+  return resp?.data ?? null
 }
 
 /** Loja(s) autorizada(s) pelo token — usado para nomear o canal e obter o shop_cipher. */

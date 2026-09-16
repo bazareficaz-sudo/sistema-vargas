@@ -1,4 +1,4 @@
-import { paginarProdutos, getLojasAutorizadas } from './catalog'
+import { paginarProdutos, getDetalheProduto, getLojasAutorizadas } from './catalog'
 import type { SyncFailure, SyncResult, TiktokChannel, TiktokProduct } from './types'
 
 // Teto de produtos por chamada de sincronização — mesmo princípio de
@@ -46,7 +46,7 @@ function skuDoProduto(raw: TiktokProduct): string | null {
 
 function imagensDoProduto(raw: TiktokProduct): string[] {
   return (raw.main_images ?? [])
-    .map(img => img.url ?? img.uri ?? img.urls?.[0])
+    .map((img: any) => img.url ?? img.uri ?? img.url_list?.[0] ?? img.urls?.[0])
     .filter((u): u is string => !!u)
 }
 
@@ -101,6 +101,20 @@ export async function processarProduto(
   raw: TiktokProduct,
 ): Promise<{ anuncioId: string }> {
   const { row } = mapProdutoToAnuncioRow(raw, ctx.canal)
+
+  // Search Products (paginarProdutos) confirmadamente não devolve
+  // main_images — só Get Product tem a imagem, mas é uma chamada extra por
+  // produto (sem lote), então só é feita quando falta imagem mesmo.
+  if (row.imagens.length === 0) {
+    try {
+      const detalhe = await getDetalheProduto(ctx.canal, String(raw.id))
+      if (detalhe) {
+        const imagensDetalhe = imagensDoProduto(detalhe)
+        if (imagensDetalhe.length > 0) row.imagens = imagensDetalhe
+      }
+    } catch { /* imagem é um extra — não pode derrubar a sincronização do produto */ }
+  }
+
   const anuncio = await upsertAnuncio(ctx.sb, row)
   return { anuncioId: anuncio.id }
 }
