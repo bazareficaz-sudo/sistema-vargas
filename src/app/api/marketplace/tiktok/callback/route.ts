@@ -75,7 +75,9 @@ export async function GET(req: Request) {
     shop_cipher: shopCipher,
     access_token: tokenData.accessToken,
     refresh_token: tokenData.refreshToken,
-    token_expira_em: new Date(Date.now() + tokenData.accessTokenExpireIn * 1000).toISOString(),
+    // access_token_expire_in é a data/hora de expiração em si (Unix epoch),
+    // não uma duração — documentado em "Generate a test access token".
+    token_expira_em: new Date(tokenData.accessTokenExpireIn * 1000).toISOString(),
     markup_canal: parseFloat(markup) || 0,
     sincronizar_estoque: true,
     sincronizar_preco: true,

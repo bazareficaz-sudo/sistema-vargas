@@ -183,7 +183,9 @@ export async function refreshAccessTokenIfNeeded(sb: any, canal: TiktokChannel):
     throw new TiktokApiError('Falha ao renovar token TikTok Shop — reconecte a loja em Marketplaces.', body?.code, body)
   }
 
-  const tokenExpiraEm = new Date(Date.now() + (body.data.access_token_expire_in ?? 0) * 1000).toISOString()
+  // access_token_expire_in é a data/hora de expiração em si (Unix epoch),
+  // não uma duração — mesma correção aplicada no callback.
+  const tokenExpiraEm = new Date((body.data.access_token_expire_in ?? 0) * 1000).toISOString()
 
   await sb.from('marketplace_canais').update({
     access_token: body.data.access_token,
