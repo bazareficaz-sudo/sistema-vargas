@@ -32,6 +32,26 @@ export type ItemVendido = {
   subtotal: number
 }
 
+/**
+ * Uma linha do monitor — vem de `vendas` (PDV/app) OU de `marketplace_pedidos`
+ * (Shopee/ML/Nuvemshop), já traduzida pro mesmo formato. `canal` é o grupo
+ * usado no filtro ('PDV', 'APP', 'Marketplace'); `canalNome` é o rótulo
+ * específico mostrado na coluna Canal ('PDV', 'Shopee Ouro', 'ML Eficaz'...).
+ */
+export type Venda = {
+  id: string
+  cliente_nome: string | null
+  vendedor_nome: string | null
+  status: string
+  total: number
+  desconto_total: number
+  canal: string
+  canalNome: string
+  terminal_id: string | null
+  created_at: string
+  itens: ItemVendido[]
+}
+
 export type KitComponente = { produtoId: string; quantidade: number; controlaEstoque: boolean }
 
 export type IndiceProdutos = {

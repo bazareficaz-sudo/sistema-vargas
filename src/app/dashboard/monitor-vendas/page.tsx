@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { buscarTudo } from '@/lib/supabase/paginar'
 import { ABERTOS } from '@/lib/faltas/status'
+import { carregarVendasUnificadas } from '@/lib/monitor-vendas/carregarVendas'
 import MonitorVendasClient from '@/components/monitor-vendas/MonitorVendasClient'
 
 export const dynamic = 'force-dynamic'
@@ -11,13 +12,14 @@ export const dynamic = 'force-dynamic'
 // para uma tela normal do painel quanto para ficar ligado numa TV do balcão
 // (modo monitor, em tela cheia).
 //
-// As últimas 5000 vendas e o catálogo inteiro podem passar de 1000 linhas —
-// o teto do PostgREST por requisição — por isso as duas consultas usam
-// `buscarTudo`. Foi a falta disso, em outra tela, que fez o card de
-// faturamento do mês mostrar só as 1000 vendas mais antigas (ver
-// CONTINUIDADE.md). O cálculo de lucro daqui depende de somar TODAS as
-// vendas do período, então o mesmo defeito aqui seria pior: lucro errado sem
-// nenhum aviso.
+// As vendas vêm de DUAS fontes (`vendas` do PDV/app e `marketplace_pedidos`
+// dos canais externos — ver `lib/monitor-vendas/carregarVendas.ts`), e junto
+// com o catálogo inteiro podem passar de 1000 linhas — o teto do PostgREST
+// por requisição — por isso todas essas consultas usam `buscarTudo`. Foi a
+// falta disso, em outra tela, que fez o card de faturamento do mês mostrar
+// só as 1000 vendas mais antigas (ver CONTINUIDADE.md). O cálculo de lucro
+// daqui depende de somar TODAS as vendas do período, então o mesmo defeito
+// aqui seria pior: lucro errado sem nenhum aviso.
 const LIMITE_VENDAS = 5000
 
 export default async function MonitorVendasPage() {
@@ -29,15 +31,7 @@ export default async function MonitorVendasPage() {
   const empresaId = perfil?.empresa_id ?? ''
 
   const [vendas, produtosBrutos, faltasRes] = await Promise.all([
-    buscarTudo(
-      (de, ate) => sb.from('vendas')
-        .select('id, cliente_nome, vendedor_nome, status, total, desconto_total, canal, terminal_id, created_at, itens')
-        .eq('empresa_id', empresaId)
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false })
-        .range(de, ate),
-      { teto: LIMITE_VENDAS, rotulo: 'monitor-vendas/vendas' },
-    ),
+    carregarVendasUnificadas(sb, empresaId, LIMITE_VENDAS),
     // Catálogo inteiro: é o que permite achar o custo/estoque de um item
     // mesmo que o produto tenha sido renomeado ou trocado de SKU depois da
     // venda (ver `buscarProduto` em lib/monitor-vendas/calculos.ts).
@@ -86,7 +80,7 @@ export default async function MonitorVendasPage() {
 
   return (
     <MonitorVendasClient
-      vendasIniciais={vendas as any}
+      vendasIniciais={vendas}
       produtosIniciais={produtos}
       kitItensIniciais={kitItens as any}
       faltasIniciais={faltasRes.data ?? []}

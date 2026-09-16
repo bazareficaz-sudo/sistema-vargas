@@ -3,11 +3,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { criarClienteSemCache } from '@/lib/monitor-vendas/clienteSemCache'
 import { buscarTudo } from '@/lib/supabase/paginar'
+import { carregarVendasUnificadas } from '@/lib/monitor-vendas/carregarVendas'
 import { inicioDoDia, inicioDeDiasAtras } from '@/lib/datas'
 import {
   construirIndiceProdutos, calcularLucroVenda, estoqueDoProduto, custoDoItem, markupItem,
   corMarkup, corMargem, situacaoEstoque, sugestaoDeCompra,
-  type ProdutoCache, type ItemVendido, type KitComponente, type IndiceProdutos, type CorBadge,
+  type Venda, type ProdutoCache, type ItemVendido, type KitComponente, type IndiceProdutos, type CorBadge,
 } from '@/lib/monitor-vendas/calculos'
 import { inserirNoInventarioMonitor } from '@/lib/monitor-vendas/inventarioMonitor'
 import FaltaModal, { type AlvoFalta, type FaltaResumo } from './FaltaModal'
@@ -15,22 +16,11 @@ import FaltaModal, { type AlvoFalta, type FaltaResumo } from './FaltaModal'
 // Monitor de Vendas — acompanhamento quase em tempo real, pensado tanto para
 // uma tela normal do painel quanto para ficar ligado numa TV do balcão.
 //
-// `vendas.itens` é JSONB embutido na própria linha da venda (não existe
-// `venda_itens` como tabela separada neste sistema) — por isso não há consulta
-// extra nenhuma para montar os itens de cada venda, só ler o campo.
-
-type Venda = {
-  id: string
-  cliente_nome: string | null
-  vendedor_nome: string | null
-  status: string
-  total: number
-  desconto_total: number
-  canal: string | null
-  terminal_id: string | null
-  created_at: string
-  itens: ItemVendido[]
-}
+// As vendas vêm de duas fontes já unificadas em `Venda` (ver
+// `lib/monitor-vendas/carregarVendas.ts`): PDV/app (itens embutidos em JSONB)
+// e marketplace (Shopee/ML/Nuvemshop, itens numa tabela própria). Daqui pra
+// baixo não existe mais distinção — os cálculos de lucro/estoque tratam as
+// duas fontes exatamente igual.
 
 type KitItemBruto = { kit_id: string; produto_id: string; quantidade: number; controla_estoque: boolean | null }
 
@@ -87,7 +77,7 @@ export default function MonitorVendasClient({
   const [inicioCustom, setInicioCustom] = useState('')
   const [fimCustom, setFimCustom] = useState('')
   const canaisDisponiveis = useMemo(
-    () => [...new Set(vendasIniciais.map(v => v.canal || 'sem-canal'))].sort(),
+    () => [...new Set(vendasIniciais.map(v => v.canal))].sort(),
     [vendasIniciais],
   )
   const [canaisSelecionados, setCanaisSelecionados] = useState<Set<string>>(new Set(canaisDisponiveis))
@@ -160,7 +150,7 @@ export default function MonitorVendasClient({
     return vendasComCalculo.filter(vc => {
       const t = new Date(vc.venda.created_at).getTime()
       if (t < t0 || t > t1) return false
-      const canal = vc.venda.canal || 'sem-canal'
+      const canal = vc.venda.canal
       if (canaisSelecionados.size > 0 && !canaisSelecionados.has(canal)) return false
       if (vendedorAlvo && !(vc.venda.vendedor_nome ?? '').toLowerCase().includes(vendedorAlvo)) return false
       if (produtoAlvo && !vc.itens.some(it => it.produto_nome.toLowerCase().includes(produtoAlvo))) return false
@@ -247,15 +237,7 @@ export default function MonitorVendasClient({
     setAtualizando(true)
     try {
       const [novasVendas, novosProdutos, novasFaltas] = await Promise.all([
-        buscarTudo<Venda>(
-          (de, ate) => sb.from('vendas')
-            .select('id, cliente_nome, vendedor_nome, status, total, desconto_total, canal, terminal_id, created_at, itens')
-            .eq('empresa_id', empresaId)
-            .order('created_at', { ascending: false })
-            .order('id', { ascending: false })
-            .range(de, ate) as any,
-          { teto: limiteVendas, rotulo: 'monitor-vendas/vendas (refresh)' },
-        ),
+        carregarVendasUnificadas(sb, empresaId, limiteVendas),
         buscarTudo<any>(
           (de, ate) => sb.from('produtos')
             .select('id, nome, sku, ean, categoria, marca, unidade, preco_custo, estoque, estoque_minimo, tipo, ativo')
@@ -463,6 +445,7 @@ export default function MonitorVendasClient({
                 <tr>
                   <th className="w-6"></th>
                   <th className="text-left px-3 py-2 font-medium">Hora</th>
+                  <th className="text-left px-3 py-2 font-medium">Canal</th>
                   <th className="text-left px-3 py-2 font-medium">Cliente</th>
                   <th className="text-left px-3 py-2 font-medium">Vendedor</th>
                   <th className="text-right px-3 py-2 font-medium">Total</th>
@@ -486,6 +469,7 @@ export default function MonitorVendasClient({
                         className="border-t border-slate-100 hover:bg-slate-50/70 cursor-pointer">
                         <td className="pl-3 text-slate-300">{aberta ? '▾' : '▸'}</td>
                         <td className="px-3 py-2 text-slate-500">{hora(v.created_at)}</td>
+                        <td className="px-3 py-2"><BadgeCanal canal={v.canal} nome={v.canalNome} /></td>
                         <td className="px-3 py-2 text-slate-700">{v.cliente_nome ?? <span className="text-slate-300">—</span>}</td>
                         <td className="px-3 py-2 text-slate-600">{v.vendedor_nome ?? '—'}</td>
                         <td className="px-3 py-2 text-right font-medium text-slate-800">{brl(Number(v.total) || 0)}</td>
@@ -502,7 +486,7 @@ export default function MonitorVendasClient({
                       </tr>
                       {aberta && (
                         <tr>
-                          <td colSpan={11} className="bg-slate-50/60 p-0">
+                          <td colSpan={12} className="bg-slate-50/60 p-0">
                             <ItensDaVenda
                               venda={v} itens={vc.itens} indice={indice} componentesPorKit={componentesPorKit}
                               faltasPendentesPorProduto={faltasPendentesPorProduto}
@@ -618,6 +602,18 @@ function EstadoVazio({ texto }: { texto: string }) {
       {texto}
     </div>
   )
+}
+
+const COR_GRUPO_CANAL: Record<string, string> = {
+  PDV: 'bg-blue-50 text-blue-700 border-blue-200',
+  APP: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+  Marketplace: 'bg-orange-50 text-orange-700 border-orange-200',
+}
+
+/** Mostra o rótulo específico ("Shopee Ouro"), colorido pelo grupo (PDV/APP/Marketplace). */
+function BadgeCanal({ canal, nome }: { canal: string; nome: string }) {
+  const cor = COR_GRUPO_CANAL[canal] ?? 'bg-slate-50 text-slate-600 border-slate-200'
+  return <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-medium border ${cor}`}>{nome}</span>
 }
 
 function BadgeEstoque({ situacao, valor }: { situacao: 'zerado' | 'baixo' | 'ok' | 'nao_vinculado'; valor: number }) {
