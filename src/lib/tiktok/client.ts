@@ -69,14 +69,18 @@ export async function tiktokGet(path: string, params: Record<string, string | nu
     ...params,
   }
   const assinatura = sign({ path, query, appSecret: opts.appSecret })
+  // access_token não entra no cálculo da assinatura (exigido pela doc), mas
+  // os exemplos que funcionaram na Ferramenta de Teste de API SEMPRE o
+  // levavam também na query string, redundante com o header — não só no
+  // header como a doc de versão 202309+ dá a entender. Incluído aqui na
+  // requisição de verdade (fora do objeto assinado) para testar essa
+  // hipótese sem mudar a assinatura já confirmada correta.
   const qs = new URLSearchParams(
-    Object.fromEntries(Object.entries({ ...query, sign: assinatura }).map(([k, v]) => [k, String(v)]))
+    Object.fromEntries(
+      Object.entries({ ...query, sign: assinatura, ...(opts.accessToken ? { access_token: opts.accessToken } : {}) })
+        .map(([k, v]) => [k, String(v)])
+    )
   )
-
-  // DEBUG TEMPORÁRIO (13/09/2026) — nada sensível aqui: nem o secret nem o
-  // access_token aparecem. Serve só para comparar contra a Ferramenta de
-  // Teste de API oficial enquanto o erro "sign inválido" não é resolvido.
-  console.log('[tiktok debug] GET', path, 'query assinada:', JSON.stringify(query), 'sign:', assinatura)
 
   const res = await fetch(`${API_BASE}${path}?${qs.toString()}`, {
     headers: {
@@ -103,7 +107,10 @@ export async function tiktokPost(
   const bodyStr = JSON.stringify(body ?? {})
   const assinatura = sign({ path, query, body: bodyStr, appSecret: opts.appSecret })
   const qs = new URLSearchParams(
-    Object.fromEntries(Object.entries({ ...query, sign: assinatura }).map(([k, v]) => [k, String(v)]))
+    Object.fromEntries(
+      Object.entries({ ...query, sign: assinatura, ...(opts.accessToken ? { access_token: opts.accessToken } : {}) })
+        .map(([k, v]) => [k, String(v)])
+    )
   )
 
   const res = await fetch(`${API_BASE}${path}?${qs.toString()}`, {
