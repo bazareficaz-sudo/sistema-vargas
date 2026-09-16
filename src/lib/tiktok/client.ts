@@ -44,41 +44,30 @@ async function parseResposta(res: Response, path: string) {
 type CallOpts = {
   appKey: string
   appSecret: string
-  // Versão do endpoint (ex: '202309', '202502') — sai do próprio path
-  // (/authorization/202309/shops), mas a TikTok também exige como parâmetro
-  // de query assinado. Não é opcional: sem ele a assinatura é calculada
-  // sobre um conjunto de parâmetros diferente do que o servidor usa para
-  // validar, e toda chamada volta com "sign inválido" mesmo com a fórmula
-  // certa — foi exatamente o bug encontrado ao testar contra a Ferramenta
-  // de teste de API oficial (a doc de "Sign your API request" mostra um
-  // exemplo simplificado sem esse campo).
-  version: string
   accessToken?: string
   shopCipher?: string
 }
 
 // GET/POST autenticados contra a API da TikTok Shop (open-api.tiktokglobalshop.com).
-// Diferente da Shopee: o token vai no header `x-tts-access-token`, não na
-// query, e não entra na assinatura (documentado em "Sign your API request").
+// A versão do endpoint (ex: 202309, 202502) vai só no path (ex:
+// /authorization/202309/shops) — não é parâmetro de query nem entra na
+// assinatura. Confirmado na doc oficial "Sign your API request": o exemplo
+// de Get Authorized Shops reordena as chaves como só `app_key` e
+// `timestamp` (+ `shop_cipher` quando o endpoint exige). O token vai no
+// header `x-tts-access-token`, nunca na query nem na assinatura, pra
+// versão 202309+ — incluir qualquer um desses dois a mais na query
+// assinada foi o que quebrava a assinatura nas tentativas anteriores.
 export async function tiktokGet(path: string, params: Record<string, string | number>, opts: CallOpts) {
   const query: Record<string, string | number> = {
     app_key: opts.appKey,
     timestamp: timestamp(),
-    version: opts.version,
     ...(opts.shopCipher ? { shop_cipher: opts.shopCipher } : {}),
     ...params,
   }
   const assinatura = sign({ path, query, appSecret: opts.appSecret })
-  // access_token não entra no cálculo da assinatura (exigido pela doc), mas
-  // os exemplos que funcionaram na Ferramenta de Teste de API SEMPRE o
-  // levavam também na query string, redundante com o header — não só no
-  // header como a doc de versão 202309+ dá a entender. Incluído aqui na
-  // requisição de verdade (fora do objeto assinado) para testar essa
-  // hipótese sem mudar a assinatura já confirmada correta.
   const qs = new URLSearchParams(
     Object.fromEntries(
-      Object.entries({ ...query, sign: assinatura, ...(opts.accessToken ? { access_token: opts.accessToken } : {}) })
-        .map(([k, v]) => [k, String(v)])
+      Object.entries({ ...query, sign: assinatura }).map(([k, v]) => [k, String(v)])
     )
   )
 
@@ -100,7 +89,6 @@ export async function tiktokPost(
   const query: Record<string, string | number> = {
     app_key: opts.appKey,
     timestamp: timestamp(),
-    version: opts.version,
     ...(opts.shopCipher ? { shop_cipher: opts.shopCipher } : {}),
     ...extraQuery,
   }
@@ -108,8 +96,7 @@ export async function tiktokPost(
   const assinatura = sign({ path, query, body: bodyStr, appSecret: opts.appSecret })
   const qs = new URLSearchParams(
     Object.fromEntries(
-      Object.entries({ ...query, sign: assinatura, ...(opts.accessToken ? { access_token: opts.accessToken } : {}) })
-        .map(([k, v]) => [k, String(v)])
+      Object.entries({ ...query, sign: assinatura }).map(([k, v]) => [k, String(v)])
     )
   )
 
@@ -164,7 +151,7 @@ export async function getAuthorizedShops(accessToken: string): Promise<Array<{
   code?: string
 }>> {
   const { appKey, appSecret } = await getIntegracaoCredentials()
-  const data = await tiktokGet('/authorization/202309/shops', {}, { appKey, appSecret, accessToken, version: '202309' })
+  const data = await tiktokGet('/authorization/202309/shops', {}, { appKey, appSecret, accessToken })
   const shops = data?.data?.shops ?? []
   return shops.map((s: any) => ({
     id: String(s.id ?? s.shop_id ?? ''),
