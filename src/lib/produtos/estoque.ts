@@ -19,7 +19,7 @@ import { ajustarDepositoPrincipal } from './depositoPrincipal'
 
 export type ResultadoBaixa = { ok: true; jaProcessado?: boolean } | { ok: false; motivo: string }
 
-const PLATAFORMA_LABEL: Record<string, string> = { mercadolivre: 'Mercado Livre', shopee: 'Shopee' }
+const PLATAFORMA_LABEL: Record<string, string> = { mercadolivre: 'Mercado Livre', shopee: 'Shopee', tiktok: 'TikTok Shop' }
 
 type ResultadoDecremento = { ok: true; estoqueAnterior: number; estoqueNovo: number } | { ok: false; motivo: string }
 

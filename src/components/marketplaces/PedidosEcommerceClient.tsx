@@ -103,7 +103,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [emitindoNfce, setEmitindoNfce] = useState(false)
   const [erroEmitirNfce, setErroEmitirNfce] = useState('')
 
-  const canaisSincronizaveis = canais.filter(c => (c.plataforma === 'shopee' || c.plataforma === 'mercadolivre') && c.ativo && c.access_token)
+  const canaisSincronizaveis = canais.filter(c => (c.plataforma === 'shopee' || c.plataforma === 'mercadolivre' || c.plataforma === 'tiktok') && c.ativo && c.access_token)
 
   const formPedidoVazio = {
     canal_id: canais[0]?.id ?? '',
@@ -236,20 +236,22 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     }
   }
 
-  // Roda a sincronização em todas as lojas Shopee/Mercado Livre conectadas
-  // (ou só na selecionada, se um filtro de loja estiver ativo) e agrega o
-  // resultado num resumo único — a rota (`sync-pedidos`) muda por
-  // plataforma, mas o formato de resposta é o mesmo nas duas.
+  // Roda a sincronização em todas as lojas Shopee/Mercado Livre/TikTok Shop
+  // conectadas (ou só na selecionada, se um filtro de loja estiver ativo) e
+  // agrega o resultado num resumo único — a rota (`sync-pedidos`) muda por
+  // plataforma, mas o formato de resposta é o mesmo nas três.
   async function sincronizarPedidos() {
     const alvos = canalFiltro ? canaisSincronizaveis.filter(c => c.id === canalFiltro) : canaisSincronizaveis
-    if (alvos.length === 0) { setResumoSync('Nenhuma loja Shopee ou Mercado Livre conectada para sincronizar.'); return }
+    if (alvos.length === 0) { setResumoSync('Nenhuma loja Shopee, Mercado Livre ou TikTok Shop conectada para sincronizar.'); return }
     setSincronizando(true); setResumoSync('')
     // Cada loja é uma chamada independente ao marketplace — rodar em paralelo
     // em vez de sequencial evita que a espera total seja a soma do tempo de
     // todas as lojas (antes, a 2ª loja só começava depois da 1ª terminar).
     const resultados = await Promise.all(alvos.map(async c => {
       try {
-        const endpoint = c.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync-pedidos' : '/api/marketplace/shopee/sync-pedidos'
+        const endpoint = c.plataforma === 'mercadolivre' ? '/api/marketplace/mercadolivre/sync-pedidos'
+          : c.plataforma === 'tiktok' ? '/api/marketplace/tiktok/sync-pedidos'
+          : '/api/marketplace/shopee/sync-pedidos'
         const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -506,7 +508,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => router.refresh()} title="Recarrega a lista a partir do banco, sem chamar Shopee/Mercado Livre"
+          <button onClick={() => router.refresh()} title="Recarrega a lista a partir do banco, sem chamar os marketplaces"
             className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
             🔄 Atualizar
           </button>

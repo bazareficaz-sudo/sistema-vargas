@@ -4,6 +4,8 @@ import { syncPedidos as syncPedidosShopee } from '@/lib/shopee/orders'
 import { syncPedidos as syncPedidosML } from '@/lib/mercadolivre/orders'
 import { syncPedidos as syncPedidosNuvemshop } from '@/lib/nuvemshop/orders'
 import { montarCanal as montarCanalNuvemshop } from '@/lib/nuvemshop/canal'
+import { syncPedidos as syncPedidosTiktok } from '@/lib/tiktok/pedidos'
+import { montarCanal as montarCanalTiktok } from '@/lib/tiktok/canal'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
 
@@ -35,8 +37,8 @@ export async function GET(req: Request) {
 
   const { data: canais, error: erroCanais } = await sb
     .from('marketplace_canais')
-    .select('id, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas')
-    .in('plataforma', ['shopee', 'mercadolivre', 'nuvemshop'])
+    .select('id, empresa_id, plataforma, seller_id, shop_cipher, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas')
+    .in('plataforma', ['shopee', 'mercadolivre', 'nuvemshop', 'tiktok'])
     .not('access_token', 'is', null)
 
   // Nunca falhar em silêncio: se a consulta der erro (ex: coluna que não
@@ -66,13 +68,25 @@ export async function GET(req: Request) {
         resultado = await syncPedidosNuvemshop(sb, montarCanalNuvemshop(canalRow), {
           maxOrders: MAX_ORDERS_POR_CANAL, desde,
         })
-      } else {
+      } else if (canalRow.plataforma === 'tiktok') {
+        resultado = await syncPedidosTiktok(sb, montarCanalTiktok(canalRow), {
+          maxOrders: MAX_ORDERS_POR_CANAL, desde,
+        })
+      } else if (canalRow.plataforma === 'mercadolivre') {
         const canal: MLChannel = {
           id: canalRow.id, empresaId: canalRow.empresa_id, sellerId: canalRow.seller_id,
           accessToken: canalRow.access_token, refreshToken: canalRow.refresh_token, tokenExpiraEm: canalRow.token_expira_em,
           sincronizarEstoque: canalRow.sincronizar_estoque, debitarEstoqueVendas: canalRow.debitar_estoque_vendas,
         }
         resultado = await syncPedidosML(sb, canal, { maxOrders: MAX_ORDERS_POR_CANAL, desde })
+      } else {
+        // Nunca cair aqui de fato — a query acima já filtra .in(plataforma,
+        // [...]) pelas 4 suportadas. Se uma 5ª plataforma ganhar canal antes
+        // de ganhar um branch aqui, é melhor pular com erro visível do que
+        // tratá-la silenciosamente como Mercado Livre (bug real que existia
+        // aqui antes: o `else` sem condição absorvia qualquer plataforma
+        // desconhecida).
+        throw new Error(`Plataforma sem sincronização de pedidos implementada no cron: ${canalRow.plataforma}`)
       }
 
       const status = resultado.upserted > 0 || resultado.totalFound === 0 ? 'ok' : 'erro'
