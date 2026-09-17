@@ -1046,8 +1046,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Código (SKU)</label>
-                  <input value={form.sku ?? ''} onChange={e => campo('sku', e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono text-gray-900 focus:outline-none focus:border-blue-500" />
+                  <input value={form.sku ?? ''} readOnly disabled
+                    title="Sequencial automático — não pode ser editado, para a numeração nunca desalinhar."
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-500 bg-gray-50 cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">GTIN/EAN</label>
