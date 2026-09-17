@@ -48,6 +48,7 @@ export const NAV: NavGroup[] = [
       // lista só. Fica ANTES de Vendas de propósito — é a visão completa.
       { href: '/dashboard/pedidos',                label: 'Pedidos',            icon: '📦',  modulo: 'vendas' },
       { href: '/dashboard/vendas',                 label: 'Vendas',             icon: '💳',  modulo: 'vendas' },
+      { href: '/dashboard/monitor-vendas',         label: 'Monitor de Vendas',  icon: '📡',  modulo: 'vendas' },
       { href: '/dashboard/orcamentos',             label: 'Orçamentos',         icon: '📋',  modulo: 'orcamentos' },
       { href: '/dashboard/incentivos',             label: 'Incentivos',         icon: '🏆',  modulo: 'incentivos' },
       { href: '/dashboard/configuracoes/saude-venda', label: 'Saúde da Venda', icon: '💚', modulo: 'saude_venda' },

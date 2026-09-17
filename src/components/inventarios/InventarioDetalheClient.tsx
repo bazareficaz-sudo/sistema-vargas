@@ -62,15 +62,24 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
   const [motivoCancelamento, setMotivoCancelamento] = useState('')
   const [finalizando, setFinalizando] = useState(false)
 
+  const [ajustandoId, setAjustandoId] = useState<string | null>(null)
+
   const buscaRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const bloqueado = inv.status === 'finalizado' || inv.status === 'cancelado'
 
   // ── Métricas ──────────────────────────────────────────────────
+  // Por `status_item`, não recalculado de qtd × estoque_sistema: um item já
+  // ajustado individualmente (ver `ajustarAgora`) continua tendo
+  // qtd_contada ≠ estoque_sistema pra sempre (é o registro de quanto ele
+  // desviava ANTES do ajuste) — contar isso nas métricas junto com quem
+  // ainda diverge de verdade faria "3 divergentes" quando na prática só 1
+  // continua pendente de ajuste.
   const totalItens = itens.length
   const contados = itens.filter(i => i.qtd_contada !== null).length
   const pendentes = totalItens - contados
-  const divergentes = itens.filter(i => i.qtd_contada !== null && i.qtd_contada !== i.estoque_sistema).length
-  const semDivergencia = itens.filter(i => i.qtd_contada !== null && i.qtd_contada === i.estoque_sistema).length
+  const divergentes = itens.filter(i => i.status_item === 'divergente').length
+  const semDivergencia = itens.filter(i => i.status_item === 'contado').length
+  const ajustados = itens.filter(i => i.status_item === 'ajustado').length
 
   // ── Busca de produtos para adicionar ─────────────────────────
   useEffect(() => {
@@ -168,50 +177,84 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
     if (data) setHistorico(p => [data as Historico, ...p])
   }
 
+  // ── Ajuste de estoque (um item, ou todos os divergentes ao finalizar) ──
+  //
+  // Compartilhado entre `ajustarAgora` (um item, inventário continua aberto)
+  // e `finalizar` (todos os divergentes de uma vez, inventário fecha) —
+  // as duas escritas em produtos.estoque/produto_estoque/estoque_movimentacoes
+  // não podem divergir entre os dois caminhos.
+  async function aplicarAjusteEstoque(item: InvItem) {
+    const novoEstoque = item.qtd_contada!
+    const anterior = item.estoque_sistema
+    await sb.from('produtos').update({ estoque: novoEstoque }).eq('id', item.produto_id)
+    // Espelha no quadro por depósito — sem isso, a contagem física corrige
+    // o total mas o quadro por depósito (Estoque Detalhado) fica parado,
+    // desatualizado a partir do dia do inventário. O depósito já é
+    // conhecido (o inventário inteiro é de um depósito só), então grava
+    // direto nele em vez de assumir o principal.
+    if (inv.deposito_id) {
+      const { data: pe } = await sb.from('produto_estoque').select('id')
+        .eq('deposito_id', inv.deposito_id).eq('produto_id', item.produto_id).maybeSingle()
+      if (pe) {
+        await sb.from('produto_estoque').update({
+          quantidade: novoEstoque, ultima_movimentacao: new Date().toISOString(),
+        }).eq('id', pe.id)
+      } else {
+        await sb.from('produto_estoque').insert({
+          empresa_id: empresaId, deposito_id: inv.deposito_id, produto_id: item.produto_id,
+          quantidade: novoEstoque,
+        })
+      }
+    }
+    await sb.from('estoque_movimentacoes').insert({
+      empresa_id: empresaId,
+      deposito_id: inv.deposito_id,
+      produto_id: item.produto_id,
+      produto_nome: item.produto_nome,
+      tipo: novoEstoque > anterior ? 'ajuste_entrada' : 'ajuste_saida',
+      quantidade: Math.abs(novoEstoque - anterior),
+      estoque_anterior: anterior,
+      estoque_novo: novoEstoque,
+      motivo: 'Ajuste por inventário',
+      referencia_id: inv.id,
+      referencia_tipo: 'inventario',
+      usuario: operador,
+    })
+    await sb.from('inventario_itens').update({ status_item: 'ajustado' }).eq('id', item.id)
+  }
+
+  // Corrige UM produto na hora, sem fechar o inventário — pensado pra quem
+  // vai conferindo aos poucos, ao longo de vários dias, na mesma lista: o
+  // produto certo não pode esperar o inventário inteiro terminar pra parar
+  // de vender do número errado.
+  async function ajustarAgora(itemId: string) {
+    const item = itens.find(i => i.id === itemId)
+    if (!item || item.qtd_contada === null || item.status_item === 'ajustado') return
+    if (!confirm(`Ajustar o estoque de "${item.produto_nome}" de ${item.estoque_sistema} para ${item.qtd_contada}?`)) return
+    setAjustandoId(itemId)
+    try {
+      await aplicarAjusteEstoque(item)
+      setItens(p => p.map(i => i.id === itemId ? { ...i, status_item: 'ajustado' } : i))
+      await registrarHistorico(
+        'item_ajustado',
+        `Estoque de "${item.produto_nome}" ajustado individualmente: ${item.estoque_sistema} → ${item.qtd_contada} (${operador})`,
+      )
+    } finally {
+      setAjustandoId(null)
+    }
+  }
+
   // ── Finalização ──────────────────────────────────────────────
   async function finalizar() {
     setFinalizando(true)
-    const divergs = itens.filter(i => i.qtd_contada !== null && i.qtd_contada !== i.estoque_sistema)
+    // Só quem ainda diverge de verdade — um item já corrigido por
+    // `ajustarAgora` continua com qtd_contada ≠ estoque_sistema (o registro
+    // não muda depois do ajuste), e reprocessá-lo aqui duplicaria a
+    // movimentação de estoque sem mudar o saldo.
+    const divergs = itens.filter(i => i.status_item === 'divergente')
 
-    // Ajusta estoque para cada divergente
     for (const item of divergs) {
-      const novoEstoque = item.qtd_contada!
-      const anterior = item.estoque_sistema
-      await sb.from('produtos').update({ estoque: novoEstoque }).eq('id', item.produto_id)
-      // Espelha no quadro por depósito — sem isso, a contagem física corrige
-      // o total mas o quadro por depósito (Estoque Detalhado) fica parado,
-      // desatualizado a partir do dia do inventário. O depósito já é
-      // conhecido (o inventário inteiro é de um depósito só), então grava
-      // direto nele em vez de assumir o principal.
-      if (inv.deposito_id) {
-        const { data: pe } = await sb.from('produto_estoque').select('id')
-          .eq('deposito_id', inv.deposito_id).eq('produto_id', item.produto_id).maybeSingle()
-        if (pe) {
-          await sb.from('produto_estoque').update({
-            quantidade: novoEstoque, ultima_movimentacao: new Date().toISOString(),
-          }).eq('id', pe.id)
-        } else {
-          await sb.from('produto_estoque').insert({
-            empresa_id: empresaId, deposito_id: inv.deposito_id, produto_id: item.produto_id,
-            quantidade: novoEstoque,
-          })
-        }
-      }
-      await sb.from('estoque_movimentacoes').insert({
-        empresa_id: empresaId,
-        deposito_id: inv.deposito_id,
-        produto_id: item.produto_id,
-        produto_nome: item.produto_nome,
-        tipo: novoEstoque > anterior ? 'ajuste_entrada' : 'ajuste_saida',
-        quantidade: Math.abs(novoEstoque - anterior),
-        estoque_anterior: anterior,
-        estoque_novo: novoEstoque,
-        motivo: 'Ajuste por inventário',
-        referencia_id: inv.id,
-        referencia_tipo: 'inventario',
-        usuario: operador,
-      })
-      await sb.from('inventario_itens').update({ status_item: 'ajustado' }).eq('id', item.id)
+      await aplicarAjusteEstoque(item)
     }
 
     // Marca inventário como finalizado
@@ -276,6 +319,7 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
                   <span><b className="text-green-600">{contados}</b> contados</span>
                   <span><b className="text-gray-400">{pendentes}</b> pendentes</span>
                   {divergentes > 0 && <span><b className="text-orange-600">{divergentes}</b> divergentes</span>}
+                  {ajustados > 0 && <span><b className="text-blue-600">{ajustados}</b> já ajustados</span>}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <div className="w-48 h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -356,6 +400,7 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
                     <th className="text-center px-3 py-2.5 w-28">Qtd contada</th>
                     <th className="text-center px-3 py-2.5 w-24">Diferença</th>
                     <th className="text-center px-3 py-2.5 w-24">Status</th>
+                    <th className="text-center px-3 py-2.5 w-28"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -364,6 +409,8 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
                       key={item.id}
                       item={item}
                       bloqueado={bloqueado}
+                      ajustando={ajustandoId === item.id}
+                      onAjustar={() => ajustarAgora(item.id)}
                       onSalvar={(qtd) => salvarContagem(item.id, qtd)}
                     />
                   ))}
@@ -516,7 +563,7 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
                 <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
                   <p className="text-sm font-semibold text-orange-800 mb-2">Produtos com divergência:</p>
                   <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {itens.filter(i => i.qtd_contada !== null && i.qtd_contada !== i.estoque_sistema).map(i => (
+                    {itens.filter(i => i.status_item === 'divergente').map(i => (
                       <div key={i.id} className="flex justify-between text-xs text-orange-700">
                         <span className="truncate flex-1">{i.produto_nome}</span>
                         <span className="flex-shrink-0 ml-3 font-mono">
@@ -531,7 +578,7 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
                   {/* Valor total da diferença */}
                   {(() => {
                     const valorDif = itens
-                      .filter(i => i.qtd_contada !== null && i.qtd_contada !== i.estoque_sistema)
+                      .filter(i => i.status_item === 'divergente')
                       .reduce((s, i) => s + (i.qtd_contada! - i.estoque_sistema) * i.preco_custo, 0)
                     return (
                       <p className="text-xs text-orange-800 font-semibold mt-2 border-t border-orange-200 pt-2">
@@ -596,8 +643,8 @@ export default function InventarioDetalheClient({ inventario: inv0, itensIniciai
 }
 
 // ── Linha de contagem ─────────────────────────────────────────
-function LinhaContagem({ item, bloqueado, onSalvar }: {
-  item: InvItem; bloqueado: boolean; onSalvar: (qtd: number | null) => void
+function LinhaContagem({ item, bloqueado, ajustando, onAjustar, onSalvar }: {
+  item: InvItem; bloqueado: boolean; ajustando: boolean; onAjustar: () => void; onSalvar: (qtd: number | null) => void
 }) {
   const [valor, setValor] = useState(item.qtd_contada !== null ? String(item.qtd_contada) : '')
   const [editando, setEditando] = useState(false)
@@ -661,6 +708,15 @@ function LinhaContagem({ item, bloqueado, onSalvar }: {
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_ITEM[item.status_item]?.cor}`}>
           {STATUS_ITEM[item.status_item]?.label}
         </span>
+      </td>
+      <td className="px-3 py-2.5 text-center">
+        {!bloqueado && item.status_item === 'divergente' && (
+          <button onClick={onAjustar} disabled={ajustando}
+            title="Corrige o estoque deste produto agora, sem fechar o inventário"
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white">
+            {ajustando ? 'Ajustando...' : 'Ajustar agora'}
+          </button>
+        )}
       </td>
     </tr>
   )
