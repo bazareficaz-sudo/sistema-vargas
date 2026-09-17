@@ -29,8 +29,6 @@ export default function ImportarProdutoUrlModal({ empresaId, categoriasRaiz, cat
 
   const [nome, setNome] = useState('')
   const [sku, setSku] = useState('')
-  const [skuDuplicado, setSkuDuplicado] = useState<any | null>(null)
-  const [checandoSku, setChecandoSku] = useState(false)
   const [categoria, setCategoria] = useState('')
   const [subcategoria, setSubcategoria] = useState('')
   const [marca, setMarca] = useState('')
@@ -86,16 +84,6 @@ export default function ImportarProdutoUrlModal({ empresaId, categoriasRaiz, cat
     } finally {
       setBuscando(false)
     }
-  }
-
-  async function checarSku() {
-    const valor = sku.trim()
-    if (!valor) { setSkuDuplicado(null); return }
-    setChecandoSku(true)
-    const sb = createClient()
-    const { data } = await sb.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('sku', valor).maybeSingle()
-    setSkuDuplicado(data ?? null)
-    setChecandoSku(false)
   }
 
   async function salvar() {
@@ -187,12 +175,9 @@ export default function ImportarProdutoUrlModal({ empresaId, categoriasRaiz, cat
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">SKU</label>
-                  <input value={sku} onChange={e => { setSku(e.target.value); setSkuDuplicado(null) }} onBlur={checarSku}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500" />
-                  {checandoSku && <p className="text-xs text-gray-400 mt-1">Verificando...</p>}
-                  {skuDuplicado && (
-                    <p className="text-xs text-red-600 mt-1">Já existe: "{skuDuplicado.nome}" — troque o SKU.</p>
-                  )}
+                  <input value={sku || 'Gerando...'} readOnly disabled
+                    title="Sequencial automático — não pode ser editado, para a numeração nunca desalinhar."
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-500 bg-gray-50 cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Unidade</label>
@@ -287,7 +272,7 @@ export default function ImportarProdutoUrlModal({ empresaId, categoriasRaiz, cat
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 flex-shrink-0">
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Cancelar</button>
           {dados && (
-            <button onClick={salvar} disabled={salvando || !!skuDuplicado}
+            <button onClick={salvar} disabled={salvando}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
               {salvando ? 'Importando...' : 'Importar produto'}
             </button>
