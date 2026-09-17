@@ -37,15 +37,27 @@ const TEXTO_COR: Record<CorBadge, string> = {
 
 type Periodo = 'hoje' | 'ontem' | '7dias' | 'personalizado'
 
-function intervaloDoPeriodo(periodo: Periodo, inicioCustom: string, fimCustom: string): { inicio: Date; fim: Date } {
+// `fim: null` significa "sem teto" — a venda mais nova sempre entra, não
+// importa quando este cálculo rodou pela última vez.
+//
+// Esta função só reexecuta quando período/datas mudam (é o array de
+// dependências do useMemo que chama ela) — NÃO a cada refresh dos dados.
+// `fim: agora` aqui já foi o bug real de "venda nova não aparece": o corte
+// superior congelava no instante em que a página abriu (ou a última vez que
+// o período foi trocado), e qualquer venda feita DEPOIS ficava para sempre
+// do lado de fora do filtro `t > t1`, mesmo com os dados corretos já
+// chegando a cada auto-refresh. "Hoje" e "Últimos 7 dias" (e personalizado
+// sem data-fim) não têm teto de verdade — só "até agora", que não é um
+// instante fixo.
+function intervaloDoPeriodo(periodo: Periodo, inicioCustom: string, fimCustom: string): { inicio: Date; fim: Date | null } {
   const agora = new Date()
-  if (periodo === 'hoje') return { inicio: inicioDoDia(agora), fim: agora }
+  if (periodo === 'hoje') return { inicio: inicioDoDia(agora), fim: null }
   if (periodo === 'ontem') return { inicio: inicioDeDiasAtras(1, agora), fim: inicioDoDia(agora) }
-  if (periodo === '7dias') return { inicio: inicioDeDiasAtras(7, agora), fim: agora }
+  if (periodo === '7dias') return { inicio: inicioDeDiasAtras(7, agora), fim: null }
   // Personalizado: os inputs <input type="date"> vêm em AAAA-MM-DD, sem fuso —
   // ancora explicitamente em -03:00 (Brasil não tem mais horário de verão).
   const inicio = inicioCustom ? new Date(`${inicioCustom}T00:00:00-03:00`) : inicioDoDia(agora)
-  const fim = fimCustom ? new Date(`${fimCustom}T23:59:59-03:00`) : agora
+  const fim = fimCustom ? new Date(`${fimCustom}T23:59:59-03:00`) : null
   return { inicio, fim }
 }
 
@@ -144,12 +156,12 @@ export default function MonitorVendasClient({
 
   const filtradas = useMemo(() => {
     const t0 = inicio.getTime()
-    const t1 = fim.getTime()
+    const t1 = fim ? fim.getTime() : null
     const vendedorAlvo = vendedorBusca.trim().toLowerCase()
     const produtoAlvo = produtoBusca.trim().toLowerCase()
     return vendasComCalculo.filter(vc => {
       const t = new Date(vc.venda.created_at).getTime()
-      if (t < t0 || t > t1) return false
+      if (t < t0 || (t1 !== null && t > t1)) return false
       const canal = vc.venda.canal
       if (canaisSelecionados.size > 0 && !canaisSelecionados.has(canal)) return false
       if (vendedorAlvo && !(vc.venda.vendedor_nome ?? '').toLowerCase().includes(vendedorAlvo)) return false
