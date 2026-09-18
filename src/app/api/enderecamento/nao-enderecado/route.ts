@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
+import { buscarSugestoesEndereco } from '@/lib/enderecamento/estoque'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +32,7 @@ export async function GET(req: Request) {
     enderecadoPorProduto.set(l.produto_id, (enderecadoPorProduto.get(l.produto_id) ?? 0) + Number(l.quantidade ?? 0))
   }
 
-  const lista = (saldos ?? [])
+  const listaBase = (saldos ?? [])
     .map((s: any) => {
       const enderecado = enderecadoPorProduto.get(s.produto_id) ?? 0
       const total = Number(s.quantidade ?? 0)
@@ -39,6 +40,9 @@ export async function GET(req: Request) {
     })
     .filter(x => x.naoEnderecado > 0)
     .sort((a, b) => b.naoEnderecado - a.naoEnderecado)
+
+  const sugestoes = await buscarSugestoesEndereco(sb, depositoId, listaBase.map(x => x.produtoId))
+  const lista = listaBase.map(x => ({ ...x, enderecoSugerido: sugestoes.get(x.produtoId) ?? null }))
 
   return NextResponse.json({
     ok: true, produtos: lista,

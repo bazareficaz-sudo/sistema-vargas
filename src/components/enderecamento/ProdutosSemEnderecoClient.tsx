@@ -3,7 +3,12 @@
 import { useState, useEffect, useCallback } from 'react'
 
 type Deposito = { id: string; nome: string; principal: boolean }
-type Item = { produtoId: string; produto: { nome: string; sku: string | null } | null; estoqueTotal: number; enderecado: number; naoEnderecado: number }
+type SugestaoEndereco = { id: string; codigoLegivel: string; quantidadeAtual: number }
+type Item = {
+  produtoId: string; produto: { nome: string; sku: string | null } | null
+  estoqueTotal: number; enderecado: number; naoEnderecado: number
+  enderecoSugerido: SugestaoEndereco | null
+}
 type Endereco = { id: string; codigo_legivel: string }
 
 export default function ProdutosSemEnderecoClient({ depositos, depositoIdInicial }: {
@@ -21,6 +26,8 @@ export default function ProdutosSemEnderecoClient({ depositos, depositoIdInicial
   const [quantidade, setQuantidade] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [erroModal, setErroModal] = useState('')
+  const [confirmandoTodos, setConfirmandoTodos] = useState(false)
+  const [progressoTodos, setProgressoTodos] = useState({ feito: 0, total: 0 })
 
   const carregar = useCallback(async () => {
     if (!depositoId) return
@@ -43,20 +50,49 @@ export default function ProdutosSemEnderecoClient({ depositos, depositoIdInicial
   }, [buscaEndereco, alvo, depositoId])
 
   function abrirModal(item: Item) {
-    setAlvo(item); setBuscaEndereco(''); setCandidatos([]); setEnderecoEscolhido(null)
-    setQuantidade(String(item.naoEnderecado)); setErroModal('')
+    setAlvo(item); setErroModal('')
+    setQuantidade(String(item.naoEnderecado))
+    if (item.enderecoSugerido) {
+      setEnderecoEscolhido({ id: item.enderecoSugerido.id, codigo_legivel: item.enderecoSugerido.codigoLegivel })
+      setBuscaEndereco(item.enderecoSugerido.codigoLegivel); setCandidatos([])
+    } else {
+      setEnderecoEscolhido(null); setBuscaEndereco(''); setCandidatos([])
+    }
   }
 
   async function confirmar() {
     if (!alvo || !enderecoEscolhido || !quantidade) return
     setSalvando(true); setErroModal('')
-    const r = await fetch('/api/enderecamento/produtos/ajustar', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ depositoId, enderecoId: enderecoEscolhido.id, produtoId: alvo.produtoId, novaQuantidade: Number(quantidade) }),
-    }).then(r => r.json()).catch(() => ({ ok: false }))
+    const usandoSugestao = alvo.enderecoSugerido?.id === enderecoEscolhido.id
+    const r = usandoSugestao
+      ? await fetch('/api/enderecamento/produtos/adicionar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ depositoId, enderecoId: enderecoEscolhido.id, produtoId: alvo.produtoId, quantidadeRecebida: Number(quantidade) }),
+        }).then(r => r.json()).catch(() => ({ ok: false }))
+      : await fetch('/api/enderecamento/produtos/ajustar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ depositoId, enderecoId: enderecoEscolhido.id, produtoId: alvo.produtoId, novaQuantidade: Number(quantidade) }),
+        }).then(r => r.json()).catch(() => ({ ok: false }))
     setSalvando(false)
     if (!r.ok) { setErroModal(r.erro ?? 'Erro ao endereçar.'); return }
     setAlvo(null)
+    carregar()
+  }
+
+  const itensComSugestao = itens.filter(it => it.enderecoSugerido)
+
+  async function confirmarTodosSugeridos() {
+    setConfirmandoTodos(true)
+    setProgressoTodos({ feito: 0, total: itensComSugestao.length })
+    for (const it of itensComSugestao) {
+      if (!it.enderecoSugerido) continue
+      await fetch('/api/enderecamento/produtos/adicionar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depositoId, enderecoId: it.enderecoSugerido.id, produtoId: it.produtoId, quantidadeRecebida: it.naoEnderecado }),
+      }).catch(() => null)
+      setProgressoTodos(p => ({ ...p, feito: p.feito + 1 }))
+    }
+    setConfirmandoTodos(false)
     carregar()
   }
 
@@ -69,12 +105,22 @@ export default function ProdutosSemEnderecoClient({ depositos, depositoIdInicial
             {resumo.totalProdutosSemEndereco} produto(s) totalmente sem endereço · {resumo.totalUnidadesNaoEnderecadas} unidade(s) não endereçadas ao todo.
           </p>
         </div>
-        {depositos.length > 0 && (
-          <select value={depositoId} onChange={e => setDepositoId(e.target.value)}
-            className="bg-white border border-slate-200 text-slate-700 rounded-xl px-3 py-2 text-sm shadow-sm">
-            {depositos.map(d => <option key={d.id} value={d.id}>{d.nome}</option>)}
-          </select>
-        )}
+        <div className="flex items-center gap-2">
+          {itensComSugestao.length > 0 && (
+            <button onClick={confirmarTodosSugeridos} disabled={confirmandoTodos}
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm">
+              {confirmandoTodos
+                ? `Confirmando... ${progressoTodos.feito}/${progressoTodos.total}`
+                : `Confirmar todos os sugeridos (${itensComSugestao.length})`}
+            </button>
+          )}
+          {depositos.length > 0 && (
+            <select value={depositoId} onChange={e => setDepositoId(e.target.value)}
+              className="bg-white border border-slate-200 text-slate-700 rounded-xl px-3 py-2 text-sm shadow-sm">
+              {depositos.map(d => <option key={d.id} value={d.id}>{d.nome}</option>)}
+            </select>
+          )}
+        </div>
       </div>
 
       <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
@@ -101,7 +147,12 @@ export default function ProdutosSemEnderecoClient({ depositos, depositoIdInicial
                 <td className="px-3 py-2.5 text-right text-slate-600">{it.enderecado}</td>
                 <td className="px-3 py-2.5 text-right font-semibold text-amber-600">{it.naoEnderecado}</td>
                 <td className="px-4 py-2.5 text-right">
-                  <button onClick={() => abrirModal(it)} className="text-xs text-blue-600 hover:underline">Endereçar agora</button>
+                  {it.enderecoSugerido && (
+                    <p className="text-xs text-emerald-600 mb-0.5">Sugestão: <span className="font-mono">{it.enderecoSugerido.codigoLegivel}</span></p>
+                  )}
+                  <button onClick={() => abrirModal(it)} className="text-xs text-blue-600 hover:underline">
+                    {it.enderecoSugerido ? 'Confirmar / ajustar' : 'Endereçar agora'}
+                  </button>
                 </td>
               </tr>
             ))}
@@ -113,7 +164,12 @@ export default function ProdutosSemEnderecoClient({ depositos, depositoIdInicial
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setAlvo(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold text-slate-900 mb-1">Endereçar produto</h2>
-            <p className="text-sm text-slate-500 mb-4">{alvo.produto?.nome} — {alvo.naoEnderecado} unidade(s) sem endereço</p>
+            <p className="text-sm text-slate-500 mb-1">{alvo.produto?.nome} — {alvo.naoEnderecado} unidade(s) sem endereço</p>
+            {alvo.enderecoSugerido && enderecoEscolhido?.id === alvo.enderecoSugerido.id && (
+              <p className="text-xs text-emerald-600 mb-3">
+                Endereço já usado por este produto, com {alvo.enderecoSugerido.quantidadeAtual} unidade(s) — confirmar soma ao que já está lá.
+              </p>
+            )}
 
             <div className="relative mb-3">
               <label className="block text-xs font-medium text-slate-600 mb-1">Endereço</label>
