@@ -11,6 +11,7 @@ import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { sincronizarProdutosVinculadosEmLote } from '@/lib/produtos/vinculo'
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { atualizarStatusPedidoAposEntrada } from '@/lib/pedidosCompra/vincularEntrada'
+import ConfirmarEnderecoEntradaModal, { type ItemEntradaParaGuardar } from '@/components/enderecamento/ConfirmarEnderecoEntradaModal'
 import {
   ratear, totalDosEncargos, somaPorTipo, ENCARGO_ABATE, ENCARGO_LABEL,
   type Encargo, type TipoEncargo,
@@ -360,6 +361,9 @@ export default function NovaEntradaClient({
   const [migracaoPendente, setMigracaoPendente] = useState(false)
   const [perguntandoEtiqueta, setPerguntandoEtiqueta] = useState<ProdutoParaEtiqueta[] | null>(null)
   const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
+  const [itensParaGuardarEstoque, setItensParaGuardarEstoque] = useState<ItemEntradaParaGuardar[] | null>(null)
+  const [depositoIdGuardar, setDepositoIdGuardar] = useState<string | null>(null)
+  const [produtosEtiquetaPendente, setProdutosEtiquetaPendente] = useState<ProdutoParaEtiqueta[] | null>(null)
 
   useEffect(() => {
     if (etapa === 'itens' && faseItem === 'busca') {
@@ -951,6 +955,7 @@ export default function NovaEntradaClient({
 
       // Atualiza estoque: busca valores atuais e soma a quantidade recebida
       const produtosComId = itens.filter(i => i.produto_id)
+      let depositoPrincipalIdConfirmado: string | null = null
       if (produtosComId.length > 0) {
         const { data: estoqueAtual } = await sb.from('produtos')
           .select('id, estoque')
@@ -960,6 +965,8 @@ export default function NovaEntradaClient({
           return acc
         }, {})
         const depositoPrincipalId = await buscarDepositoPrincipal(sb, empresaId)
+        depositoPrincipalIdConfirmado = depositoPrincipalId
+        setDepositoIdGuardar(depositoPrincipalId)
         for (const item of produtosComId) {
           const qtdAtual = estoqueMap[item.produto_id!] ?? 0
           // Zerar antes: o produto termina com o que veio nesta entrada, e não
@@ -1067,7 +1074,22 @@ export default function NovaEntradaClient({
             estoque: item.quantidade,
           } as ProdutoParaEtiqueta & { estoque: number }
         })
-        setPerguntandoEtiqueta(produtosEtiqueta)
+        // Antes de perguntar sobre etiqueta, pergunta onde guardar o que
+        // chegou — mesma ordem de prioridade da entrada por XML: primeiro
+        // decide o lugar físico, depois se imprime etiqueta.
+        const itensParaGuardar: ItemEntradaParaGuardar[] = produtosComId.map(item => {
+          const p = porId.get(item.produto_id!)
+          return {
+            produtoId: item.produto_id!, produtoNome: p?.nome ?? item.nome_produto,
+            sku: p?.sku ?? item.sku, quantidadeRecebida: item.quantidade,
+          }
+        })
+        if (itensParaGuardar.length > 0 && depositoPrincipalIdConfirmado) {
+          setProdutosEtiquetaPendente(produtosEtiqueta)
+          setItensParaGuardarEstoque(itensParaGuardar)
+        } else {
+          setPerguntandoEtiqueta(produtosEtiqueta)
+        }
       } else {
         router.push('/dashboard/entradas')
         router.refresh()
@@ -2001,6 +2023,18 @@ export default function NovaEntradaClient({
             </div>
           </div>
         </div>
+      )}
+
+      {itensParaGuardarEstoque && depositoIdGuardar && (
+        <ConfirmarEnderecoEntradaModal
+          depositoId={depositoIdGuardar}
+          itens={itensParaGuardarEstoque}
+          onFechar={() => {
+            setItensParaGuardarEstoque(null)
+            if (produtosEtiquetaPendente) setPerguntandoEtiqueta(produtosEtiquetaPendente)
+            else { router.push('/dashboard/entradas'); router.refresh() }
+          }}
+        />
       )}
 
       {perguntandoEtiqueta && !imprimindoEtiqueta && (

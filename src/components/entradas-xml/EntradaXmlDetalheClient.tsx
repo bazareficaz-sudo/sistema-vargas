@@ -9,6 +9,7 @@ import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { sincronizarProdutosVinculadosEmLote } from '@/lib/produtos/vinculo'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
+import ConfirmarEnderecoEntradaModal, { type ItemEntradaParaGuardar } from '@/components/enderecamento/ConfirmarEnderecoEntradaModal'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -244,6 +245,7 @@ export default function EntradaXmlDetalheClient({
   const [gerarContaPagar, setGerarContaPagar] = useState(true)
   const [obsFinanceiro, setObsFinanceiro] = useState('')
   const [finalizando, setFinalizando] = useState(false)
+  const [itensParaGuardarEstoque, setItensParaGuardarEstoque] = useState<ItemEntradaParaGuardar[] | null>(null)
   const [cancelando, setCancelando] = useState(false)
 
   // ── Stats mapeamento ─────────────────────────────────────────────────────
@@ -806,7 +808,26 @@ export default function EntradaXmlDetalheClient({
 
       setEntrada(p => ({ ...p, status: 'finalizada' }))
       setAba('dados')
-      alert('Entrada finalizada com sucesso!')
+
+      // Pergunta onde guardar o que chegou — nunca endereça sozinho (ver
+      // ConfirmarEnderecoEntradaModal). Busca nome/sku de uma vez só pros
+      // produtos afetados em vez de reusar o texto da nota, que pode
+      // divergir do cadastro.
+      const itensParaGuardar = itens.filter(item => item.produto_id && item.status_mapeamento !== 'ignorado')
+      if (itensParaGuardar.length > 0) {
+        const { data: infoProdutos } = await sb.from('produtos').select('id, nome, sku').in('id', [...produtoIdsAfetados])
+        const infoPorId = new Map((infoProdutos ?? []).map((p: any) => [p.id, p]))
+        setItensParaGuardarEstoque(itensParaGuardar.map(item => {
+          const qtd = item.qtd_conferida || item.quantidade_entrada || item.quantidade_xml
+          const info = infoPorId.get(item.produto_id!)
+          return {
+            produtoId: item.produto_id!, produtoNome: info?.nome ?? item.descricao_sistema ?? item.descricao_xml,
+            sku: info?.sku ?? null, quantidadeRecebida: qtd,
+          }
+        }))
+      } else {
+        alert('Entrada finalizada com sucesso!')
+      }
     } catch (e: any) { alert('Erro ao finalizar: ' + e.message) }
     finally { setFinalizando(false) }
   }
@@ -1896,6 +1917,14 @@ export default function EntradaXmlDetalheClient({
             )}
           </div>
         </div>
+      )}
+
+      {itensParaGuardarEstoque && (
+        <ConfirmarEnderecoEntradaModal
+          depositoId={depositoId}
+          itens={itensParaGuardarEstoque}
+          onFechar={() => setItensParaGuardarEstoque(null)}
+        />
       )}
     </div>
   )
