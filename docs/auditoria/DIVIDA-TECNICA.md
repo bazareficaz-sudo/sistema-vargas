@@ -142,3 +142,43 @@ porque dependem de migrar caminhos do PDV.
 
 O Caixa está isolado disso: `anon` não tem privilégio nenhum nas duas
 tabelas do ledger.
+
+---
+
+## 5. `caixa.terminal_id` usa ON DELETE SET NULL
+
+**Registrado na Fase 2.1. Não alterar até a Fase 3.**
+
+A identidade de um caixa de PDV é o `terminal_id` — é ele que garante uma
+gaveta, um caixa (`idx_caixa_pdv_um_por_terminal`). Mas a FK é
+`ON DELETE SET NULL`: apagar fisicamente um terminal faria o caixa perder a
+identidade, mantendo os movimentos e o saldo pendurados numa gaveta que não
+se sabe mais qual é.
+
+Na prática isso não acontece hoje: terminais são **revogados**
+(`status='revogado'`), não apagados — há um assim na Bazar Eficaz. Mas a
+porta existe no schema.
+
+Na Fase 3, avaliar impedir a exclusão física de terminal que tenha histórico
+financeiro, mantendo apenas revogação/desativação. Provavelmente trocando
+para `ON DELETE RESTRICT`, já que é o que as outras FKs do ledger usam
+quando apagar destruiria histórico.
+
+---
+
+## 6. A homologação da Fase 2 pela UI não foi concluída
+
+**Bloqueada por configuração da Vercel, não por defeito do código.**
+
+A Fase 2.1 pediu para provar sangria e suprimento pela interface
+autenticada. O preview deployment da branch existe e está pronto no commit
+certo, com as variáveis de Supabase válidas para `preview` — mas o projeto
+tem **Vercel Authentication ligada** (`ssoProtection: all_except_custom_domains`),
+e a URL `*.vercel.app` redireciona para o login da Vercel antes de chegar à
+aplicação.
+
+Somado a isso, a autenticação no próprio Sistema Vargas exige credenciais do
+operador, que não são minhas para digitar.
+
+A prova pela UI segue pendente. Tudo do servidor para baixo está provado
+contra o banco real (ver o checkpoint da Fase 2).
