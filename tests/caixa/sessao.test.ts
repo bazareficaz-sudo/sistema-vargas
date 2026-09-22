@@ -556,3 +556,155 @@ describe('depois de uma operação, a tela toda revalida', () => {
     }
   })
 })
+
+// ── FASE 3.1 — o fundo herdado é o saldo do ledger ───────────────────────
+//
+// O bug: `saldo_gaveta` só era calculado quando havia sessão ABERTA
+// (`c && s`). A abertura por herança acontece justamente com a gaveta
+// FECHADA, então o campo vinha null, o modal fazia `?? 0`, e uma gaveta com
+// R$ 50,00 no ledger aparecia como R$ 0,00.
+//
+// O servidor estava certo e teria recusado com `fundo_herdado_divergente` —
+// mas isso significava que abrir por herança nunca funcionaria.
+describe('o saldo da gaveta é calculado com a gaveta fechada também', () => {
+  // Dublê mínimo: só o que `listarCaixasPdv` chama.
+  function sbFalso(opts: {
+    terminais: { id: string; nome: string }[]
+    caixas: { id: string; nome: string; terminal_id: string; ativo: boolean }[]
+    sessoesAbertas?: { id: string; caixa_id: string; aberta_em: string; fundo_inicial: number }[]
+    saldos: Record<string, number>
+  }) {
+    const { terminais, caixas, sessoesAbertas = [], saldos } = opts
+    const chamadasRpc: string[] = []
+    const sb = {
+      from(tabela: string) {
+        const dados = tabela === 'pdv_terminais' ? terminais
+          : tabela === 'caixa' ? caixas : sessoesAbertas
+        const api: any = {
+          select: () => api,
+          eq: () => api,
+          order: async () => ({ data: dados }),
+          then: (r: any) => Promise.resolve({ data: dados }).then(r),
+        }
+        return api
+      },
+      async rpc(_nome: string, args: { p_caixa: string }) {
+        chamadasRpc.push(args.p_caixa)
+        return { data: saldos[args.p_caixa] ?? 0 }
+      },
+      chamadasRpc,
+    }
+    return sb
+  }
+
+  const TERM = 'a3c2f27c-c6b5-4a8b-885c-9f918c0d9181'
+  const CX = '4ad41b7c-b1ba-4f2d-99c1-f5db038fa327'
+
+  test('O CENÁRIO REAL: gaveta fechada com R$ 50 no ledger devolve 50', async () => {
+    // Exatamente o estado da homologação depois do fechamento:
+    // +100 −(−20) −30 −5 −35 = 50, sem sessão aberta.
+    const { listarCaixasPdv } = await import('../../src/lib/caixa/caixaPdvServidor')
+    const sb = sbFalso({
+      terminais: [{ id: TERM, nome: 'YOGA' }],
+      caixas: [{ id: CX, nome: 'Caixa YOGA', terminal_id: TERM, ativo: true }],
+      sessoesAbertas: [],                 // fechada — era aqui que quebrava
+      saldos: { [CX]: 50 },
+    })
+    const r = await listarCaixasPdv(sb, 'emp')
+    assert.equal(r[0].sessao_id, null, 'nenhuma sessão aberta')
+    assert.equal(r[0].saldo_gaveta, 50, 'a gaveta fechada tem de reportar o saldo do ledger')
+  })
+
+  test('o saldo é pedido para a gaveta mesmo sem sessão', async () => {
+    const { listarCaixasPdv } = await import('../../src/lib/caixa/caixaPdvServidor')
+    const sb = sbFalso({
+      terminais: [{ id: TERM, nome: 'YOGA' }],
+      caixas: [{ id: CX, nome: 'Caixa YOGA', terminal_id: TERM, ativo: true }],
+      sessoesAbertas: [],
+      saldos: { [CX]: 50 },
+    })
+    await listarCaixasPdv(sb, 'emp')
+    assert.deepEqual(sb.chamadasRpc, [CX], 'o saldo tem de ser consultado')
+  })
+
+  test('gaveta ABERTA continua reportando o mesmo número', async () => {
+    const { listarCaixasPdv } = await import('../../src/lib/caixa/caixaPdvServidor')
+    const sb = sbFalso({
+      terminais: [{ id: TERM, nome: 'YOGA' }],
+      caixas: [{ id: CX, nome: 'Caixa YOGA', terminal_id: TERM, ativo: true }],
+      sessoesAbertas: [{ id: 's1', caixa_id: CX, aberta_em: 'x', fundo_inicial: 100 }],
+      saldos: { [CX]: 120 },
+    })
+    const r = await listarCaixasPdv(sb, 'emp')
+    assert.equal(r[0].saldo_gaveta, 120)
+    assert.equal(r[0].sessao_id, 's1')
+  })
+
+  test('caixa novo, ledger zero → herdado zero', async () => {
+    const { listarCaixasPdv } = await import('../../src/lib/caixa/caixaPdvServidor')
+    const sb = sbFalso({
+      terminais: [{ id: TERM, nome: 'YOGA' }],
+      caixas: [{ id: CX, nome: 'Caixa YOGA', terminal_id: TERM, ativo: true }],
+      saldos: { [CX]: 0 },
+    })
+    const r = await listarCaixasPdv(sb, 'emp')
+    assert.equal(r[0].saldo_gaveta, 0)
+  })
+
+  test('TERMINAL SEM CAIXA devolve null, não zero', async () => {
+    // Confundir "não existe" com "está vazio" foi metade deste bug.
+    const { listarCaixasPdv } = await import('../../src/lib/caixa/caixaPdvServidor')
+    const sb = sbFalso({
+      terminais: [{ id: TERM, nome: 'YOGA' }],
+      caixas: [],
+      saldos: {},
+    })
+    const r = await listarCaixasPdv(sb, 'emp')
+    assert.equal(r[0].caixa_id, null)
+    assert.equal(r[0].saldo_gaveta, null)
+  })
+
+  test('movimento administrativo depois do fechamento muda o herdado', async () => {
+    // O herdado segue o LEDGER ATUAL, não uma cópia de
+    // `valor_mantido_troco` da sessão anterior. Se entrou um suprimento
+    // administrativo de 25 depois de fechar mantendo 50, herda 75.
+    const { listarCaixasPdv } = await import('../../src/lib/caixa/caixaPdvServidor')
+    const sb = sbFalso({
+      terminais: [{ id: TERM, nome: 'YOGA' }],
+      caixas: [{ id: CX, nome: 'Caixa YOGA', terminal_id: TERM, ativo: true }],
+      sessoesAbertas: [],
+      saldos: { [CX]: 75 },
+    })
+    const r = await listarCaixasPdv(sb, 'emp')
+    assert.equal(r[0].saldo_gaveta, 75,
+      'copiar valor_mantido_troco da sessão anterior daria 50 e estaria errado')
+  })
+})
+
+describe('o modal não confunde carregando, erro e zero', () => {
+  const raiz = path.join(__dirname, '..', '..')
+  const MODAIS = fs.readFileSync(path.join(raiz, 'src/components/caixa/SessaoModais.tsx'), 'utf8')
+
+  test('o saldo desconhecido NÃO vira zero', () => {
+    // `?? 0` numa leitura que falhou foi exatamente o que exibiu R$ 0,00
+    // com R$ 50,00 no ledger.
+    assert.match(MODAIS, /setSaldoGaveta\(c\?\.saldo_gaveta \?\? null\)/)
+    assert.equal(/saldo_gaveta \?\? 0/.test(MODAIS), false)
+  })
+
+  test('sem saber o saldo, a abertura por herança fica bloqueada', () => {
+    // Confirmar com valor chutado só produziria `fundo_herdado_divergente`.
+    assert.match(MODAIS, /origem === 'herdado'\s*\?\s*herdadoConhecido/)
+  })
+
+  test('os três estados são distintos na tela', () => {
+    assert.match(MODAIS, /saldoGaveta === undefined \? 'carregando\.\.\.'/)
+    assert.match(MODAIS, /saldoGaveta === null \?/)
+  })
+
+  test('o valor herdado continua não digitável', () => {
+    const i = MODAIS.indexOf("origem === 'herdado' ? (")
+    const bloco = MODAIS.slice(i, i + 900)
+    assert.equal(/<input/.test(bloco), false, 'o fundo herdado não é campo de entrada')
+  })
+})

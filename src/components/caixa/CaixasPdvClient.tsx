@@ -110,8 +110,8 @@ export default function CaixasPdvClient({ aoMudar, revalidacao = 0 }: {
                 <div className="text-right">
                   <p className="text-xs text-gray-500">Esperado agora</p>
                   <p className={`text-2xl font-semibold ${
-                    (c.saldo_esperado ?? 0) < 0 ? 'text-red-700' : 'text-gray-900'}`}>
-                    {reais(c.saldo_esperado ?? 0)}
+                    (c.saldo_gaveta ?? 0) < 0 ? 'text-red-700' : 'text-gray-900'}`}>
+                    {reais(c.saldo_gaveta ?? 0)}
                   </p>
                 </div>
               )}

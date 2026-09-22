@@ -32,8 +32,23 @@ export type TerminalComCaixa = {
   sessao_id: string | null
   sessao_aberta_em: string | null
   sessao_fundo_inicial: number | null
-  /** Quanto deveria haver na gaveta agora — soma do ledger, nunca coluna. */
-  saldo_esperado: number | null
+  /**
+   * Quanto existe fisicamente nesta gaveta AGORA — a soma do ledger do
+   * caixa, nunca uma coluna.
+   *
+   * Calculado sempre que o caixa existe, com sessão aberta ou não. A versão
+   * anterior só o calculava para gaveta ABERTA, e por isso a abertura por
+   * herança — que acontece justamente com a gaveta fechada — recebia null e
+   * exibia R$ 0,00 com R$ 50,00 no ledger.
+   *
+   * `null` significa apenas "este terminal ainda não tem caixa", não zero:
+   * quem consome precisa distinguir gaveta nova de falha de leitura.
+   *
+   * É a MESMA grandeza que o card chama de "esperado agora" quando há
+   * sessão aberta. Um número, uma fonte — duas teriam divergido, que foi
+   * exatamente o que aconteceu.
+   */
+  saldo_gaveta: number | null
 }
 
 /**
@@ -70,13 +85,13 @@ export async function listarCaixasPdv(sb: any, empresaId: string): Promise<Termi
     porCaixa.set(s.caixa_id, { id: s.id, aberta_em: s.aberta_em, fundo_inicial: Number(s.fundo_inicial) })
   }
 
-  // O esperado de cada gaveta aberta, pela MESMA função que a RPC de
-  // fechamento usa — a tela não pode mostrar um número diferente do que vai
-  // valer na hora de conferir.
+  // O saldo de CADA gaveta existente — aberta ou fechada —, pela MESMA
+  // função que as RPCs de fechamento e de abertura usam. A tela não pode
+  // mostrar um número diferente do que vai valer quando o servidor decidir.
   const saldos = new Map<string, number>()
-  for (const [caixaId] of porCaixa) {
-    const { data } = await sb.rpc('saldo_caixa_v1', { p_caixa: caixaId })
-    saldos.set(caixaId, Number(data ?? 0))
+  for (const c of caixas ?? []) {
+    const { data } = await sb.rpc('saldo_caixa_v1', { p_caixa: c.id })
+    saldos.set(c.id, Number(data ?? 0))
   }
 
   return (terminais ?? []).map((t: { id: string; nome: string }) => {
@@ -91,7 +106,7 @@ export async function listarCaixasPdv(sb: any, empresaId: string): Promise<Termi
       sessao_id: s?.id ?? null,
       sessao_aberta_em: s?.aberta_em ?? null,
       sessao_fundo_inicial: s?.fundo_inicial ?? null,
-      saldo_esperado: c && s ? (saldos.get(c.id) ?? 0) : null,
+      saldo_gaveta: c ? (saldos.get(c.id) ?? 0) : null,
     }
   })
 }

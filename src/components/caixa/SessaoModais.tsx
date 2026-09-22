@@ -19,7 +19,7 @@ export type CaixaPdvSessao = {
   sessao_id: string | null
   sessao_aberta_em: string | null
   sessao_fundo_inicial: number | null
-  saldo_esperado: number | null
+  saldo_gaveta: number | null
 }
 
 function reais(v: number) {
@@ -43,26 +43,39 @@ export function AbrirCaixaModal({ caixa, aoFechar, aoAbrir }: {
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
   // Quanto já existe na gaveta: é o fundo herdado, e não é digitável.
-  const [saldoGaveta, setSaldoGaveta] = useState<number | null>(null)
+  //
+  // `undefined` = ainda carregando; `null` = a leitura falhou. Os dois são
+  // diferentes de ZERO, e confundi-los foi o defeito: gaveta com R$ 50 no
+  // ledger aparecia como R$ 0,00 e a abertura por herança era recusada pelo
+  // servidor.
+  const [saldoGaveta, setSaldoGaveta] = useState<number | null | undefined>(undefined)
 
   const [idSessao] = useState(() => crypto.randomUUID())
   const [idTransferencia] = useState(() => crypto.randomUUID())
 
   useEffect(() => {
     let vivo = true
+    // Gaveta que nunca operou não tem caixa, e aí zero é a resposta certa.
     if (!caixa.caixa_id) { setSaldoGaveta(0); return }
+    // Releitura no instante de abrir o diálogo: o saldo é do servidor, e
+    // entre o card carregar e o operador clicar pode ter havido movimento.
     fetch(`/api/caixa/pdvs`).then(r => r.json()).catch(() => null).then(d => {
       if (!vivo) return
       const c = d?.caixas?.find((x: CaixaPdvSessao) => x.terminal_id === caixa.terminal_id)
-      setSaldoGaveta(c?.saldo_esperado ?? 0)
+      // `?? null`, nunca `?? 0`: saldo que não chegou não é gaveta vazia.
+      setSaldoGaveta(c?.saldo_gaveta ?? null)
     })
     return () => { vivo = false }
   }, [caixa.caixa_id, caixa.terminal_id])
 
-  const herdado = saldoGaveta ?? 0
+  const herdadoConhecido = typeof saldoGaveta === 'number'
+  const herdado = herdadoConhecido ? saldoGaveta : 0
   const valorNumero = origem === 'herdado' ? herdado : paraNumero(valor)
+  // Sem saber o saldo, não dá para abrir por herança: o servidor exige que
+  // o valor informado seja exatamente o do ledger, e chutar zero produziria
+  // `fundo_herdado_divergente`.
   const valido = origem === 'herdado'
-    ? true
+    ? herdadoConhecido
     : Number.isFinite(valorNumero) && valorNumero > 0 && (origem !== 'manual' || observacao.trim() !== '')
 
   const nomeCaixa = caixa.caixa_nome ?? `Caixa ${caixa.terminal_nome}`
@@ -119,12 +132,19 @@ export function AbrirCaixaModal({ caixa, aoFechar, aoAbrir }: {
             <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-3">
               <p className="text-xs text-gray-500">Saldo que ficou na gaveta</p>
               <p className="text-2xl font-semibold text-gray-900">
-                {saldoGaveta == null ? '—' : reais(herdado)}
+                {saldoGaveta === undefined ? 'carregando...' : herdadoConhecido ? reais(herdado) : '—'}
               </p>
-              <p className="text-[11px] text-gray-400 mt-1">
-                Este valor não é digitado: é o que o sistema sabe que ficou. Se não bate com o
-                dinheiro físico, abra com o valor correto e a diferença aparecerá no fechamento.
-              </p>
+              {saldoGaveta === null ? (
+                <p className="text-[11px] text-red-600 mt-1">
+                  Não foi possível ler o saldo desta gaveta. Feche e tente de novo — abrir sem
+                  esse número abriria com o fundo errado.
+                </p>
+              ) : (
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Este valor não é digitado: é o saldo que o ledger registra para esta gaveta. Se
+                  não bate com o dinheiro físico, a diferença aparecerá no fechamento.
+                </p>
+              )}
             </div>
           ) : (
             <div>
