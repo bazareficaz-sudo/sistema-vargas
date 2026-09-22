@@ -105,7 +105,9 @@ describe('4. forçar outra empresa pela requisição não tem por onde entrar', 
 
     test(`${r.split('/').slice(-2).join('/')} — o guard é a PRIMEIRA coisa depois do client`, () => {
       const s = fonte(r)
-      const g = s.indexOf('await contextoCaixa(sb)')
+      // `contextoCaixa(sb)` ou `contextoCaixa(sb, 'estornar_caixa')`: o que
+      // importa é que o guard venha antes de qualquer escrita.
+      const g = s.indexOf('await contextoCaixa(sb')
       assert.notEqual(g, -1)
       const antes = s.slice(0, g)
       assert.equal(/\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(/.test(antes), false,

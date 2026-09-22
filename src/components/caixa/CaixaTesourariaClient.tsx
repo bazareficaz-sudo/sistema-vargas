@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import TransferenciaModal, { ComprovanteTransferencia, type Especie, type Comprovante } from './TransferenciaModal'
 
 // Caixa da Empresa (tesouraria) — Fase 1 do controle de caixa.
 //
@@ -12,11 +13,15 @@ import { useState, useEffect } from 'react'
 // Correção de lançamento errado é estorno, não edição — por isso não há
 // botão de editar em lugar nenhum desta tela.
 
-type Natureza = 'aporte' | 'retirada_socio' | 'deposito_banco' | 'ajuste'
+type NaturezaFase1 = 'aporte' | 'retirada_socio' | 'deposito_banco' | 'ajuste'
+// A Fase 2 acrescenta os dois lados de cada transferência. Quatro naturezas
+// e não duas: o extrato da tesouraria diz "Sangria recebida (+)" enquanto o
+// do PDV diz "Sangria enviada (−)" — a mesma operação, lida de cada lado.
+type Natureza = NaturezaFase1 | 'sangria' | 'sangria_recebida' | 'suprimento' | 'suprimento_entregue'
 type Tipo = 'entrada' | 'saida'
 type FormaPagamento = 'dinheiro' | 'pix' | 'transferencia'
 
-const NATUREZAS: { valor: Natureza; label: string; tipo: Tipo | null; ajuda: string }[] = [
+const NATUREZAS: { valor: NaturezaFase1; label: string; tipo: Tipo | null; ajuda: string }[] = [
   { valor: 'aporte', label: 'Aporte de sócio', tipo: 'entrada', ajuda: 'Dinheiro que o sócio colocou na empresa.' },
   { valor: 'retirada_socio', label: 'Retirada de sócio', tipo: 'saida', ajuda: 'Dinheiro que saiu da tesouraria para o sócio.' },
   { valor: 'deposito_banco', label: 'Depósito no banco', tipo: 'saida', ajuda: 'Dinheiro físico que saiu da tesouraria e foi depositado.' },
@@ -39,6 +44,8 @@ type Movimento = {
   estorno_de_id: string | null
   usuario_id: string
   created_at: string
+  transferencia_id: string | null
+  contraparte: { id: string; nome: string } | null
 }
 
 type Caixa = { id: string; nome: string; tipo: string }
@@ -56,9 +63,22 @@ const ROTULO_NATUREZA: Record<Natureza, string> = {
   retirada_socio: 'Retirada de sócio',
   deposito_banco: 'Depósito no banco',
   ajuste: 'Ajuste de contagem',
+  sangria: 'Sangria enviada',
+  sangria_recebida: 'Sangria recebida',
+  suprimento_entregue: 'Suprimento enviado',
+  suprimento: 'Suprimento recebido',
 }
 
-export default function CaixaTesourariaClient() {
+// Quem enviou mostra para ONDE foi; quem recebeu, de ONDE veio. A
+// transferência aparece uma vez em cada caixa — nunca duas no mesmo, que
+// faria parecer que o dinheiro andou duas vezes.
+function rotuloContraparte(natureza: Natureza): string | null {
+  if (natureza === 'sangria' || natureza === 'suprimento_entregue') return 'Destino'
+  if (natureza === 'sangria_recebida' || natureza === 'suprimento') return 'Origem'
+  return null
+}
+
+export default function CaixaTesourariaClient({ responsavel }: { responsavel: string }) {
   const [caixa, setCaixa] = useState<Caixa | null>(null)
   const [saldo, setSaldo] = useState<number | null>(null)
   const [movimentos, setMovimentos] = useState<Movimento[]>([])
@@ -66,7 +86,7 @@ export default function CaixaTesourariaClient() {
   const [temMais, setTemMais] = useState(false)
   const [carregandoMais, setCarregandoMais] = useState(false)
 
-  const [natureza, setNatureza] = useState<Natureza>('aporte')
+  const [natureza, setNatureza] = useState<NaturezaFase1>('aporte')
   const [tipoAjuste, setTipoAjuste] = useState<Tipo>('entrada')
   const [valor, setValor] = useState('')
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento | ''>('')
@@ -74,6 +94,8 @@ export default function CaixaTesourariaClient() {
   const [lancando, setLancando] = useState(false)
   const [erro, setErro] = useState('')
   const [estornando, setEstornando] = useState<string | null>(null)
+  const [modal, setModal] = useState<Especie | null>(null)
+  const [comprovante, setComprovante] = useState<Comprovante | null>(null)
 
   async function carregar() {
     const [rSaldo, rMovimentos] = await Promise.all([
@@ -176,12 +198,41 @@ export default function CaixaTesourariaClient() {
         </p>
       </div>
 
+      <div className="grid grid-cols-2 gap-3">
+        <button onClick={() => setModal('sangria')}
+          className="rounded-2xl border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 p-5 text-left transition">
+          <p className="text-base font-semibold text-gray-900">Sangria</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Dinheiro que saiu da gaveta do PDV e entrou na tesouraria.
+          </p>
+        </button>
+        <button onClick={() => setModal('suprimento')}
+          className="rounded-2xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50 p-5 text-left transition">
+          <p className="text-base font-semibold text-gray-900">Suprimento</p>
+          <p className="text-xs text-gray-500 mt-1">
+            Dinheiro que a tesouraria entregou ao PDV, normalmente para troco.
+          </p>
+        </button>
+      </div>
+
+      {modal && (
+        <TransferenciaModal
+          especie={modal}
+          responsavel={responsavel}
+          aoFechar={() => setModal(null)}
+          aoConcluir={(c) => { setModal(null); setComprovante(c); carregar() }}
+        />
+      )}
+      {comprovante && (
+        <ComprovanteTransferencia c={comprovante} aoFechar={() => setComprovante(null)} />
+      )}
+
       <div className="rounded-2xl border border-gray-200 p-5">
         <p className="text-sm font-medium text-gray-900 mb-3">Lançar movimento</p>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2 sm:col-span-1">
             <label className="text-xs text-gray-500">Natureza</label>
-            <select value={natureza} onChange={e => setNatureza(e.target.value as Natureza)}
+            <select value={natureza} onChange={e => setNatureza(e.target.value as NaturezaFase1)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1">
               {NATUREZAS.map(n => <option key={n.valor} value={n.valor}>{n.label}</option>)}
             </select>
@@ -242,7 +293,7 @@ export default function CaixaTesourariaClient() {
             <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Quando', 'Natureza', 'Valor', 'Forma', 'Observação', ''].map(h => (
+                  {['Quando', 'Natureza', 'Valor', 'Contraparte', 'Observação', ''].map(h => (
                     <th key={h} className="text-left font-bold text-gray-700 px-4 py-2">{h}</th>
                   ))}
                 </tr>
@@ -251,6 +302,10 @@ export default function CaixaTesourariaClient() {
                 {movimentos.map(m => {
                   const jaEstornado = idsEstornados.has(m.id)
                   const ehEstorno = !!m.estorno_de_id
+                  // Metade de uma transferência não se estorna daqui: devolveria
+                  // o dinheiro a um caixa sem tirá-lo do outro. O servidor
+                  // recusa de qualquer forma; esconder o botão evita o clique.
+                  const ehTransferencia = !!m.transferencia_id
                   return (
                     <tr key={m.id} className="border-b border-gray-100 last:border-0">
                       <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{quando(m.created_at)}</td>
@@ -261,16 +316,25 @@ export default function CaixaTesourariaClient() {
                       <td className={`px-4 py-2 font-medium ${m.tipo === 'entrada' ? 'text-emerald-700' : 'text-red-700'}`}>
                         {m.tipo === 'entrada' ? '+' : '-'} {reais(m.valor)}
                       </td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">{FORMAS.find(f => f.valor === m.forma_pagamento)?.label ?? '—'}</td>
+                      <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">
+                        {m.contraparte
+                          ? `${rotuloContraparte(m.natureza) ?? ''}: ${m.contraparte.nome}`
+                          : (FORMAS.find(f => f.valor === m.forma_pagamento)?.label ?? '—')}
+                      </td>
                       <td className="px-4 py-2 text-gray-500 text-xs max-w-[200px] truncate" title={m.observacao ?? ''}>{m.observacao ?? '—'}</td>
                       <td className="px-4 py-2 text-right">
-                        {!ehEstorno && !jaEstornado && (
+                        {!ehEstorno && !jaEstornado && !ehTransferencia && (
                           <button onClick={() => estornar(m)} disabled={estornando === m.id}
                             className="text-xs text-red-600 hover:underline disabled:opacity-40">
                             {estornando === m.id ? 'estornando...' : 'estornar'}
                           </button>
                         )}
                         {jaEstornado && <span className="text-xs text-gray-400">estornado</span>}
+                        {ehTransferencia && !ehEstorno && (
+                          <span className="text-xs text-gray-400" title="Estorne a transferência inteira, não um dos lados.">
+                            transferência
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -290,8 +354,9 @@ export default function CaixaTesourariaClient() {
       </div>
 
       <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-        <strong>Só tesouraria por enquanto.</strong> Vendas do PDV ainda não lançam movimento aqui,
-        e não há caixa de balcão, sangria ou fechamento de turno — essas fases vêm depois.
+        <strong>Sangria e suprimento já valem.</strong> O que ainda não existe é a sessão de caixa:
+        vendas do PDV não lançam movimento aqui sozinhas, e não há abertura, conferência nem
+        fechamento de turno — isso vem na próxima fase.
       </p>
     </div>
   )

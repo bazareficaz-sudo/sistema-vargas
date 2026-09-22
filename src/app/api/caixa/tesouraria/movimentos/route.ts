@@ -21,7 +21,10 @@ export async function GET(req: Request) {
 
   const caixa = await buscarOuCriarTesouraria(sb, guarda.empresaId, guarda.userId)
 
-  let query = sb.from('caixa_movimento').select('*')
+  // A contraparte vem junto: o extrato precisa dizer "Origem: Caixa YOGA",
+  // e sem o nome do outro caixa a linha de sangria não se explica sozinha.
+  let query = sb.from('caixa_movimento')
+    .select('*, contraparte:contraparte_caixa_id(id, nome)')
     .eq('caixa_id', caixa.id).order('created_at', { ascending: false }).limit(limite)
   if (antes) query = query.lt('created_at', antes)
 

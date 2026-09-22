@@ -13,13 +13,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params
 
   const sb = await createClient()
-  const guarda = await contextoCaixa(sb)
+  const guarda = await contextoCaixa(sb, 'estornar_caixa')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
   const { data: original } = await sb.from('caixa_movimento')
-    .select('id, caixa_id, tipo, natureza, valor, estorno_de_id')
+    .select('id, caixa_id, tipo, natureza, valor, estorno_de_id, transferencia_id')
     .eq('id', id).eq('empresa_id', guarda.empresaId).maybeSingle()
   if (!original) return NextResponse.json({ ok: false, erro: 'Movimento não encontrado.' }, { status: 404 })
+
+  // FASE 2 — METADE DE UMA TRANSFERÊNCIA NÃO SE ESTORNA AQUI.
+  //
+  // Esta rota estorna UM movimento. Um movimento de sangria/suprimento é um
+  // dos dois lados de uma transferência: revertê-lo sozinho devolveria o
+  // dinheiro à gaveta sem tirá-lo da tesouraria, e o sistema passaria a
+  // contar o mesmo dinheiro duas vezes — exatamente o descasamento que a
+  // Fase 2 existe para impedir.
+  //
+  // O estorno da transferência inteira vive em
+  // /api/caixa/transferencias/[id]/estornar e exige `estornar_caixa`.
+  if (original.transferencia_id) {
+    return NextResponse.json({
+      ok: false,
+      erro: 'Este movimento faz parte de uma transferência entre caixas. '
+          + 'Estorne a transferência inteira, não um dos lados.',
+      transferencia_id: original.transferencia_id,
+    }, { status: 409 })
+  }
 
   const { data: existente } = await sb.from('caixa_movimento')
     .select('id').eq('estorno_de_id', id).maybeSingle()

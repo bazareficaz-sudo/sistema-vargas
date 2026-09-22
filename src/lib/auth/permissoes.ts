@@ -33,6 +33,10 @@ export type PermissaoCodigo =
   // quem pode autorizar um terminal pode revoga-lo, e separar criaria uma
   // matriz que ninguem configura na pratica.
   | 'gerenciar_terminais_pdv'
+  // Estorno de caixa: separado de `gerenciar_financeiro` porque lancar uma
+  // sangria e desfazer uma sao decisoes diferentes. Quem opera o caixa no
+  // dia a dia nao precisa poder reverter o que ja foi conferido.
+  | 'estornar_caixa'
 
 export const PAPEIS: { valor: Papel; label: string }[] = [
   { valor: 'admin', label: 'Administrador' },
@@ -70,7 +74,8 @@ export const GRUPOS_PERMISSAO: { grupo: string; itens: { codigo: PermissaoCodigo
       { codigo: 'gerenciar_terminais_pdv', label: 'Gerenciar terminais de PDV', ajuda: 'Autorizar, ativar e revogar os terminais de caixa da empresa.' },
       { codigo: 'gerenciar_estoque', label: 'Mexer no estoque', ajuda: 'Ajuste, transferencia e inventario.' },
       { codigo: 'gerenciar_compras', label: 'Entradas e compras', ajuda: '' },
-      { codigo: 'gerenciar_financeiro', label: 'Financeiro', ajuda: 'Contas a pagar e receber, caixa.' },
+      { codigo: 'gerenciar_financeiro', label: 'Financeiro', ajuda: 'Contas a pagar e receber, caixa, sangria e suprimento.' },
+      { codigo: 'estornar_caixa', label: 'Estornar movimentacao de caixa', ajuda: 'Desfazer lancamento, sangria ou suprimento ja registrado. O original nunca e apagado: o estorno e um lancamento novo em sentido contrario.' },
       { codigo: 'gerenciar_fiscal', label: 'Emitir e cancelar nota', ajuda: '' },
       { codigo: 'gerenciar_marketplaces', label: 'Marketplaces', ajuda: 'Anuncios, pedidos e integracoes.' },
       { codigo: 'gerenciar_whatsapp', label: 'WhatsApp e automacoes', ajuda: '' },
@@ -93,7 +98,7 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
     'gerenciar_marketplaces', 'realizar_vendas', 'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados',
     'ver_dados_grupo', 'ver_totais_vendas', 'ver_dashboard_financeiro',
     'editar_produtos', 'editar_precos', 'editar_credito_cliente',
-    'gerenciar_terminais_pdv',
+    'gerenciar_terminais_pdv', 'estornar_caixa',
   ]),
   gerente: new Set([
     'ver_custos_margens', 'excluir_cadastros', 'gerenciar_financeiro', 'gerenciar_estoque',
@@ -101,7 +106,7 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
     'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados', 'ver_dados_grupo',
     'ver_totais_vendas', 'ver_dashboard_financeiro',
     'editar_produtos', 'editar_precos', 'editar_credito_cliente',
-    'gerenciar_terminais_pdv',
+    'gerenciar_terminais_pdv', 'estornar_caixa',
   ]),
   financeiro: new Set([
     'ver_custos_margens', 'gerenciar_financeiro', 'gerenciar_fiscal', 'exportar_dados',
