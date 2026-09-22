@@ -28,5 +28,12 @@ export default async function CanalConfigPage({ params }: { params: Promise<{ ca
     .order('created_at', { ascending: false })
     .limit(20)
 
-  return <CanalConfigClient canal={canal} logs={logs ?? []} empresaId={empresaId} />
+  const { data: regras } = await supabase
+    .from('marketplace_regras_preco')
+    .select('id, nome')
+    .eq('canal_id', canalId)
+    .eq('ativo', true)
+    .order('nome')
+
+  return <CanalConfigClient canal={canal} logs={logs ?? []} regras={regras ?? []} empresaId={empresaId} />
 }

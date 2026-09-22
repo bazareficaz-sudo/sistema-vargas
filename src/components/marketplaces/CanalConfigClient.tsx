@@ -13,8 +13,8 @@ const PLATAFORMAS: Record<string, { label: string; icone: string; cor: string }>
   outro:        { label: 'Outro',         icone: '🏪', cor: 'bg-gray-500'   },
 }
 
-export default function CanalConfigClient({ canal: canalInicial, logs, empresaId }: {
-  canal: any; logs: any[]; empresaId: string
+export default function CanalConfigClient({ canal: canalInicial, logs, regras, empresaId }: {
+  canal: any; logs: any[]; regras: { id: string; nome: string }[]; empresaId: string
 }) {
   const router = useRouter()
   const plat = PLATAFORMAS[canalInicial.plataforma] ?? PLATAFORMAS.outro
@@ -31,6 +31,7 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
     debitar_estoque_vendas: canalInicial.debitar_estoque_vendas ?? true,
     atualizar_estoque_canal: canalInicial.atualizar_estoque_canal ?? false,
     aplicar_regra_produto: canalInicial.aplicar_regra_produto ?? false,
+    regra_padrao_id: canalInicial.regra_padrao_id ?? '',
   })
 
   function f(k: string, v: any) { setForm(p => ({ ...p, [k]: v })) }
@@ -49,6 +50,7 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
       debitar_estoque_vendas: form.debitar_estoque_vendas,
       atualizar_estoque_canal: form.atualizar_estoque_canal,
       aplicar_regra_produto: form.aplicar_regra_produto,
+      regra_padrao_id: form.regra_padrao_id || null,
       updated_at: new Date().toISOString(),
     }).eq('id', canalInicial.id)
     setSalvando(false)
@@ -142,6 +144,18 @@ export default function CanalConfigClient({ canal: canalInicial, logs, empresaId
                 <p className="text-xs text-gray-400">Atualiza preços no marketplace automaticamente</p>
               </div>
             </label>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Regra padrão</label>
+              <select value={form.regra_padrao_id} onChange={e => f('regra_padrao_id', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                <option value="">— Nenhuma —</option>
+                {regras.map(r => <option key={r.id} value={r.id}>{r.nome}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Pré-selecionada automaticamente ao mapear um anúncio deste canal a um produto — vale só pra anúncio
+                sem regra ainda; o operador pode trocar depois na tela de Anúncios.
+              </p>
+            </div>
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
