@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
+import { registrarAuditoria } from '@/lib/auth/permissoes'
+import { contextoCaixa } from '@/lib/caixa/contextoCaixa'
 import { prepararEstorno } from '@/lib/caixa/movimento'
 
 // Corrige um lançamento errado — nunca por UPDATE/DELETE (seção K.5 da
@@ -12,7 +13,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params
 
   const sb = await createClient()
-  const guarda = await exigirPermissao(sb, 'gerenciar_financeiro')
+  const guarda = await contextoCaixa(sb)
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
   const { data: original } = await sb.from('caixa_movimento')

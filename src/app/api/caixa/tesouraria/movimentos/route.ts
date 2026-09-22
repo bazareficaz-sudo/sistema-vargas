@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
+import { registrarAuditoria } from '@/lib/auth/permissoes'
+import { contextoCaixa } from '@/lib/caixa/contextoCaixa'
 import { buscarOuCriarTesouraria } from '@/lib/caixa/tesourariaServidor'
 import { validarNovoMovimento } from '@/lib/caixa/movimento'
 
@@ -11,7 +12,7 @@ const LIMITE_MAXIMO = 200
 // (`antes`, o created_at do último item da página anterior).
 export async function GET(req: Request) {
   const sb = await createClient()
-  const guarda = await exigirPermissao(sb, 'gerenciar_financeiro')
+  const guarda = await contextoCaixa(sb)
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
   const url = new URL(req.url)
@@ -37,7 +38,7 @@ export async function POST(req: Request) {
   const payload = await req.json().catch(() => ({}))
 
   const sb = await createClient()
-  const guarda = await exigirPermissao(sb, 'gerenciar_financeiro')
+  const guarda = await contextoCaixa(sb)
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
   const validado = validarNovoMovimento(payload)

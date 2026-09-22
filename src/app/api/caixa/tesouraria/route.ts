@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { exigirPermissao } from '@/lib/auth/permissoes'
+import { contextoCaixa } from '@/lib/caixa/contextoCaixa'
 import { buscarOuCriarTesouraria } from '@/lib/caixa/tesourariaServidor'
 import { calcularSaldo } from '@/lib/caixa/movimento'
 
@@ -10,7 +10,7 @@ import { calcularSaldo } from '@/lib/caixa/movimento'
 
 export async function GET() {
   const sb = await createClient()
-  const guarda = await exigirPermissao(sb, 'gerenciar_financeiro')
+  const guarda = await contextoCaixa(sb)
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
   const caixa = await buscarOuCriarTesouraria(sb, guarda.empresaId, guarda.userId)
