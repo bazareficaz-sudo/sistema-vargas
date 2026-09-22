@@ -28,6 +28,12 @@ export type TerminalComCaixa = {
   caixa_id: string | null
   caixa_nome: string | null
   ativo: boolean
+  // Fase 3: o turno. Null quando a gaveta está fechada (ou nem existe).
+  sessao_id: string | null
+  sessao_aberta_em: string | null
+  sessao_fundo_inicial: number | null
+  /** Quanto deveria haver na gaveta agora — soma do ledger, nunca coluna. */
+  saldo_esperado: number | null
 }
 
 /**
@@ -53,14 +59,39 @@ export async function listarCaixasPdv(sb: any, empresaId: string): Promise<Termi
     if (c.terminal_id) porTerminal.set(c.terminal_id, { id: c.id, nome: c.nome, ativo: c.ativo })
   }
 
+  // As sessões abertas. O índice único garante no máximo uma por caixa, o
+  // que é o que torna este Map seguro.
+  const { data: sessoes } = await sb.from('caixa_sessao')
+    .select('id, caixa_id, aberta_em, fundo_inicial')
+    .eq('empresa_id', empresaId).eq('status', 'aberta')
+
+  const porCaixa = new Map<string, { id: string; aberta_em: string; fundo_inicial: number }>()
+  for (const s of sessoes ?? []) {
+    porCaixa.set(s.caixa_id, { id: s.id, aberta_em: s.aberta_em, fundo_inicial: Number(s.fundo_inicial) })
+  }
+
+  // O esperado de cada gaveta aberta, pela MESMA função que a RPC de
+  // fechamento usa — a tela não pode mostrar um número diferente do que vai
+  // valer na hora de conferir.
+  const saldos = new Map<string, number>()
+  for (const [caixaId] of porCaixa) {
+    const { data } = await sb.rpc('saldo_caixa_v1', { p_caixa: caixaId })
+    saldos.set(caixaId, Number(data ?? 0))
+  }
+
   return (terminais ?? []).map((t: { id: string; nome: string }) => {
     const c = porTerminal.get(t.id)
+    const s = c ? porCaixa.get(c.id) : undefined
     return {
       terminal_id: t.id,
       terminal_nome: t.nome,
       caixa_id: c?.id ?? null,
       caixa_nome: c?.nome ?? null,
       ativo: c ? c.ativo : true,
+      sessao_id: s?.id ?? null,
+      sessao_aberta_em: s?.aberta_em ?? null,
+      sessao_fundo_inicial: s?.fundo_inicial ?? null,
+      saldo_esperado: c && s ? (saldos.get(c.id) ?? 0) : null,
     }
   })
 }

@@ -37,6 +37,15 @@ export type PermissaoCodigo =
   // sangria e desfazer uma sao decisoes diferentes. Quem opera o caixa no
   // dia a dia nao precisa poder reverter o que ja foi conferido.
   | 'estornar_caixa'
+  // Abrir e fechar a gaveta do PDV. Separadas de `gerenciar_financeiro` de
+  // proposito: o operador de balcao precisa abrir e fechar o proprio caixa
+  // sem por isso enxergar contas a pagar, a receber e a tesouraria inteira.
+  // Os mesmos nomes existem no sistema de permissoes do PDV Electron
+  // (`src/components/usuarios-pdv/permissoes.ts`) — sao listas separadas, e
+  // manter o nome igual e o que vai permitir que convirjam quando a
+  // integracao vier.
+  | 'abrir_caixa'
+  | 'fechar_caixa'
 
 export const PAPEIS: { valor: Papel; label: string }[] = [
   { valor: 'admin', label: 'Administrador' },
@@ -76,6 +85,8 @@ export const GRUPOS_PERMISSAO: { grupo: string; itens: { codigo: PermissaoCodigo
       { codigo: 'gerenciar_compras', label: 'Entradas e compras', ajuda: '' },
       { codigo: 'gerenciar_financeiro', label: 'Financeiro', ajuda: 'Contas a pagar e receber, caixa, sangria e suprimento.' },
       { codigo: 'estornar_caixa', label: 'Estornar movimentacao de caixa', ajuda: 'Desfazer lancamento, sangria ou suprimento ja registrado. O original nunca e apagado: o estorno e um lancamento novo em sentido contrario.' },
+      { codigo: 'abrir_caixa', label: 'Abrir caixa de PDV', ajuda: 'Iniciar o turno de uma gaveta, registrando o fundo inicial.' },
+      { codigo: 'fechar_caixa', label: 'Fechar caixa de PDV', ajuda: 'Conferir o dinheiro contado, apurar sobra ou falta e entregar o excedente a tesouraria.' },
       { codigo: 'gerenciar_fiscal', label: 'Emitir e cancelar nota', ajuda: '' },
       { codigo: 'gerenciar_marketplaces', label: 'Marketplaces', ajuda: 'Anuncios, pedidos e integracoes.' },
       { codigo: 'gerenciar_whatsapp', label: 'WhatsApp e automacoes', ajuda: '' },
@@ -98,7 +109,7 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
     'gerenciar_marketplaces', 'realizar_vendas', 'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados',
     'ver_dados_grupo', 'ver_totais_vendas', 'ver_dashboard_financeiro',
     'editar_produtos', 'editar_precos', 'editar_credito_cliente',
-    'gerenciar_terminais_pdv', 'estornar_caixa',
+    'gerenciar_terminais_pdv', 'estornar_caixa', 'abrir_caixa', 'fechar_caixa',
   ]),
   gerente: new Set([
     'ver_custos_margens', 'excluir_cadastros', 'gerenciar_financeiro', 'gerenciar_estoque',
@@ -106,11 +117,12 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
     'cancelar_venda', 'gerenciar_whatsapp', 'exportar_dados', 'ver_dados_grupo',
     'ver_totais_vendas', 'ver_dashboard_financeiro',
     'editar_produtos', 'editar_precos', 'editar_credito_cliente',
-    'gerenciar_terminais_pdv', 'estornar_caixa',
+    'gerenciar_terminais_pdv', 'estornar_caixa', 'abrir_caixa', 'fechar_caixa',
   ]),
   financeiro: new Set([
     'ver_custos_margens', 'gerenciar_financeiro', 'gerenciar_fiscal', 'exportar_dados',
     'ver_totais_vendas', 'ver_dashboard_financeiro', 'editar_credito_cliente',
+    'abrir_caixa', 'fechar_caixa',
   ]),
   estoque: new Set([
     'ver_custos_margens', 'gerenciar_estoque', 'gerenciar_compras', 'exportar_dados',
@@ -118,6 +130,9 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
   ]),
   vendas: new Set([
     'realizar_vendas',
+    // O operador de balcao abre e fecha a propria gaveta — e so isso. Nao
+    // ganha `gerenciar_financeiro`, entao nao ve tesouraria nem contas.
+    'abrir_caixa', 'fechar_caixa',
   ]),
   leitura: new Set([]),
 }

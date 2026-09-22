@@ -66,6 +66,20 @@ export async function POST(req: Request) {
   const combinacao = validarCombinacao(especie, origem, destino, guarda.empresaId)
   if (!combinacao.ok) return NextResponse.json({ ok: false, erro: combinacao.erro }, { status: 409 })
 
+  // FASE 3 — O VÍNCULO COM A SESSÃO É DECIDIDO AQUI, NÃO PELO NAVEGADOR.
+  //
+  // Se aquela gaveta tem turno aberto, esta transferência pertence a ele e
+  // vai aparecer no demonstrativo de fechamento. O cliente não manda
+  // `sessao_id`: ele nem sabe qual é. Aceitar o id do navegador deixaria
+  // uma sangria ser lançada no fechamento de outro turno.
+  //
+  // Sem sessão aberta, `sessao_id` fica nulo e a transferência é
+  // administrativa — continua permitida durante a transição, por decisão
+  // registrada em `FASE-3-SESSAO-DE-CAIXA-DECISOES.md`.
+  const { data: sessaoAberta } = await sb.from('caixa_sessao')
+    .select('id').eq('caixa_id', pdv.caixa.id).eq('empresa_id', guarda.empresaId)
+    .eq('status', 'aberta').maybeSingle()
+
   const t = validado.transferencia
   const { data: resultado, error } = await sb.rpc('transferir_caixa_v1', {
     p: {
@@ -77,6 +91,7 @@ export async function POST(req: Request) {
       valor: String(t.valor),
       observacao: t.observacao,
       usuario_id: guarda.userId,
+      sessao_id: sessaoAberta?.id ?? null,
     },
   })
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 500 })

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import TransferenciaModal, { ComprovanteTransferencia, type Especie, type Comprovante } from './TransferenciaModal'
+import CaixasPdvClient from './CaixasPdvClient'
 
 // Caixa da Empresa (tesouraria) — Fase 1 do controle de caixa.
 //
@@ -213,6 +214,18 @@ export default function CaixaTesourariaClient({ responsavel }: { responsavel: st
             Dinheiro que a tesouraria entregou ao PDV, normalmente para troco.
           </p>
         </button>
+      </div>
+
+      <div className="rounded-2xl border border-gray-200">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-sm font-medium text-gray-900">Caixas de PDV</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Cada gaveta tem o seu turno: abre com um fundo, opera, e fecha conferindo o dinheiro contado.
+          </p>
+        </div>
+        <div className="p-5">
+          <CaixasPdvClient aoMudar={carregar} />
+        </div>
       </div>
 
       {modal && (
