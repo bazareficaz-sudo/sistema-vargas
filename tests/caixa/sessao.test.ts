@@ -2,6 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { permissoesDoPapel, type Papel } from '../../src/lib/auth/permissoes'
 import {
   validarAbertura, validarFechamento, conferir, calcularEntrega,
   montarDemonstrativo, conferirDemonstrativo, categoriaDaNatureza,
@@ -365,5 +366,104 @@ describe('a UI gera os UUIDs ANTES do envio', () => {
 
   test('o fechamento manda o esperado que a tela mostrou', () => {
     assert.match(modais, /valor_esperado_visto: esperado/)
+  })
+})
+
+
+// ── Quem pode operar a gaveta ────────────────────────────────────────────
+describe('abrir e fechar caixa é ato de quem está no balcão', () => {
+  const pode = (papel: Papel, codigo: 'abrir_caixa' | 'fechar_caixa') =>
+    permissoesDoPapel(papel).includes(codigo)
+
+  for (const papel of ['admin', 'gerente', 'vendas'] as Papel[]) {
+    test(`${papel} abre e fecha`, () => {
+      assert.equal(pode(papel, 'abrir_caixa'), true)
+      assert.equal(pode(papel, 'fechar_caixa'), true)
+    })
+  }
+
+  test('ESTOQUE NÃO opera gaveta', () => {
+    // Pertencer ao estoque não tem relação nenhuma com responder por
+    // dinheiro numa gaveta.
+    assert.equal(pode('estoque', 'abrir_caixa'), false)
+    assert.equal(pode('estoque', 'fechar_caixa'), false)
+  })
+
+  test('FINANCEIRO SUPERVISIONA, NÃO OPERA', () => {
+    // É papel de escritório: não tem `realizar_vendas` e não está no
+    // balcão. Enxerga tudo por `gerenciar_financeiro` — que é o que as
+    // rotas de consulta do caixa pedem — sem abrir nem fechar gaveta.
+    assert.equal(pode('financeiro', 'abrir_caixa'), false)
+    assert.equal(pode('financeiro', 'fechar_caixa'), false)
+    assert.equal(permissoesDoPapel('financeiro').includes('gerenciar_financeiro'), true)
+  })
+
+  test('leitura não opera nada', () => {
+    assert.equal(pode('leitura', 'abrir_caixa'), false)
+    assert.equal(pode('leitura', 'fechar_caixa'), false)
+  })
+
+  test('o operador de balcão NÃO ganha o financeiro junto', () => {
+    // O ponto de separar os códigos: `vendas` abre e fecha a própria
+    // gaveta sem ver tesouraria, contas a pagar nem contas a receber.
+    assert.equal(permissoesDoPapel('vendas').includes('gerenciar_financeiro'), false)
+    assert.equal(permissoesDoPapel('vendas').includes('estornar_caixa'), false)
+  })
+
+  test('estornar continua mais restrito que abrir/fechar', () => {
+    assert.equal(permissoesDoPapel('financeiro').includes('estornar_caixa'), false)
+    assert.equal(permissoesDoPapel('admin').includes('estornar_caixa'), true)
+    assert.equal(permissoesDoPapel('gerente').includes('estornar_caixa'), true)
+  })
+})
+
+// ── O ajuste de conferência ──────────────────────────────────────────────
+describe('a sobra/falta vira movimento, e é rastreável', () => {
+  const raiz = path.join(__dirname, '..', '..')
+  const MIG = fs.readFileSync(
+    path.join(raiz, 'supabase/migrations/20260922194756_caixa_sessao_v1.sql'), 'utf8')
+  // Só o corpo da função: depois dela vêm os GRANTs, onde a palavra UPDATE
+  // aparece como privilégio e não como comando.
+  const inicioFechar = MIG.indexOf('FUNCTION fechar_caixa_sessao_v1')
+  const corpoFechar = MIG.slice(inicioFechar, MIG.indexOf('$$;', inicioFechar))
+
+  test('tem natureza própria — não se mistura com ajuste comum', () => {
+    assert.match(corpoFechar, /'diferenca_fechamento'/)
+  })
+
+  test('o sinal segue a diferença: sobra entra, falta sai', () => {
+    assert.match(corpoFechar, /CASE WHEN v_dif > 0 THEN 'entrada' ELSE 'saida' END/)
+  })
+
+  test('carrega sessão, usuário e empresa', () => {
+    const i = corpoFechar.indexOf("'diferenca_fechamento'")
+    const insert = corpoFechar.slice(corpoFechar.lastIndexOf('INSERT INTO caixa_movimento', i), i + 400)
+    assert.match(insert, /sessao_id/)
+    assert.match(insert, /usuario_id/)
+    assert.match(insert, /empresa_id/)
+  })
+
+  test('a sessão guarda esperado, contado e diferença', () => {
+    assert.match(corpoFechar, /valor_esperado = v_esperado/)
+    assert.match(corpoFechar, /valor_contado = v_contado/)
+    assert.match(corpoFechar, /diferenca = v_dif/)
+  })
+
+  test('NENHUM MOVIMENTO ANTERIOR É ALTERADO para o saldo bater', () => {
+    // A única escrita fora do INSERT é o UPDATE da própria sessão.
+    const updates = corpoFechar.match(/UPDATE\s+caixa_\w+/g) ?? []
+    assert.deepEqual([...new Set(updates)], ['UPDATE caixa_sessao'],
+      'o fechamento só atualiza a própria sessão — nunca um movimento do passado')
+    assert.equal(/DELETE\s+FROM/.test(corpoFechar), false, 'nada é apagado no fechamento')
+  })
+
+  test('o fechamento registra auditoria com os cinco números', () => {
+    const rota = fs.readFileSync(
+      path.join(raiz, 'src/app/api/caixa/sessoes/[id]/fechar/route.ts'), 'utf8')
+    assert.match(rota, /acao: 'caixa_sessao_fechada'/)
+    for (const campo of ['valor_esperado', 'valor_contado', 'diferenca',
+                         'valor_mantido_troco', 'valor_entregue_tesouraria']) {
+      assert.ok(rota.includes(campo), campo)
+    }
   })
 })

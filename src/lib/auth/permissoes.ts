@@ -37,9 +37,20 @@ export type PermissaoCodigo =
   // sangria e desfazer uma sao decisoes diferentes. Quem opera o caixa no
   // dia a dia nao precisa poder reverter o que ja foi conferido.
   | 'estornar_caixa'
-  // Abrir e fechar a gaveta do PDV. Separadas de `gerenciar_financeiro` de
-  // proposito: o operador de balcao precisa abrir e fechar o proprio caixa
-  // sem por isso enxergar contas a pagar, a receber e a tesouraria inteira.
+  // Abrir e fechar a gaveta do PDV — ato FISICO, de quem esta no balcao com
+  // a gaveta na mao. Separadas de `gerenciar_financeiro` nos dois sentidos:
+  //
+  //   o operador de balcao abre e fecha sem enxergar contas a pagar, a
+  //   receber e a tesouraria inteira;
+  //
+  //   e o financeiro, que e papel de escritorio, ENXERGA tudo (as rotas de
+  //   consulta do caixa pedem `gerenciar_financeiro`) sem poder abrir nem
+  //   fechar gaveta nenhuma. Supervisionar nao e operar.
+  //
+  // `estoque` tambem nao recebe: pertencer ao estoque nao tem relacao com
+  // responder por dinheiro em gaveta.
+  //
+  // Quem precisar da excecao a tem pelo mecanismo normal, por usuario.
   // Os mesmos nomes existem no sistema de permissoes do PDV Electron
   // (`src/components/usuarios-pdv/permissoes.ts`) — sao listas separadas, e
   // manter o nome igual e o que vai permitir que convirjam quando a
@@ -122,7 +133,6 @@ const PERMISSOES_POR_PAPEL: Record<Papel, Set<PermissaoCodigo>> = {
   financeiro: new Set([
     'ver_custos_margens', 'gerenciar_financeiro', 'gerenciar_fiscal', 'exportar_dados',
     'ver_totais_vendas', 'ver_dashboard_financeiro', 'editar_credito_cliente',
-    'abrir_caixa', 'fechar_caixa',
   ]),
   estoque: new Set([
     'ver_custos_margens', 'gerenciar_estoque', 'gerenciar_compras', 'exportar_dados',
