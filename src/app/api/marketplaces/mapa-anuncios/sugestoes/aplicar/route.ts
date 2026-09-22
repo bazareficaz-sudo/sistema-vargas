@@ -27,12 +27,23 @@ export async function POST(req: Request) {
   let aplicados = 0
   const jaMapeadosPorOutraSessao: string[] = []
   const erros: { id: string; erro: string }[] = []
+  // Cache de regra padrão por canal — os itens de um lote quase sempre são do
+  // mesmo canal (a tela só passa anuncioIds do canal aberto), então isso evita
+  // reconsultar marketplace_canais uma vez por item.
+  const regraPadraoPorCanal = new Map<string, string | null>()
+  async function regraPadraoDoCanal(canalId: string): Promise<string | null> {
+    if (regraPadraoPorCanal.has(canalId)) return regraPadraoPorCanal.get(canalId)!
+    const { data } = await sb.from('marketplace_canais').select('regra_padrao_id').eq('id', canalId).maybeSingle()
+    const regraId = data?.regra_padrao_id ?? null
+    regraPadraoPorCanal.set(canalId, regraId)
+    return regraId
+  }
 
   for (const item of itens) {
     const tabela = item.tipo === 'anuncio' ? 'marketplace_anuncios' : 'marketplace_anuncio_variacoes'
 
     const { data: linha }: { data: any } = await sb.from(tabela)
-      .select(item.tipo === 'anuncio' ? 'id, empresa_id, canal_id, sku_canal, produto_id' : 'id, empresa_id, anuncio_id, sku_variacao, produto_id')
+      .select(item.tipo === 'anuncio' ? 'id, empresa_id, canal_id, sku_canal, produto_id, regra_id' : 'id, empresa_id, anuncio_id, sku_variacao, produto_id')
       .eq('id', item.id).eq('empresa_id', guarda.empresaId).single()
 
     if (!linha) { erros.push({ id: item.id, erro: 'Não encontrado' }); continue }
@@ -42,7 +53,15 @@ export async function POST(req: Request) {
       .eq('id', item.produtoId).eq('empresa_id', guarda.empresaId).single()
     if (!produto) { erros.push({ id: item.id, erro: 'Produto não encontrado' }); continue }
 
-    const { error: errUpd } = await sb.from(tabela).update({ produto_id: produto.id }).eq('id', item.id)
+    // Variação não tem coluna de regra — só anúncio recebe a padrão do canal,
+    // e só quando ainda não tem regra própria (nunca sobrescreve escolha manual).
+    const dadosUpdate: any = { produto_id: produto.id }
+    if (item.tipo === 'anuncio' && !linha.regra_id) {
+      const regraPadrao = await regraPadraoDoCanal(linha.canal_id)
+      if (regraPadrao) dadosUpdate.regra_id = regraPadrao
+    }
+
+    const { error: errUpd } = await sb.from(tabela).update(dadosUpdate).eq('id', item.id)
     if (errUpd) { erros.push({ id: item.id, erro: errUpd.message }); continue }
 
     let canalId: string | null = null

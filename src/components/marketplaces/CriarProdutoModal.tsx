@@ -11,7 +11,7 @@ type Variacao = { id: string; nome_variacao: string | null; sku_variacao: string
 export default function CriarProdutoModal({ anuncio, variacao, canal, empresaId, operador, onClose, onCriado }: {
   anuncio: any; variacao?: Variacao; canal: any; empresaId: string; operador: string
   onClose: () => void
-  onCriado: (produto: any) => void
+  onCriado: (produto: any, regraAplicada?: string | null) => void
 }) {
   const isVariacao = !!variacao
 
@@ -111,10 +111,19 @@ export default function CriarProdutoModal({ anuncio, variacao, canal, empresaId,
       })))
     }
 
+    // Variação não tem coluna de regra — só o anúncio principal recebe a
+    // regra padrão do canal, e só se ainda não tiver uma (nunca sobrescreve
+    // escolha manual anterior; ver CanalConfigClient.tsx).
+    let regraAplicada: string | null = null
     if (isVariacao) {
       await sb.from('marketplace_anuncio_variacoes').update({ produto_id: produto.id }).eq('id', variacao!.id)
     } else {
-      await sb.from('marketplace_anuncios').update({ produto_id: produto.id }).eq('id', anuncio.id)
+      const dadosUpdate: any = { produto_id: produto.id }
+      if (!anuncio.regra_id && canal.regra_padrao_id) {
+        regraAplicada = canal.regra_padrao_id
+        dadosUpdate.regra_id = regraAplicada
+      }
+      await sb.from('marketplace_anuncios').update(dadosUpdate).eq('id', anuncio.id)
     }
 
     const chave = isVariacao ? variacao!.sku_variacao : anuncio.sku_canal
@@ -129,7 +138,7 @@ export default function CriarProdutoModal({ anuncio, variacao, canal, empresaId,
     }
 
     setSalvando(false)
-    onCriado(produto)
+    onCriado(produto, regraAplicada)
   }
 
   return (

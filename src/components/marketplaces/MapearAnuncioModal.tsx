@@ -110,7 +110,14 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
   async function mapearAnuncio(produto: any, metodo: 'manual' | 'automatico_sku') {
     setSalvando(true); setErro(''); setAviso('')
     const sb = createClient()
-    const { error } = await sb.from('marketplace_anuncios').update({ produto_id: produto.id }).eq('id', anuncioAtual.id)
+
+    // Regra padrão do canal só entra se o anúncio ainda não tiver regra —
+    // nunca sobrescreve uma escolha manual anterior (ver CanalConfigClient.tsx).
+    const regraAplicada = !anuncioAtual.regra_id && canal.regra_padrao_id ? canal.regra_padrao_id : undefined
+    const dadosUpdate: any = { produto_id: produto.id }
+    if (regraAplicada) dadosUpdate.regra_id = regraAplicada
+
+    const { error } = await sb.from('marketplace_anuncios').update(dadosUpdate).eq('id', anuncioAtual.id)
     if (error) { setErro(error.message); setSalvando(false); return }
 
     if (anuncioAtual.sku_canal) {
@@ -122,11 +129,11 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
       }, { onConflict: 'empresa_id,canal_id,nivel,chave' })
     }
 
-    const atualizado = { ...anuncioAtual, produto_id: produto.id, produtos: produto }
+    const atualizado = { ...anuncioAtual, ...dadosUpdate, produtos: produto }
     setAnuncioAtual(atualizado)
     onAtualizado(atualizado)
     setAlvoBusca(null)
-    setAviso(`Vinculado a "${produto.nome}".`)
+    setAviso(`Vinculado a "${produto.nome}".${regraAplicada ? ' Regra padrão do canal aplicada.' : ''}`)
     setSalvando(false)
   }
 
@@ -186,10 +193,13 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
     setSalvando(false)
   }
 
-  function handleProdutoCriado(produto: any) {
+  function handleProdutoCriado(produto: any, regraAplicada?: string | null) {
     if (!criandoProduto) return
     if (criandoProduto.tipo === 'anuncio') {
-      const atualizado = { ...anuncioAtual, produto_id: produto.id, produtos: produto }
+      const atualizado = {
+        ...anuncioAtual, produto_id: produto.id, produtos: produto,
+        ...(regraAplicada ? { regra_id: regraAplicada } : {}),
+      }
       setAnuncioAtual(atualizado)
       onAtualizado(atualizado)
     } else {
