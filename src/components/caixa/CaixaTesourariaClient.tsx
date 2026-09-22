@@ -97,6 +97,26 @@ export default function CaixaTesourariaClient({ responsavel }: { responsavel: st
   const [estornando, setEstornando] = useState<string | null>(null)
   const [modal, setModal] = useState<Especie | null>(null)
   const [comprovante, setComprovante] = useState<Comprovante | null>(null)
+  // Incrementado a cada operação bem-sucedida em QUALQUER ponto desta tela.
+  // Desce para `CaixasPdvClient`, que relê os caixas quando ele muda.
+  const [revalidacao, setRevalidacao] = useState(0)
+
+  /**
+   * Relê tudo o que uma operação de caixa pode ter mudado nesta tela:
+   * saldo da tesouraria, extrato, e — pelo contador — os caixas de PDV com
+   * a sessão aberta e o esperado de cada gaveta.
+   *
+   * Sempre RELENDO do servidor. Nenhum saldo é recalculado aqui: o número
+   * que vale é o que o ledger soma, e adivinhá-lo no frontend deixaria a
+   * tela e o banco divergindo justamente onde isso custa caro.
+   *
+   * Só leitura. A operação já foi concluída pelo modal, com o UUID dela; um
+   * POST aqui criaria movimento em duplicidade.
+   */
+  function revalidarTudo() {
+    carregar()
+    setRevalidacao(n => n + 1)
+  }
 
   async function carregar() {
     const [rSaldo, rMovimentos] = await Promise.all([
@@ -165,7 +185,7 @@ export default function CaixaTesourariaClient({ responsavel }: { responsavel: st
       }).then(r => r.json())
       if (!d.ok) { setErro(d.erro ?? 'Falha ao lançar.'); return }
       setValor(''); setObservacao(''); setFormaPagamento('')
-      carregar()
+      revalidarTudo()
     } finally {
       setLancando(false)
     }
@@ -177,7 +197,7 @@ export default function CaixaTesourariaClient({ responsavel }: { responsavel: st
     try {
       const d = await fetch(`/api/caixa/tesouraria/movimentos/${m.id}/estornar`, { method: 'POST' }).then(r => r.json())
       if (!d.ok) { setErro(d.erro ?? 'Falha ao estornar.'); return }
-      carregar()
+      revalidarTudo()
     } finally {
       setEstornando(null)
     }
@@ -224,7 +244,7 @@ export default function CaixaTesourariaClient({ responsavel }: { responsavel: st
           </p>
         </div>
         <div className="p-5">
-          <CaixasPdvClient aoMudar={carregar} />
+          <CaixasPdvClient aoMudar={revalidarTudo} revalidacao={revalidacao} />
         </div>
       </div>
 
@@ -233,7 +253,7 @@ export default function CaixaTesourariaClient({ responsavel }: { responsavel: st
           especie={modal}
           responsavel={responsavel}
           aoFechar={() => setModal(null)}
-          aoConcluir={(c) => { setModal(null); setComprovante(c); carregar() }}
+          aoConcluir={(c) => { setModal(null); setComprovante(c); revalidarTudo() }}
         />
       )}
       {comprovante && (

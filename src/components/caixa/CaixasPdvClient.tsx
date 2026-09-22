@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   AbrirCaixaModal, FecharCaixaModal, ComprovanteFechamento,
   type CaixaPdvSessao, type ResultadoFechamento,
@@ -24,19 +24,29 @@ function hora(iso: string) {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-export default function CaixasPdvClient({ aoMudar }: { aoMudar?: () => void }) {
+// `revalidacao` é o caminho PAI → FILHO que faltava.
+//
+// Sangria e suprimento acontecem no componente de cima, onde mora o modal.
+// Antes, este componente só carregava na montagem (`useEffect` com `[]`) e
+// não tinha como saber que a gaveta havia mudado — o card ficava com o
+// esperado velho até um F5. O contador muda a cada operação bem-sucedida em
+// qualquer ponto da tela, e o efeito abaixo relê o estado do SERVIDOR.
+//
+// Contador, e não os dados em si: quem sabe o saldo é o servidor. Somar o
+// valor da sangria no número que já está na tela seria inventar saldo no
+// frontend, que é justamente o que este módulo não faz em lugar nenhum.
+export default function CaixasPdvClient({ aoMudar, revalidacao = 0 }: {
+  aoMudar?: () => void
+  revalidacao?: number
+}) {
   const [caixas, setCaixas] = useState<CaixaPdvSessao[]>([])
   const [carregando, setCarregando] = useState(true)
   const [abrindo, setAbrindo] = useState<CaixaPdvSessao | null>(null)
   const [fechando, setFechando] = useState<CaixaPdvSessao | null>(null)
   const [comprovante, setComprovante] = useState<ResultadoFechamento | null>(null)
 
-  const carregar = useCallback(async () => {
-    const d = await fetch('/api/caixa/pdvs').then(r => r.json()).catch(() => null)
-    if (d?.ok) setCaixas(d.caixas)
-    setCarregando(false)
-  }, [])
-
+  // Carga inicial E revalidação, no mesmo efeito: um caminho só para trazer
+  // o estado, em vez de duas funções que podem divergir.
   useEffect(() => {
     let vivo = true
     fetch('/api/caixa/pdvs').then(r => r.json()).catch(() => null).then(d => {
@@ -45,10 +55,15 @@ export default function CaixasPdvClient({ aoMudar }: { aoMudar?: () => void }) {
       setCarregando(false)
     })
     return () => { vivo = false }
-  }, [])
+  }, [revalidacao])
 
+  // Abrir e fechar avisam o pai, que incrementa `revalidacao` — e é o
+  // incremento que faz este componente recarregar. Recarregar aqui também
+  // seria um GET a mais pelo mesmo motivo.
+  //
+  // Nada aqui reenvia POST: a operação já aconteceu, e daqui para frente é
+  // só leitura.
   function depoisDeMudar() {
-    carregar()
     aoMudar?.()
   }
 

@@ -467,3 +467,92 @@ describe('a sobra/falta vira movimento, e é rastreável', () => {
     }
   })
 })
+
+// ── FASE 3.1 — a tela inteira reflete a operação, sem F5 ─────────────────
+//
+// O bug: sangria e suprimento acontecem no modal, que vive no componente
+// PAI. O pai recarregava a si mesmo (tesouraria e extrato) e o card do
+// Caixa PDV ficava com o esperado velho, porque `CaixasPdvClient` só
+// carregava na montagem — não havia caminho pai → filho.
+describe('depois de uma operação, a tela toda revalida', () => {
+  const raiz = path.join(__dirname, '..', '..')
+  const PAI = fs.readFileSync(path.join(raiz, 'src/components/caixa/CaixaTesourariaClient.tsx'), 'utf8')
+  const FILHO = fs.readFileSync(path.join(raiz, 'src/components/caixa/CaixasPdvClient.tsx'), 'utf8')
+  const MODAIS = fs.readFileSync(path.join(raiz, 'src/components/caixa/SessaoModais.tsx'), 'utf8')
+  const TRANSF = fs.readFileSync(path.join(raiz, 'src/components/caixa/TransferenciaModal.tsx'), 'utf8')
+
+  test('O CAMINHO PAI → FILHO EXISTE', () => {
+    // É o que faltava: sem o contador descendo, o card da gaveta não tem
+    // como saber que a sangria aconteceu.
+    assert.match(PAI, /revalidacao=\{revalidacao\}/)
+    assert.match(FILHO, /revalidacao\?: number/)
+  })
+
+  test('o filho relê quando o contador muda', () => {
+    // `useEffect(..., [revalidacao])` — com `[]` o componente ficaria
+    // congelado na montagem, que era exatamente o bug.
+    assert.match(FILHO, /\}, \[revalidacao\]\)/)
+    assert.equal(/\}, \[\]\)/.test(FILHO), false, 'sobrou um efeito que nunca revalida')
+  })
+
+  test('SUPRIMENTO concluído revalida tudo', () => {
+    assert.match(PAI, /aoConcluir=\{\(c\) => \{ setModal\(null\); setComprovante\(c\); revalidarTudo\(\) \}\}/)
+  })
+
+  test('SANGRIA usa o mesmo caminho — é o mesmo modal', () => {
+    // Um modal só para as duas espécies, então a garantia é a mesma.
+    assert.match(PAI, /especie=\{modal\}/)
+    assert.equal((PAI.match(/aoConcluir=/g) ?? []).length, 1)
+  })
+
+  test('abertura e fechamento também revalidam', () => {
+    assert.match(PAI, /aoMudar=\{revalidarTudo\}/)
+    assert.match(FILHO, /aoAbrir=\{\(\) => \{ setAbrindo\(null\); depoisDeMudar\(\) \}\}/)
+    assert.match(FILHO, /aoFechado=\{\(r\) => \{ setFechando\(null\); setComprovante\(r\); depoisDeMudar\(\) \}\}/)
+    assert.match(FILHO, /function depoisDeMudar\(\) \{\s*aoMudar\?\.\(\)\s*\}/)
+  })
+
+  test('lançamento manual e estorno da tesouraria revalidam', () => {
+    assert.equal((PAI.match(/revalidarTudo\(\)/g) ?? []).length >= 4, true)
+    assert.equal(/carregar\(\)\s*\n\s*\} finally/.test(PAI), false,
+      'sobrou um caminho que só recarrega metade da tela')
+  })
+
+  test('revalidarTudo relê a tesouraria E incrementa o contador', () => {
+    const i = PAI.indexOf('function revalidarTudo()')
+    const corpo = PAI.slice(i, PAI.indexOf('}', PAI.indexOf('{', i) + 1) + 1)
+    assert.match(corpo, /carregar\(\)/)
+    assert.match(corpo, /setRevalidacao/)
+  })
+
+  test('A REVALIDAÇÃO NÃO REENVIA NADA — só GET', () => {
+    // O POST já aconteceu, com o UUID da operação. Repetir criaria
+    // movimento em duplicidade, que é o oposto do que esta correção quer.
+    const i = PAI.indexOf('function revalidarTudo()')
+    const corpo = PAI.slice(i, i + 400)
+    assert.equal(/method: 'POST'|randomUUID/.test(corpo), false)
+
+    // O filho não faz POST em lugar nenhum: ele delega aos modais.
+    assert.equal(/method: 'POST'/.test(FILHO), false)
+
+    // E o efeito de revalidação do filho só busca.
+    const ef = FILHO.slice(FILHO.indexOf('useEffect'), FILHO.indexOf('}, [revalidacao])'))
+    assert.match(ef, /fetch\('\/api\/caixa\/pdvs'\)/)
+    assert.equal(/method:/.test(ef), false)
+  })
+
+  test('o UUID continua nascendo uma vez por diálogo', () => {
+    // A correção é de leitura; a idempotência da escrita não foi tocada.
+    assert.match(TRANSF, /const \[idTransferencia\] = useState\(\(\) => crypto\.randomUUID\(\)\)/)
+    assert.match(MODAIS, /useState\(\(\) => crypto\.randomUUID\(\)\)/)
+  })
+
+  test('nenhum saldo é inventado no frontend', () => {
+    // Nada de somar o valor da operação ao número que está na tela: quem
+    // sabe o saldo é o ledger.
+    for (const [nome, src] of [['pai', PAI], ['filho', FILHO]] as const) {
+      assert.equal(/setSaldo\([^)]*[+-]\s*(valor|valorNumero)/.test(src), false, nome)
+      assert.equal(/saldo_esperado:\s*[^,\n]*[+-]/.test(src), false, nome)
+    }
+  })
+})
