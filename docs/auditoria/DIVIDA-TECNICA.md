@@ -166,9 +166,13 @@ quando apagar destruiria histórico.
 
 ---
 
-## 6. A homologação da Fase 2 pela UI não foi concluída
+## 6. A homologação da Fase 2 pela UI — CONCLUÍDA em 22/09/2026
 
-**Bloqueada por configuração da Vercel, não por defeito do código.**
+**Resolvida.** Feita manualmente pelo operador, com validação no banco.
+Ver `FASE-2-HOMOLOGACAO.md`. O registro abaixo fica como histórico do
+impedimento, que permanece válido para futuras homologações.
+
+**Estava bloqueada por configuração da Vercel, não por defeito do código.**
 
 A Fase 2.1 pediu para provar sangria e suprimento pela interface
 autenticada. O preview deployment da branch existe e está pronto no commit
