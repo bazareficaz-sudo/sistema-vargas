@@ -708,3 +708,47 @@ describe('o modal não confunde carregando, erro e zero', () => {
     assert.equal(/<input/.test(bloco), false, 'o fundo herdado não é campo de entrada')
   })
 })
+
+// ── FASE 3.1 — a observação do ajuste de conferência ─────────────────────
+describe('a observação da diferença não começa com espaço', () => {
+  const raiz = path.join(__dirname, '..', '..')
+  const MIG = fs.readFileSync(
+    path.join(raiz, 'supabase/migrations/20260923180445_caixa_fechamento_observacao_sem_espaco.sql'), 'utf8')
+
+  // A mesma montagem que o SQL faz, para conferir os dois casos sem banco.
+  const observacao = (obs: string | null, dif: number) =>
+    (obs === null ? '' : obs + ' ') + (dif > 0 ? '[sobra no fechamento]' : '[falta no fechamento]')
+
+  test('SEM observação, o rótulo fica sozinho', () => {
+    assert.equal(observacao(null, -5), '[falta no fechamento]')
+    assert.equal(observacao(null, 5), '[sobra no fechamento]')
+  })
+
+  test('não sobra espaço à esquerda', () => {
+    for (const dif of [-5, 5]) {
+      const s = observacao(null, dif)
+      assert.equal(s, s.trimStart(), 'era exatamente o defeito: " [falta no fechamento]"')
+    }
+  })
+
+  test('COM observação, o espaço separa os dois', () => {
+    assert.equal(observacao('conferido com o gerente', -5),
+      'conferido com o gerente [falta no fechamento]')
+    assert.equal(observacao('turno da tarde', 5),
+      'turno da tarde [sobra no fechamento]')
+  })
+
+  test('o SQL usa a mesma montagem', () => {
+    assert.match(MIG, /CASE WHEN v_obs IS NULL THEN '' ELSE v_obs \|\| ' ' END \|\|/)
+    // O rótulo perdeu o espaço de dentro; ele agora vem do CASE acima.
+    assert.match(MIG, /'\[sobra no fechamento\]' ELSE '\[falta no fechamento\]'/)
+    assert.equal(/' \[sobra no fechamento\]'/.test(MIG), false)
+  })
+
+  test('a correção NÃO reescreve o passado', () => {
+    // `CREATE OR REPLACE FUNCTION` redefine o corpo; nenhum UPDATE ou
+    // DELETE em caixa_movimento entra nesta migration.
+    assert.match(MIG, /CREATE OR REPLACE FUNCTION fechar_caixa_sessao_v1/)
+    assert.equal(/UPDATE\s+caixa_movimento|DELETE\s+FROM\s+caixa_movimento/.test(MIG), false)
+  })
+})
