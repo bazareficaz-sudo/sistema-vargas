@@ -814,8 +814,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           // saldo_devedor aqui só criaria um saldo que nenhuma conta explica.
           erroContasReceber = `Fiado: ${erroFiadoCR.message}`
         } else {
+          // Só a data da compra. O saldo devedor vem do gatilho que
+          // recalcula SUM(valor_aberto) quando as parcelas entram — somar
+          // `total` aqui contaria a mesma divida uma segunda vez.
           await sb.from('clientes').update({
-            saldo_devedor: (clienteSelecionado.saldo_devedor ?? 0) + total,
             data_ultima_compra_fiada: new Date().toISOString(),
           }).eq('id', clienteSelecionado.id)
         }

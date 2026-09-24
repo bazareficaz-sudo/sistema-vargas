@@ -172,17 +172,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   //
   // Só o que estava em aberto: parcela recebida já foi barrada lá em cima,
   // então tudo que sobrou aqui é dívida que deixa de existir.
-  if (venda.cliente_id && valorEmAberto > 0) {
-    const { data: cli } = await sb.from('clientes')
-      .select('saldo_devedor').eq('id', venda.cliente_id).maybeSingle()
-    if (cli) {
-      await sb.from('clientes').update({
-        // Nunca abaixo de zero: um saldo negativo aqui viraria crédito
-        // fantasma que ninguém sabe explicar.
-        saldo_devedor: Math.max(0, arred(Number(cli.saldo_devedor ?? 0) - valorEmAberto)),
-      }).eq('id', venda.cliente_id)
-    }
-  }
+  // Nada a escrever: cancelar as parcelas acima ja disparou
+  // `z_trg_sincronizar_saldo_devedor`, que recalcula o saldo do cliente
+  // excluindo o que virou 'cancelado'. Subtrair aqui tambem seria o segundo
+  // escritor do mesmo numero, e desta vez para baixo.
 
   // ── 4. CRÉDITO GERADO POR DEVOLUÇÃO ─────────────────────────
   let creditosCancelados = 0

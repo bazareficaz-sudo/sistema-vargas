@@ -308,22 +308,14 @@ export default function ContasReceberClient({
         updated_at: new Date().toISOString(),
       }).eq('id', contaReceber.id)
 
-      // Saldo devedor do cliente: abate o que entrou, sempre.
+      // O saldo devedor NAO e escrito aqui.
       //
-      // Antes só abatia quando a conta era quitada por inteiro — pagamento
-      // parcial não mexia no saldo — e, quando abatia, subtraía o valor
-      // cheio da conta em vez do valor recebido, descontando de novo o que
-      // já tinha sido pago antes. Os dois defeitos juntos fizeram o saldo do
-      // cadastro divergir da soma real das contas em alguns clientes.
-      if (contaReceber.cliente_id) {
-        const { data: cli } = await sb.from('clientes').select('saldo_devedor').eq('id', contaReceber.cliente_id).single()
-        if (cli) {
-          await sb.from('clientes').update({
-            saldo_devedor: Math.max(0, Number(cli.saldo_devedor ?? 0) - valor),
-            data_ultimo_pagamento: new Date().toISOString(),
-          }).eq('id', contaReceber.cliente_id)
-        }
-      }
+      // Ele e projecao de contas_receber: o UPDATE acima dispara
+      // `z_trg_sincronizar_saldo_devedor`, que recalcula SUM(valor_aberto)
+      // do cliente e carimba `data_ultimo_pagamento` porque
+      // `valor_recebido` subiu. Abater de novo pela aritmetica da tela
+      // criaria um segundo escritor do mesmo saldo - foi assim que a
+      // carteira chegou a contabilizar a mesma divida duas vezes.
 
       setContas(p => p.map(c => c.id === contaReceber.id
         ? { ...c, valor_recebido: novoRecebido, valor_aberto: Math.max(0, novoAberto), juros: c.juros+juros, multa: c.multa+multa, desconto: c.desconto+desconto, status: novoStatus }
