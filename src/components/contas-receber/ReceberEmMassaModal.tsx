@@ -70,7 +70,6 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
   ), [contas, juros, jurosUnidade, desconto, descontoUnidade])
 
   const porConta = new Map(rateio.itens.map(i => [i.id, i]))
-  const clienteId = contas[0]?.cliente_id ?? null
 
   async function confirmar() {
     if (rateio.totalPago <= 0) { setErro('O valor a receber ficou zerado.'); return }
@@ -124,22 +123,16 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
         })
       }
 
-      // Saldo devedor do cliente: abate o principal recebido, uma vez só.
-      //
-      // O recebimento individual tinha dois defeitos aqui — só mexia no
-      // saldo quando a conta era quitada por inteiro, e quando mexia
-      // subtraía o valor cheio da conta em vez do que entrou. É o que fez o
-      // saldo do cadastro divergir das contas em alguns clientes. Aqui abate
-      // exatamente o principal.
-      if (clienteId) {
-        const { data: cli } = await sb.from('clientes').select('saldo_devedor').eq('id', clienteId).single()
-        if (cli) {
-          await sb.from('clientes').update({
-            saldo_devedor: Math.max(0, Number(cli.saldo_devedor ?? 0) - rateio.totalDevido),
-            data_ultimo_pagamento: agora,
-          }).eq('id', clienteId)
-        }
-      }
+      // Saldo devedor do cliente: o trigger `z_trg_sincronizar_saldo_devedor`
+      // (AFTER INSERT/UPDATE/DELETE em contas_receber) já recalcula
+      // clientes.saldo_devedor do zero — soma de valor_aberto — a cada
+      // `contas_receber.update()` do loop acima, e também carimba
+      // `data_ultimo_pagamento`. Não escrever aqui de novo: este bloco existiu
+      // com uma conta própria (`saldo_devedor - totalDevido`) e competia com
+      // o trigger — se o saldo lido antes do loop já estivesse defasado
+      // (outra aba, outro recebimento entre a leitura e a escrita), ele
+      // sobrescrevia o valor correto que o trigger acabara de gravar. Foi
+      // isso que divergiu o saldo do cadastro em pelo menos um cliente.
 
       onConcluido(atualizadas)
     } catch (e: unknown) {
