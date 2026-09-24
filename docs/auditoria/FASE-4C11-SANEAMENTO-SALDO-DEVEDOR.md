@@ -1,7 +1,7 @@
 # Fase 4C.1.1 — `saldo_devedor` vira projeção
 
-24/09/2026. **Migration escrita e provada em transação revertida; ainda NÃO
-aplicada em produção** (ver "Pendência" no fim).
+24/09/2026. **HOMOLOGADA.** Migration `20260924204626_saldo_devedor_projecao_v1.sql`
+aplicada em produção e validada (ver "Homologação" no fim).
 
 ## Etapa A — todos os escritores
 
@@ -108,15 +108,86 @@ arquivos e aprova as quatro atuais.
 `npm test` 1116/1116 · `tsc --noEmit` limpo · `next build` OK ·
 `git diff --check` OK.
 
-## Pendência
+## Homologação
 
-A migration `saldo_devedor_projecao_v1.sql`
-(md5 `de38feeada6f32d0ad056101860c2b9a`) **não foi aplicada**: a chamada de
-`apply_migration` foi recusada pelo classificador do modo automático. O nome
-do arquivo está provisório (`20260924999999_`) e precisa ser renomeado para a
-`version` registrada, com prova de md5, assim que a aplicação for liberada.
+### Proveniência da migration
 
-Enquanto ela não for aplicada, o banco **ainda dobra** o saldo a cada venda em
-carteira. As correções de código já removem os outros três escritores cegos e
-são seguras isoladamente — todas apenas deixam de escrever um valor que o
-gatilho já calcula.
+| | |
+|---|---|
+| arquivo | `supabase/migrations/20260924204626_saldo_devedor_projecao_v1.sql` |
+| version registrada | `20260924204626` |
+| name | `saldo_devedor_projecao_v1` |
+| md5 do arquivo | `de38feeada6f32d0ad056101860c2b9a` |
+| md5 registrado no Supabase | `f283096b70235536f80086c2c5a07b8b` |
+
+Os dois md5 diferem **apenas pelo newline final**, que o Supabase remove:
+`md5` do arquivo sem o último `
+` é exatamente `f283096b…`. O conteúdo
+aplicado é byte a byte o do arquivo. Nenhum `db push` foi usado.
+
+O arquivo nunca existiu em commit com nome provisório aplicado: o provisório
+foi removido **antes** do apply, e o nome definitivo veio da `version`
+devolvida pelo próprio mecanismo de migration — que é quem a gera.
+
+### Pré-flight (base viva)
+
+A base andou entre a auditoria e a aplicação. Classificado antes de aplicar:
+
+| | auditoria | pré-flight |
+|---|---|---|
+| contas_receber | 256 | **268** (+12) |
+| clientes divergentes | 9 | **10** |
+| divergência | R$ 610,12 | **R$ 731,36** |
+
+As 12 contas novas são todas `carteira`/`aberto`, R$ 315,19, com `origem_id`,
+criadas entre 13:00 e 19:29 UTC — operação normal da loja. E **10 de 10** dos
+clientes divergentes tinham a diferença igual ao `valor_original` da última
+conta de carteira: o mesmo defeito, em escala maior, não uma classe nova.
+Zero duplicatas que violassem o índice.
+
+Inalterados no pré-flight: 109 clientes, 140 recebimentos, `venda_pagamento` 0,
+`caixa_movimento` 13, `caixa_transferencia` 6, YOGA R$ 50, Tesouraria −R$ 55.
+
+### Etapa H — depois da aplicação
+
+**A. Integridade.** 0 clientes divergentes; divergência agregada **R$ 0,00**.
+Os 10 anteriormente divergentes conferidos um a um: todos `CONFERE`.
+
+**B. Documentos.** 268 contas e 140 recebimentos — contagens intactas.
+`sum(valor_recebido)` = 6.788,40, idêntico ao pré-migration. Distribuição de
+status preservada (aberto 108, parcial 5, vencido 11, recebido 139,
+cancelado 5). **0 contas com `updated_at` no instante da migration**: o
+saneamento não encostou em documento financeiro nenhum.
+
+**C. Índice** (transação revertida): 2ª conta `carteira` para o mesmo
+`origem_id` **recusada**; fiado com 3 parcelas no mesmo `origem_id`
+**permitido** (saldo 150,00); duas contas `carteira` com `origem_id` nulo
+**permitidas** — históricas preservadas.
+
+**D/E. Defeito original** (transação revertida), contra as funções já
+aplicadas:
+
+| passo | saldo | autoritativo | |
+|---|---|---|---|
+| venda carteira R$ 100 | **100,00** | 100,00 | 1 conta, **nunca R$ 200** |
+| + 2ª conta R$ 40 | 140,00 | 140,00 | ✔ |
+| recebe 60 parcial | 80,00 | 80,00 | ✔ |
+| quita | 40,00 | 40,00 | ✔ |
+| cancela | 0,00 | 0,00 | ✔ sem dupla subtração |
+
+Em todos os passos `saldo_devedor = saldo_devedor_autoritativo(cliente)`.
+O fluxo legado de carteira cria **exatamente uma** conta e aumenta o saldo
+**exatamente uma vez**. Carteira via `venda_pagamento` não foi testada nem
+implementada — pertence à continuação da 4C.
+
+**F. Caixa.** `venda_pagamento` 0, `caixa_movimento` 13,
+`caixa_transferencia` 6, YOGA R$ 50, Tesouraria −R$ 55. Inalterados.
+
+Após a reversão: 0 clientes de teste, 0 vendas de teste, 109 clientes, 268
+contas, 140 recebimentos, 0 divergentes, índice ativo, **0 incrementos cegos
+restantes** em `criar_conta_carteira`.
+
+### Repositório
+
+`npm test` 1116/1116 · `tsc --noEmit` limpo · `next build` OK ·
+`git diff --check` OK. Os 4 consumidores Web seguem provados sem escrita cega.
