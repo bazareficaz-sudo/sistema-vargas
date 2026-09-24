@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import EnviarWhatsAppModal from '@/components/integracoes/EnviarWhatsAppModal'
 import VendaDaContaModal from './VendaDaContaModal'
@@ -127,6 +127,9 @@ export default function ContasReceberClient({
     forma: 'dinheiro', conta_destino: '', observacao: '', usar_credito: false
   })
   const [salvandoRec, setSalvandoRec] = useState(false)
+  // Trava síncrona contra clique duplo — ver o mesmo padrão em
+  // ReceberEmMassaModal.tsx e NovaEntradaClient.tsx.
+  const enviandoRecRef = useRef(false)
 
   // Modal renegociação
   const [modalRenego, setModalRenego] = useState(false)
@@ -256,6 +259,8 @@ export default function ContasReceberClient({
     const multa    = parseFloat(receb.multa.replace(',','.')) || 0
 
     if (valor <= 0) { alert('Informe o valor recebido'); return }
+    if (enviandoRecRef.current) return
+    enviandoRecRef.current = true
     setSalvandoRec(true)
     try {
       const novoRecebido = contaReceber.valor_recebido + valor
@@ -324,7 +329,7 @@ export default function ContasReceberClient({
         : c))
       setContaReceber(null)
     } catch(e:any) { alert('Erro: ' + e.message) }
-    finally { setSalvandoRec(false) }
+    finally { setSalvandoRec(false); enviandoRecRef.current = false }
   }
 
   // ── Renegociação ─────────────────────────────────────────────

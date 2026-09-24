@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calcularRateio } from '@/lib/financeiro/pagamento'
 import { botao } from '@/components/ui/botao'
@@ -71,8 +71,18 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
 
   const porConta = new Map(rateio.itens.map(i => [i.id, i]))
 
+  // Trava síncrona contra clique duplo — `salvando` só desabilita o botão
+  // depois do próximo render, então dois cliques bem rápidos (ou o clique
+  // duplicado que o navegador às vezes dispara) podiam iniciar dois
+  // `confirmar()` antes do disabled= surtir efeito, gravando cada conta
+  // duas vezes em `recebimentos`. Mesmo padrão já usado em
+  // NovaEntradaClient.tsx.
+  const enviandoRef = useRef(false)
+
   async function confirmar() {
     if (rateio.totalPago <= 0) { setErro('O valor a receber ficou zerado.'); return }
+    if (enviandoRef.current) return
+    enviandoRef.current = true
     setSalvando(true); setErro('')
     const sb = createClient()
     const agora = new Date().toISOString()
@@ -139,6 +149,7 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
       setErro(e instanceof Error ? e.message : 'Falha ao registrar os recebimentos')
     } finally {
       setSalvando(false)
+      enviandoRef.current = false
     }
   }
 
