@@ -32,9 +32,9 @@ banco) passa a ler os produtos com a tag **marketing** da empresa.
   fiscal, cliente ou venda. `sinais` entrega chegadas de entradas confirmadas.
 - **Tela:** Configurações → Integrações → cartão "Vargas Marketing" (gerar e
   cancelar código; permissão `gerenciar_configuracoes`).
-- **Migração ANTES do deploy:** `supabase-integracao-marketing.sql` (uma
-  tabela nova, aditiva). Sem ela, a tela e as rotas respondem erro — nada do
-  que já existe é afetado.
+- **Migração `supabase-integracao-marketing.sql` APLICADA em 25/09** (uma
+  tabela nova, aditiva; conferido: RLS ligado, `anon` sem acesso,
+  `authenticated` sem o hash e sem escrita).
 - Testes: `tests/integracoes/marketing-catalogo.test.ts`.
 
 
