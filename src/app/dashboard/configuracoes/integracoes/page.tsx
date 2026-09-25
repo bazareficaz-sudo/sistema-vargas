@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import IntegracoesClient from '@/components/configuracoes/IntegracoesClient'
+import VargasMarketingCard from '@/components/configuracoes/VargasMarketingCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,5 +11,10 @@ export default async function IntegracoesPage() {
     .select('*')
     .order('plataforma')
 
-  return <IntegracoesClient integracoes={integracoes ?? []} />
+  return (
+    <>
+      <IntegracoesClient integracoes={integracoes ?? []} />
+      <div className="max-w-2xl mt-5"><VargasMarketingCard /></div>
+    </>
+  )
 }
