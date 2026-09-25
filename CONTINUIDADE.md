@@ -16,6 +16,28 @@ a seção própria no fim antes de usá-lo no catálogo em geral.
 
 ## Em andamento
 
+### Integração com o Vargas Marketing — PR aberto, NÃO no ar
+
+Branch `claude/api-marketing`. O Vargas Marketing (sistema separado, outro
+banco) passa a ler os produtos com a tag **marketing** da empresa.
+
+- **Somente leitura.** Rotas `/api/integracoes/marketing/v1/{empresa,produtos,sinais}`
+  autenticadas por token de integração (`Authorization: Bearer vgm_…`), no
+  mesmo desenho dos tokens da extensão: SHA-256 no banco, validade (365 dias),
+  revogação. A empresa vem do token, nunca da requisição.
+- **Sai só o necessário para divulgar:** nome, preço em centavos, promoção
+  (com vigência pela mesma `promocaoVigente`), condição "só no Pix" quando a
+  regra do PDV está ligada, disponibilidade (em estoque / sem estoque /
+  desconhecida — sem a quantidade), fotos https. Nada de custo, fornecedor,
+  fiscal, cliente ou venda. `sinais` entrega chegadas de entradas confirmadas.
+- **Tela:** Configurações → Integrações → cartão "Vargas Marketing" (gerar e
+  cancelar código; permissão `gerenciar_configuracoes`).
+- **Migração ANTES do deploy:** `supabase-integracao-marketing.sql` (uma
+  tabela nova, aditiva). Sem ela, a tela e as rotas respondem erro — nada do
+  que já existe é afetado.
+- Testes: `tests/integracoes/marketing-catalogo.test.ts`.
+
+
 ### Loja Online — Fase 1 no ar
 
 Canal de venda novo, com vitrine pública própria. **Está no ar** em
