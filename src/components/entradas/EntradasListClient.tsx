@@ -451,6 +451,13 @@ export default function EntradasListClient({
                           {carregandoAcao === `etiqueta-${e.id}` ? 'Carregando…' : '🏷️ Etiquetas'}
                         </button>
                       )}
+                      {e.status === 'confirmada' && (
+                        <Link
+                          href={`/dashboard/produtos?entrada=${encodeURIComponent(e.numero_entrada ?? e.numero_nf ?? '')}`}
+                          className="text-xs text-emerald-600 hover:text-emerald-800 font-medium whitespace-nowrap">
+                          📦 Produtos
+                        </Link>
+                      )}
                       {e.status !== 'cancelada' && (
                         <button
                           onClick={() => { setErroExclusao(''); setConfirmando(e) }}

@@ -630,6 +630,10 @@ export default function EntradasXmlClient({
                       className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs rounded-lg disabled:opacity-50">
                       💰 Preços
                     </button>
+                    <button onClick={ev => { ev.stopPropagation(); router.push(`/dashboard/produtos?entrada=${encodeURIComponent(e.numero ?? '')}`) }}
+                      className="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs rounded-lg">
+                      📦 Produtos
+                    </button>
                     <button onClick={ev => { ev.stopPropagation(); imprimirEtiquetasEntrada(e.id) }}
                       disabled={carregandoAcao === `etiqueta-${e.id}`}
                       className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs rounded-lg disabled:opacity-50">
