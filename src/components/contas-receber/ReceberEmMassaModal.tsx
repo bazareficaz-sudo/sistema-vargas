@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calcularRateio } from '@/lib/financeiro/pagamento'
 import { botao } from '@/components/ui/botao'
@@ -70,10 +70,19 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
   ), [contas, juros, jurosUnidade, desconto, descontoUnidade])
 
   const porConta = new Map(rateio.itens.map(i => [i.id, i]))
-  const clienteId = contas[0]?.cliente_id ?? null
+
+  // Trava síncrona contra clique duplo — `salvando` só desabilita o botão
+  // depois do próximo render, então dois cliques bem rápidos (ou o clique
+  // duplicado que o navegador às vezes dispara) podiam iniciar dois
+  // `confirmar()` antes do disabled= surtir efeito, gravando cada conta
+  // duas vezes em `recebimentos`. Mesmo padrão já usado em
+  // NovaEntradaClient.tsx.
+  const enviandoRef = useRef(false)
 
   async function confirmar() {
     if (rateio.totalPago <= 0) { setErro('O valor a receber ficou zerado.'); return }
+    if (enviandoRef.current) return
+    enviandoRef.current = true
     setSalvando(true); setErro('')
     const sb = createClient()
     const agora = new Date().toISOString()
@@ -124,28 +133,23 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
         })
       }
 
-      // Saldo devedor do cliente: abate o principal recebido, uma vez só.
-      //
-      // O recebimento individual tinha dois defeitos aqui — só mexia no
-      // saldo quando a conta era quitada por inteiro, e quando mexia
-      // subtraía o valor cheio da conta em vez do que entrou. É o que fez o
-      // saldo do cadastro divergir das contas em alguns clientes. Aqui abate
-      // exatamente o principal.
-      if (clienteId) {
-        const { data: cli } = await sb.from('clientes').select('saldo_devedor').eq('id', clienteId).single()
-        if (cli) {
-          await sb.from('clientes').update({
-            saldo_devedor: Math.max(0, Number(cli.saldo_devedor ?? 0) - rateio.totalDevido),
-            data_ultimo_pagamento: agora,
-          }).eq('id', clienteId)
-        }
-      }
+      // Saldo devedor do cliente: o trigger `z_trg_sincronizar_saldo_devedor`
+      // (AFTER INSERT/UPDATE/DELETE em contas_receber) já recalcula
+      // clientes.saldo_devedor do zero — soma de valor_aberto — a cada
+      // `contas_receber.update()` do loop acima, e também carimba
+      // `data_ultimo_pagamento`. Não escrever aqui de novo: este bloco existiu
+      // com uma conta própria (`saldo_devedor - totalDevido`) e competia com
+      // o trigger — se o saldo lido antes do loop já estivesse defasado
+      // (outra aba, outro recebimento entre a leitura e a escrita), ele
+      // sobrescrevia o valor correto que o trigger acabara de gravar. Foi
+      // isso que divergiu o saldo do cadastro em pelo menos um cliente.
 
       onConcluido(atualizadas)
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Falha ao registrar os recebimentos')
     } finally {
       setSalvando(false)
+      enviandoRef.current = false
     }
   }
 
