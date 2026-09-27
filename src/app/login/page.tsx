@@ -23,8 +23,15 @@ function LoginForm() {
   const [enviandoRecuperacao, setEnviandoRecuperacao] = useState(false)
 
   useEffect(() => {
-    if (searchParams.get('erro') === 'acesso_bloqueado') {
+    const erroParam = searchParams.get('erro')
+    if (erroParam === 'acesso_bloqueado') {
       setErro('Seu acesso foi bloqueado ou inativado por um administrador.')
+    } else if (erroParam === 'inatividade') {
+      setErro('Sua sessão expirou por inatividade (30 min sem uso). Entre novamente.')
+    } else if (erroParam === 'virada_dia') {
+      setErro('Sua sessão do dia anterior expirou. Entre novamente.')
+    } else if (erroParam === 'outra_aba') {
+      setErro('Sua sessão foi encerrada em outra aba. Entre novamente.')
     }
   }, [searchParams])
 
