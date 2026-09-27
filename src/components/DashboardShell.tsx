@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Sidebar from '@/components/Sidebar'
 import TopMenu from '@/components/TopMenu'
+import SessaoVigia from '@/components/auth/SessaoVigia'
 import { PlanAlertBanner } from '@/components/plan/PlanBanner'
 import SupportModeBanner from '@/components/plan/SupportModeBanner'
 import type { EmpresaDoUsuario } from '@/lib/auth/empresaAtiva'
@@ -33,6 +34,7 @@ export default function DashboardShell({ empresa, empresas = [], empresaAtivaId 
   if (layout === 'topbar') {
     return (
       <div className="min-h-screen flex flex-col" style={{ background: '#ffffff' }} suppressHydrationWarning>
+        <SessaoVigia />
         <TopMenu empresa={empresa} empresas={empresas} empresaAtivaId={empresaAtivaId} />
         <main
           id="main-content"
@@ -49,6 +51,7 @@ export default function DashboardShell({ empresa, empresas = [], empresaAtivaId 
 
   return (
     <div className="min-h-screen flex" style={{ background: '#ffffff' }} suppressHydrationWarning>
+      <SessaoVigia />
       <Sidebar empresa={empresa} empresas={empresas} empresaAtivaId={empresaAtivaId} />
       {/* No celular o trilho do menu vira gaveta (ver Sidebar), então o
           conteúdo começa colado na borda e ganha espaço no topo pra barra
