@@ -23,7 +23,9 @@ export default async function VendasPage() {
       .gte('created_at', hoje.toISOString())
       .lte('created_at', fimHoje.toISOString())
       .order('created_at', { ascending: false })
-      .limit(200),
+      // Primeira página, tamanho padrão (50) — VendasClient.tsx pagina o
+      // resto a partir daqui; ver o mesmo range ali em buscarVendas().
+      .range(0, 49),
     supabase.from('saude_config').select('*').eq('empresa_id', empresaId).single(),
     supabase.from('saude_faixas').select('*').eq('empresa_id', empresaId).order('ordem'),
     supabase.from('empresa_config_estoque').select('empresa_estoque_id').eq('empresa_id', empresaId).maybeSingle(),

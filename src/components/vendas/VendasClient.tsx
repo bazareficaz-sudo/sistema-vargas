@@ -118,6 +118,12 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const faixasSaude = (saudeFaixas && saudeFaixas.length > 0) ? saudeFaixas : FAIXAS_PADRAO
 
   const primeiraRenderizacao = useRef(true)
+  const [pagina, setPagina] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  // Guarda a última combinação de período/busca/tamanho de página que já
+  // gerou uma busca — é o que diferencia "mudou o conjunto (volta pra
+  // página 1)" de "só virou de página".
+  const chaveConjuntoRef = useRef('')
 
   useEffect(() => {
     const t = setTimeout(() => setBuscaDebounced(busca), 350)
@@ -125,9 +131,24 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   }, [busca])
 
   useEffect(() => {
-    if (primeiraRenderizacao.current) { primeiraRenderizacao.current = false; return }
+    const chaveAtual = `${periodo}|${customInicio}|${customFim}|${buscaDebounced}|${pageSize}`
+    if (primeiraRenderizacao.current) {
+      primeiraRenderizacao.current = false
+      chaveConjuntoRef.current = chaveAtual
+      return
+    }
+    if (chaveAtual !== chaveConjuntoRef.current) {
+      chaveConjuntoRef.current = chaveAtual
+      // Período, busca ou tamanho de página mudou — o conjunto de vendas é
+      // outro, sempre volta pra primeira página. Se já estava na página 1,
+      // o `setPagina` abaixo não dispara de novo (mesmo valor), então busca
+      // aqui mesmo; se estava noutra página, o próprio efeito roda de novo
+      // quando `pagina` vira 1 e busca lá — nunca busca as duas vezes.
+      if (pagina !== 1) { setPagina(1); return }
+    }
     buscarVendas()
-  }, [periodo, customInicio, customFim, buscaDebounced])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodo, customInicio, customFim, buscaDebounced, pageSize, pagina])
 
   async function buscarVendas() {
     setCarregando(true); setErroBusca('')
@@ -152,12 +173,13 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
       if (idsFiltro.length === 0) { setVendas([]); setTotal(0); setCarregando(false); return }
     }
 
+    const inicioRange = (pagina - 1) * pageSize
     let query = sb.from('vendas').select(SELECT_VENDAS, { count: 'exact' })
       .eq('empresa_id', empresaId)
       .gte('created_at', inicio.toISOString())
       .lte('created_at', fim.toISOString())
       .order('created_at', { ascending: false })
-      .limit(300)
+      .range(inicioRange, inicioRange + pageSize - 1)
     if (idsFiltro) query = query.in('id', idsFiltro)
 
     const { data, count, error } = await query
@@ -188,6 +210,26 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const formasPresentes = (() => {
     const contagem = new Map<string, number>()
     for (const v of vendas) for (const f of formasDaVenda(v)) contagem.set(f, (contagem.get(f) ?? 0) + 1)
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1])
+  })()
+
+  // Filtro por vendedor — mesmo padrão do de pagamento. Usa o que a coluna
+  // "Vendedor" da tabela já mostra (vendedor_nome, com operador_nome de
+  // fallback), pra filtrar exatamente o que a pessoa está vendo.
+  const [vendedorFiltro, setVendedorFiltro] = useState<Set<string>>(new Set())
+  const vendedorDaVenda = (v: Venda) => v.vendedor_nome ?? v.operador_nome ?? '—'
+  const vendedoresPresentes = (() => {
+    const contagem = new Map<string, number>()
+    for (const v of vendas) contagem.set(vendedorDaVenda(v), (contagem.get(vendedorDaVenda(v)) ?? 0) + 1)
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1])
+  })()
+
+  // Filtro por canal — mesmo padrão.
+  const [canalFiltro, setCanalFiltro] = useState<Set<string>>(new Set())
+  const canalDaVenda = (v: Venda) => v.canal ?? 'PDV'
+  const canaisPresentes = (() => {
+    const contagem = new Map<string, number>()
+    for (const v of vendas) contagem.set(canalDaVenda(v), (contagem.get(canalDaVenda(v)) ?? 0) + 1)
     return [...contagem.entries()].sort((a, b) => b[1] - a[1])
   })()
 
@@ -223,8 +265,18 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const vendasFiltradas = vendas
     .filter(v => formasFiltro.size === 0 || formasDaVenda(v).some(f => formasFiltro.has(f)))
     .filter(casaFiscal)
+    .filter(v => vendedorFiltro.size === 0 || vendedorFiltro.has(vendedorDaVenda(v)))
+    .filter(v => canalFiltro.size === 0 || canalFiltro.has(canalDaVenda(v)))
 
   const totalFaturado = vendasFiltradas.filter(v => v.status === 'concluida').reduce((s, v) => s + (v.total ?? 0), 0)
+
+  // Paginação — sobre o total do período+busca no servidor (`total`), não
+  // sobre `vendasFiltradas`: pagamento/vendedor/canal só recortam DENTRO da
+  // página já carregada (mesmo padrão que os filtros já tinham antes desta
+  // mudança), então o número de páginas não pode depender deles.
+  const totalPaginas = Math.max(1, Math.ceil(total / pageSize))
+  const inicioIntervalo = total === 0 ? 0 : (pagina - 1) * pageSize + 1
+  const fimIntervalo = Math.min(pagina * pageSize, total)
 
   // Saúde retroativa por venda — reaproveita o mesmo calcSaude usado ao vivo
   // no PDV. Vendas antigas não têm custo_unitario salvo (coluna nova), então
@@ -556,8 +608,8 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Vendas</h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            {formasFiltro.size > 0
-              ? `${vendasFiltradas.length} de ${vendas.length} transações`
+            {(formasFiltro.size > 0 || vendedorFiltro.size > 0 || canalFiltro.size > 0)
+              ? `${vendasFiltradas.length} de ${vendas.length} transações desta página`
               : `${total} transações`} · {fmt(totalFaturado)} faturados
           </p>
           <p className="text-xs text-gray-400 mt-1">
@@ -626,6 +678,58 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           })}
           {formasFiltro.size > 0 && (
             <button onClick={() => setFormasFiltro(new Set())}
+              className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
+          )}
+        </div>
+      )}
+
+      {vendedoresPresentes.length > 1 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs text-gray-500">Vendedor:</span>
+          {vendedoresPresentes.map(([vend, qtd]) => {
+            const on = vendedorFiltro.has(vend)
+            return (
+              <button key={vend}
+                onClick={() => setVendedorFiltro(prev => {
+                  const novo = new Set(prev)
+                  novo.has(vend) ? novo.delete(vend) : novo.add(vend)
+                  return novo
+                })}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                  on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}>
+                {vend} <span className="opacity-60">{qtd}</span>
+              </button>
+            )
+          })}
+          {vendedorFiltro.size > 0 && (
+            <button onClick={() => setVendedorFiltro(new Set())}
+              className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
+          )}
+        </div>
+      )}
+
+      {canaisPresentes.length > 1 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <span className="text-xs text-gray-500">Canal:</span>
+          {canaisPresentes.map(([canal, qtd]) => {
+            const on = canalFiltro.has(canal)
+            return (
+              <button key={canal}
+                onClick={() => setCanalFiltro(prev => {
+                  const novo = new Set(prev)
+                  novo.has(canal) ? novo.delete(canal) : novo.add(canal)
+                  return novo
+                })}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                  on ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}>
+                {canal} <span className="opacity-60">{qtd}</span>
+              </button>
+            )
+          })}
+          {canalFiltro.size > 0 && (
+            <button onClick={() => setCanalFiltro(new Set())}
               className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
           )}
         </div>
@@ -721,7 +825,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                 <input type="checkbox" checked={selecionados.size === vendas.length && vendas.length > 0}
                   onChange={e => toggleTodos(e.target.checked)} className="w-4 h-4 accent-blue-600" />
               </th>
-              <th className="text-center px-2 py-3 font-medium" title="Saúde da venda">Saúde</th>
+              <th className="text-center px-2 py-3 font-medium" title="Markup médio do pedido — (preço − custo) / custo. A cor segue a faixa de saúde da venda.">Markup</th>
               <th className="text-left px-4 py-3 font-medium">#</th>
               <th className="text-left px-4 py-3 font-medium">Data/Hora</th>
               <th className="text-left px-4 py-3 font-medium">Cliente</th>
@@ -747,13 +851,13 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                 </td>
                 <td className="px-2 py-2.5 text-center">
                   {saude ? (
-                    <span title={`${saude.resultado.faixa?.nome ?? '—'} · margem ${saude.resultado.margem.toFixed(1)}%${saude.aproximado ? ' (estimado com custo atual)' : ''}`}
-                      className="inline-flex items-center gap-0.5">
-                      <span className={`inline-block w-2.5 h-2.5 rounded-full ${saude.aproximado ? 'opacity-60' : ''}`}
-                        style={{ backgroundColor: saude.resultado.faixa?.cor ?? '#9ca3af' }} />
-                      {saude.aproximado && <span className="text-[10px] text-gray-300">~</span>}
+                    <span title={`${saude.resultado.faixa?.nome ?? '—'} · margem líquida ${saude.resultado.margem.toFixed(1)}%${saude.aproximado ? ' (estimado com custo atual)' : ''}`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap"
+                      style={{ color: saude.resultado.faixa?.cor ?? '#6b7280', backgroundColor: saude.resultado.faixa?.cor_fundo ?? '#f3f4f6' }}>
+                      {saude.resultado.markup.toFixed(0)}%
+                      {saude.aproximado && <span className="opacity-60">~</span>}
                     </span>
-                  ) : <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-200" />}
+                  ) : <span className="text-xs text-gray-300">—</span>}
                 </td>
                 <td className="px-4 py-2.5 text-gray-400 font-mono">{v.numero}</td>
                 <td className="px-4 py-2.5 text-gray-400 text-xs">
@@ -842,6 +946,34 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             )}
           </tbody>
         </table>
+
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 bg-gray-50 flex-wrap">
+          <span className="text-xs text-gray-500">
+            {total === 0 ? 'Nenhuma venda no período' : `${inicioIntervalo}–${fimIntervalo} de ${total}`}
+          </span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-gray-500">
+              Por página:
+              <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}
+                className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:border-blue-500">
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+            </label>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pagina <= 1 || carregando}
+                className="px-2.5 py-1 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-white disabled:opacity-40 bg-white">
+                ← Anterior
+              </button>
+              <span className="text-xs text-gray-500 px-1.5 whitespace-nowrap">Página {pagina} de {totalPaginas}</span>
+              <button onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))} disabled={pagina >= totalPaginas || carregando}
+                className="px-2.5 py-1 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-white disabled:opacity-40 bg-white">
+                Próxima →
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {detalheAberto && (
