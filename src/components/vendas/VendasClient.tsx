@@ -8,6 +8,7 @@ import EditarItensVendaModal from './EditarItensVendaModal'
 import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integracoes/EnviarWhatsAppModal'
 import { calcSaude, CONFIG_PADRAO, FAIXAS_PADRAO, type SaudeConfig, type FaixaSaude, type ResultadoSaude } from '@/lib/saude-venda'
 import { abrirDanfe, type FormatoPapel } from '@/lib/fiscal/danfe'
+import { buscarTudo } from '@/lib/supabase/paginar'
 
 type Cliente = { nome: string; telefone: string | null; cpf_cnpj: string | null } | null
 
@@ -77,8 +78,12 @@ function calcularRange(periodo: Periodo, custom: { inicio: string; fim: string }
 
 const SELECT_VENDAS = 'id, numero, total, subtotal, desconto, status, forma_pagamento, pagamentos, tipo_operacao, created_at, cliente_id, operador_nome, vendedor_nome, canal, clientes(nome, telefone, cpf_cnpj), nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf'
 
-export default function VendasClient({ empresaId, vendasIniciais, totalInicial, empresaEstoqueNome, empresaFiscalNome, saudeConfig, saudeFaixas, formatoImpressao, erroInicial }: {
+export default function VendasClient({ empresaId, vendasIniciais, totalInicial, resumoInicial, empresaEstoqueNome, empresaFiscalNome, saudeConfig, saudeFaixas, formatoImpressao, erroInicial }: {
   empresaId: string; vendasIniciais: Venda[]; totalInicial: number
+  // Faturamento/qtd de vendas concluídas do dia inteiro, já calculado no
+  // servidor — evita os cards de topo mostrarem por um instante o valor
+  // (errado) da primeira página antes do resumo do período chegar do cliente.
+  resumoInicial?: { faturamento: number; concluidas: number }
   // Config da conta (Empresas → Estoque/Fiscal) — igual em toda linha hoje.
   empresaEstoqueNome: string; empresaFiscalNome: string
   saudeConfig?: SaudeConfig | null; saudeFaixas?: FaixaSaude[]
@@ -118,6 +123,12 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   // "comparado com o quê" não tem uma resposta óbvia, então os cards ficam
   // sem a linha de variação em vez de comparar com algo arbitrário.
   const [comparativoOntem, setComparativoOntem] = useState<{ faturamento: number; ticket: number } | null>(null)
+  // Faturamento/ticket médio do PERÍODO INTEIRO (não só da página carregada)
+  // — buscado à parte com buscarTudo(), pra não repetir o card "Faturamento
+  // do mês" mentindo quando o período passa de 1.000 vendas (ver
+  // src/lib/supabase/paginar.ts). Os cards caem pra ele quando nenhum chip
+  // de pagamento/vendedor/canal está filtrando a lista.
+  const [resumoPeriodo, setResumoPeriodo] = useState<{ faturamento: number; concluidas: number } | null>(resumoInicial ?? null)
 
   const cfgSaude = saudeConfig ?? CONFIG_PADRAO
   const faixasSaude = (saudeFaixas && saudeFaixas.length > 0) ? saudeFaixas : FAIXAS_PADRAO
@@ -155,28 +166,33 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodo, customInicio, customFim, buscaDebounced, pageSize, pagina])
 
+  // Resolve a busca livre (produto/cliente/número) pra uma lista de ids de
+  // venda — compartilhado entre a busca paginada da tabela e o resumo do
+  // período, pra não implementar a mesma regra duas vezes.
+  async function resolverIdsFiltro(sb: ReturnType<typeof createClient>, termo: string): Promise<string[] | null> {
+    if (!termo) return null
+    const [{ data: itensMatch }, { data: clienteMatch }] = await Promise.all([
+      sb.from('venda_itens').select('venda_id').ilike('produto_nome', `%${termo}%`).limit(500),
+      sb.from('vendas').select('id, clientes!inner(nome)').eq('empresa_id', empresaId).ilike('clientes.nome', `%${termo}%`).limit(500),
+    ])
+    const ids = new Set<string>()
+    for (const i of itensMatch ?? []) ids.add(i.venda_id)
+    for (const v of clienteMatch ?? []) ids.add(v.id)
+    if (/^\d+$/.test(termo)) {
+      const { data: porNumero } = await sb.from('vendas').select('id').eq('empresa_id', empresaId).eq('numero', parseInt(termo)).limit(20)
+      for (const v of porNumero ?? []) ids.add(v.id)
+    }
+    return [...ids]
+  }
+
   async function buscarVendas() {
     setCarregando(true); setErroBusca('')
     const sb = createClient()
     const { inicio, fim } = calcularRange(periodo, { inicio: customInicio, fim: customFim })
     const termo = buscaDebounced.trim()
 
-    let idsFiltro: string[] | null = null
-    if (termo) {
-      const [{ data: itensMatch }, { data: clienteMatch }] = await Promise.all([
-        sb.from('venda_itens').select('venda_id').ilike('produto_nome', `%${termo}%`).limit(500),
-        sb.from('vendas').select('id, clientes!inner(nome)').eq('empresa_id', empresaId).ilike('clientes.nome', `%${termo}%`).limit(500),
-      ])
-      const ids = new Set<string>()
-      for (const i of itensMatch ?? []) ids.add(i.venda_id)
-      for (const v of clienteMatch ?? []) ids.add(v.id)
-      if (/^\d+$/.test(termo)) {
-        const { data: porNumero } = await sb.from('vendas').select('id').eq('empresa_id', empresaId).eq('numero', parseInt(termo)).limit(20)
-        for (const v of porNumero ?? []) ids.add(v.id)
-      }
-      idsFiltro = [...ids]
-      if (idsFiltro.length === 0) { setVendas([]); setTotal(0); setCarregando(false); return }
-    }
+    const idsFiltro = await resolverIdsFiltro(sb, termo)
+    if (termo && idsFiltro && idsFiltro.length === 0) { setVendas([]); setTotal(0); setCarregando(false); return }
 
     const inicioRange = (pagina - 1) * pageSize
     let query = sb.from('vendas').select(SELECT_VENDAS, { count: 'exact' })
@@ -193,6 +209,54 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     setTotal(count ?? 0)
     setCarregando(false)
   }
+
+  // Resumo do PERÍODO INTEIRO pros cards do topo — roda à parte da busca
+  // paginada acima (inclusive na primeira carga, que usa vendasIniciais e
+  // não chama buscarVendas()), porque os cards precisam do total certo
+  // desde o primeiro render, não só depois da próxima ação do usuário.
+  // Usa buscarTudo() porque um mês de movimento pode passar de 1.000
+  // vendas, e uma soma direta cairia no mesmo teto silencioso do PostgREST
+  // que o comentário de paginar.ts documenta (foi exatamente esse bug).
+  const primeiraRenderizacaoResumo = useRef(true)
+  useEffect(() => {
+    // O servidor já mandou o resumo certo pro estado inicial (período
+    // "hoje", sem busca) — não refaz a mesma consulta de novo assim que a
+    // página monta.
+    if (primeiraRenderizacaoResumo.current) {
+      primeiraRenderizacaoResumo.current = false
+      if (resumoInicial) return
+    }
+    let ativo = true
+    ;(async () => {
+      const sb = createClient()
+      const { inicio, fim } = calcularRange(periodo, { inicio: customInicio, fim: customFim })
+      const termo = buscaDebounced.trim()
+      const idsFiltro = await resolverIdsFiltro(sb, termo)
+      if (termo && idsFiltro && idsFiltro.length === 0) { if (ativo) setResumoPeriodo({ faturamento: 0, concluidas: 0 }); return }
+
+      const linhas = await buscarTudo<{ id: string; total: number; status: string }>(
+        (de, ate) => {
+          let q = sb.from('vendas').select('id, total, status')
+            .eq('empresa_id', empresaId)
+            .gte('created_at', inicio.toISOString())
+            .lte('created_at', fim.toISOString())
+            .order('id')
+            .range(de, ate)
+          if (idsFiltro) q = q.in('id', idsFiltro)
+          return q
+        },
+        { rotulo: 'Vendas — resumo do período' },
+      )
+      if (!ativo) return
+      const concluidas = linhas.filter(v => v.status === 'concluida')
+      setResumoPeriodo({
+        faturamento: concluidas.reduce((s, v) => s + (v.total ?? 0), 0),
+        concluidas: concluidas.length,
+      })
+    })()
+    return () => { ativo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodo, customInicio, customFim, buscaDebounced])
 
   useEffect(() => {
     if (periodo !== 'hoje') { setComparativoOntem(null); return }
@@ -291,9 +355,19 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     .filter(v => vendedorFiltro.size === 0 || vendedorFiltro.has(vendedorDaVenda(v)))
     .filter(v => canalFiltro.size === 0 || canalFiltro.has(canalDaVenda(v)))
 
-  const vendasConcluidas = vendasFiltradas.filter(v => v.status === 'concluida')
-  const totalFaturado = vendasConcluidas.reduce((s, v) => s + (v.total ?? 0), 0)
-  const ticketMedio = vendasConcluidas.length > 0 ? totalFaturado / vendasConcluidas.length : 0
+  // Sem filtro de chip: os cards usam o resumo do PERÍODO INTEIRO
+  // (resumoPeriodo, buscado à parte — ver o efeito acima). Com algum
+  // filtro de pagamento/vendedor/canal ativo, caem pro escopo da página
+  // carregada, porque esses filtros só recortam dentro dela — mesma razão
+  // do texto "X de Y nesta página" logo abaixo.
+  const semFiltroDeChip = formasFiltro.size === 0 && vendedorFiltro.size === 0 && canalFiltro.size === 0
+  const vendasConcluidasPagina = vendasFiltradas.filter(v => v.status === 'concluida')
+  const totalFaturadoPagina = vendasConcluidasPagina.reduce((s, v) => s + (v.total ?? 0), 0)
+
+  const usaResumoPeriodo = semFiltroDeChip && resumoPeriodo != null
+  const totalFaturado = usaResumoPeriodo ? resumoPeriodo!.faturamento : totalFaturadoPagina
+  const qtdConcluidas = usaResumoPeriodo ? resumoPeriodo!.concluidas : vendasConcluidasPagina.length
+  const ticketMedio = qtdConcluidas > 0 ? totalFaturado / qtdConcluidas : 0
 
   // Markup médio dos cards do topo — média simples do markup de cada venda
   // já calculado por saudePorVenda (chega assíncrono, então só entram as
@@ -643,7 +717,6 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     { id: '7dias', label: '7 dias' }, { id: 'mes', label: 'Este mês' }, { id: 'custom', label: 'Período' },
   ]
 
-  const semFiltroDeChip = formasFiltro.size === 0 && vendedorFiltro.size === 0 && canalFiltro.size === 0
   const variacaoFaturamento = variacao(totalFaturado, comparativoOntem?.faturamento)
   const variacaoTicket = variacao(ticketMedio, comparativoOntem?.ticket)
 
@@ -725,7 +798,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
               {variacaoTicket.positivo ? '▲' : '▼'} {variacaoTicket.texto}
             </span>
           ) : (
-            <span className="text-xs text-stone-300">{vendasConcluidas.length} venda(s) concluída(s)</span>
+            <span className="text-xs text-stone-300">{qtdConcluidas} venda(s) concluída(s)</span>
           )}
         </div>
         <div className="bg-white border border-stone-200 rounded-2xl px-5 py-4 flex flex-col gap-1.5">

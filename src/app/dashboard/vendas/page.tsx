@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import VendasClient from '@/components/vendas/VendasClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { buscarTudo } from '@/lib/supabase/paginar'
 
 export default async function VendasPage() {
   const supabase = await createClient()
@@ -33,6 +34,25 @@ export default async function VendasPage() {
     supabase.from('empresa_config_impressao').select('formato').eq('empresa_id', empresaId).maybeSingle(),
   ])
 
+  // Resumo do dia inteiro pros cards do topo (Faturamento, Ticket médio) —
+  // a query acima só traz a 1ª página (50 linhas); sem isto os cards
+  // mentiam num dia com mais de 50 vendas, mostrando só a soma da página.
+  // buscarTudo() por segurança (ver src/lib/supabase/paginar.ts).
+  const linhasResumoHoje = await buscarTudo<{ id: string; total: number; status: string }>(
+    (de, ate) => supabase.from('vendas').select('id, total, status')
+      .eq('empresa_id', empresaId)
+      .gte('created_at', hoje.toISOString())
+      .lte('created_at', fimHoje.toISOString())
+      .order('id')
+      .range(de, ate),
+    { rotulo: 'Vendas — resumo do dia (SSR)' },
+  )
+  const concluidasHoje = linhasResumoHoje.filter(v => v.status === 'concluida')
+  const resumoInicial = {
+    faturamento: concluidasHoje.reduce((s, v) => s + (v.total ?? 0), 0),
+    concluidas: concluidasHoje.length,
+  }
+
   // Mesmo padrão de resolução usado no PDV interno (src/app/pdv/page.tsx) —
   // só diverge da própria empresa quando configurado em Empresas → Estoque/Fiscal.
   const empresaEstoqueId = configEstoque?.empresa_estoque_id || empresaId
@@ -53,6 +73,7 @@ export default async function VendasPage() {
       empresaId={empresaId ?? ''}
       vendasIniciais={(vendas ?? []) as any}
       totalInicial={count ?? 0}
+      resumoInicial={resumoInicial}
       empresaEstoqueNome={empresaEstoqueNome}
       empresaFiscalNome={empresaFiscalNome}
       saudeConfig={saudeConfig ?? null}
