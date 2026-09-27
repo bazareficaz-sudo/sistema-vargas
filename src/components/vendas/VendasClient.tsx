@@ -113,11 +113,22 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const [trocandoPagamento, setTrocandoPagamento] = useState(false)
   const [novaFormaMassa, setNovaFormaMassa] = useState('pix')
   const [emitindoId, setEmitindoId] = useState<string | null>(null)
+  // Comparação "vs. ontem" dos cards do topo — só busca (e só faz sentido
+  // mostrar) quando o período é "hoje"; nos demais períodos a pergunta
+  // "comparado com o quê" não tem uma resposta óbvia, então os cards ficam
+  // sem a linha de variação em vez de comparar com algo arbitrário.
+  const [comparativoOntem, setComparativoOntem] = useState<{ faturamento: number; ticket: number } | null>(null)
 
   const cfgSaude = saudeConfig ?? CONFIG_PADRAO
   const faixasSaude = (saudeFaixas && saudeFaixas.length > 0) ? saudeFaixas : FAIXAS_PADRAO
 
   const primeiraRenderizacao = useRef(true)
+  const [pagina, setPagina] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  // Guarda a última combinação de período/busca/tamanho de página que já
+  // gerou uma busca — é o que diferencia "mudou o conjunto (volta pra
+  // página 1)" de "só virou de página".
+  const chaveConjuntoRef = useRef('')
 
   useEffect(() => {
     const t = setTimeout(() => setBuscaDebounced(busca), 350)
@@ -125,9 +136,24 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   }, [busca])
 
   useEffect(() => {
-    if (primeiraRenderizacao.current) { primeiraRenderizacao.current = false; return }
+    const chaveAtual = `${periodo}|${customInicio}|${customFim}|${buscaDebounced}|${pageSize}`
+    if (primeiraRenderizacao.current) {
+      primeiraRenderizacao.current = false
+      chaveConjuntoRef.current = chaveAtual
+      return
+    }
+    if (chaveAtual !== chaveConjuntoRef.current) {
+      chaveConjuntoRef.current = chaveAtual
+      // Período, busca ou tamanho de página mudou — o conjunto de vendas é
+      // outro, sempre volta pra primeira página. Se já estava na página 1,
+      // o `setPagina` abaixo não dispara de novo (mesmo valor), então busca
+      // aqui mesmo; se estava noutra página, o próprio efeito roda de novo
+      // quando `pagina` vira 1 e busca lá — nunca busca as duas vezes.
+      if (pagina !== 1) { setPagina(1); return }
+    }
     buscarVendas()
-  }, [periodo, customInicio, customFim, buscaDebounced])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodo, customInicio, customFim, buscaDebounced, pageSize, pagina])
 
   async function buscarVendas() {
     setCarregando(true); setErroBusca('')
@@ -152,12 +178,13 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
       if (idsFiltro.length === 0) { setVendas([]); setTotal(0); setCarregando(false); return }
     }
 
+    const inicioRange = (pagina - 1) * pageSize
     let query = sb.from('vendas').select(SELECT_VENDAS, { count: 'exact' })
       .eq('empresa_id', empresaId)
       .gte('created_at', inicio.toISOString())
       .lte('created_at', fim.toISOString())
       .order('created_at', { ascending: false })
-      .limit(300)
+      .range(inicioRange, inicioRange + pageSize - 1)
     if (idsFiltro) query = query.in('id', idsFiltro)
 
     const { data, count, error } = await query
@@ -166,6 +193,24 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     setTotal(count ?? 0)
     setCarregando(false)
   }
+
+  useEffect(() => {
+    if (periodo !== 'hoje') { setComparativoOntem(null); return }
+    let ativo = true
+    ;(async () => {
+      const sb = createClient()
+      const ontem = new Date(); ontem.setDate(ontem.getDate() - 1)
+      const { data } = await sb.from('vendas').select('total')
+        .eq('empresa_id', empresaId).eq('status', 'concluida')
+        .gte('created_at', inicioDoDia(ontem).toISOString())
+        .lte('created_at', fimDoDia(ontem).toISOString())
+      if (!ativo) return
+      const faturamento = (data ?? []).reduce((s, v) => s + (v.total ?? 0), 0)
+      const ticket = data && data.length > 0 ? faturamento / data.length : 0
+      setComparativoOntem({ faturamento, ticket })
+    })()
+    return () => { ativo = false }
+  }, [periodo, empresaId])
 
   // Filtro por forma de pagamento.
   //
@@ -188,6 +233,26 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const formasPresentes = (() => {
     const contagem = new Map<string, number>()
     for (const v of vendas) for (const f of formasDaVenda(v)) contagem.set(f, (contagem.get(f) ?? 0) + 1)
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1])
+  })()
+
+  // Filtro por vendedor — mesmo padrão do de pagamento. Usa o que a coluna
+  // "Vendedor" da tabela já mostra (vendedor_nome, com operador_nome de
+  // fallback), pra filtrar exatamente o que a pessoa está vendo.
+  const [vendedorFiltro, setVendedorFiltro] = useState<Set<string>>(new Set())
+  const vendedorDaVenda = (v: Venda) => v.vendedor_nome ?? v.operador_nome ?? '—'
+  const vendedoresPresentes = (() => {
+    const contagem = new Map<string, number>()
+    for (const v of vendas) contagem.set(vendedorDaVenda(v), (contagem.get(vendedorDaVenda(v)) ?? 0) + 1)
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1])
+  })()
+
+  // Filtro por canal — mesmo padrão.
+  const [canalFiltro, setCanalFiltro] = useState<Set<string>>(new Set())
+  const canalDaVenda = (v: Venda) => v.canal ?? 'PDV'
+  const canaisPresentes = (() => {
+    const contagem = new Map<string, number>()
+    for (const v of vendas) contagem.set(canalDaVenda(v), (contagem.get(canalDaVenda(v)) ?? 0) + 1)
     return [...contagem.entries()].sort((a, b) => b[1] - a[1])
   })()
 
@@ -223,8 +288,36 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
   const vendasFiltradas = vendas
     .filter(v => formasFiltro.size === 0 || formasDaVenda(v).some(f => formasFiltro.has(f)))
     .filter(casaFiscal)
+    .filter(v => vendedorFiltro.size === 0 || vendedorFiltro.has(vendedorDaVenda(v)))
+    .filter(v => canalFiltro.size === 0 || canalFiltro.has(canalDaVenda(v)))
 
-  const totalFaturado = vendasFiltradas.filter(v => v.status === 'concluida').reduce((s, v) => s + (v.total ?? 0), 0)
+  const vendasConcluidas = vendasFiltradas.filter(v => v.status === 'concluida')
+  const totalFaturado = vendasConcluidas.reduce((s, v) => s + (v.total ?? 0), 0)
+  const ticketMedio = vendasConcluidas.length > 0 ? totalFaturado / vendasConcluidas.length : 0
+
+  // Markup médio dos cards do topo — média simples do markup de cada venda
+  // já calculado por saudePorVenda (chega assíncrono, então só entram as
+  // que já têm saúde calculada; o número se ajusta sozinho enquanto carrega).
+  const markupsCalculados = vendasFiltradas
+    .map(v => saudePorVenda[v.id]?.resultado.markup)
+    .filter((m): m is number => m != null)
+  const markupMedio = markupsCalculados.length > 0
+    ? markupsCalculados.reduce((s, m) => s + m, 0) / markupsCalculados.length
+    : null
+
+  function variacao(atual: number, anterior: number | undefined) {
+    if (anterior == null || anterior <= 0) return null
+    const pct = ((atual - anterior) / anterior) * 100
+    return { texto: `${Math.abs(pct).toFixed(0)}% vs. ontem`, positivo: pct >= 0 }
+  }
+
+  // Paginação — sobre o total do período+busca no servidor (`total`), não
+  // sobre `vendasFiltradas`: pagamento/vendedor/canal só recortam DENTRO da
+  // página já carregada (mesmo padrão que os filtros já tinham antes desta
+  // mudança), então o número de páginas não pode depender deles.
+  const totalPaginas = Math.max(1, Math.ceil(total / pageSize))
+  const inicioIntervalo = total === 0 ? 0 : (pagina - 1) * pageSize + 1
+  const fimIntervalo = Math.min(pagina * pageSize, total)
 
   // Saúde retroativa por venda — reaproveita o mesmo calcSaude usado ao vivo
   // no PDV. Vendas antigas não têm custo_unitario salvo (coluna nova), então
@@ -550,64 +643,112 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
     { id: '7dias', label: '7 dias' }, { id: 'mes', label: 'Este mês' }, { id: 'custom', label: 'Período' },
   ]
 
+  const semFiltroDeChip = formasFiltro.size === 0 && vendedorFiltro.size === 0 && canalFiltro.size === 0
+  const variacaoFaturamento = variacao(totalFaturado, comparativoOntem?.faturamento)
+  const variacaoTicket = variacao(ticketMedio, comparativoOntem?.ticket)
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-1 flex-wrap gap-3">
+      <div className="flex items-start justify-between mb-5 flex-wrap gap-4">
         <div>
-          <h1 className="text-gray-900 text-xl font-semibold">Vendas</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
-            {formasFiltro.size > 0
-              ? `${vendasFiltradas.length} de ${vendas.length} transações`
-              : `${total} transações`} · {fmt(totalFaturado)} faturados
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            📦 Estoque debitado de: <strong className="text-gray-500">{empresaEstoqueNome}</strong>
-            {' · '}🧾 Fiscal emitido por: <strong className="text-gray-500">{empresaFiscalNome}</strong>
+          <h1 className="text-stone-900 text-2xl font-extrabold tracking-tight">Vendas</h1>
+          <p className="text-stone-400 text-xs mt-1.5">
+            📦 Estoque debitado de: <strong className="text-stone-500 font-medium">{empresaEstoqueNome}</strong>
+            {' · '}🧾 Fiscal emitido por: <strong className="text-stone-500 font-medium">{empresaFiscalNome}</strong>
           </p>
         </div>
-        <button onClick={() => buscarVendas()} disabled={carregando}
-          className="px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors">
-          🔄 Atualizar
-        </button>
-        <input
-          value={busca}
-          onChange={e => setBusca(e.target.value)}
-          placeholder="Buscar por cliente, produto ou número..."
-          className="bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:border-blue-500"
-        />
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <div className="flex bg-stone-100 rounded-lg p-1 gap-0.5">
+            {CHIPS.map(c => (
+              <button key={c.id} onClick={() => setPeriodo(c.id)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                  periodo === c.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-stone-500 hover:text-stone-700'
+                }`}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+          {periodo === 'custom' && (
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={customInicio} onChange={e => setCustomInicio(e.target.value)}
+                className="bg-white border border-stone-200 text-stone-800 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-indigo-500" />
+              <span className="text-stone-400 text-xs">até</span>
+              <input type="date" value={customFim} onChange={e => setCustomFim(e.target.value)}
+                className="bg-white border border-stone-200 text-stone-800 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-indigo-500" />
+            </div>
+          )}
+          <input
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            placeholder="Buscar por cliente, produto ou número..."
+            className="bg-white border border-stone-200 text-stone-800 rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:border-indigo-500"
+          />
+          <button onClick={() => buscarVendas()} disabled={carregando} aria-label="Atualizar lista"
+            className="w-9 h-9 flex items-center justify-center border border-stone-200 text-stone-500 rounded-lg hover:bg-stone-50 disabled:opacity-50 transition-colors">
+            🔄
+          </button>
+        </div>
       </div>
 
       {erroBusca && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
+        <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs px-4 py-2.5 rounded-lg mb-4 flex items-center justify-between">
           <span>Erro ao carregar vendas: {erroBusca}</span>
-          <button onClick={() => setErroBusca('')} className="text-red-400 hover:text-red-600">✕</button>
+          <button onClick={() => setErroBusca('')} className="text-rose-400 hover:text-rose-600">✕</button>
         </div>
       )}
 
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        {CHIPS.map(c => (
-          <button key={c.id} onClick={() => setPeriodo(c.id)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-              periodo === c.id ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-            }`}>
-            {c.label}
-          </button>
-        ))}
-        {periodo === 'custom' && (
-          <div className="flex items-center gap-2 ml-1">
-            <input type="date" value={customInicio} onChange={e => setCustomInicio(e.target.value)}
-              className="bg-white border border-gray-300 text-gray-800 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500" />
-            <span className="text-gray-400 text-xs">até</span>
-            <input type="date" value={customFim} onChange={e => setCustomFim(e.target.value)}
-              className="bg-white border border-gray-300 text-gray-800 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500" />
+      <div className="grid grid-cols-4 gap-4 mb-5">
+        <div className="bg-white border border-stone-200 rounded-2xl px-5 py-4 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">Faturamento</span>
+            <span className="text-sm opacity-50">💰</span>
           </div>
-        )}
-        {carregando && <span className="text-xs text-gray-400">Carregando...</span>}
+          <span className="text-2xl font-extrabold text-stone-900">{fmt(totalFaturado)}</span>
+          {variacaoFaturamento ? (
+            <span className={`text-xs font-semibold ${variacaoFaturamento.positivo ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {variacaoFaturamento.positivo ? '▲' : '▼'} {variacaoFaturamento.texto}
+            </span>
+          ) : (
+            <span className="text-xs text-stone-300">
+              {semFiltroDeChip ? `${total} transações` : `${vendasFiltradas.length} de ${vendas.length} nesta página`}
+            </span>
+          )}
+        </div>
+        <div className="bg-white border border-stone-200 rounded-2xl px-5 py-4 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">Ticket médio</span>
+            <span className="text-sm opacity-50">🧾</span>
+          </div>
+          <span className="text-2xl font-extrabold text-stone-900">{fmt(ticketMedio)}</span>
+          {variacaoTicket ? (
+            <span className={`text-xs font-semibold ${variacaoTicket.positivo ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {variacaoTicket.positivo ? '▲' : '▼'} {variacaoTicket.texto}
+            </span>
+          ) : (
+            <span className="text-xs text-stone-300">{vendasConcluidas.length} venda(s) concluída(s)</span>
+          )}
+        </div>
+        <div className="bg-white border border-stone-200 rounded-2xl px-5 py-4 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">Transações</span>
+            <span className="text-sm opacity-50">🧮</span>
+          </div>
+          <span className="text-2xl font-extrabold text-stone-900">{semFiltroDeChip ? total : vendasFiltradas.length}</span>
+          <span className="text-xs text-stone-300">no período selecionado</span>
+        </div>
+        <div className="bg-white border border-stone-200 rounded-2xl px-5 py-4 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-stone-400">Markup médio</span>
+            <span className="text-sm opacity-50">📈</span>
+          </div>
+          <span className="text-2xl font-extrabold text-stone-900">{markupMedio != null ? `${markupMedio.toFixed(0)}%` : '—'}</span>
+          <span className="text-xs text-stone-300">média de {markupsCalculados.length} venda(s)</span>
+        </div>
       </div>
 
       {formasPresentes.length > 1 && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap">
-          <span className="text-xs text-gray-500">Pagamento:</span>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <span className="text-xs text-stone-400 font-medium">Pagamento:</span>
           {formasPresentes.map(([forma, qtd]) => {
             const on = formasFiltro.has(forma)
             return (
@@ -617,8 +758,8 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                   novo.has(forma) ? novo.delete(forma) : novo.add(forma)
                   return novo
                 })}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                  on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
                 }`}>
                 {FORMA_LABEL[forma] ?? forma} <span className="opacity-60">{qtd}</span>
               </button>
@@ -626,7 +767,59 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           })}
           {formasFiltro.size > 0 && (
             <button onClick={() => setFormasFiltro(new Set())}
-              className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
+              className="text-xs text-stone-400 hover:text-stone-600 underline">limpar</button>
+          )}
+        </div>
+      )}
+
+      {vendedoresPresentes.length > 1 && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <span className="text-xs text-stone-400 font-medium">Vendedor:</span>
+          {vendedoresPresentes.map(([vend, qtd]) => {
+            const on = vendedorFiltro.has(vend)
+            return (
+              <button key={vend}
+                onClick={() => setVendedorFiltro(prev => {
+                  const novo = new Set(prev)
+                  novo.has(vend) ? novo.delete(vend) : novo.add(vend)
+                  return novo
+                })}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                }`}>
+                {vend} <span className="opacity-60">{qtd}</span>
+              </button>
+            )
+          })}
+          {vendedorFiltro.size > 0 && (
+            <button onClick={() => setVendedorFiltro(new Set())}
+              className="text-xs text-stone-400 hover:text-stone-600 underline">limpar</button>
+          )}
+        </div>
+      )}
+
+      {canaisPresentes.length > 1 && (
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <span className="text-xs text-stone-400 font-medium">Canal:</span>
+          {canaisPresentes.map(([canal, qtd]) => {
+            const on = canalFiltro.has(canal)
+            return (
+              <button key={canal}
+                onClick={() => setCanalFiltro(prev => {
+                  const novo = new Set(prev)
+                  novo.has(canal) ? novo.delete(canal) : novo.add(canal)
+                  return novo
+                })}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  on ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                }`}>
+                {canal} <span className="opacity-60">{qtd}</span>
+              </button>
+            )
+          })}
+          {canalFiltro.size > 0 && (
+            <button onClick={() => setCanalFiltro(new Set())}
+              className="text-xs text-stone-400 hover:text-stone-600 underline">limpar</button>
           )}
         </div>
       )}
@@ -635,7 +828,7 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           filtro de pagamento acima, em vez de substituí-lo. */}
       {(contagemFiscal.com > 0 || contagemFiscal.sem > 0) && (
         <div className="flex items-center gap-2 mb-4 flex-wrap">
-          <span className="text-xs text-gray-500">Nota fiscal:</span>
+          <span className="text-xs text-stone-400 font-medium">Nota fiscal:</span>
           {([
             ['com', '🧾 Com NFC-e', contagemFiscal.com, 'Vendas com nota autorizada'],
             ['sem', 'Sem NFC-e', contagemFiscal.sem, 'Vendas que ainda precisam de nota (troca e devolução não entram)'],
@@ -646,10 +839,10 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             return (
               <button key={valor} title={ajuda}
                 onClick={() => setFiscalFiltro(on ? '' : valor)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                   on
-                    ? valor === 'rejeitada' ? 'bg-red-600 border-red-600 text-white' : 'bg-blue-600 border-blue-600 text-white'
-                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                    ? valor === 'rejeitada' ? 'bg-rose-600 border-rose-600 text-white' : 'bg-indigo-600 border-indigo-600 text-white'
+                    : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
                 }`}>
                 {rotulo} <span className="opacity-60">{qtd}</span>
               </button>
@@ -657,39 +850,39 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
           })}
           {fiscalFiltro && (
             <button onClick={() => setFiscalFiltro('')}
-              className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
+              className="text-xs text-stone-400 hover:text-stone-600 underline">limpar</button>
           )}
         </div>
       )}
 
       {selecionados.size > 0 && (
-        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 flex-wrap">
-          <span className="text-sm text-blue-700 font-medium">{selecionados.size} selecionada(s)</span>
+        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-2.5 mb-4 flex-wrap">
+          <span className="text-sm text-indigo-700 font-medium">{selecionados.size} selecionada(s)</span>
           <button onClick={imprimirSelecionados} disabled={aplicandoMassa}
             title="Gera um PDF único com uma venda por página, na ordem da lista"
-            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            className="px-3 py-1.5 bg-white border border-stone-200 hover:bg-stone-50 disabled:opacity-50 text-stone-700 text-xs font-medium rounded-lg">
             {aplicandoMassa ? '🖨️ Gerando…' : '🖨️ Imprimir selecionadas'}
           </button>
           <button onClick={enviarWhatsappSelecionados} disabled={aplicandoMassa}
-            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            className="px-3 py-1.5 bg-white border border-stone-200 hover:bg-stone-50 disabled:opacity-50 text-stone-700 text-xs font-medium rounded-lg">
             📱 Enviar por WhatsApp
           </button>
           <button onClick={emitirNfceSelecionados} disabled={aplicandoMassa}
-            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            className="px-3 py-1.5 bg-white border border-stone-200 hover:bg-stone-50 disabled:opacity-50 text-stone-700 text-xs font-medium rounded-lg">
             🧾 Emitir NFC-e
           </button>
           <button onClick={imprimirNfceSelecionadas} disabled={aplicandoMassa}
             title="Imprime a DANFE das vendas com NFC-e autorizada; as demais são puladas"
-            className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+            className="px-3 py-1.5 bg-white border border-stone-200 hover:bg-stone-50 disabled:opacity-50 text-stone-700 text-xs font-medium rounded-lg">
             🖨️ Imprimir NFC-e
           </button>
           {!trocandoPagamento ? (
             <button onClick={() => setTrocandoPagamento(true)} disabled={aplicandoMassa}
-              className="px-3 py-1.5 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-xs font-medium rounded-lg">
+              className="px-3 py-1.5 bg-white border border-stone-200 hover:bg-stone-50 disabled:opacity-50 text-stone-700 text-xs font-medium rounded-lg">
               💳 Mudar forma de pagamento
             </button>
           ) : (
-            <div className="flex items-center gap-1.5 bg-white border border-gray-300 rounded-lg px-2 py-1">
+            <div className="flex items-center gap-1.5 bg-white border border-stone-200 rounded-lg px-2 py-1">
               <select value={novaFormaMassa} onChange={e => setNovaFormaMassa(e.target.value)}
                 className="text-xs focus:outline-none">
                 {Object.entries(FORMA_LABEL).filter(([k]) => k !== 'troca' && k !== 'multiplo').map(([k, l]) => (
@@ -697,13 +890,13 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                 ))}
               </select>
               <button onClick={mudarPagamentoSelecionados} disabled={aplicandoMassa}
-                className="px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded">
+                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-medium rounded">
                 Aplicar
               </button>
-              <button onClick={() => setTrocandoPagamento(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+              <button onClick={() => setTrocandoPagamento(false)} className="text-xs text-stone-400 hover:text-stone-600">✕</button>
             </div>
           )}
-          <button onClick={() => setSelecionados(new Set())} className="text-xs text-blue-400 hover:text-blue-600 ml-auto">✕ limpar seleção</button>
+          <button onClick={() => setSelecionados(new Set())} className="text-xs text-indigo-400 hover:text-indigo-600 ml-auto">✕ limpar seleção</button>
         </div>
       )}
       {resumoMassa && (
@@ -713,100 +906,102 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-gray-500 bg-gray-50 border-b border-gray-200">
+            <tr className="text-stone-400 bg-stone-50 border-b border-stone-200">
               <th className="px-4 py-3">
                 <input type="checkbox" checked={selecionados.size === vendas.length && vendas.length > 0}
-                  onChange={e => toggleTodos(e.target.checked)} className="w-4 h-4 accent-blue-600" />
+                  onChange={e => toggleTodos(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
               </th>
-              <th className="text-center px-2 py-3 font-medium" title="Saúde da venda">Saúde</th>
-              <th className="text-left px-4 py-3 font-medium">#</th>
-              <th className="text-left px-4 py-3 font-medium">Data/Hora</th>
-              <th className="text-left px-4 py-3 font-medium">Cliente</th>
-              <th className="text-left px-4 py-3 font-medium">Vendedor</th>
-              <th className="text-left px-4 py-3 font-medium">Itens</th>
-              <th className="text-left px-4 py-3 font-medium">Canal</th>
-              <th className="text-left px-4 py-3 font-medium">Pagamento</th>
-              <th className="text-right px-4 py-3 font-medium">Desconto</th>
-              <th className="text-right px-4 py-3 font-medium">Total</th>
-              <th className="text-center px-4 py-3 font-medium">Status</th>
-              <th className="text-center px-4 py-3 font-medium">Nota Fiscal</th>
-              <th className="text-center px-4 py-3 font-medium">Ações</th>
+              <th className="text-center px-2 py-3 font-bold text-[10.5px] uppercase tracking-wide" title="Markup médio do pedido — (preço − custo) / custo. A cor segue a faixa de saúde da venda.">Markup</th>
+              <th className="text-left px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">#</th>
+              <th className="text-left px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Data/Hora</th>
+              <th className="text-left px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Cliente</th>
+              <th className="text-left px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Vendedor</th>
+              <th className="text-left px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Itens</th>
+              <th className="text-left px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Canal</th>
+              <th className="text-left px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Pagamento</th>
+              <th className="text-right px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Desconto</th>
+              <th className="text-right px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Total</th>
+              <th className="text-center px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Status</th>
+              <th className="text-center px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Nota Fiscal</th>
+              <th className="text-center px-4 py-3 font-bold text-[10.5px] uppercase tracking-wide">Ações</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {vendasFiltradas.map(v => {
-              const itensV = (itensPorVenda[v.id] ?? []).filter(i => i.tipo !== 'devolucao')
+          <tbody className="divide-y divide-stone-100">
+            {vendasFiltradas.map((v, i) => {
+              const itensV = (itensPorVenda[v.id] ?? []).filter(item => item.tipo !== 'devolucao')
               const saude = saudePorVenda[v.id]
               return (
-              <tr key={v.id} className={`text-gray-600 hover:bg-gray-50 transition-colors ${selecionados.has(v.id) ? 'bg-blue-50/50' : ''}`}>
+              <tr key={v.id} className={`text-stone-600 hover:bg-stone-50 transition-colors ${
+                selecionados.has(v.id) ? 'bg-indigo-50/60' : i % 2 === 1 ? 'bg-stone-50/50' : ''
+              }`}>
                 <td className="px-4 py-2.5">
-                  <input type="checkbox" checked={selecionados.has(v.id)} onChange={() => toggleUm(v.id)} className="w-4 h-4 accent-blue-600" />
+                  <input type="checkbox" checked={selecionados.has(v.id)} onChange={() => toggleUm(v.id)} className="w-4 h-4 accent-indigo-600" />
                 </td>
                 <td className="px-2 py-2.5 text-center">
                   {saude ? (
-                    <span title={`${saude.resultado.faixa?.nome ?? '—'} · margem ${saude.resultado.margem.toFixed(1)}%${saude.aproximado ? ' (estimado com custo atual)' : ''}`}
-                      className="inline-flex items-center gap-0.5">
-                      <span className={`inline-block w-2.5 h-2.5 rounded-full ${saude.aproximado ? 'opacity-60' : ''}`}
-                        style={{ backgroundColor: saude.resultado.faixa?.cor ?? '#9ca3af' }} />
-                      {saude.aproximado && <span className="text-[10px] text-gray-300">~</span>}
+                    <span title={`${saude.resultado.faixa?.nome ?? '—'} · margem líquida ${saude.resultado.margem.toFixed(1)}%${saude.aproximado ? ' (estimado com custo atual)' : ''}`}
+                      className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                      style={{ color: saude.resultado.faixa?.cor ?? '#6b7280', backgroundColor: saude.resultado.faixa?.cor_fundo ?? '#f3f4f6' }}>
+                      {saude.resultado.markup.toFixed(0)}%
+                      {saude.aproximado && <span className="opacity-60">~</span>}
                     </span>
-                  ) : <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-200" />}
+                  ) : <span className="text-xs text-stone-300">—</span>}
                 </td>
-                <td className="px-4 py-2.5 text-gray-400 font-mono">{v.numero}</td>
-                <td className="px-4 py-2.5 text-gray-400 text-xs">
+                <td className="px-4 py-2.5 text-stone-400 font-mono">{v.numero}</td>
+                <td className="px-4 py-2.5 text-stone-500 text-xs">
                   {new Date(v.created_at).toLocaleDateString('pt-BR')} {new Date(v.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </td>
-                <td className="px-4 py-2.5 text-gray-900">{v.clientes?.nome ?? 'Consumidor'}</td>
+                <td className="px-4 py-2.5 text-stone-800">{v.clientes?.nome ?? 'Consumidor'}</td>
                 {/* Vendedor é quem VENDEU, escolhido ao fechar o pedido.
                     `operador_nome` é o login do terminal ("balcao") e serve
                     para outra pergunta — por isso vai só no title, para não
                     perder a rastreabilidade nem ocupar a coluna. */}
-                <td className="px-4 py-2.5 text-gray-600 text-xs"
+                <td className="px-4 py-2.5 text-stone-600 text-xs"
                   title={v.operador_nome ? `Operador do PDV: ${v.operador_nome}` : undefined}>
                   {v.vendedor_nome ?? v.operador_nome ?? '—'}
                 </td>
-                <td className="px-4 py-2.5 text-gray-600 text-xs max-w-[180px] truncate" title={itensV.map(i => i.produto_nome).join(', ')}>
+                <td className="px-4 py-2.5 text-stone-500 text-xs max-w-[180px] truncate" title={itensV.map(item => item.produto_nome).join(', ')}>
                   {itensV.length > 0 ? `${itensV[0].produto_nome}${itensV.length > 1 ? ` +${itensV.length - 1}` : ''}` : '—'}
                 </td>
                 <td className="px-4 py-2.5">
-                  <span className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200">{v.canal ?? 'PDV'}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-stone-100 text-stone-500 font-medium">{v.canal ?? 'PDV'}</span>
                 </td>
-                <td className="px-4 py-2.5 text-gray-600 text-xs">{FORMA_LABEL[v.forma_pagamento] ?? v.forma_pagamento}</td>
-                <td className="px-4 py-2.5 text-right text-gray-400">
+                <td className="px-4 py-2.5 text-stone-600 text-xs">{FORMA_LABEL[v.forma_pagamento] ?? v.forma_pagamento}</td>
+                <td className="px-4 py-2.5 text-right text-stone-400">
                   {(v.desconto ?? 0) > 0 ? fmt(v.desconto) : '—'}
                 </td>
-                <td className="px-4 py-2.5 text-right text-gray-900 font-medium">{fmt(v.total)}</td>
+                <td className="px-4 py-2.5 text-right text-stone-900 font-semibold">{fmt(v.total)}</td>
                 <td className="px-4 py-2.5 text-center">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                    v.status === 'concluida' ? 'bg-green-100 text-green-700 border-green-200' :
-                    v.status === 'cancelada' ? 'bg-red-100 text-red-600 border-red-200' :
-                    'bg-yellow-100 text-yellow-700 border-yellow-200'
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    v.status === 'concluida' ? 'bg-emerald-50 text-emerald-700' :
+                    v.status === 'cancelada' ? 'bg-rose-50 text-rose-600' :
+                    'bg-amber-50 text-amber-700'
                   }`}>{v.status}</span>
                 </td>
                 <td className="px-4 py-2.5 text-center">
                   {v.tipo_operacao !== 'venda' ? (
-                    <span className="text-xs text-gray-300">—</span>
+                    <span className="text-xs text-stone-300">—</span>
                   ) : v.nfce_status === 'autorizada' ? (
                     // Botão, não link: a DANFE fica guardada como data: URL, e
                     // navegador não navega pra data: — <a href> não abria nada.
                     <button onClick={() => imprimirNfce(v, false)} disabled={!v.nfce_url_pdf}
                       title={v.nfce_url_pdf ? 'Ver DANFE da NFC-e' : 'NFC-e autorizada, mas sem DANFE guardada'}
-                      className="text-xs px-2 py-0.5 rounded-full border bg-green-100 text-green-700 border-green-200 hover:bg-green-200 disabled:opacity-60 disabled:hover:bg-green-100">
+                      className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 disabled:hover:bg-emerald-50">
                       ✅ {v.nfce_numero ?? 'Autorizada'}
                     </button>
                   ) : v.nfce_status === 'erro' ? (
                     <button onClick={() => emitirNfceLinha(v)} disabled={emitindoId === v.id} title={v.nfce_motivo_rejeicao ?? 'Erro ao emitir'}
-                      className="text-xs px-2 py-0.5 rounded-full border bg-red-100 text-red-600 border-red-200 hover:bg-red-200 disabled:opacity-50">
+                      className="text-xs px-2 py-0.5 rounded-full font-medium bg-rose-50 text-rose-600 hover:bg-rose-100 disabled:opacity-50">
                       {emitindoId === v.id ? '⏳' : '⚠️ Tentar de novo'}
                     </button>
                   ) : v.nfce_status === 'pendente' ? (
-                    <span className="text-xs px-2 py-0.5 rounded-full border bg-yellow-100 text-yellow-700 border-yellow-200">⏳ Pendente</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700">⏳ Pendente</span>
                   ) : (
                     <button onClick={() => emitirNfceLinha(v)} disabled={emitindoId === v.id}
-                      className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 disabled:opacity-50">
+                      className="text-xs px-2 py-0.5 rounded-full font-medium bg-stone-100 text-stone-500 hover:bg-stone-200 disabled:opacity-50">
                       {emitindoId === v.id ? '⏳' : 'Emitir'}
                     </button>
                   )}
@@ -814,19 +1009,19 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
                 <td className="px-4 py-2.5">
                   <div className="flex items-center justify-center gap-1">
                     <button onClick={() => abrirDetalhe(v, false)} title="Ver detalhes"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500">👁</button>
+                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-stone-100 text-stone-500">👁</button>
                     <button onClick={() => abrirDetalhe(v, true)} title="Editar"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500">✏️</button>
+                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-stone-100 text-stone-500">✏️</button>
                     <button onClick={() => imprimirVenda(v)} disabled={gerandoPdfId === v.id} title="Imprimir comprovante"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 disabled:opacity-40">
+                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-stone-100 text-stone-500 disabled:opacity-40">
                       {gerandoPdfId === v.id ? '⏳' : '🖨️'}
                     </button>
                     {podeImprimirNfce(v) && (
                       <button onClick={() => imprimirNfce(v)} title={`Imprimir NFC-e nº ${v.nfce_numero ?? ''}`.trim()}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-green-50 text-green-600">🧾</button>
+                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-emerald-50 text-emerald-600">🧾</button>
                     )}
                     <button onClick={() => abrirWhatsapp(v)} disabled={gerandoPdfId === v.id} title="Enviar via WhatsApp"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 disabled:opacity-40">
+                      className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-stone-100 text-stone-500 disabled:opacity-40">
                       {gerandoPdfId === v.id ? '⏳' : '📱'}
                     </button>
                   </div>
@@ -835,13 +1030,41 @@ export default function VendasClient({ empresaId, vendasIniciais, totalInicial, 
             )})}
             {vendasFiltradas.length === 0 && !carregando && (
               <tr>
-                <td colSpan={14} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={14} className="px-4 py-8 text-center text-stone-400">
                   Nenhuma venda encontrada neste período.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-stone-100 bg-stone-50 flex-wrap">
+          <span className="text-xs text-stone-400">
+            {total === 0 ? 'Nenhuma venda no período' : `${inicioIntervalo}–${fimIntervalo} de ${total}`}
+          </span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-stone-500">
+              Por página:
+              <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}
+                className="border border-stone-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:border-indigo-500">
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+              </select>
+            </label>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPagina(p => Math.max(1, p - 1))} disabled={pagina <= 1 || carregando}
+                className="px-2.5 py-1 border border-stone-200 rounded-lg text-xs text-stone-600 hover:bg-white disabled:opacity-40 bg-white">
+                ← Anterior
+              </button>
+              <span className="text-xs text-stone-500 px-1.5 whitespace-nowrap">Página {pagina} de {totalPaginas}</span>
+              <button onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))} disabled={pagina >= totalPaginas || carregando}
+                className="px-2.5 py-1 border border-stone-200 rounded-lg text-xs text-stone-600 hover:bg-white disabled:opacity-40 bg-white">
+                Próxima →
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {detalheAberto && (

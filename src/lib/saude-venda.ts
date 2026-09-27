@@ -68,6 +68,10 @@ export interface ResultadoSaude {
   lucroLiquido: number
   margem: number
   margemBruta: number
+  /** (preço − custo) / custo × 100 — markup sobre o custo da mercadoria,
+   * diferente de `margem` (lucro líquido sobre o preço de venda). É o
+   * número que o balcão costuma chamar de "markup". */
+  markup: number
   faixa: FaixaSaude | null
   descontoMaxPct: number
   descontoMaxValor: number
@@ -161,6 +165,7 @@ export function calcSaude(
   const lucroLiquido = totalComDesc - custoTotalReal
   const margem = totalComDesc > 0 ? (lucroLiquido / totalComDesc) * 100 : 0
   const margemBruta = totalComDesc > 0 ? (lucroBruto / totalComDesc) * 100 : 0
+  const markup = custoTotal > 0 ? (lucroBruto / custoTotal) * 100 : 0
 
   const faixasAtivas = (faixas.length > 0 ? faixas : FAIXAS_PADRAO).filter(f => f.ativo !== false)
   const faixa = encontrarFaixa(margem, faixasAtivas)
@@ -191,7 +196,7 @@ export function calcSaude(
     totalBruto, totalComDesc, custoTotal,
     custoTaxaPag, custoImposto, custoOperacional, custoComissao, custoEmbalagem, custoFrete,
     custoTotalReal, lucroBruto, lucroLiquido,
-    margem, margemBruta, faixa,
+    margem, margemBruta, markup, faixa,
     descontoMaxPct, descontoMaxValor, descontoAtual: descontoGlobal, descontoRestante,
     valorMinRecomendado, valorMinAbsoluto,
     taxaPagPct,
