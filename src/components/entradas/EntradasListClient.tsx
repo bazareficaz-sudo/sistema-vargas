@@ -22,6 +22,63 @@ type Entrada = {
   total_contas?: number
 }
 
+// Entrada por XML/NF-e, versão enxuta pra tabela unificada — só o que a
+// linha mostra. O resto (itens, mapeamento, financeiro) mora na tela
+// dedicada `/dashboard/entradas-xml/[id]`, que continua existindo como está.
+type EntradaXml = {
+  id: string
+  numero: string | null
+  serie: string | null
+  nome_fornecedor: string | null
+  cnpj_fornecedor: string | null
+  data_emissao: string | null
+  data_finalizacao: string | null
+  valor_total: number
+  status: string
+  created_at: string
+}
+
+// Mesmas cores/rótulos de src/components/entradas-xml/EntradasXmlClient.tsx
+// (duplicado de propósito: são dois componentes grandes e independentes,
+// acoplar um ao outro só pra reaproveitar um objeto de 13 linhas não vale).
+const STATUS_LABEL_XML: Record<string, string> = {
+  xml_importado:        'XML Importado',
+  sefaz_encontrada:     'SEFAZ Encontrada',
+  manifesto_pendente:   'Manifesto Pendente',
+  manifestada:          'Manifestada',
+  xml_baixado:          'XML Baixado',
+  aguardando_mapeamento:'Mapeamento',
+  aguardando_conferencia:'Conferência',
+  aguardando_precos:    'Revisão Preços',
+  aguardando_financeiro:'Financeiro',
+  pronta:               'Pronta',
+  finalizada:            'Finalizada',
+  cancelada:             'Cancelada',
+  ignorada:              'Ignorada',
+  erro:                  'Erro',
+}
+const STATUS_COR_XML: Record<string, string> = {
+  xml_importado:        'bg-blue-50 text-blue-600 border border-blue-100',
+  aguardando_mapeamento:'bg-amber-50 text-amber-600 border border-amber-100',
+  aguardando_conferencia:'bg-orange-50 text-orange-600 border border-orange-100',
+  aguardando_precos:    'bg-purple-50 text-purple-600 border border-purple-100',
+  aguardando_financeiro:'bg-indigo-50 text-indigo-600 border border-indigo-100',
+  pronta:               'bg-cyan-50 text-cyan-600 border border-cyan-100',
+  finalizada:            'bg-emerald-50 text-emerald-600 border border-emerald-100',
+  cancelada:             'bg-red-50 text-red-600 border border-red-100',
+  ignorada:              'bg-slate-100 text-slate-500',
+  erro:                  'bg-red-50 text-red-600 border border-red-100',
+  manifestada:           'bg-teal-50 text-teal-600 border border-teal-100',
+  manifesto_pendente:    'bg-amber-50 text-amber-600 border border-amber-100',
+}
+function fmtCnpj(c: string | null) {
+  if (!c) return ''
+  return c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
+}
+/** Quando o estoque da NF-e de fato entrou — finalização, ou emissão se
+ * ainda não finalizou. Mesmo critério de src/lib/entradas/taxaAcerto.ts. */
+function dataEfetivaXml(e: EntradaXml) { return e.data_finalizacao ?? e.data_emissao }
+
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
 type ItemEntrada = {
@@ -67,24 +124,32 @@ function fmtData(d: string | null | undefined) {
 
 export default function EntradasListClient({
   entradas: inicial,
+  entradasXml: inicialXml,
   fornecedores,
   pendencias,
   empresaId,
   operador,
 }: {
   entradas: Entrada[]
+  entradasXml: EntradaXml[]
   fornecedores: Fornecedor[]
   pendencias: { semRevisao: number; semContas: number; rascunho: number }
   empresaId: string
   operador: string
 }) {
   const [lista, setLista] = useState<Entrada[]>(inicial)
+  const [listaXml] = useState<EntradaXml[]>(inicialXml)
   const [busca, setBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState('')
   const [filtroRevisao, setFiltroRevisao] = useState('')
   const [filtroForn, setFiltroForn] = useState('')
   const [dataInicio, setDataInicio] = useState('')
   const [dataFim, setDataFim] = useState('')
+  // Origem: filtro extra da tela unificada. O status em si NÃO é unificado
+  // (o pipeline de 13 estados da XML não é a mesma coisa que os 3 estados
+  // manuais) — cada linha mostra seu próprio status nativo; isto aqui só
+  // decide quais das duas listas entram na tabela.
+  const [origemFiltro, setOrigemFiltro] = useState<'' | 'manual' | 'xml'>('')
   const [confirmando, setConfirmando] = useState<Entrada | null>(null)
   const [excluindo, setExcluindo] = useState(false)
   const [erroExclusao, setErroExclusao] = useState('')
@@ -227,6 +292,7 @@ export default function EntradasListClient({
   }
 
   const filtradas = useMemo(() => {
+    if (origemFiltro === 'xml') return []
     const q = busca.toLowerCase().trim()
     return lista.filter(e => {
       if (filtroStatus && e.status !== filtroStatus) return false
@@ -241,12 +307,48 @@ export default function EntradasListClient({
       }
       return true
     })
-  }, [lista, busca, filtroStatus, filtroRevisao, filtroForn, dataInicio, dataFim, idsComProduto])
+  }, [lista, busca, filtroStatus, filtroRevisao, filtroForn, dataInicio, dataFim, idsComProduto, origemFiltro])
 
-  const temFiltro = busca || buscaProduto || filtroStatus || filtroRevisao || filtroForn || dataInicio || dataFim
+  // Filtros exclusivos da entrada manual (status/revisão do fluxo de preço,
+  // busca por produto comprado) não têm equivalente na XML — se algum deles
+  // estiver ativo, a XML simplesmente some da lista em vez de fingir que o
+  // filtro "não bateu" (que ia parecer bug: "cadê minha nota?").
+  const filtroExclusivoManualAtivo = !!(filtroStatus || filtroRevisao || buscaProduto.trim().length >= 2)
+
+  const filtradasXml = useMemo(() => {
+    if (origemFiltro === 'manual' || filtroExclusivoManualAtivo) return []
+    const q = busca.toLowerCase().trim()
+    return listaXml.filter(e => {
+      if (filtroForn && !(e.nome_fornecedor ?? '').toLowerCase().includes(filtroForn.toLowerCase())) return false
+      const dataEf = dataEfetivaXml(e)
+      if (dataInicio && (!dataEf || dataEf < dataInicio)) return false
+      if (dataFim && (!dataEf || dataEf > dataFim)) return false
+      if (q) {
+        const hay = [e.numero, e.nome_fornecedor, e.cnpj_fornecedor].join(' ').toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [listaXml, busca, filtroForn, dataInicio, dataFim, origemFiltro, filtroExclusivoManualAtivo])
+
+  type LinhaUnificada = { origem: 'manual'; e: Entrada } | { origem: 'xml'; e: EntradaXml }
+  const unificadas: LinhaUnificada[] = useMemo(() => {
+    const combinadas: LinhaUnificada[] = [
+      ...filtradas.map(e => ({ origem: 'manual' as const, e })),
+      ...filtradasXml.map(e => ({ origem: 'xml' as const, e })),
+    ]
+    combinadas.sort((a, b) => {
+      const da = a.origem === 'manual' ? a.e.data_entrada : (dataEfetivaXml(a.e) ?? a.e.created_at)
+      const db = b.origem === 'manual' ? b.e.data_entrada : (dataEfetivaXml(b.e) ?? b.e.created_at)
+      return (db ?? '').localeCompare(da ?? '')
+    })
+    return combinadas
+  }, [filtradas, filtradasXml])
+
+  const temFiltro = busca || buscaProduto || filtroStatus || filtroRevisao || filtroForn || dataInicio || dataFim || origemFiltro
   function limpar() {
     setBusca(''); setBuscaProduto(''); setFiltroStatus(''); setFiltroRevisao('')
-    setFiltroForn(''); setDataInicio(''); setDataFim('')
+    setFiltroForn(''); setDataInicio(''); setDataFim(''); setOrigemFiltro('')
   }
 
   return (
@@ -261,12 +363,22 @@ export default function EntradasListClient({
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Entradas de Mercadoria</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{filtradas.length} de {lista.length} entradas</p>
+          <p className="text-gray-500 text-sm mt-0.5">
+            {unificadas.length} de {lista.length + listaXml.length} entradas (manual + XML/NF-e)
+          </p>
         </div>
         <div className="flex gap-2">
           <Link href="/dashboard/entradas/produtos"
             className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
             📦 Produtos Comprados
+          </Link>
+          <Link href="/dashboard/entradas-xml?abrir=sefaz"
+            className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+            🔍 Consultar SEFAZ
+          </Link>
+          <Link href="/dashboard/entradas-xml?abrir=importar"
+            className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
+            📄 Importar XML
           </Link>
           <Link href="/dashboard/entradas/nova"
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
@@ -311,6 +423,22 @@ export default function EntradasListClient({
         </div>
       )}
 
+      {/* Origem */}
+      <div className="flex gap-2 mb-3">
+        {([
+          { v: '', label: `Todas (${lista.length + listaXml.length})` },
+          { v: 'manual', label: `📝 Manual (${lista.length})` },
+          { v: 'xml', label: `📄 XML/NF-e (${listaXml.length})` },
+        ] as const).map(op => (
+          <button key={op.v} onClick={() => setOrigemFiltro(op.v)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+              origemFiltro === op.v ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+            }`}>
+            {op.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filtros */}
       <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 mb-4 flex flex-wrap gap-3 items-end">
         <div className="flex-1 min-w-[200px]">
@@ -331,7 +459,7 @@ export default function EntradasListClient({
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Status</label>
+          <label className="block text-xs text-gray-500 mb-1" title="Só existe no fluxo manual — usar isto esconde as entradas por XML da lista">Status (manual)</label>
           <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400">
             <option value="">Todos</option>
@@ -341,7 +469,7 @@ export default function EntradasListClient({
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Revisão de preços</label>
+          <label className="block text-xs text-gray-500 mb-1" title="Só existe no fluxo manual — usar isto esconde as entradas por XML da lista">Revisão de preços (manual)</label>
           <select value={filtroRevisao} onChange={e => setFiltroRevisao(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400">
             <option value="">Todos</option>
@@ -373,8 +501,8 @@ export default function EntradasListClient({
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Nº Entrada</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Nº NF</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Origem</th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Identificação</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Fornecedor</th>
               <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Itens</th>
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Data entrada</th>
@@ -385,16 +513,60 @@ export default function EntradasListClient({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filtradas.map(e => {
+            {unificadas.map(linha => {
+              if (linha.origem === 'xml') {
+                const x = linha.e
+                return (
+                  <tr key={`xml-${x.id}`} className="hover:bg-gray-50 transition-colors group">
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-purple-600 bg-purple-50 border border-purple-100 px-2 py-0.5 rounded-full">📄 XML</span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-gray-500 text-xs">
+                      NF-e {x.numero ?? '—'}{x.serie ? `/${x.serie}` : ''}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-gray-900 font-medium text-sm">{x.nome_fornecedor ?? '—'}</p>
+                      {x.cnpj_fornecedor && <p className="text-xs text-gray-400">{fmtCnpj(x.cnpj_fornecedor)}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-center"><span className="text-xs text-gray-400">—</span></td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{fmtData(dataEfetivaXml(x))}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(Number(x.valor_total))}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COR_XML[x.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                        {STATUS_LABEL_XML[x.status] ?? x.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center"></td>
+                    <td className="px-4 py-3">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-3">
+                        <Link href={`/dashboard/entradas-xml/${x.id}`}
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">
+                          Abrir →
+                        </Link>
+                        <Link href={`/dashboard/produtos?entrada=${encodeURIComponent(x.numero ?? '')}`}
+                          className="text-xs text-emerald-600 hover:text-emerald-800 font-medium whitespace-nowrap">
+                          📦 Produtos
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+              const e = linha.e
               const revisao = e.status_revisao ?? 'pendente'
               const linhaPrincipal = (
                 <tr key={e.id} className="hover:bg-gray-50 transition-colors group">
                   <td className="px-4 py-3">
+                    <span className="text-xs text-blue-600 bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">📝 Manual</span>
+                  </td>
+                  <td className="px-4 py-3">
                     <span className="font-mono text-xs bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded">
                       {e.numero_entrada ?? '—'}
                     </span>
+                    {(e.numero_nf || e.serie) && (
+                      <p className="text-gray-400 text-xs mt-0.5">NF {e.numero_nf ?? '—'}{e.serie ? `/${e.serie}` : ''}</p>
+                    )}
                   </td>
-                  <td className="px-4 py-3 font-mono text-gray-500 text-xs">{e.numero_nf ?? '—'}{e.serie ? `/${e.serie}` : ''}</td>
                   <td className="px-4 py-3">
                     <p className="text-gray-900 font-medium text-sm">
                       {e.fornecedores?.nome_fantasia ?? e.fornecedores?.razao_social ?? '—'}
@@ -510,7 +682,7 @@ export default function EntradasListClient({
               ) : null
               return linhaItens ? [linhaPrincipal, linhaItens] : linhaPrincipal
             })}
-            {filtradas.length === 0 && (
+            {unificadas.length === 0 && (
               <tr>
                 <td colSpan={9} className="py-12 text-center text-gray-400">
                   {temFiltro ? 'Nenhuma entrada encontrada com esses filtros.' : (

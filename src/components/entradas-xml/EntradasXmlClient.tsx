@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -59,10 +59,13 @@ function fmtCnpj(c: string) {
 }
 
 export default function EntradasXmlClient({
-  empresaId, operador, entradasIniciais, depositos, configSefaz
+  empresaId, operador, entradasIniciais, depositos, configSefaz, abrirInicial
 }: {
   empresaId: string; operador: string; entradasIniciais: Entrada[]
   depositos: Deposito[]; configSefaz: ConfigSefaz
+  /** Vem da tela unificada de Entradas (`?abrir=importar|sefaz`) — pula
+   * direto pro modal certo em vez de obrigar mais um clique aqui. */
+  abrirInicial?: 'importar' | 'sefaz'
 }) {
   const sb = createClient()
   const router = useRouter()
@@ -95,6 +98,14 @@ export default function EntradasXmlClient({
   // Preços / Etiquetas por entrada
   const [carregandoAcao, setCarregandoAcao] = useState<string | null>(null)
   const [etiquetaProdutos, setEtiquetaProdutos] = useState<(ProdutoParaEtiqueta & { estoque: number })[] | null>(null)
+
+  // Abre direto o modal pedido na tela unificada de Entradas — só uma vez,
+  // pra não reabrir sozinho se o usuário fechar e navegar dentro da tela.
+  useEffect(() => {
+    if (abrirInicial === 'importar') { setModalImportar(true); setArquivos([]); setResultados([]) }
+    else if (abrirInicial === 'sefaz') { setModalSefaz(true); consultarSefaz() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const depositoPrincipal = depositos.find(d => d.principal)?.id ?? depositos[0]?.id ?? null
 
