@@ -5,7 +5,10 @@ import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
-export default async function EntradasXmlPage() {
+export default async function EntradasXmlPage({
+  searchParams,
+}: { searchParams: Promise<{ abrir?: string }> }) {
+  const { abrir } = await searchParams
   const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
@@ -37,6 +40,7 @@ export default async function EntradasXmlPage() {
       entradasIniciais={entradasRes.error ? [] : (entradasRes.data ?? [])}
       depositos={depositosRes.error ? [] : (depositosRes.data ?? [])}
       configSefaz={configRes.data ?? null}
+      abrirInicial={abrir === 'importar' || abrir === 'sefaz' ? abrir : undefined}
     />
   )
 }

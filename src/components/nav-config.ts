@@ -125,8 +125,6 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/compras-lista',           label: 'Lista de Compra',      icon: '🧾', modulo: 'pedidos_compra' },
       { href: '/dashboard/auxiliar-compras/historico', label: 'Histórico de Compras', icon: '🕘', modulo: 'pedidos_compra' },
       { href: '/dashboard/pedidos-compra',  label: 'Pedido ao Fornecedor', icon: '📋', modulo: 'pedidos_compra' },
-      { href: '/dashboard/entradas/nova',   label: 'Nova Entrada',         icon: '➕', modulo: 'entradas' },
-      { href: '/dashboard/entradas-xml',    label: 'XML / NF-e',           icon: '📄', modulo: 'entradas_xml' },
       { href: '/dashboard/fornecedores',    label: 'Fornecedores',         icon: '🏭', modulo: 'fornecedores' },
     ],
   },

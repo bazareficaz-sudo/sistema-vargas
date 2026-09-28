@@ -18,6 +18,17 @@ export default async function EntradasPage() {
     .order('created_at', { ascending: false })
     .limit(200)
 
+  // Entrada por XML/NF-e — mesma listagem, tela única (pedido do usuário:
+  // "as duas são entradas, mas ficam separadas"). Só as colunas leves que a
+  // tabela unificada mostra; o resto (mapeamento, itens, etc.) continua na
+  // tela dedicada `/dashboard/entradas-xml/[id]`.
+  const { data: entradasXml } = await supabase
+    .from('nfe_entradas')
+    .select('id, numero, serie, nome_fornecedor, cnpj_fornecedor, data_emissao, data_finalizacao, valor_total, status, created_at')
+    .eq('empresa_id', empresaId)
+    .order('created_at', { ascending: false })
+    .limit(200)
+
   const { data: fornecedores } = await supabase
     .from('fornecedores')
     .select('id, razao_social, nome_fantasia')
@@ -64,6 +75,7 @@ export default async function EntradasPage() {
   return (
     <EntradasListClient
       entradas={lista as any}
+      entradasXml={entradasXml ?? []}
       fornecedores={fornecedores ?? []}
       pendencias={pendencias}
       empresaId={empresaId}
