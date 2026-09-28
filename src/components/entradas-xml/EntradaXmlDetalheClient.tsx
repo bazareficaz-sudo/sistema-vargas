@@ -189,6 +189,31 @@ export default function EntradaXmlDetalheClient({
 
   const zerarCount = Object.values(zerar).filter(Boolean).length
 
+  // Taxa de acerto — quanto já vendeu do que essa NF-e trouxe, item a item.
+  // Só existe resposta pra entrada finalizada (ver a rota); carrega ao
+  // abrir a aba, não no load da página — mesmo padrão do Estoque acima.
+  type LinhaTaxaAcerto = {
+    produtoId: string; nome: string
+    quantidadeComprada: number; quantidadeVendida: number
+    percentual: number | null; temProximaEntrada: boolean
+  }
+  const [taxaAcerto, setTaxaAcerto] = useState<LinhaTaxaAcerto[]>([])
+  const [carregandoTaxaAcerto, setCarregandoTaxaAcerto] = useState(false)
+  const [taxaAcertoFinalizada, setTaxaAcertoFinalizada] = useState(true)
+
+  async function carregarTaxaAcerto() {
+    setCarregandoTaxaAcerto(true)
+    try {
+      const resp = await fetch(`/api/entradas-xml/${entrada.id}/taxa-acerto`)
+      const data = await resp.json()
+      if (!data.ok) { setTaxaAcerto([]); setTaxaAcertoFinalizada(true); return }
+      setTaxaAcertoFinalizada(!!data.finalizada)
+      setTaxaAcerto(data.itens ?? [])
+    } finally {
+      setCarregandoTaxaAcerto(false)
+    }
+  }
+
   async function carregarEstoqueAgora() {
     const ids = [...new Set(itens.filter(i => i.produto_id && i.status_mapeamento !== 'ignorado').map(i => i.produto_id))]
     if (ids.length === 0) { setEstoqueAgora({}); return }
@@ -203,6 +228,7 @@ export default function EntradaXmlDetalheClient({
 
   useEffect(() => {
     if (aba === 'estoque') carregarEstoqueAgora()
+    if (aba === 'desempenho') carregarTaxaAcerto()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aba])
 
@@ -859,6 +885,7 @@ export default function EntradaXmlDetalheClient({
     { id: 'fiscal',      label: `🧬 Dados Fiscais${candidatosFiscais.length > 0 ? ` (${candidatosFiscais.length})` : ''}` },
     { id: 'financeiro',  label: '🧾 Financeiro' },
     { id: 'finalizar',   label: '✅ Finalizar' },
+    { id: 'desempenho',  label: '📈 Desempenho' },
   ]
   // Cliente externo (plano Consulta Fiscal) só vê a nota em si e as duplicatas —
   // mapeamento/conferência/custos/preços/fiscal/finalizar são etapas de trabalho interno.
@@ -1770,6 +1797,80 @@ export default function EntradaXmlDetalheClient({
                 </p>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {aba === 'desempenho' && (
+        <div className="space-y-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-700 text-sm">
+            Quanto já vendeu do que esta NF-e trouxe, produto a produto — conta as vendas desde que a
+            entrada foi finalizada até a <b>próxima</b> compra do mesmo produto (ou até hoje, se ainda
+            não houve outra). O sistema não rastreia lote, então é uma aproximação por ordem de chegada
+            (FIFO), não um número exato.
+          </div>
+
+          {carregandoTaxaAcerto ? (
+            <p className="text-sm text-slate-400">Calculando...</p>
+          ) : !taxaAcertoFinalizada ? (
+            <p className="text-sm text-slate-400 text-center py-8">
+              Só dá pra calcular depois que a entrada for finalizada — é quando o estoque de fato entra.
+            </p>
+          ) : taxaAcerto.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-8">Nenhum item mapeado a produto nesta entrada.</p>
+          ) : (
+            (() => {
+              const totalComprado = taxaAcerto.reduce((s, i) => s + i.quantidadeComprada, 0)
+              const totalVendido = taxaAcerto.reduce((s, i) => s + i.quantidadeVendida, 0)
+              const percentualGeral = totalComprado > 0 ? (totalVendido / totalComprado) * 100 : null
+              return (
+                <>
+                  <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-center gap-6">
+                    <div>
+                      <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Taxa de acerto geral</p>
+                      <p className={`text-2xl font-bold ${
+                        percentualGeral == null ? 'text-slate-300' :
+                        percentualGeral >= 80 ? 'text-emerald-600' : percentualGeral >= 40 ? 'text-amber-600' : 'text-rose-500'
+                      }`}>
+                        {percentualGeral != null ? `${percentualGeral.toFixed(0)}%` : '—'}
+                      </p>
+                    </div>
+                    <p className="text-xs text-slate-400">{totalVendido} vendida(s) de {totalComprado} comprada(s), somando todos os itens.</p>
+                  </div>
+
+                  <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
+                        <th className="px-3 py-2 text-left">Produto</th>
+                        <th className="px-3 py-2 text-right">Comprado</th>
+                        <th className="px-3 py-2 text-right">Vendido</th>
+                        <th className="px-3 py-2 text-right">Taxa de acerto</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {taxaAcerto.map(item => (
+                          <tr key={item.produtoId}>
+                            <td className="px-3 py-2 text-slate-700 text-xs">{item.nome}</td>
+                            <td className="px-3 py-2 text-right text-xs text-slate-600">{item.quantidadeComprada}</td>
+                            <td className="px-3 py-2 text-right text-xs text-slate-600">{item.quantidadeVendida}</td>
+                            <td className="px-3 py-2 text-right">
+                              {item.percentual == null ? (
+                                <span className="text-xs text-slate-300">—</span>
+                              ) : (
+                                <span className={`text-xs font-bold ${
+                                  item.percentual >= 80 ? 'text-emerald-600' : item.percentual >= 40 ? 'text-amber-600' : 'text-rose-500'
+                                }`} title={item.temProximaEntrada ? 'Contado até a próxima compra deste produto' : 'Contado até hoje — ainda não houve outra compra deste produto'}>
+                                  {item.percentual.toFixed(0)}%
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )
+            })()
           )}
         </div>
       )}

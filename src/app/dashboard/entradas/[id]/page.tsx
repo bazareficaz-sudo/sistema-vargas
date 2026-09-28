@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import EditarEntradaClient from '@/components/entradas/EditarEntradaClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { calcularTaxaAcertoEntrada } from '@/lib/entradas/taxaAcerto'
 
 export const dynamic = 'force-dynamic'
 
@@ -63,6 +64,20 @@ export default async function EntradaDetalhePage({
     .eq('entrada_id', id)
     .order('created_at', { ascending: false })
 
+  // Taxa de acerto — quanto já vendeu do que essa entrada trouxe. Só faz
+  // sentido pra entrada CONFIRMADA: rascunho e cancelada nunca chegaram a
+  // incrementar o estoque de verdade.
+  const taxaAcertoPorProduto: Record<string, { quantidadeVendida: number; percentual: number | null; temProximaEntrada: boolean }> = {}
+  if (entrada.status === 'confirmada' && entrada.data_entrada) {
+    const itensParaCalculo = (itens ?? [])
+      .filter(i => i.produto_id)
+      .map(i => ({ produtoId: i.produto_id as string, quantidade: Number(i.quantidade) || 0 }))
+    const resultado = await calcularTaxaAcertoEntrada(supabase, empresaId, itensParaCalculo, entrada.data_entrada)
+    for (const r of resultado) {
+      taxaAcertoPorProduto[r.produtoId] = { quantidadeVendida: r.quantidadeVendida, percentual: r.percentual, temProximaEntrada: r.temProximaEntrada }
+    }
+  }
+
   return (
     <EditarEntradaClient
       entrada={entrada}
@@ -71,6 +86,7 @@ export default async function EntradaDetalhePage({
       fornecedores={fornecedores ?? []}
       produtosMap={produtosMap}
       historicoPrecos={historicoPrecos ?? []}
+      taxaAcertoPorProduto={taxaAcertoPorProduto}
       empresaId={empresaId}
       operadorNome={operadorNome}
     />
