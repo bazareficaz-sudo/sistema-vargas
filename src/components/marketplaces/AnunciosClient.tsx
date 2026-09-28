@@ -152,6 +152,7 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'sem_sku', label: 'Sem SKU' },
   { key: 'sem_estoque', label: 'Sem estoque' },
   { key: 'com_variacao', label: 'Com variações' },
+  { key: 'sem_regra', label: 'Sem regra' },
   { key: 'divergente', label: 'Divergente' },
   { key: 'qualidade_ruim', label: 'Qualidade ruim' },
   { key: 'qualidade_boa', label: 'Qualidade ótima' },
@@ -1021,6 +1022,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       if (faceta === 'sem_sku' && a.sku_canal) return false
       if (faceta === 'sem_estoque' && (a.estoque_externo ?? null) !== 0) return false
       if (faceta === 'com_variacao' && !a.tem_variacao) return false
+      if (faceta === 'sem_regra' && a.regra_id) return false
       if (faceta === 'divergente' && !temDivergencia(a)) return false
       if (faceta === 'qualidade_ruim' && !(a.qualidade_em != null && Number(a.qualidade_score ?? 100) <= 40)) return false
       if (faceta === 'qualidade_boa' && !(a.qualidade_em != null && Number(a.qualidade_score ?? 0) > 80)) return false
