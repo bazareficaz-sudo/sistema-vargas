@@ -15,6 +15,17 @@
 // PostgREST"); por segurança, `entrada_itens -> entradas` e
 // `nfe_itens -> nfe_entradas` seguem a mesma regra aqui. Sempre duas
 // consultas simples + Map em JS, nunca um join do PostgREST.
+//
+// Pelo mesmo motivo, as vendas são lidas direto de `venda_itens` (que tem
+// seu próprio `created_at`) filtrando por produto_id — nunca juntando via
+// uma lista de `venda_id`: com centenas/milhares de vendas no período, um
+// `.in('venda_id', idsMuitoGrande)` ou estoura o tamanho de URL do
+// PostgREST ou esbarra no teto de 1.000 linhas por resposta, calado (ver
+// `src/lib/supabase/paginar.ts`) — foi exatamente isso que zerava a taxa
+// de acerto em produtos com muita venda no período. `buscarTudo()` evita
+// as duas coisas.
+
+import { buscarTudo } from '@/lib/supabase/paginar'
 
 export type TaxaAcertoItem = {
   produtoId: string
@@ -76,32 +87,24 @@ export async function calcularTaxaAcertoEntrada(
   for (const r of (itensManuais ?? []) as any[]) registrarSeFutura(r.produto_id, dataDaEntradaManual.get(r.entrada_id))
   for (const r of (itensXml ?? []) as any[]) registrarSeFutura(r.produto_id, dataDaEntradaXml.get(r.entrada_id))
 
-  // 2. Vendas destes produtos desde esta entrada. Filtra `vendas` primeiro
-  //    (janela de tempo, por empresa) pra manter a segunda consulta pequena
-  //    — `.limit()` como rede de segurança: se uma entrada for velha
-  //    demais e isso disparar, o cálculo já teria pouco sentido prático
-  //    mesmo (a resposta "vendeu bem" já estaria óbvia de outro jeito).
-  const { data: vendasDesde } = await sb.from('vendas')
-    .select('id, created_at')
-    .eq('empresa_id', empresaId)
-    .gte('created_at', dataEntrada)
-    .order('created_at')
-    .limit(5000)
-
-  const idsVendas = (vendasDesde ?? []).map((v: any) => v.id)
-  const dataDaVenda = new Map<string, string>((vendasDesde ?? []).map((v: any) => [v.id, v.created_at]))
-
-  const { data: itensVendidos } = idsVendas.length
-    ? await sb.from('venda_itens').select('venda_id, produto_id, quantidade, tipo').in('venda_id', idsVendas).in('produto_id', produtoIds)
-    : { data: [] as any[] }
+  // 2. Vendas destes produtos desde esta entrada — direto em `venda_itens`
+  //    (produto_id + created_at próprios, sem passar por `vendas`), pagina
+  //    com buscarTudo() pra nunca perder linha calado.
+  const itensVendidos = await buscarTudo<{ produto_id: string; quantidade: number; tipo: string; created_at: string }>(
+    (de, ate) => sb.from('venda_itens')
+      .select('produto_id, quantidade, tipo, created_at')
+      .in('produto_id', produtoIds)
+      .gte('created_at', dataEntrada)
+      .order('id')
+      .range(de, ate),
+    { rotulo: 'taxaAcertoEntrada' },
+  )
 
   const agora = new Date().toISOString()
   const vendidoPorProduto = new Map<string, number>()
-  for (const vi of (itensVendidos ?? []) as any[]) {
-    const dataVenda = dataDaVenda.get(vi.venda_id)
-    if (!dataVenda) continue
+  for (const vi of itensVendidos) {
     const dataCorte = proximaPorProduto.get(vi.produto_id) ?? agora
-    if (dataVenda > dataCorte) continue
+    if (vi.created_at > dataCorte) continue
     const delta = vi.tipo === 'devolucao' ? -Math.abs(vi.quantidade) : vi.quantidade
     vendidoPorProduto.set(vi.produto_id, (vendidoPorProduto.get(vi.produto_id) ?? 0) + delta)
   }
