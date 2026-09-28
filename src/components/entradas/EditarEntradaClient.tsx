@@ -67,7 +67,7 @@ function F({ label, value, onChange, type = 'text', disabled }: {
 
 export default function EditarEntradaClient({
   entrada, itens: itensIniciais, contasPagar: contasIniciais,
-  fornecedores, produtosMap, historicoPrecos: histInicial, empresaId, operadorNome,
+  fornecedores, produtosMap, historicoPrecos: histInicial, taxaAcertoPorProduto, empresaId, operadorNome,
 }: {
   entrada: any
   itens: ItemEntrada[]
@@ -75,6 +75,10 @@ export default function EditarEntradaClient({
   fornecedores: Fornecedor[]
   produtosMap: Record<string, ProdutoInfo>
   historicoPrecos: HistoricoPreco[]
+  // Quanto já vendeu de cada produto desde esta entrada, até a próxima
+  // compra do mesmo produto (ou hoje) — vazio quando a entrada não está
+  // confirmada (rascunho/cancelada nunca incrementaram o estoque de fato).
+  taxaAcertoPorProduto?: Record<string, { quantidadeVendida: number; percentual: number | null; temProximaEntrada: boolean }>
   empresaId: string
   operadorNome: string
 }) {
@@ -588,6 +592,7 @@ export default function EditarEntradaClient({
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Markup</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço venda</th>
                 <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Subtotal</th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28" title="Quanto já vendeu desde esta entrada, até a próxima compra do produto (ou hoje) — aproximação por FIFO, sem rastreamento de lote.">Vendido</th>
                 {!cancelada && <th className="px-4 py-3 w-28"></th>}
               </tr>
             </thead>
@@ -626,6 +631,7 @@ export default function EditarEntradaClient({
                       <td className="px-4 py-3 text-right text-gray-500 text-xs">
                         {fmt((Number(itemForm.preco_custo_novo) || 0) * (Number(itemForm.quantidade) || 0))}
                       </td>
+                      <td className="px-4 py-3"></td>
                       <td className="px-4 py-2">
                         <div className="flex gap-2 justify-end">
                           <button onClick={() => salvarItem(item)} disabled={salvando}
@@ -661,6 +667,19 @@ export default function EditarEntradaClient({
                       <td className="px-4 py-3 text-right text-gray-500 text-xs">{Number(item.markup).toFixed(1)}%</td>
                       <td className="px-4 py-3 text-right text-gray-900">{fmt(Number(item.preco_venda_novo))}</td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(Number(item.subtotal))}</td>
+                      <td className="px-4 py-3 text-right">
+                        {(() => {
+                          const acerto = item.produto_id ? taxaAcertoPorProduto?.[item.produto_id] : undefined
+                          if (!acerto || acerto.percentual == null) return <span className="text-gray-300 text-xs">—</span>
+                          const cor = acerto.percentual >= 80 ? 'text-emerald-600' : acerto.percentual >= 40 ? 'text-amber-600' : 'text-rose-500'
+                          return (
+                            <span className={`text-xs font-bold ${cor}`}
+                              title={`${acerto.quantidadeVendida} de ${item.quantidade} vendida(s)${acerto.temProximaEntrada ? ' até a próxima compra deste produto' : ' até hoje'} — aproximação por FIFO, sem rastreamento de lote.`}>
+                              {acerto.percentual.toFixed(0)}%
+                            </span>
+                          )
+                        })()}
+                      </td>
                       {!cancelada && (
                         <td className="px-4 py-3">
                           <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
@@ -676,13 +695,14 @@ export default function EditarEntradaClient({
                 </tr>
               ))}
               {itens.length === 0 && (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400 text-sm">Nenhum item nesta entrada.</td></tr>
+                <tr><td colSpan={9} className="py-10 text-center text-gray-400 text-sm">Nenhum item nesta entrada.</td></tr>
               )}
             </tbody>
             <tfoot>
               <tr className="bg-gray-50 border-t border-gray-200">
                 <td colSpan={6} className="px-4 py-3 text-sm text-gray-600">{itens.length} item(s)</td>
                 <td className="px-4 py-3 text-right font-bold text-gray-900">{fmt(totalProdutos)}</td>
+                <td></td>
                 {!cancelada && <td></td>}
               </tr>
             </tfoot>
