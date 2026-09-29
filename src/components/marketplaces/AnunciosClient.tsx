@@ -24,6 +24,7 @@ import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
 import { calcular as calcularPreco, saudeDaMargem, ROTULO_SAUDE } from '@/lib/precificacao/motor'
 import { FALTAS_CATALOGO } from '@/lib/marketplace/qualidade'
+import { SELECT_LISTAGEM_ANUNCIO, TAMANHOS_PAGINA_ANUNCIOS, normalizarTamanhoPagina } from '@/lib/marketplace/colunasAnuncio'
 
 // Saúde da precificação do anúncio: pega o preço que está no ar, desconta
 // tudo que o canal cobra (as taxas configuradas em Precificação) e mostra o
@@ -168,8 +169,13 @@ const FACETAS: { key: string; label: string }[] = [
   { key: 'campanha_acabando', label: 'Campanha acaba em 7 dias' },
 ]
 
-export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true, filaAtiva, campanhasAtivas = [], selosCampanha = {} }: {
+export default function AnunciosClient({ canal, canais = [], anuncios: anunciosIniciais, totalCanal, tamanhoInicial = 50, produtos, empresaId, qInicial, statusInicial, tagInicial = '', faltaInicial = '', facetasIniciais = [], operador, regras = [], depositos = [], configPreco, simulacaoDaEmpresa = true, filaAtiva, campanhasAtivas = [], selosCampanha = {} }: {
   canal: any; canais?: { id: string; nome: string; plataforma?: string; ativo?: boolean }[]; anuncios: any[]; produtos: any[]; empresaId: string; qInicial: string; statusInicial: string; operador: string
+  /** Total de anúncios do canal no banco — pode ser maior que `anuncios.length`
+   * quando a tela carregou só a primeira página (ver tamanhoInicial). */
+  totalCanal: number
+  /** Quantos anúncios `page.tsx` já carregou (`?tamanho=` na URL, padrão 50). */
+  tamanhoInicial?: number
   tagInicial?: string; faltaInicial?: string; facetasIniciais?: string[]
   regras?: any[]; depositos?: { id: string; nome: string }[]
   /** `marketplace_fila_config.simulacao` — o padrao que o canal pode sobrepor. */
@@ -234,12 +240,20 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [regraParaVincular, setRegraParaVincular] = useState('')
 
   const [anuncios, setAnuncios] = useState(anunciosIniciais)
+  // Quando a tela abre já com tudo (canal pequeno, ou catálogo carregado
+  // numa visita anterior), `catalogoCompleto` nasce true e a busca nunca
+  // precisa buscar mais nada.
+  const [catalogoCompleto, setCatalogoCompleto] = useState(anunciosIniciais.length >= totalCanal)
+  const [carregandoCompleto, setCarregandoCompleto] = useState(false)
   // anunciosIniciais só vale como valor inicial do useState — sem isso,
   // router.refresh() (ex: depois de sincronizar) atualiza os dados no
   // servidor mas o estado local do client component nunca pega o valor
   // novo, então a listagem parecia "travada" mesmo com o catálogo já
   // sincronizado por baixo (mesmo bug já visto antes na tela de Pedidos).
-  useEffect(() => { setAnuncios(anunciosIniciais) }, [anunciosIniciais])
+  useEffect(() => {
+    setAnuncios(anunciosIniciais)
+    setCatalogoCompleto(anunciosIniciais.length >= totalCanal)
+  }, [anunciosIniciais, totalCanal])
   const [q, setQ] = useState(qInicial)
   const [statusFiltro, setStatusFiltro] = useState(statusInicial)
   const [modal, setModal] = useState(false)
@@ -266,16 +280,51 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // Levando-os na URL, quem escolhe outro canal continua vendo o mesmo
   // recorte, que é o que se quer ao comparar duas contas do mesmo
   // marketplace: "como está 'corrente' aqui, e como está lá?".
-  function filtrosNaUrl(): string {
+  function filtrosNaUrl(tamanhoOverride?: number): string {
     const p = new URLSearchParams()
     if (q) p.set('q', q)
     if (statusFiltro) p.set('status', statusFiltro)
     if (tagFiltro) p.set('tag', tagFiltro)
     if (faltaFiltro) p.set('falta', faltaFiltro)
     if (facetas.size > 0) p.set('facetas', [...facetas].join(','))
+    const tamanho = tamanhoOverride ?? tamanhoInicial
+    if (tamanho !== 50) p.set('tamanho', String(tamanho))
     const s = p.toString()
     return s ? `?${s}` : ''
   }
+
+  // BUSCA/FILTRO COM A LISTA PARCIAL: a tela abre com só os primeiros
+  // `tamanhoInicial` anúncios (ver page.tsx). Buscar ou filtrar em cima
+  // disso mentiria — "não achei" pode só significar "não carreguei ainda".
+  // Então, assim que busca/filtro é ativado, busca o catálogo completo do
+  // canal uma vez (mesma forma de linha do carregamento inicial) e passa a
+  // filtrar sobre ele; sem filtro nenhum, a lista parcial nunca precisa
+  // crescer sozinha.
+  async function carregarCatalogoCompleto() {
+    if (catalogoCompleto || carregandoCompleto) return
+    setCarregandoCompleto(true)
+    const sb = createClient()
+    const TAMANHO_PAGINA = 1000
+    const todos: any[] = []
+    for (let offset = 0; offset < 20 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
+      const { data } = await sb.from('marketplace_anuncios')
+        .select(SELECT_LISTAGEM_ANUNCIO)
+        .eq('canal_id', canal.id)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + TAMANHO_PAGINA - 1)
+      todos.push(...(data ?? []))
+      if (!data || data.length < TAMANHO_PAGINA) break
+    }
+    setAnuncios(todos)
+    setCatalogoCompleto(true)
+    setCarregandoCompleto(false)
+  }
+
+  useEffect(() => {
+    const filtroAtivo = !!(q || statusFiltro || tagFiltro || faltaFiltro || facetas.size > 0)
+    if (filtroAtivo && !catalogoCompleto && !carregandoCompleto) carregarCatalogoCompleto()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, statusFiltro, tagFiltro, faltaFiltro, facetas, catalogoCompleto, carregandoCompleto])
 
   const temFiltroAtivo = !!(q || statusFiltro || tagFiltro || faltaFiltro || facetas.size > 0)
   const urlTemFiltro = !!(qInicial || statusInicial || tagInicial || faltaInicial || facetasIniciais.length)
@@ -969,6 +1018,46 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     setAnuncios(prev => prev.filter(a => a.id !== id))
   }
 
+  // MENU DE AÇÕES DA LINHA — antes eram até 6 botões soltos, visíveis só no
+  // hover do mouse (`opacity-0 group-hover:opacity-100`), numa coluna de
+  // largura fixa sem quebra de linha: em qualquer tela mais estreita, ou em
+  // toque (sem hover nenhum), a maioria simplesmente sumia ou era cortada
+  // pela tabela. Agora só "Mapear/Trocar" fica solto (é a ação mais comum);
+  // o resto mora neste menu — sempre alcançável, em qualquer largura.
+  const [menuAcoesAberto, setMenuAcoesAberto] = useState<string | null>(null)
+  function renderMenuAcoes(a: any) {
+    const aberto = menuAcoesAberto === a.id
+    const item = (label: string, onClick: () => void, cor = 'text-gray-700') => (
+      <button onClick={() => { setMenuAcoesAberto(null); onClick() }}
+        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${cor}`}>
+        {label}
+      </button>
+    )
+    return (
+      <div className="relative">
+        <button onClick={() => setMenuAcoesAberto(aberto ? null : a.id)}
+          title="Mais ações"
+          className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex-shrink-0">
+          ⋯
+        </button>
+        {aberto && (
+          <>
+            {/* Fecha ao clicar fora — sem isto o menu só some clicando de novo no ⋯. */}
+            <div className="fixed inset-0 z-10" onClick={() => setMenuAcoesAberto(null)} />
+            <div className="absolute right-0 z-20 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+              {a.produtos && item('Enriquecer', () => setEnriquecendoAberto(a), 'text-emerald-700')}
+              {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && a.id_externo &&
+                item(`Enviar p/ ${canal.plataforma === 'mercadolivre' ? 'ML' : 'Shopee'}`, () => setEnviandoPrecoAberto(a), 'text-orange-700')}
+              {item('Detalhes', () => setDetalheAberto(a))}
+              {item('Editar', () => abrirEditar(a), 'text-blue-700')}
+              {item('Excluir', () => excluir(a.id), 'text-red-600')}
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   // Trocar entre ativo/pausado num anúncio Shopee ou Mercado Livre já
   // sincronizado precisa refletir no marketplace de verdade — esse dropdown
   // historicamente só mudava a coluna local (nada avisava o marketplace),
@@ -1084,8 +1173,10 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Anúncios — {canal.nome}</h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            {anuncios.length} anúncio(s) cadastrados
+            {totalCanal} anúncio(s) cadastrados
+            {!catalogoCompleto && ` · ${anuncios.length} carregado(s)`}
             {filtrados.length !== anuncios.length && ` · ${filtrados.length} nos filtros atuais`}
+            {carregandoCompleto && <span className="text-blue-500"> · carregando o catálogo completo para a busca…</span>}
           </p>
         </div>
         <div className="flex gap-2 items-center">
@@ -1185,6 +1276,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por título..."
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-64 bg-white" />
+        <select value={tamanhoInicial}
+          onChange={e => router.push(`/dashboard/marketplaces/${canal.id}/anuncios${filtrosNaUrl(Number(e.target.value))}`)}
+          title="Quantos anúncios carregar ao abrir a tela — busca e filtros sempre olham o catálogo completo do canal, carregado à parte quando precisar"
+          className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs text-gray-600 focus:outline-none focus:border-blue-500 bg-white">
+          {TAMANHOS_PAGINA_ANUNCIOS.map(t => <option key={t} value={t}>Carregar {t}</option>)}
+        </select>
         <div className="flex gap-1">
           {[['', 'Todos'], ['ativo', 'Ativos'], ['pausado', 'Pausados'], ['rascunho', 'Rascunhos'], ['encerrado', 'Encerrados']].map(([s, l]) => (
             <button key={s} onClick={() => setStatusFiltro(s)}
@@ -1441,6 +1538,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                 }`}>
                 {estaMapeado(a) ? 'Trocar' : 'Mapear'}
               </button>
+              {renderMenuAcoes(a)}
             </div>
           </div>
         ))}
@@ -1451,7 +1549,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
       </div>
 
       {/* ── Tabela (desktop) — inalterada ────────────────────────────────── */}
-      <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
@@ -1473,7 +1571,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço venda</th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Preço promo</th>
               <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Status</th>
-              <th className="px-4 py-3 w-28"></th>
+              <th className="px-4 py-3 w-24"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -1625,22 +1723,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   </select>
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center justify-end gap-1.5">
                     <button onClick={() => setMapeandoAberto(a)}
-                      className={`text-xs font-medium ${!a.produtos ? 'text-purple-600 hover:text-purple-800' : 'text-gray-500 hover:text-gray-700'}`}>
-                      Mapear
+                      title={estaMapeado(a) ? 'Trocar o produto vinculado' : 'Vincular a um produto'}
+                      className={`text-xs px-2 py-1 rounded-lg font-medium whitespace-nowrap ${
+                        estaMapeado(a) ? 'border border-gray-200 text-gray-600 hover:bg-gray-50' : 'bg-purple-600 text-white hover:bg-purple-700'
+                      }`}>
+                      {estaMapeado(a) ? 'Trocar' : 'Mapear'}
                     </button>
-                    {a.produtos && (
-                      <button onClick={() => setEnriquecendoAberto(a)} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium">Enriquecer</button>
-                    )}
-                    {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && a.id_externo && (
-                      <button onClick={() => setEnviandoPrecoAberto(a)} className="text-xs text-orange-600 hover:text-orange-800 font-medium">
-                        Enviar p/ {canal.plataforma === 'mercadolivre' ? 'ML' : 'Shopee'}
-                      </button>
-                    )}
-                    <button onClick={() => setDetalheAberto(a)} className="text-xs text-gray-600 hover:text-gray-900 font-medium">Detalhes</button>
-                    <button onClick={() => abrirEditar(a)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Editar</button>
-                    <button onClick={() => excluir(a.id)} className="text-xs text-red-500 hover:text-red-700">Excluir</button>
+                    {renderMenuAcoes(a)}
                   </div>
                 </td>
               </tr>
