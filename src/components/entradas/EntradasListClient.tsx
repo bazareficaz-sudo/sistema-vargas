@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
+import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 
 type Entrada = {
   id: string
@@ -262,17 +263,25 @@ export default function EntradasListClient({
           .eq('entrada_id', entrada.id)
         if (itens && itens.length > 0) {
           for (const item of itens) {
+            if (!item.produto_id) continue
             const { data: prod } = await supabase
               .from('produtos')
-              .select('quantidade_estoque')
+              // 'quantidade_estoque' não existe nesta tabela (é 'estoque') —
+              // o update abaixo sempre falhava calado (erro não checado) e a
+              // reversão nunca aconteceu de verdade, em nenhum campo.
+              .select('estoque')
               .eq('id', item.produto_id)
               .single()
             if (prod) {
               await supabase
                 .from('produtos')
-                .update({ quantidade_estoque: Math.max(0, (prod.quantidade_estoque ?? 0) - item.quantidade) })
+                .update({ estoque: Math.max(0, (prod.estoque ?? 0) - item.quantidade) })
                 .eq('id', item.produto_id)
             }
+            // Mesma sincronização de EditarEntradaClient.cancelarEntrada():
+            // sem espelhar no depósito, o saldo por depósito (Estoque
+            // Detalhado, PDV) fica inflado mesmo com o agregado revertido.
+            await ajustarDepositoPrincipal(supabase, empresaId, item.produto_id, -item.quantidade)
           }
         }
         // Remove contas a pagar vinculadas
