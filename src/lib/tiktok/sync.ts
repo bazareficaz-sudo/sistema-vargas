@@ -44,10 +44,12 @@ function skuDoProduto(raw: TiktokProduct): string | null {
   return skus[0]?.seller_sku ? String(skus[0].seller_sku) : null
 }
 
+// `uri` é um identificador interno da TikTok (ex: "tos-alisg-i-.../<hash>"),
+// não um endereço — confirmado com dado real. O link abrível vem em url_list.
 function imagensDoProduto(raw: TiktokProduct): string[] {
   return (raw.main_images ?? [])
-    .map((img: any) => img.url ?? img.uri ?? img.url_list?.[0] ?? img.urls?.[0])
-    .filter((u): u is string => !!u)
+    .map((img: any) => img.url_list?.[0] ?? img.url ?? img.urls?.[0])
+    .filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
 }
 
 // Mapeamento defensivo, mesmo espírito de Shopee/Nuvemshop: os nomes de
