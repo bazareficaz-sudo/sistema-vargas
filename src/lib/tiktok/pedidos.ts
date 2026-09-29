@@ -128,20 +128,25 @@ async function upsertPedido(sb: any, row: Record<string, any>): Promise<{ id: st
   return data
 }
 
-// A sincronização de catálogo (sync.ts) ainda não grava
-// marketplace_anuncio_variacoes para a TikTok — resolve só no nível do
-// anúncio (produto), mesmo tratamento que Shopee/Nuvemshop dão a produto
-// de variação única. Quando a criação de variações existir, dá pra evoluir
-// aqui do mesmo jeito.
+// Mesmo caminho da Nuvemshop: acha o anúncio pelo produto e, se o SKU
+// estiver gravado como variação, o produto do ERP vem da variação. Produto
+// de SKU único não tem linha de variação (ver sync.ts), então o vínculo do
+// anúncio continua valendo.
 async function resolverVinculoItem(
-  sb: any, canalId: string, produtoIdExterno: string,
+  sb: any, canalId: string, produtoIdExterno: string, skuIdExterno: string | null,
 ): Promise<{ anuncioId: string | null; produtoId: string | null }> {
   const { data: anuncio } = await sb.from('marketplace_anuncios')
     .select('id, produto_id')
     .eq('canal_id', canalId).eq('id_externo', produtoIdExterno)
     .maybeSingle()
   if (!anuncio) return { anuncioId: null, produtoId: null }
-  return { anuncioId: anuncio.id, produtoId: anuncio.produto_id }
+  if (!skuIdExterno) return { anuncioId: anuncio.id, produtoId: anuncio.produto_id }
+
+  const { data: variacao } = await sb.from('marketplace_anuncio_variacoes')
+    .select('produto_id')
+    .eq('anuncio_id', anuncio.id).eq('model_id', skuIdExterno)
+    .maybeSingle()
+  return { anuncioId: anuncio.id, produtoId: variacao?.produto_id ?? anuncio.produto_id }
 }
 
 async function upsertItemPedido(
@@ -198,7 +203,7 @@ export async function processarPedido(
     const modelIdExterno = it?.sku_id != null ? String(it.sku_id) : null
     const produtoIdExterno = it?.product_id != null ? String(it.product_id) : ''
     const vinculo = produtoIdExterno
-      ? await resolverVinculoItem(sb, canal.id, produtoIdExterno)
+      ? await resolverVinculoItem(sb, canal.id, produtoIdExterno, modelIdExterno)
       : { anuncioId: null, produtoId: null }
     vinculos.push({ raw: it, itemIdExterno, modelIdExterno, vinculo })
   }

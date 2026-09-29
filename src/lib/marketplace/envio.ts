@@ -4,6 +4,11 @@ import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
 import { atualizarPrecoEstoque as atualizarPrecoEstoqueNuvemshop, publicarProduto } from '@/lib/nuvemshop/write'
 import type { NuvemshopChannel } from '@/lib/nuvemshop/types'
+import {
+  atualizarPrecoEstoque as atualizarPrecoEstoqueTiktok, pausarProdutos as pausarTiktok,
+  reativarProdutos as reativarTiktok,
+} from '@/lib/tiktok/write'
+import { COLUNAS_CANAL as COLUNAS_CANAL_TIKTOK, montarCanal as montarCanalTiktok } from '@/lib/tiktok/canal'
 
 
 // Envio de preço/estoque para o canal, escolhendo a plataforma.
@@ -196,6 +201,43 @@ export async function enviarParaAnuncio(
         await sleep(THROTTLE_ENVIO_MS)
         await publicarProduto(c, idExterno, false)
         return { ok: true, pausado: true }
+      }
+      return { ok: true }
+    }
+
+    if (canal.plataforma === 'tiktok') {
+      // `CanalEnvio` não carrega `shop_cipher`, que toda chamada de loja da
+      // TikTok exige. Ler o canal aqui evita mexer nos quatro lugares que
+      // montam `CanalEnvio` só por causa de uma plataforma.
+      const { data: canalRow } = await sb.from('marketplace_canais')
+        .select(COLUNAS_CANAL_TIKTOK).eq('id', canal.id).single()
+      if (!canalRow?.shop_cipher) return { ok: false, erro: 'Canal TikTok Shop sem shop_cipher — reconecte a loja' }
+      const c = montarCanalTiktok(canalRow)
+
+      const alvos = porVariacao
+        ? variacoes.map(v => ({
+            skuId: v.modelId,
+            preco: v.preco != null ? Number(v.preco) : null,
+            estoque: v.estoque != null ? Number(v.estoque) : null,
+          }))
+        : [{ preco: preco ?? null, estoque: estoque ?? null }]
+
+      const r = await atualizarPrecoEstoqueTiktok(sb, c, idExterno, alvos)
+      if (!r.ok) {
+        const motivos = [r.erro, r.erroPreco, r.erroEstoque].filter(Boolean)
+        return { ok: false, erro: motivos.join(' · ') || 'A TikTok Shop recusou a atualização' }
+      }
+      if (alvo.pausar) {
+        await sleep(THROTTLE_ENVIO_MS)
+        const p = await pausarTiktok(sb, c, [idExterno])
+        if (!p.ok) return { ok: false, erro: `Estoque enviado, mas não pausou: ${p.falhas[0]?.erro ?? 'recusado'}` }
+        return { ok: true, pausado: true }
+      }
+      if (alvo.reativar) {
+        await sleep(THROTTLE_ENVIO_MS)
+        const p = await reativarTiktok(sb, c, [idExterno])
+        if (!p.ok) return { ok: false, erro: `Estoque enviado, mas não reativou: ${p.falhas[0]?.erro ?? 'recusado'}` }
+        return { ok: true, reativado: true }
       }
       return { ok: true }
     }

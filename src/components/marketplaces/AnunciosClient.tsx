@@ -189,17 +189,18 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // impedia o ML de ter atualizar/enviar/pausar/ativar e as regras em massa.
   const plataforma: string = canal.plataforma
   const ehML = plataforma === 'mercadolivre'
-  const nomeCanalPlataforma = ehML ? 'Mercado Livre' : 'Shopee'
-  const nomeCurto = ehML ? 'ML' : 'Shopee'
-  // Preposição certa: "na Shopee", "no Mercado Livre".
+  const ehTiktok = plataforma === 'tiktok'
+  const nomeCanalPlataforma = ehML ? 'Mercado Livre' : ehTiktok ? 'TikTok Shop' : 'Shopee'
+  const nomeCurto = ehML ? 'ML' : ehTiktok ? 'TikTok' : 'Shopee'
+  // Preposição certa: "na Shopee", "no Mercado Livre", "na TikTok Shop".
   const preposicao = ehML ? 'no' : 'na'
   function rotaCanal(recurso: string) {
-    return `/api/marketplace/${ehML ? 'mercadolivre' : 'shopee'}/${recurso}`
+    return `/api/marketplace/${ehML ? 'mercadolivre' : ehTiktok ? 'tiktok' : 'shopee'}/${recurso}`
   }
   // Plataformas que já têm módulo de escrita. Nuvemshop ainda não tem, então
   // os botões de envio não aparecem para ela — melhor ausente do que
   // presente e falhando.
-  const temEscrita = plataforma === 'shopee' || ehML
+  const temEscrita = plataforma === 'shopee' || ehML || ehTiktok
 
   // O nome da regra vem de `regras`, que a pagina ja carrega para o envio em
   // massa. Sem nome, a coluna mostraria um uuid.
@@ -979,11 +980,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     const anuncio = anuncios.find(a => a.id === id)
     const ehTogglePausarAtivar = (novoStatus === 'pausado' || novoStatus === 'ativo')
       && (anuncio?.status === 'pausado' || anuncio?.status === 'ativo')
-    const plataformaComEscrita = canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre'
+    const plataformaComEscrita = temEscrita
 
     if (plataformaComEscrita && ehTogglePausarAtivar && anuncio?.id_externo) {
       const acao = novoStatus === 'pausado' ? 'pausar' : 'ativar'
-      const nomePlataforma = canal.plataforma === 'mercadolivre' ? 'Mercado Livre' : 'Shopee'
+      const nomePlataforma = nomeCanalPlataforma
       try {
         const resp = await fetch(`/api/marketplace/${canal.plataforma}/pausar-ativar`, {
           method: 'POST',
@@ -1633,9 +1634,9 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                     {a.produtos && (
                       <button onClick={() => setEnriquecendoAberto(a)} className="text-xs text-emerald-600 hover:text-emerald-800 font-medium">Enriquecer</button>
                     )}
-                    {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && a.id_externo && (
+                    {temEscrita && a.id_externo && (
                       <button onClick={() => setEnviandoPrecoAberto(a)} className="text-xs text-orange-600 hover:text-orange-800 font-medium">
-                        Enviar p/ {canal.plataforma === 'mercadolivre' ? 'ML' : 'Shopee'}
+                        Enviar p/ {nomeCurto}
                       </button>
                     )}
                     <button onClick={() => setDetalheAberto(a)} className="text-xs text-gray-600 hover:text-gray-900 font-medium">Detalhes</button>
