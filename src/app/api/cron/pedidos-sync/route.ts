@@ -40,6 +40,10 @@ export async function GET(req: Request) {
     .select('id, empresa_id, plataforma, seller_id, shop_cipher, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas')
     .in('plataforma', ['shopee', 'mercadolivre', 'nuvemshop', 'tiktok'])
     .not('access_token', 'is', null)
+    // Canal desativado em Marketplaces não sincroniza. Sem isto, um canal
+    // trocado por outro (ex: Tiktok Teste, do app antigo) seguia sendo
+    // chamado a cada 5 min com um token que não vale mais, só gerando erro.
+    .eq('ativo', true)
 
   // Nunca falhar em silêncio: se a consulta der erro (ex: coluna que não
   // existe porque uma migration não foi rodada), `canais` viria `null` e o
