@@ -19,6 +19,8 @@ export default async function AnunciosLandingPage() {
     .select('id, nome')
     // Loja Online não tem anúncio para listar — ver src/lib/marketplace/canais.ts.
     .neq('plataforma', PLATAFORMA_LOJA_ONLINE)
+    // Canal desativado em Marketplaces não é mais para operar.
+    .eq('ativo', true)
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: true })
 
