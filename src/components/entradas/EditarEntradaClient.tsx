@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -392,6 +393,13 @@ export default function EditarEntradaClient({
       if (item.produto_id) {
         const { data: prod } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
         if (prod) await sb.from('produtos').update({ estoque: Math.max(0, (prod.estoque ?? 0) - item.quantidade) }).eq('id', item.produto_id)
+        // Espelha a reversão no depósito principal — mesma sincronização que
+        // NovaEntradaClient.confirmarEntrada() faz ao ADICIONAR estoque (ver
+        // src/lib/produtos/depositoPrincipal.ts). Sem isto, `produtos.estoque`
+        // (o agregado) voltava certo ao cancelar, mas `produto_estoque` (o que
+        // o Estoque Detalhado e o PDV enxergam por depósito) ficava inflado
+        // pra sempre — a entrada cancelada continuava "no estoque" ali.
+        await ajustarDepositoPrincipal(sb, empresaId, item.produto_id, -item.quantidade)
       }
     }
     await sb.from('entradas').update({ status: 'cancelada' }).eq('id', entrada.id)
