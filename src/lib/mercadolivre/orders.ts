@@ -208,8 +208,10 @@ async function upsertItemPedido(
 // prazo de postagem — vive em /shipments/{id}:
 //   status/substatus: ready_to_ship + invoice_pending | ready_to_print |
 //                     printed | ...; shipped; delivered (doc "Shipments")
-//   /shipments/{id}/lead_time → estimated_handling_limit.date: prazo para
-//                     despachar. "Só a data conta" — vale o dia inteiro.
+//   /shipments/{id}/sla → expected_date: data e hora limite para despachar
+//                     o pacote (doc "Shipment SLA"). O estimated_handling_limit
+//                     que a doc de shipments cita não vem nas respostas reais
+//                     do lead_time (conferido em 30/09/2026).
 
 // Depois disto o shipment não muda mais de um jeito que importe à esteira.
 const ENVIO_FINAL = new Set(['shipped', 'delivered', 'not_delivered', 'cancelled'])
@@ -247,13 +249,12 @@ export async function buscarEnvio(canal: MLChannel, shippingId: string | number,
     // Sem prazo o pedido só cai como "sai hoje" — falhar aqui não pode
     // derrubar o pedido. O erro fica guardado em envio_dados para diagnóstico.
     try {
-      const lt = await mlGet(`/shipments/${shippingId}/lead_time`, {}, canal.accessToken, { 'x-format-new': 'true' })
-      envio.envio_dados!.lead_time = lt
-      const limite = lt?.estimated_handling_limit?.date ?? lt?.estimated_delivery_time?.handling_limit?.date
-      const prazo = limite ? fimDoDiaBrasilia(limite) : undefined
-      if (prazo) envio.prazo_postagem = prazo
+      const sla = await mlGet(`/shipments/${shippingId}/sla`, {}, canal.accessToken)
+      envio.envio_dados!.sla = sla
+      const limite = sla?.expected_date ? new Date(sla.expected_date) : null
+      if (limite && !isNaN(limite.getTime())) envio.prazo_postagem = limite.toISOString()
     } catch (e: any) {
-      envio.envio_dados!.lead_time_erro = e?.message ?? String(e)
+      envio.envio_dados!.sla_erro = e?.message ?? String(e)
     }
   }
   return envio
