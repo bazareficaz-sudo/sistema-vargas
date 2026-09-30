@@ -79,8 +79,13 @@ export function notaResolvida(p: any): boolean {
 // coleta, deixada na agência, já no centro do ML). Serve para a esteira
 // reconhecer a etiqueta impressa em outro sistema.
 const SUBSTATUS_ML_JA_IMPRESSO = new Set([
-  'printed', 'in_pickup_list', 'in_packing_list', 'ready_for_pickup', 'dropped_off', 'picked_up', 'in_hub',
+  'printed', 'in_pickup_list', 'in_packing_list', 'ready_for_pickup',
 ])
+
+// Pacote que já saiu do galpão — entregue na agência, coletado ou já no
+// centro do ML — mas cujo shipment ainda diz ready_to_ship até o primeiro
+// escaneamento. Para a esteira, já foi postado.
+const SUBSTATUS_ML_JA_POSTADO = new Set(['dropped_off', 'picked_up', 'in_hub'])
 
 export function etiquetaImpressa(p: any): boolean {
   return !!p.etiqueta_impressa_em || SUBSTATUS_ML_JA_IMPRESSO.has(String(p.envio_substatus ?? ''))
@@ -95,6 +100,7 @@ export function etapaEsteira(p: any, agora = new Date()): EtapaEsteira {
   if (st === 'cancelado' || st === 'devolvido' || ei === 'cancelado' || ext === 'TO_RETURN') return 'cancelado'
   if (st === 'entregue' || ei === 'concluido') return 'entregue'
   if (st === 'enviado' || ei === 'enviado') return 'enviado'
+  if (SUBSTATUS_ML_JA_POSTADO.has(String(p.envio_substatus ?? ''))) return 'enviado'
   // Sem pagamento confirmado não se despacha nada — fica em Novos.
   if (st === 'novo') return 'novos'
 
