@@ -43,14 +43,27 @@ const CODIGO_SEFAZ_PAGAMENTO: Record<string, string> = {
  * pelo MESMO caminho da emissão. Duas resoluções que discordam produzem
  * exatamente o defeito que a correção deveria consertar.
  */
-export async function resolverEmitente(sb: any, empresaId: string): Promise<{
+//
+// `empresaFiscalForcada`: quem emite foi escolhido FORA da config da conta —
+// hoje, o canal de marketplace (Configurar → canal → "Empresa que emite a
+// nota fiscal"). Vale só se for do mesmo grupo (tenant) de quem vende: o id
+// chega de uma coluna que o navegador grava, e emitir com o CNPJ de outro
+// cliente do SaaS não pode depender de ninguém ter mexido nela.
+export async function resolverEmitente(sb: any, empresaId: string, empresaFiscalForcada?: string | null): Promise<{
   empresaFiscalId: string
   configFiscal: any
   simplesNacional: boolean
   cfopPadrao: string
 }> {
+  if (empresaFiscalForcada && empresaFiscalForcada !== empresaId) {
+    const { data: duas } = await sb.from('empresas').select('id, tenant_id').in('id', [empresaId, empresaFiscalForcada])
+    const tenantDe = new Map((duas ?? []).map((e: any) => [e.id, e.tenant_id]))
+    if (!tenantDe.get(empresaFiscalForcada) || tenantDe.get(empresaFiscalForcada) !== tenantDe.get(empresaId)) {
+      throw new Error('A empresa escolhida para emitir a nota deste canal não pertence ao seu grupo empresarial. Revise em Marketplaces → canal → Configurar.')
+    }
+  }
   let { data: configFiscal } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaId).single()
-  const empresaFiscalId: string = configFiscal?.empresa_fiscal_id || empresaId
+  const empresaFiscalId: string = empresaFiscalForcada || configFiscal?.empresa_fiscal_id || empresaId
   if (empresaFiscalId !== empresaId) {
     const { data: configFiscalEmitente } = await sb.from('empresa_config_fiscal').select('*').eq('empresa_id', empresaFiscalId).single()
     configFiscal = configFiscalEmitente
@@ -80,7 +93,7 @@ export type ResultadoEmissao = {
 // o executor de automações (cron, sem sessão de usuário). `sb` pode ser
 // tanto o cliente com sessão quanto o admin client — ambos têm os mesmos
 // métodos de query.
-export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: string, operador?: string | null): Promise<ResultadoEmissao> {
+export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: string, operador?: string | null, opts?: { empresaFiscalId?: string | null }): Promise<ResultadoEmissao> {
   const { data: venda } = await sb.from('vendas').select('*').eq('id', vendaId).eq('empresa_id', empresaId).single()
   if (!venda) return { ok: false, erro: 'Venda não encontrada' }
   if (venda.nfce_status === 'autorizada') {
@@ -98,7 +111,13 @@ export async function emitirNfceParaVenda(sb: any, empresaId: string, vendaId: s
     : { data: [] as any[] }
   const produtoPorId = new Map((produtos ?? []).map((p: any) => [p.id, p]))
 
-  const { empresaFiscalId, configFiscal, simplesNacional, cfopPadrao } = await resolverEmitente(sb, empresaId)
+  let emitente: Awaited<ReturnType<typeof resolverEmitente>>
+  try {
+    emitente = await resolverEmitente(sb, empresaId, opts?.empresaFiscalId)
+  } catch (e: any) {
+    return { ok: false, erro: e?.message ?? 'Empresa emissora inválida' }
+  }
+  const { empresaFiscalId, configFiscal, simplesNacional, cfopPadrao } = emitente
 
   const { data: empresa } = await sb.from('empresas').select('cnpj').eq('id', empresaFiscalId).single()
   if (!empresa?.cnpj) {

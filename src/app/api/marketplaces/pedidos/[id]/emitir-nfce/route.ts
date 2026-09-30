@@ -18,12 +18,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const empresaId = profile?.empresa_id
   if (!empresaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 
-  const { data: pedido } = await sb.from('marketplace_pedidos').select('id').eq('id', pedidoId).eq('empresa_id', empresaId).maybeSingle()
+  const { data: pedido } = await sb.from('marketplace_pedidos')
+    .select('id, marketplace_canais(empresa_fiscal_id)')
+    .eq('id', pedidoId).eq('empresa_id', empresaId).maybeSingle()
   if (!pedido) return NextResponse.json({ ok: false, erro: 'Pedido não encontrado' }, { status: 404 })
+  // Empresa do grupo escolhida no canal para emitir; sem escolha, vale a
+  // config da conta (Empresas → Fiscal).
+  const empresaFiscalDoCanal = (pedido as any).marketplace_canais?.empresa_fiscal_id ?? null
 
   const garantia = await garantirVendaDoPedido(sb, pedidoId, empresaId)
   if (!garantia.ok) return NextResponse.json({ ok: false, erro: garantia.erro }, { status: 400 })
 
-  const resultado = await emitirNfceParaVenda(sb, empresaId, garantia.vendaId, user.email)
+  const resultado = await emitirNfceParaVenda(sb, empresaId, garantia.vendaId, user.email, { empresaFiscalId: empresaFiscalDoCanal })
   return NextResponse.json(resultado, { status: resultado.ok || resultado.jaEmitida ? 200 : 400 })
 }

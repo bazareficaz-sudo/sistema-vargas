@@ -44,11 +44,13 @@ function fmtData(v: string | null) {
 }
 
 
-export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, empresaEstoqueNome, empresaFiscalNome, qInicial, canalIdInicial, operador }: {
+export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, empresaEstoqueNome, empresaFiscalNome, emissorPorCanal, qInicial, canalIdInicial, operador }: {
   canais: any[]; pedidos: any[]; totalReal: number; empresaId: string
   // Config da conta (Empresas → Estoque/Fiscal) — igual em toda linha hoje,
   // já que não existe override por canal ainda.
   empresaEstoqueNome: string; empresaFiscalNome: string
+  // Empresa que emite a nota de cada canal (Configurar → canal).
+  emissorPorCanal: Record<string, string>
   qInicial: string; canalIdInicial: string; operador: string
 }) {
   const router = useRouter()
@@ -587,7 +589,9 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
       <div className="mb-5">
         <p className="text-xs text-gray-400">
           📦 Estoque debitado de: <strong className="text-gray-600">{empresaEstoqueNome}</strong>
-          {' · '}🧾 Fiscal emitido por: <strong className="text-gray-600">{empresaFiscalNome}</strong>
+          {' · '}🧾 Nota fiscal emitida por: <strong className="text-gray-600">
+            {new Set(Object.values(emissorPorCanal)).size > 1 ? 'depende do canal (Configurar → canal)' : (Object.values(emissorPorCanal)[0] || empresaFiscalNome)}
+          </strong>
         </p>
       </div>
 
@@ -953,7 +957,12 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                   Cria a venda por trás na primeira emissão (garantirVendaDoPedido),
                   reaproveita nas próximas — reemitir/consultar usa a mesma venda. */}
               <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-                <p className="text-xs font-semibold text-gray-600">Nota Fiscal</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-gray-600">Nota Fiscal</p>
+                  <p className="text-[11px] text-gray-400 truncate" title="Configurável por canal em Marketplaces → canal → Configurar">
+                    emitida por {emissorPorCanal[detalhe.canal_id] || empresaFiscalNome}
+                  </p>
+                </div>
                 {nfceStatus?.status === 'autorizada' ? (
                   <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5">
                     <p>✓ Autorizada — Nº <span className="font-mono">{nfceStatus.numero}</span></p>

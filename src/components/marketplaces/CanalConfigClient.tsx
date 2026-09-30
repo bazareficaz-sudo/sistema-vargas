@@ -10,11 +10,26 @@ const PLATAFORMAS: Record<string, { label: string; icone: string; cor: string }>
   shopee:       { label: 'Shopee',        icone: '🧡', cor: 'bg-orange-500' },
   amazon:       { label: 'Amazon',        icone: '📦', cor: 'bg-orange-400' },
   magalu:       { label: 'Magazine Luiza',icone: '🛍️', cor: 'bg-blue-600'  },
+  tiktok:       { label: 'TikTok Shop',   icone: '🎵', cor: 'bg-gray-900'   },
+  nuvemshop:    { label: 'Nuvemshop',     icone: '☁️', cor: 'bg-blue-500'   },
   outro:        { label: 'Outro',         icone: '🏪', cor: 'bg-gray-500'   },
 }
 
-export default function CanalConfigClient({ canal: canalInicial, logs, regras, empresaId }: {
+type EmpresaGrupo = { id: string; nome: string | null; nome_fantasia: string | null; cnpj: string | null; uf: string | null; regime_tributario: string | null }
+
+const REGIME_LABEL: Record<string, string> = {
+  simples_nacional: 'Simples Nacional', lucro_presumido: 'Lucro Presumido', lucro_real: 'Lucro Real', mei: 'MEI',
+}
+
+function nomeEmpresa(e: EmpresaGrupo | undefined): string {
+  return e ? (e.nome_fantasia || e.nome || 'Empresa sem nome') : '—'
+}
+
+export default function CanalConfigClient({ canal: canalInicial, logs, regras, empresaId, empresasGrupo, emissorPadraoId }: {
   canal: any; logs: any[]; regras: { id: string; nome: string }[]; empresaId: string
+  // Empresas do grupo empresarial (mesmo tenant) e a emissora padrão da conta
+  // (Empresas → Fiscal), usada quando o canal não escolhe nenhuma.
+  empresasGrupo: EmpresaGrupo[]; emissorPadraoId: string
 }) {
   const router = useRouter()
   const plat = PLATAFORMAS[canalInicial.plataforma] ?? PLATAFORMAS.outro
@@ -32,6 +47,7 @@ export default function CanalConfigClient({ canal: canalInicial, logs, regras, e
     atualizar_estoque_canal: canalInicial.atualizar_estoque_canal ?? false,
     aplicar_regra_produto: canalInicial.aplicar_regra_produto ?? false,
     regra_padrao_id: canalInicial.regra_padrao_id ?? '',
+    empresa_fiscal_id: canalInicial.empresa_fiscal_id ?? '',
   })
 
   function f(k: string, v: any) { setForm(p => ({ ...p, [k]: v })) }
@@ -41,7 +57,7 @@ export default function CanalConfigClient({ canal: canalInicial, logs, regras, e
     if (!form.nome.trim()) { setErro('Nome obrigatório.'); return }
     setSalvando(true); setErro('')
     const sb = createClient()
-    await sb.from('marketplace_canais').update({
+    const { error } = await sb.from('marketplace_canais').update({
       nome: form.nome.trim(),
       markup_canal: parseFloat(form.markup_canal) || 0,
       seller_id: form.seller_id || null,
@@ -51,9 +67,11 @@ export default function CanalConfigClient({ canal: canalInicial, logs, regras, e
       atualizar_estoque_canal: form.atualizar_estoque_canal,
       aplicar_regra_produto: form.aplicar_regra_produto,
       regra_padrao_id: form.regra_padrao_id || null,
+      empresa_fiscal_id: form.empresa_fiscal_id || null,
       updated_at: new Date().toISOString(),
     }).eq('id', canalInicial.id)
     setSalvando(false)
+    if (error) { setErro(`Não foi possível salvar: ${error.message}`); return }
     flash('Configurações salvas.')
     router.refresh()
   }
@@ -154,6 +172,30 @@ export default function CanalConfigClient({ canal: canalInicial, logs, regras, e
               <p className="text-xs text-gray-400 mt-1">
                 Pré-selecionada automaticamente ao mapear um anúncio deste canal a um produto — vale só pra anúncio
                 sem regra ainda; o operador pode trocar depois na tela de Anúncios.
+              </p>
+            </div>
+          </div>
+
+          {/* Quem fatura os pedidos deste canal */}
+          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
+            <h2 className="font-semibold text-gray-800">Nota fiscal</h2>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Empresa que emite a nota fiscal dos pedidos deste canal</label>
+              <select value={form.empresa_fiscal_id} onChange={e => f('empresa_fiscal_id', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
+                <option value="">
+                  Padrão da conta — {nomeEmpresa(empresasGrupo.find(e => e.id === emissorPadraoId))}
+                </option>
+                {empresasGrupo.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {nomeEmpresa(e)}{e.cnpj ? ` · ${e.cnpj}` : ''}{e.uf ? ` · ${e.uf}` : ''}{e.regime_tributario ? ` · ${REGIME_LABEL[e.regime_tributario] ?? e.regime_tributario}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                A nota de cada pedido deste canal sai com o CNPJ, a numeração, o certificado e o regime tributário da
+                empresa escolhida. O pedido e o estoque continuam nesta conta. O CNPJ precisa ser o mesmo cadastrado
+                na conta de vendedor do marketplace, senão o canal recusa a nota.
               </p>
             </div>
           </div>

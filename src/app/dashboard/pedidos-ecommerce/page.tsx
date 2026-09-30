@@ -52,11 +52,16 @@ export default async function PedidosEcommercePage({ searchParams }: {
   ])
   const empresaEstoqueId = configEstoque?.empresa_estoque_id || empresaId
   const empresaFiscalId = configFiscal?.empresa_fiscal_id || empresaId
-  const idsParaNome = [...new Set([empresaEstoqueId, empresaFiscalId])]
+  // Cada canal pode ter sua própria empresa emissora (Configurar → canal);
+  // sem escolha, vale a da conta.
+  const emissorIdPorCanal = new Map((canais ?? []).map(c => [c.id, (c.empresa_fiscal_id as string | null) || empresaFiscalId]))
+  const idsParaNome = [...new Set([empresaEstoqueId, empresaFiscalId, ...emissorIdPorCanal.values()])]
   const { data: empresasNomes } = await supabase.from('empresas').select('id, nome, nome_fantasia').in('id', idsParaNome)
   const nomePorId = new Map((empresasNomes ?? []).map(e => [e.id, e.nome_fantasia ?? e.nome]))
   const empresaEstoqueNome = nomePorId.get(empresaEstoqueId) ?? ''
   const empresaFiscalNome = nomePorId.get(empresaFiscalId) ?? ''
+  const emissorPorCanal: Record<string, string> = Object.fromEntries(
+    [...emissorIdPorCanal].map(([canalId, id]) => [canalId, nomePorId.get(id) ?? '']))
 
   const filtrar = (query: any) => {
     let r = query.eq('empresa_id', empresaId)
@@ -96,6 +101,7 @@ export default async function PedidosEcommercePage({ searchParams }: {
       empresaId={empresaId}
       empresaEstoqueNome={empresaEstoqueNome}
       empresaFiscalNome={empresaFiscalNome}
+      emissorPorCanal={emissorPorCanal}
       qInicial={q}
       canalIdInicial={canalId}
       operador={user?.email ?? ''}
