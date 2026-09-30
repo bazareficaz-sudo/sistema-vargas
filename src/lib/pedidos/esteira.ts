@@ -88,7 +88,9 @@ export function etapaEsteira(p: any, agora = new Date()): EtapaEsteira {
   const st = p.status
   const ei = p.etapa_interna
 
-  if (st === 'cancelado' || st === 'devolvido' || ei === 'cancelado') return 'cancelado'
+  // TO_RETURN (Shopee): pedido em devolução — saiu do fluxo de despacho.
+  const ext = String(p.status_externo ?? '').toUpperCase()
+  if (st === 'cancelado' || st === 'devolvido' || ei === 'cancelado' || ext === 'TO_RETURN') return 'cancelado'
   if (st === 'entregue' || ei === 'concluido') return 'entregue'
   if (st === 'enviado' || ei === 'enviado') return 'enviado'
   // Sem pagamento confirmado não se despacha nada — fica em Novos.
