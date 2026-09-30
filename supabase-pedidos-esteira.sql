@@ -25,3 +25,8 @@ ALTER TABLE marketplace_pedidos
 --    misturava histórico com o que falta enviar).
 CREATE INDEX IF NOT EXISTS marketplace_pedidos_empresa_status_data_idx
   ON marketplace_pedidos (empresa_id, status, data_pedido DESC);
+
+-- 4. O que o ML devolveu no shipment/lead_time — prazo, modalidade e
+--    rastreio sem consultar o canal de novo (e diagnóstico quando o prazo
+--    não vem).
+ALTER TABLE marketplace_pedidos ADD COLUMN IF NOT EXISTS envio_dados JSONB;

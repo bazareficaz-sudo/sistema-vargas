@@ -214,7 +214,13 @@ async function upsertItemPedido(
 // Depois disto o shipment não muda mais de um jeito que importe à esteira.
 const ENVIO_FINAL = new Set(['shipped', 'delivered', 'not_delivered', 'cancelled'])
 
-type EnvioML = { envio_status: string | null; envio_substatus: string | null; envio_atualizado_em: string; prazo_postagem?: string }
+type EnvioML = {
+  envio_status: string | null; envio_substatus: string | null; envio_atualizado_em: string
+  prazo_postagem?: string
+  // O que o ML devolveu (shipment e lead_time) — para conferir prazo,
+  // modalidade e rastreio sem precisar consultar o canal de novo.
+  envio_dados?: Record<string, any>
+}
 
 // "2026-10-01T00:00:00.000-03:00" → fim desse dia em Brasília.
 function fimDoDiaBrasilia(dataIso: string): string | undefined {
@@ -229,15 +235,26 @@ export async function buscarEnvio(canal: MLChannel, shippingId: string | number,
     envio_status: sh?.status ?? null,
     envio_substatus: sh?.substatus ?? null,
     envio_atualizado_em: new Date().toISOString(),
+    envio_dados: { shipment: sh },
   }
-  if (precisaPrazo && !ENVIO_FINAL.has(envio.envio_status ?? '')) {
+  // O limite de despacho pode vir no próprio shipment (formato antigo:
+  // shipping_option; novo: lead_time) ou só no recurso /lead_time.
+  const limiteNoShipment = sh?.lead_time?.estimated_handling_limit?.date
+    ?? sh?.shipping_option?.estimated_handling_limit?.date
+  if (limiteNoShipment) envio.prazo_postagem = fimDoDiaBrasilia(limiteNoShipment)
+
+  if (precisaPrazo && !envio.prazo_postagem && !ENVIO_FINAL.has(envio.envio_status ?? '')) {
     // Sem prazo o pedido só cai como "sai hoje" — falhar aqui não pode
-    // derrubar o pedido.
+    // derrubar o pedido. O erro fica guardado em envio_dados para diagnóstico.
     try {
-      const lt = await mlGet(`/shipments/${shippingId}/lead_time`, {}, canal.accessToken)
-      const prazo = lt?.estimated_handling_limit?.date ? fimDoDiaBrasilia(lt.estimated_handling_limit.date) : undefined
+      const lt = await mlGet(`/shipments/${shippingId}/lead_time`, {}, canal.accessToken, { 'x-format-new': 'true' })
+      envio.envio_dados!.lead_time = lt
+      const limite = lt?.estimated_handling_limit?.date ?? lt?.estimated_delivery_time?.handling_limit?.date
+      const prazo = limite ? fimDoDiaBrasilia(limite) : undefined
       if (prazo) envio.prazo_postagem = prazo
-    } catch { /* fica sem prazo nesta rodada */ }
+    } catch (e: any) {
+      envio.envio_dados!.lead_time_erro = e?.message ?? String(e)
+    }
   }
   return envio
 }
@@ -250,6 +267,7 @@ function aplicarEnvio(row: Record<string, any>, envio: EnvioML, tags: string[], 
   row.envio_substatus = envio.envio_substatus
   row.envio_atualizado_em = envio.envio_atualizado_em
   if (envio.prazo_postagem) row.prazo_postagem = envio.prazo_postagem
+  if (envio.envio_dados) row.envio_dados = envio.envio_dados
   if (row.status === 'confirmado') {
     if (envio.envio_status === 'shipped') row.status = 'enviado'
     if (envio.envio_status === 'delivered') row.status = 'entregue'

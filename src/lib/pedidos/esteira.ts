@@ -75,10 +75,12 @@ export function notaResolvida(p: any): boolean {
 }
 
 // Substatus do shipment do Mercado Livre que só existem DEPOIS de a etiqueta
-// sair da impressora (impressa, na lista de coleta, pronta para a coleta,
-// deixada na agência). Serve para a esteira reconhecer a etiqueta impressa
-// em outro sistema.
-const SUBSTATUS_ML_JA_IMPRESSO = new Set(['printed', 'in_pickup_list', 'ready_for_pickup', 'dropped_off', 'picked_up'])
+// sair da impressora (impressa, na lista de coleta/embalagem, pronta para a
+// coleta, deixada na agência, já no centro do ML). Serve para a esteira
+// reconhecer a etiqueta impressa em outro sistema.
+const SUBSTATUS_ML_JA_IMPRESSO = new Set([
+  'printed', 'in_pickup_list', 'in_packing_list', 'ready_for_pickup', 'dropped_off', 'picked_up', 'in_hub',
+])
 
 export function etiquetaImpressa(p: any): boolean {
   return !!p.etiqueta_impressa_em || SUBSTATUS_ML_JA_IMPRESSO.has(String(p.envio_substatus ?? ''))
