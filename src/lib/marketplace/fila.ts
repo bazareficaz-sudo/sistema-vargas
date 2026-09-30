@@ -61,6 +61,15 @@ export type ResultadoRodada = {
 // impedindo os produtos de trás de serem atendidos.
 export const MAX_TENTATIVAS_ENVIO = 5
 
+// Status em que a PRÓPRIA PLATAFORMA trava o anúncio: a TikTok congela
+// (FREEZE) ou desativa (PLATFORM_DEACTIVATED) por violação de política, e
+// recusa qualquer alteração ("Operation Not Allowed") até o vendedor
+// resolver no Seller Center. Não é falha nossa — tentar de novo só gastaria
+// as 5 tentativas do produto e poluiria a fila com erro a cada rodada.
+const STATUS_TRAVADO_PELO_CANAL = new Set(['FREEZE', 'PLATFORM_DEACTIVATED'])
+const DETALHE_TRAVADO = (s: string) =>
+  `anuncio travado pela plataforma (${s}) — resolva no painel do canal`
+
 /** Ainda falta o intervalo passar? Então esta rodada não é dela. */
 export function devidoExecutar(cfg: ConfigFila, agora = Date.now()): boolean {
   if (!cfg.ativo) return false
@@ -186,7 +195,7 @@ export async function processarFilaDaEmpresa(
   for (let offset = 0; idsDeCanal.length > 0 && offset < 50 * TAMANHO_PAGINA; offset += TAMANHO_PAGINA) {
     const { data: pagina, error: erroAnuncios } = await sb
       .from('marketplace_anuncios')
-      .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, pausa_origem, empresa_id')
+      .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, status_externo, pausa_origem, empresa_id')
       .in('canal_id', idsDeCanal)
       .in('produto_id', produtoIds)
       // Ordem estável: sem ela, duas páginas podem repetir e omitir linhas.
@@ -233,7 +242,7 @@ export async function processarFilaDaEmpresa(
     for (let i = 0; i < faltantes.length; i += TAMANHO_PAGINA) {
       const { data: extras, error } = await sb
         .from('marketplace_anuncios')
-        .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, pausa_origem, empresa_id')
+        .select('id, canal_id, produto_id, id_externo, titulo, preco_venda, estoque_externo, estoque_reservado, regra_id, tem_variacao, status, status_externo, pausa_origem, empresa_id')
         .in('id', faltantes.slice(i, i + TAMANHO_PAGINA))
         // O limite de inquilino continua vindo do canal, como na consulta
         // principal: sem isto, um id de variação de outra empresa traria o
@@ -488,6 +497,9 @@ export async function processarFilaDaEmpresa(
           // 26/08/2026: 16 anuncios encerrados com id_externo.
           acao = 'encerrado'
           detalheFinal = 'anuncio encerrado no canal — enviar estoque poderia reabri-lo'
+        } else if (STATUS_TRAVADO_PELO_CANAL.has(String(a.status_externo ?? ''))) {
+          acao = 'travado_canal'
+          detalheFinal = DETALHE_TRAVADO(String(a.status_externo))
         } else {
           // Item em campanha ativa: vai estoque, nao vai preco. A Shopee
           // recusaria o preco de qualquer jeito, e quem manda no preco de um
@@ -787,6 +799,9 @@ export async function processarFilaDaEmpresa(
       } else if (a.status === 'encerrado') {
         acaoAnuncio = 'encerrado'
         detalheAnuncio = 'anuncio encerrado no canal — enviar estoque poderia reabri-lo'
+      } else if (STATUS_TRAVADO_PELO_CANAL.has(String(a.status_externo ?? ''))) {
+        acaoAnuncio = 'travado_canal'
+        detalheAnuncio = DETALHE_TRAVADO(String(a.status_externo))
       } else {
         const variacoesEnvio: AlvoVariacao[] = aEnviar.map(x => ({
           modelId: x.modelId,

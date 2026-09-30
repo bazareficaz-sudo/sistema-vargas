@@ -43,6 +43,8 @@ const ROTULO_ACAO: Record<string, { txt: string; cls: string }> = {
   com_variacao:    { txt: 'Com variação',   cls: 'bg-purple-100 text-purple-700' },
   canal_desligado: { txt: 'Canal desligado', cls: 'bg-gray-100 text-gray-500' },
   encerrado:       { txt: 'Encerrado',      cls: 'bg-gray-100 text-gray-500' },
+  // Congelado/desativado pela plataforma (TikTok FREEZE): pulado, não é erro.
+  travado_canal:   { txt: 'Travado no canal', cls: 'bg-amber-100 text-amber-700' },
   // Variação sem produto vinculado: NÃO é erro e não é "já igual" — é a
   // única linha que diz onde falta mapeamento, e some se não tiver rótulo.
   variacao_sem_produto: { txt: 'Variação sem produto', cls: 'bg-amber-100 text-amber-700' },
