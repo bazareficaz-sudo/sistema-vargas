@@ -79,6 +79,10 @@ export type TiktokOrder = {
   create_time?: number
   update_time?: number
   rts_time?: number
+  // Prazo para o pacote estar pronto para envio (unix, fim do dia BRT).
+  rts_sla_time?: number
+  // NEED_INVOICE enquanto a TikTok espera a nota fiscal do pedido.
+  need_upload_invoice?: string
   payment?: {
     currency?: string
     sub_total?: string

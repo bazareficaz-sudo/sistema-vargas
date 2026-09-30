@@ -4,10 +4,34 @@ import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
 
+// Colunas da listagem. Sem `dados_brutos` (o JSON inteiro do canal, pesado
+// demais para centenas de linhas): da TikTok só interessa se ainda falta a
+// nota, e isso vem extraído no próprio select.
+const COLUNAS = [
+  'id, canal_id, id_externo, numero_pedido, cliente_nome, cliente_email, cliente_doc',
+  'entrega_cep, entrega_logradouro, entrega_numero, entrega_bairro, entrega_cidade, entrega_estado',
+  'valor_produtos, valor_frete, valor_desconto, valor_total, status, status_externo, etapa_interna',
+  'pendencia_motivo, prazo_postagem, data_pedido, data_envio, transportadora, codigo_rastreio, observacoes',
+  'nfe_numero, nfe_chave, nfe_informada_em, venda_id',
+  'envio_status, envio_substatus, etiqueta_impressa_em, etiqueta_impressa_por',
+  'need_upload_invoice:dados_brutos->>need_upload_invoice',
+  'marketplace_pedido_itens(*, produtos(nome, sku), marketplace_anuncios(imagens))',
+  'marketplace_pedido_pacotes(*)',
+  'marketplace_canais(id, nome, plataforma)',
+].join(', ')
+
+// Pedido que já saiu, chegou ou foi cancelado. Os abertos são todos
+// carregados (é o trabalho do dia); do histórico, só os mais recentes.
+const FINALIZADOS_STATUS = '(enviado,entregue,cancelado,devolvido)'
+const FINALIZADOS_ETAPA = '(concluido,cancelado,enviado)'
+const JANELA_ABERTOS_DIAS = 45
+const LIMITE_ABERTOS = 1000
+const LIMITE_HISTORICO = 150
+
 export default async function PedidosEcommercePage({ searchParams }: {
-  searchParams: Promise<{ status?: string; q?: string; canalId?: string }>
+  searchParams: Promise<{ q?: string; canalId?: string }>
 }) {
-  const { status = '', q = '', canalId = '' } = await searchParams
+  const { q = '', canalId = '' } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const profile = await perfilDaSessao(supabase, user!.id)
@@ -34,39 +58,44 @@ export default async function PedidosEcommercePage({ searchParams }: {
   const empresaEstoqueNome = nomePorId.get(empresaEstoqueId) ?? ''
   const empresaFiscalNome = nomePorId.get(empresaFiscalId) ?? ''
 
-  let query = supabase
-    .from('marketplace_pedidos')
-    .select('*, marketplace_pedido_itens(*, produtos(nome, sku), marketplace_anuncios(imagens)), marketplace_pedido_pacotes(*), marketplace_canais(id, nome, plataforma)')
-    .eq('empresa_id', empresaId)
-    .order('data_pedido', { ascending: false })
+  const filtrar = (query: any) => {
+    let r = query.eq('empresa_id', empresaId)
+    if (canalId) r = r.eq('canal_id', canalId)
+    if (q) r = r.or(`cliente_nome.ilike.%${q}%,numero_pedido.ilike.%${q}%,id_externo.ilike.%${q}%`)
+    return r
+  }
 
-  if (status) query = query.eq('status', status)
-  if (canalId) query = query.eq('canal_id', canalId)
-  if (q) query = query.or(`cliente_nome.ilike.%${q}%,numero_pedido.ilike.%${q}%,id_externo.ilike.%${q}%`)
+  // Antes era um único .limit(200) do mais novo para o mais velho: numa
+  // semana cheia o histórico empurrava para fora da lista justamente pedido
+  // que ainda não tinha saído. Agora abertos e histórico são consultas
+  // separadas.
+  const desde = new Date(Date.now() - JANELA_ABERTOS_DIAS * 86_400_000).toISOString()
+  const [{ data: abertos }, { data: historico }, { count: totalReal }] = await Promise.all([
+    filtrar(supabase.from('marketplace_pedidos').select(COLUNAS))
+      .not('status', 'in', FINALIZADOS_STATUS)
+      // etapa_interna nula (pedido lançado à mão) conta como aberto — o
+      // `not in` sozinho descartaria o nulo.
+      .or(`etapa_interna.is.null,etapa_interna.not.in.${FINALIZADOS_ETAPA}`)
+      .gte('data_pedido', desde)
+      .order('data_pedido', { ascending: false })
+      .limit(LIMITE_ABERTOS),
+    filtrar(supabase.from('marketplace_pedidos').select(COLUNAS))
+      .or(`status.in.${FINALIZADOS_STATUS},etapa_interna.in.${FINALIZADOS_ETAPA}`)
+      .order('data_pedido', { ascending: false })
+      .limit(LIMITE_HISTORICO),
+    filtrar(supabase.from('marketplace_pedidos').select('id', { count: 'exact', head: true })),
+  ])
 
-  const { data: pedidos } = await query.limit(200)
-
-  // Contagem real (sem o .limit acima) — o número exibido no cabeçalho não
-  // pode depender do tamanho da página carregada, senão "sobe e desce"
-  // conforme a base cresce além do limite, do jeito que confundiu antes.
-  let countQuery = supabase
-    .from('marketplace_pedidos')
-    .select('*', { count: 'exact', head: true })
-    .eq('empresa_id', empresaId)
-  if (status) countQuery = countQuery.eq('status', status)
-  if (canalId) countQuery = countQuery.eq('canal_id', canalId)
-  if (q) countQuery = countQuery.or(`cliente_nome.ilike.%${q}%,numero_pedido.ilike.%${q}%,id_externo.ilike.%${q}%`)
-  const { count: totalReal } = await countQuery
+  const pedidos = [...(abertos ?? []), ...(historico ?? [])]
 
   return (
     <PedidosEcommerceClient
       canais={canais ?? []}
-      pedidos={pedidos ?? []}
-      totalReal={totalReal ?? (pedidos ?? []).length}
+      pedidos={pedidos}
+      totalReal={totalReal ?? pedidos.length}
       empresaId={empresaId}
       empresaEstoqueNome={empresaEstoqueNome}
       empresaFiscalNome={empresaFiscalNome}
-      statusInicial={status}
       qInicial={q}
       canalIdInicial={canalId}
       operador={user?.email ?? ''}

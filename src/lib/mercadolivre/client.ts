@@ -63,10 +63,10 @@ async function parseMLResponse(res: Response, path: string) {
   return body
 }
 
-export async function mlGet(path: string, params: Record<string, string | number>, accessToken: string) {
+export async function mlGet(path: string, params: Record<string, string | number>, accessToken: string, headersExtras?: Record<string, string>) {
   const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])))
   const url = `${API_BASE}${path}${qs.toString() ? `?${qs.toString()}` : ''}`
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+  const res = await fetch(url, { headers: { ...headersExtras, Authorization: `Bearer ${accessToken}` } })
   return parseMLResponse(res, path)
 }
 

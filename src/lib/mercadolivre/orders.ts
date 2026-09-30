@@ -71,9 +71,10 @@ function mapStatus(status?: string): string {
   return ORDER_STATUS_TO_STATUS[status ?? ''] ?? 'novo'
 }
 
-export function calcularEtapaInterna(status: string | undefined, tags: string[] | undefined, algumItemPendente: boolean): string {
+export function calcularEtapaInterna(status: string | undefined, tags: string[] | undefined, algumItemPendente: boolean, envioStatus?: string | null): string {
   if (status === 'cancelled' || status === 'invalid') return 'cancelado'
-  if ((tags ?? []).includes('delivered')) return 'concluido'
+  if ((tags ?? []).includes('delivered') || envioStatus === 'delivered') return 'concluido'
+  if (envioStatus === 'shipped') return 'enviado'
   if (algumItemPendente) return 'pendencia_mapeamento'
   if (status === 'paid') return 'pronto_expedicao'
   return 'novo'
@@ -116,7 +117,9 @@ function mapOrderToPedidoRow(rawOrder: any, canal: MLChannel, algumItemPendente:
     etapa_interna: calcularEtapaInterna(status, tags, algumItemPendente),
     data_pedido: rawOrder.date_created ?? new Date().toISOString(),
     data_envio: tags.includes('delivered') && rawOrder.date_closed ? rawOrder.date_closed : null,
-    prazo_postagem: null, // idem valor_frete — prazo de postagem vive no shipment, não no pedido
+    // prazo_postagem e envio_* NÃO vão aqui: vivem no shipment e são
+    // acrescentados por aplicarEnvio() só quando consultados — mandar null
+    // apagaria o prazo já gravado a cada re-sync.
     dados_brutos: rawOrder,
     ultima_sincronizacao: new Date().toISOString(),
     erro_sincronizacao: null,
@@ -198,6 +201,123 @@ async function upsertItemPedido(
   return { id: criado.id }
 }
 
+// ── ENVIO (shipment) ───────────────────────────────────────────────────────
+//
+// O pedido do ML só fala de pagamento. O que a esteira de pedidos precisa —
+// nota pendente, etiqueta pronta, etiqueta impressa, enviado, entregue, e o
+// prazo de postagem — vive em /shipments/{id}:
+//   status/substatus: ready_to_ship + invoice_pending | ready_to_print |
+//                     printed | ...; shipped; delivered (doc "Shipments")
+//   /shipments/{id}/lead_time → estimated_handling_limit.date: prazo para
+//                     despachar. "Só a data conta" — vale o dia inteiro.
+
+// Depois disto o shipment não muda mais de um jeito que importe à esteira.
+const ENVIO_FINAL = new Set(['shipped', 'delivered', 'not_delivered', 'cancelled'])
+
+type EnvioML = { envio_status: string | null; envio_substatus: string | null; envio_atualizado_em: string; prazo_postagem?: string }
+
+// "2026-10-01T00:00:00.000-03:00" → fim desse dia em Brasília.
+function fimDoDiaBrasilia(dataIso: string): string | undefined {
+  const dia = String(dataIso).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return undefined
+  return new Date(`${dia}T23:59:59-03:00`).toISOString()
+}
+
+export async function buscarEnvio(canal: MLChannel, shippingId: string | number, precisaPrazo: boolean): Promise<EnvioML> {
+  const sh = await mlGet(`/shipments/${shippingId}`, {}, canal.accessToken, { 'x-format-new': 'true' })
+  const envio: EnvioML = {
+    envio_status: sh?.status ?? null,
+    envio_substatus: sh?.substatus ?? null,
+    envio_atualizado_em: new Date().toISOString(),
+  }
+  if (precisaPrazo && !ENVIO_FINAL.has(envio.envio_status ?? '')) {
+    // Sem prazo o pedido só cai como "sai hoje" — falhar aqui não pode
+    // derrubar o pedido.
+    try {
+      const lt = await mlGet(`/shipments/${shippingId}/lead_time`, {}, canal.accessToken)
+      const prazo = lt?.estimated_handling_limit?.date ? fimDoDiaBrasilia(lt.estimated_handling_limit.date) : undefined
+      if (prazo) envio.prazo_postagem = prazo
+    } catch { /* fica sem prazo nesta rodada */ }
+  }
+  return envio
+}
+
+// Leva o que o shipment disse para a linha do pedido: situação do envio,
+// prazo e — quando o pacote já saiu ou chegou — o status do pedido, que
+// antes ficava "confirmado" para sempre no ML.
+function aplicarEnvio(row: Record<string, any>, envio: EnvioML, tags: string[], algumItemPendente: boolean): void {
+  row.envio_status = envio.envio_status
+  row.envio_substatus = envio.envio_substatus
+  row.envio_atualizado_em = envio.envio_atualizado_em
+  if (envio.prazo_postagem) row.prazo_postagem = envio.prazo_postagem
+  if (row.status === 'confirmado') {
+    if (envio.envio_status === 'shipped') row.status = 'enviado'
+    if (envio.envio_status === 'delivered') row.status = 'entregue'
+  }
+  row.etapa_interna = calcularEtapaInterna(row.status_externo ?? undefined, tags, algumItemPendente, envio.envio_status)
+}
+
+// Consulta o shipment de um pedido pago ainda não finalizado. Falha de
+// shipment é isolada: o pedido segue gravado com o que se sabia antes.
+async function envioDoPedido(sb: any, canal: MLChannel, rawOrder: any): Promise<EnvioML | null> {
+  const shippingId = rawOrder.shipping?.id
+  if (!shippingId || rawOrder.status !== 'paid') return null
+  if ((rawOrder.tags ?? []).includes('delivered')) return null
+
+  const { data: atual } = await sb.from('marketplace_pedidos')
+    .select('prazo_postagem, envio_status, envio_substatus, envio_atualizado_em')
+    .eq('canal_id', canal.id).eq('id_externo', String(rawOrder.id))
+    .maybeSingle()
+  // Envio já finalizado: não consulta de novo, mas REAPLICA o que está
+  // gravado — senão o upsert devolveria o pedido para "confirmado".
+  const gravado: EnvioML | null = atual?.envio_status ? {
+    envio_status: atual.envio_status, envio_substatus: atual.envio_substatus ?? null,
+    envio_atualizado_em: atual.envio_atualizado_em ?? new Date().toISOString(),
+  } : null
+  if (gravado && ENVIO_FINAL.has(gravado.envio_status ?? '')) return gravado
+
+  try {
+    return await buscarEnvio(canal, shippingId, !atual?.prazo_postagem)
+  } catch {
+    return gravado
+  }
+}
+
+// Pedidos em aberto cujo pedido NÃO mudou (então não voltam no
+// /orders/search), mas cujo envio pode ter mudado — nota aceita, etiqueta
+// impressa em outro sistema, pacote postado. Uma fatia por rodada, os mais
+// desatualizados primeiro.
+export async function atualizarEnviosEmAberto(sb: any, canal: MLChannel, limite = 30): Promise<number> {
+  const trintaDias = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const cincoMin = new Date(Date.now() - 5 * 60_000).toISOString()
+  const { data: abertos } = await sb.from('marketplace_pedidos')
+    .select('id, status, status_externo, prazo_postagem, envio_status, dados_brutos')
+    .eq('canal_id', canal.id).eq('status', 'confirmado')
+    .gte('data_pedido', trintaDias)
+    .or(`envio_atualizado_em.is.null,envio_atualizado_em.lt.${cincoMin}`)
+    .order('envio_atualizado_em', { ascending: true, nullsFirst: true })
+    .limit(limite)
+
+  let atualizados = 0
+  for (const p of abertos ?? []) {
+    const shippingId = p.dados_brutos?.shipping?.id
+    if (!shippingId) continue
+    try {
+      const envio = await buscarEnvio(canal, shippingId, !p.prazo_postagem)
+      const { data: itens } = await sb.from('marketplace_pedido_itens').select('produto_id').eq('pedido_id', p.id)
+      const row: Record<string, any> = { status: p.status, status_externo: p.status_externo }
+      aplicarEnvio(row, envio, p.dados_brutos?.tags ?? [], (itens ?? []).some((i: any) => !i.produto_id))
+      await sb.from('marketplace_pedidos').update(row).eq('id', p.id)
+      if (row.status !== p.status) {
+        await sincronizarEtapaComCanal(sb, { pedidoId: p.id, empresaId: canal.empresaId, statusCanal: row.status })
+      }
+      atualizados++
+      await sleep(THROTTLE_MS)
+    } catch { /* tenta de novo na próxima rodada */ }
+  }
+  return atualizados
+}
+
 // Processa um pedido já buscado (search já traz completo). Reaproveitado por
 // syncPedidos (lote) e syncSinglePedido.
 export async function processRawOrder(
@@ -215,6 +335,8 @@ export async function processRawOrder(
   const algumItemPendente = vinculos.some(v => !v.vinculo.produtoId)
 
   const row = mapOrderToPedidoRow(rawOrder, canal, algumItemPendente)
+  const envio = await envioDoPedido(sb, canal, rawOrder)
+  if (envio) aplicarEnvio(row, envio, rawOrder.tags ?? [], algumItemPendente)
   const pedido = await upsertPedido(sb, row)
 
   // Etapa operacional acompanha o canal — só para a frente, nunca apagando
@@ -286,6 +408,7 @@ export async function syncPedidos(
   }
 
   if (pedidosBrutos.length === 0) {
+    try { await atualizarEnviosEmAberto(sb, canal) } catch { /* próxima rodada */ }
     return { totalFound: 0, upserted: 0, failed: [], truncated: false }
   }
 
@@ -301,20 +424,23 @@ export async function syncPedidos(
     }
   }
 
+  // Envios de pedidos que não mudaram nesta janela — não pode derrubar o sync.
+  try { await atualizarEnviosEmAberto(sb, canal) } catch { /* próxima rodada */ }
+
   return { totalFound: pedidosBrutos.length, upserted, failed, truncated }
 }
 
 // Mesmo motivo/uso da versão Shopee: recalcula etapa_interna a partir do
 // estado atual depois de um mapeamento manual feito fora da sincronização.
 export async function recalcularEtapaPedido(sb: any, pedidoId: string): Promise<string | null> {
-  const { data: pedido } = await sb.from('marketplace_pedidos').select('id, status_externo, dados_brutos').eq('id', pedidoId).single()
+  const { data: pedido } = await sb.from('marketplace_pedidos').select('id, status_externo, envio_status, dados_brutos').eq('id', pedidoId).single()
   if (!pedido) return null
 
   const { data: itens } = await sb.from('marketplace_pedido_itens').select('produto_id').eq('pedido_id', pedidoId)
   const algumItemPendente = (itens ?? []).some((i: any) => !i.produto_id)
 
   const tags = pedido.dados_brutos?.tags as string[] | undefined
-  const etapa = calcularEtapaInterna(pedido.status_externo ?? undefined, tags, algumItemPendente)
+  const etapa = calcularEtapaInterna(pedido.status_externo ?? undefined, tags, algumItemPendente, pedido.envio_status)
   await sb.from('marketplace_pedidos').update({ etapa_interna: etapa }).eq('id', pedidoId)
   return etapa
 }

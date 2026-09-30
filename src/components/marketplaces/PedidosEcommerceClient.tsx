@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
-import { calcularEtapaExibicao, ehHoje, ETAPA_EXIBICAO_CORES, ETAPA_EXIBICAO_LABEL, type EtapaExibicao } from './utils'
+import RomaneioModal from '@/components/pedidos/RomaneioModal'
+import { ehHoje } from './utils'
+import { ESTEIRA, ESTEIRA_INFO, emAberto, etapaEsteira, fimDeHoje, janelaDoPrazo, textoPrazo, type EtapaEsteira } from '@/lib/pedidos/esteira'
 
 const STATUS_CORES: Record<string, string> = {
   novo:       'bg-blue-100 text-blue-700',
@@ -20,15 +22,19 @@ const STATUS_LABEL: Record<string, string> = {
   enviado: 'Enviado', entregue: 'Entregue', cancelado: 'Cancelado', devolvido: 'Devolvido',
 }
 
-const ABAS_ETAPA: { key: EtapaExibicao | ''; label: string }[] = [
-  { key: '', label: 'Todos' },
-  { key: 'reservar', label: ETAPA_EXIBICAO_LABEL.reservar },
-  { key: 'mapear', label: ETAPA_EXIBICAO_LABEL.mapear },
-  { key: 'emitir', label: ETAPA_EXIBICAO_LABEL.emitir },
-  { key: 'enviar', label: ETAPA_EXIBICAO_LABEL.enviar },
-  { key: 'imprimir', label: ETAPA_EXIBICAO_LABEL.imprimir },
-  { key: 'enviado', label: ETAPA_EXIBICAO_LABEL.enviado },
-  { key: 'com_pendencia', label: ETAPA_EXIBICAO_LABEL.com_pendencia },
+// Abas abaixo dos passos. Os passos 1–4 são escolhidos pelos cards.
+type Aba = 'abertos' | 'todos' | EtapaEsteira
+const PASSOS = ESTEIRA.filter(e => e.numero)
+const ABAS: [Aba, string][] = [
+  ['abertos', 'Em aberto'],
+  ['pendencia', ESTEIRA_INFO.pendencia.label],
+  ['enviado', ESTEIRA_INFO.enviado.label],
+  ['entregue', ESTEIRA_INFO.entregue.label],
+  ['cancelado', ESTEIRA_INFO.cancelado.label],
+  ['todos', 'Todos'],
+]
+const JANELAS: ['' | 'hoje' | 'atrasado' | 'futuro', string][] = [
+  ['', 'Todos os prazos'], ['hoje', 'Sai hoje'], ['atrasado', 'Atrasados'], ['futuro', 'Próximos dias'],
 ]
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
@@ -37,24 +43,13 @@ function fmtData(v: string | null) {
   return new Date(v).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-// Prazo de postagem: quanto falta (ou quanto já passou) até `prazo_postagem`.
-// Etapas finais (enviado/concluído/cancelado) não têm mais prazo relevante.
-function prazoInfo(pedido: any): { texto: string; cor: string } | null {
-  if (!pedido.prazo_postagem) return null
-  if (['enviado', 'concluido', 'cancelado'].includes(pedido.etapa_interna)) return null
-  const diffMs = new Date(pedido.prazo_postagem).getTime() - Date.now()
-  const diffH = diffMs / (1000 * 60 * 60)
-  if (diffH < 0) return { texto: `Atrasado ${Math.abs(diffH) < 24 ? Math.round(Math.abs(diffH)) + 'h' : Math.round(Math.abs(diffH) / 24) + 'd'}`, cor: 'text-red-600 font-medium' }
-  if (diffH < 24) return { texto: `${Math.round(diffH)}h restantes`, cor: 'text-orange-600 font-medium' }
-  return { texto: `${Math.round(diffH / 24)}d restantes`, cor: 'text-gray-500' }
-}
 
-export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, empresaEstoqueNome, empresaFiscalNome, statusInicial, qInicial, canalIdInicial, operador }: {
+export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, empresaEstoqueNome, empresaFiscalNome, qInicial, canalIdInicial, operador }: {
   canais: any[]; pedidos: any[]; totalReal: number; empresaId: string
   // Config da conta (Empresas → Estoque/Fiscal) — igual em toda linha hoje,
   // já que não existe override por canal ainda.
   empresaEstoqueNome: string; empresaFiscalNome: string
-  statusInicial: string; qInicial: string; canalIdInicial: string; operador: string
+  qInicial: string; canalIdInicial: string; operador: string
 }) {
   const router = useRouter()
   const [pedidos, setPedidos] = useState(pedidosIniciais)
@@ -64,11 +59,13 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   // aparece na tela até um F5 manual).
   useEffect(() => { setPedidos(pedidosIniciais) }, [pedidosIniciais])
   const [q, setQ] = useState(qInicial)
-  const [statusFiltro, setStatusFiltro] = useState(statusInicial)
   const [canalFiltro, setCanalFiltro] = useState(canalIdInicial)
-  const [etapaFiltro, setEtapaFiltro] = useState<EtapaExibicao | ''>('')
-  const [somenteAtrasados, setSomenteAtrasados] = useState(false)
-  const [somenteHoje, setSomenteHoje] = useState(false)
+  const [aba, setAba] = useState<Aba>('abertos')
+  const [janela, setJanela] = useState<'' | 'hoje' | 'atrasado' | 'futuro'>('')
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [romaneio, setRomaneio] = useState<{ fonte: string; id: string }[] | null>(null)
+  const [marcandoImpressao, setMarcandoImpressao] = useState(false)
+  const [avisoAcao, setAvisoAcao] = useState('')
   const [detalhe, setDetalhe] = useState<any | null>(null)
   const [modal, setModal] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -233,6 +230,37 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
       setErroEmitirNfce(e?.message ?? 'Erro ao emitir NF-e')
     } finally {
       setEmitindoNfce(false)
+    }
+  }
+
+  // Marca/desmarca a etiqueta como impressa (passo 3 → 4 da esteira).
+  async function marcarImpressao(ids: string[], impresso: boolean) {
+    if (ids.length === 0) return
+    setMarcandoImpressao(true); setAvisoAcao('')
+    try {
+      const resp = await fetch('/api/pedidos/impressao', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, impresso }),
+      })
+      const data = await resp.json()
+      if (!data.ok) { setAvisoAcao(data.erro ?? 'Erro ao registrar impressão'); return }
+      const alterados = new Set<string>(data.alterados ?? [])
+      const patch = impresso
+        ? { etiqueta_impressa_em: new Date().toISOString(), etiqueta_impressa_por: operador }
+        : { etiqueta_impressa_em: null, etiqueta_impressa_por: null }
+      setPedidos(prev => prev.map(p => alterados.has(p.id) ? { ...p, ...patch } : p))
+      if (detalhe && alterados.has(detalhe.id)) setDetalhe((p: any) => ({ ...p, ...patch }))
+      setSelecionados(new Set())
+      const ignorados = ids.length - alterados.size
+      setAvisoAcao((impresso
+        ? `${alterados.size} pedido(s) marcado(s) como impresso(s) — foram para "Aguardando postagem".`
+        : `${alterados.size} pedido(s) voltaram para "Imprimir etiqueta".`)
+        + (ignorados > 0 ? ` ${ignorados} já estava(m) assim.` : ''))
+      router.refresh()
+    } catch (e: any) {
+      setAvisoAcao(e?.message ?? 'Erro ao registrar impressão')
+    } finally {
+      setMarcandoImpressao(false)
     }
   }
 
@@ -469,6 +497,12 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
       const data = await resp.json()
       if (!data.ok) { setErroEtiqueta(data.erro ?? 'Erro ao baixar etiqueta'); return }
       window.open(data.url, '_blank')
+      // A rota já registrou a impressão (primeira vez) — reflete na tela.
+      if (!detalhe.etiqueta_impressa_em) {
+        const patch = { etiqueta_impressa_em: new Date().toISOString(), etiqueta_impressa_por: operador }
+        setPedidos(prev => prev.map(p => p.id === detalhe.id ? { ...p, ...patch } : p))
+        setDetalhe((p: any) => ({ ...p, ...patch }))
+      }
     } catch (e: any) {
       setErroEtiqueta(e.message ?? 'Erro ao baixar etiqueta')
     } finally {
@@ -476,21 +510,46 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     }
   }
 
-  const filtrados = pedidos.filter(p => {
-    const matchQ = !q || (p.cliente_nome ?? '').toLowerCase().includes(q.toLowerCase()) || (p.numero_pedido ?? '').includes(q) || p.id_externo.includes(q)
-    const matchS = !statusFiltro || p.status === statusFiltro
-    const matchC = !canalFiltro || p.canal_id === canalFiltro
-    const matchE = !etapaFiltro || calcularEtapaExibicao(p) === etapaFiltro
-    const matchAtraso = !somenteAtrasados || !!prazoInfo(p)?.texto.startsWith('Atrasado')
-    const matchHoje = !somenteHoje || ehHoje(p.data_pedido)
-    return matchQ && matchS && matchC && matchE && matchAtraso && matchHoje
-  })
+  // Cada pedido com sua etapa na esteira e a janela do prazo — calculados
+  // uma vez por render e usados pela lista, pelos contadores e pelo painel.
+  const agora = new Date()
+  const base = pedidos
+    .map(p => ({ p, etapa: etapaEsteira(p, agora), janela: janelaDoPrazo(p, agora) }))
+    .filter(({ p }) => {
+      const termo = q.trim().toLowerCase()
+      const matchQ = !termo || (p.cliente_nome ?? '').toLowerCase().includes(termo) || (p.numero_pedido ?? '').toLowerCase().includes(termo) || String(p.id_externo ?? '').toLowerCase().includes(termo)
+      const matchC = !canalFiltro || p.canal_id === canalFiltro
+      return matchQ && matchC
+    })
 
-  const contagemEtapas: Record<string, number> = {}
-  for (const p of pedidos) { const e = calcularEtapaExibicao(p); contagemEtapas[e] = (contagemEtapas[e] ?? 0) + 1 }
-  const atrasados = pedidos.filter(p => prazoInfo(p)?.texto.startsWith('Atrasado')).length
+  const contagem: Record<string, number> = {}
+  const urgentesPorEtapa: Record<string, { hoje: number; atrasado: number }> = {}
+  let saemHoje = 0, atrasados = 0, impressosHoje = 0, totalAbertos = 0
+  for (const x of base) {
+    contagem[x.etapa] = (contagem[x.etapa] ?? 0) + 1
+    if (x.p.etiqueta_impressa_em && ehHoje(x.p.etiqueta_impressa_em)) impressosHoje++
+    if (!emAberto(x.etapa)) continue
+    totalAbertos++
+    // Sem pagamento não conta como "tem que sair hoje".
+    if (x.p.status === 'novo') continue
+    const u = (urgentesPorEtapa[x.etapa] ??= { hoje: 0, atrasado: 0 })
+    if (x.janela === 'atrasado') { atrasados++; u.atrasado++ }
+    else if (x.janela === 'hoje' || x.janela === 'sem_prazo') { saemHoje++; u.hoje++ }
+  }
 
-  const faturamento = pedidos.filter(p => !['cancelado', 'devolvido'].includes(p.status)).reduce((s, p) => s + Number(p.valor_total), 0)
+  const abaEmAberto = aba === 'abertos' || (aba !== 'todos' && emAberto(aba))
+  const prazoMs = (p: any) => p.prazo_postagem ? new Date(p.prazo_postagem).getTime() : fimDeHoje(agora).getTime()
+  const filtrados = base
+    .filter(x => {
+      const matchAba = aba === 'todos' ? true : aba === 'abertos' ? emAberto(x.etapa) : x.etapa === aba
+      const matchJanela = !abaEmAberto || !janela
+        || (janela === 'hoje' ? (x.janela === 'hoje' || x.janela === 'sem_prazo') : x.janela === janela)
+      return matchAba && matchJanela
+    })
+    // Em aberto: o que vence primeiro no topo. Histórico: o mais recente.
+    .sort((a, b) => abaEmAberto
+      ? prazoMs(a.p) - prazoMs(b.p)
+      : new Date(b.p.data_pedido ?? 0).getTime() - new Date(a.p.data_pedido ?? 0).getTime())
 
   return (
     <div>
@@ -504,7 +563,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Pedidos de E-commerce</h1>
           <p className="text-gray-500 text-sm mt-0.5">
-            {totalReal} pedidos{totalReal > pedidos.length ? ` (${pedidos.length} mais recentes exibidos)` : ''} · {fmt(faturamento)} faturados · todas as lojas conectadas
+            {totalAbertos} em aberto · {totalReal} pedidos no total · todas as lojas conectadas
           </p>
         </div>
         <div className="flex gap-2">
@@ -539,84 +598,149 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         </div>
       )}
 
-      {/* Cards status (comercial) */}
-      <div className="grid grid-cols-5 gap-3 mb-3">
-        {[['novo','Novos','blue'],['confirmado','Confirmados','green'],['enviado','Enviados','cyan'],['entregue','Entregues','green'],['cancelado','Cancelados','red']].map(([s, l, c]) => {
-          const n = pedidos.filter(p => p.status === s).length
+      {/* Painel do dia */}
+      <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+        <span className="text-gray-500 font-medium">Hoje</span>
+        <button onClick={() => { setAba('abertos'); setJanela('hoje') }} className="hover:underline">
+          <strong className={saemHoje > 0 ? 'text-orange-600' : 'text-gray-900'}>{saemHoje}</strong> <span className="text-gray-600">para sair hoje</span>
+        </button>
+        <button onClick={() => { setAba('abertos'); setJanela('atrasado') }} className="hover:underline">
+          <strong className={atrasados > 0 ? 'text-red-600' : 'text-gray-900'}>{atrasados}</strong> <span className="text-gray-600">atrasado(s)</span>
+        </button>
+        <span><strong className="text-gray-900">{impressosHoje}</strong> <span className="text-gray-600">etiqueta(s) impressa(s) hoje</span></span>
+        {(contagem.pendencia ?? 0) > 0 && (
+          <button onClick={() => { setAba('pendencia'); setJanela('') }} className="text-amber-700 hover:underline">
+            ⚠ {contagem.pendencia} com pendência
+          </button>
+        )}
+      </div>
+
+      {/* Esteira: 1 Novos → 2 Emitir NF → 3 Imprimir etiqueta → 4 Aguardando postagem */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        {PASSOS.map(passo => {
+          const n = contagem[passo.valor] ?? 0
+          const urg = urgentesPorEtapa[passo.valor] ?? { hoje: 0, atrasado: 0 }
+          const ativo = aba === passo.valor
           return (
-            <button key={s} onClick={() => setStatusFiltro(statusFiltro === s ? '' : s)}
-              className={`bg-white border rounded-xl p-3 text-left transition-all ${statusFiltro === s ? 'border-blue-400 ring-1 ring-blue-400' : 'border-gray-200 hover:border-gray-300'}`}>
-              <p className="text-xs text-gray-500">{l}</p>
-              <p className={`text-xl font-bold ${n > 0 && s === 'novo' ? 'text-orange-500' : 'text-gray-900'}`}>{n}</p>
+            <button key={passo.valor} onClick={() => setAba(ativo ? 'abertos' : passo.valor)} title={passo.ajuda}
+              className={`bg-white border rounded-xl p-3 text-left transition-all ${ativo ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200 hover:border-gray-300'}`}>
+              <p className="text-xs text-gray-600 flex items-center gap-1.5">
+                <span className="inline-flex w-5 h-5 items-center justify-center rounded-full bg-gray-100 text-gray-700 font-semibold">{passo.numero}</span>
+                {passo.label}
+              </p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{n}</p>
+              <p className="text-[11px] mt-0.5 min-h-[1rem]">
+                {urg.atrasado > 0 && <span className="text-red-600 font-medium">{urg.atrasado} atrasado(s) </span>}
+                {urg.hoje > 0 && <span className="text-orange-600">{urg.hoje} para hoje</span>}
+                {urg.atrasado === 0 && urg.hoje === 0 && (
+                  <span className="text-gray-400">{passo.valor === 'novos' ? 'agendados para os próximos dias' : 'nada urgente'}</span>
+                )}
+              </p>
             </button>
           )
         })}
       </div>
 
-      {/* Abas por etapa operacional */}
-      <div className="flex items-center gap-1 mb-5 border-b border-gray-200 flex-wrap">
-        {ABAS_ETAPA.map(aba => {
-          const ativo = etapaFiltro === aba.key
-          const n = aba.key === '' ? pedidos.length : (contagemEtapas[aba.key] ?? 0)
+      {/* Abas: em aberto, pendências, histórico */}
+      <div className="flex items-center gap-1 mb-4 border-b border-gray-200 flex-wrap">
+        {ABAS.map(([chave, label]) => {
+          const ativo = aba === chave
+          const n = chave === 'todos' ? base.length : chave === 'abertos' ? totalAbertos : (contagem[chave] ?? 0)
           return (
-            <button key={aba.key || 'todos'} onClick={() => setEtapaFiltro(aba.key)}
+            <button key={chave} onClick={() => { setAba(chave); if (!emAberto(chave as EtapaEsteira) && chave !== 'abertos') setJanela('') }}
               className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${ativo ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              {aba.label} <span className={ativo ? 'text-blue-400' : 'text-gray-400'}>({n})</span>
+              {label} <span className={ativo ? 'text-blue-400' : 'text-gray-400'}>({n})</span>
             </button>
           )
         })}
-        <button onClick={() => setSomenteHoje(v => !v)}
-          className={`ml-auto mb-1 px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteHoje ? 'bg-blue-600 text-white border-blue-600 font-medium' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
-          Hoje
-        </button>
-        <button onClick={() => setSomenteAtrasados(v => !v)}
-          className={`mb-1 px-2.5 py-1 text-xs rounded-lg border transition-colors ${somenteAtrasados ? 'bg-red-600 text-white border-red-600 font-medium' : atrasados > 0 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-gray-400 border-gray-200'}`}>
-          Atrasados ({atrasados})
-        </button>
+        {abaEmAberto && (
+          <div className="ml-auto mb-1 flex items-center gap-1">
+            {JANELAS.map(([chave, label]) => (
+              <button key={chave || 'todas'} onClick={() => setJanela(chave)}
+                className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${janela === chave
+                  ? (chave === 'atrasado' ? 'bg-red-600 text-white border-red-600 font-medium' : 'bg-blue-600 text-white border-blue-600 font-medium')
+                  : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Ações em lote */}
+      {selecionados.size > 0 && (
+        <div className="sticky top-0 z-10 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-blue-800 font-medium">{selecionados.size} selecionado(s)</span>
+          <button onClick={() => marcarImpressao([...selecionados], true)} disabled={marcandoImpressao}
+            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+            🖨 Marcar etiqueta como impressa
+          </button>
+          <button onClick={() => marcarImpressao([...selecionados], false)} disabled={marcandoImpressao}
+            className="px-3 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-xs font-medium rounded-lg">
+            ↩ Desfazer impressão
+          </button>
+          <button onClick={() => setRomaneio([...selecionados].map(id => ({ fonte: 'marketplace', id })))}
+            className="px-3 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 text-xs font-medium rounded-lg">
+            📋 Romaneio de separação
+          </button>
+          <button onClick={() => setSelecionados(new Set())} className="ml-auto text-xs text-blue-600 hover:text-blue-800">Limpar seleção</button>
+        </div>
+      )}
+      {avisoAcao && (
+        <div className="bg-teal-50 border border-teal-200 text-teal-800 text-xs px-4 py-2.5 rounded-lg mb-3 flex items-center justify-between">
+          <span>{avisoAcao}</span>
+          <button onClick={() => setAvisoAcao('')} className="text-teal-500 hover:text-teal-700">✕</button>
+        </div>
+      )}
 
       {/* Filtros */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar cliente, nº pedido, ID..."
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-72 bg-white" />
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full sm:w-72 bg-white" />
         <select value={canalFiltro} onChange={e => setCanalFiltro(e.target.value)}
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
           <option value="">Todas as lojas</option>
           {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
         </select>
-        {statusFiltro && (
-          <button onClick={() => setStatusFiltro('')} className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
-            <span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_CORES[statusFiltro]}`}>{STATUS_LABEL[statusFiltro]}</span>
-            ✕
-          </button>
-        )}
       </div>
 
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Lista */}
-        <div className="col-span-3 bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="lg:col-span-3 bg-white border border-gray-200 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Pedido / Cliente</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Loja</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Etapa</th>
-                <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Prazo</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Total</th>
-                <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Status</th>
+                <th className="px-3 py-3 w-8">
+                  <input type="checkbox" aria-label="Selecionar todos"
+                    checked={filtrados.length > 0 && filtrados.every(x => selecionados.has(x.p.id))}
+                    onChange={e => setSelecionados(e.target.checked ? new Set(filtrados.map(x => x.p.id)) : new Set())} />
+                </th>
+                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Pedido / Cliente</th>
+                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Loja</th>
+                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Etapa</th>
+                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Prazo</th>
+                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filtrados.map(p => {
-                const prazo = prazoInfo(p)
+              {filtrados.map(({ p, etapa }) => {
+                const prazo = emAberto(etapa) ? textoPrazo(p) : null
                 const primeiroItem = p.marketplace_pedido_itens?.[0]
                 const imagem = primeiroItem?.marketplace_anuncios?.imagens?.[0]
                 const qtdItens = p.marketplace_pedido_itens?.length ?? 0
-                const etapa = calcularEtapaExibicao(p)
+                const info = ESTEIRA_INFO[etapa]
                 return (
                 <tr key={p.id} onClick={() => { setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }); abrirNotaFiscal(p) }}
                   className={`hover:bg-blue-50 transition-colors cursor-pointer ${detalhe?.id === p.id ? 'bg-blue-50' : ''}`}>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" aria-label="Selecionar pedido" checked={selecionados.has(p.id)}
+                      onChange={e => setSelecionados(prev => {
+                        const novo = new Set(prev)
+                        if (e.target.checked) novo.add(p.id); else novo.delete(p.id)
+                        return novo
+                      })} />
+                  </td>
+                  <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-9 h-9 flex-shrink-0 rounded-lg overflow-hidden bg-gray-50 border border-gray-200">
                         {imagem ? <img src={imagem} alt="" className="w-full h-full object-cover" /> : (
@@ -633,32 +757,28 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500 truncate max-w-[6rem]" title={p.marketplace_canais?.nome}>
+                  <td className="px-3 py-3 text-xs text-gray-500 truncate max-w-[6rem]" title={p.marketplace_canais?.nome}>
                     {p.marketplace_canais?.nome ?? '—'}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${ETAPA_EXIBICAO_CORES[etapa]}`}>
-                      {ETAPA_EXIBICAO_LABEL[etapa]}
+                  <td className="px-3 py-3">
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap ${info.cor}`}>
+                      {info.numero ? `${info.numero}. ` : ''}{info.label}
                     </span>
+                    {p.status === 'novo' && etapa === 'novos' && <p className="text-[10px] text-gray-400 mt-0.5">aguardando pagamento</p>}
                   </td>
-                  <td className={`px-4 py-3 text-xs ${prazo?.cor ?? 'text-gray-300'}`}>{prazo?.texto ?? '—'}</td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900 text-sm">{fmt(Number(p.valor_total))}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_CORES[p.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                      {STATUS_LABEL[p.status] ?? p.status}
-                    </span>
-                  </td>
+                  <td className={`px-3 py-3 text-xs ${prazo?.cor ?? 'text-gray-300'}`}>{prazo?.texto ?? '—'}</td>
+                  <td className="px-3 py-3 text-right font-medium text-gray-900 text-sm">{fmt(Number(p.valor_total))}</td>
                 </tr>
               )})}
               {filtrados.length === 0 && (
-                <tr><td colSpan={6} className="py-12 text-center text-gray-400 text-sm">Nenhum pedido encontrado.</td></tr>
+                <tr><td colSpan={6} className="py-12 text-center text-gray-400 text-sm">Nenhum pedido nesta etapa.</td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         {/* Detalhe do pedido selecionado */}
-        <div className="col-span-2">
+        <div className="lg:col-span-2">
           {detalhe ? (
             <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4 sticky top-4">
               <div className="flex items-start justify-between">
@@ -672,6 +792,42 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                   {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
+
+              {/* Onde o pedido está na esteira e o que falta */}
+              {(() => {
+                const etapa = etapaEsteira(detalhe)
+                const info = ESTEIRA_INFO[etapa]
+                const prazo = emAberto(etapa) ? textoPrazo(detalhe) : null
+                return (
+                  <div className="border border-gray-200 rounded-lg p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${info.cor}`}>
+                        {info.numero ? `${info.numero}. ` : ''}{info.label}
+                      </span>
+                      {prazo && <span className={`text-xs ${prazo.cor}`}>{prazo.texto}</span>}
+                    </div>
+                    <p className="text-[11px] text-gray-500">{detalhe.status === 'novo' ? 'Aguardando pagamento no canal.' : info.ajuda}</p>
+                    {detalhe.prazo_postagem && (
+                      <p className="text-[11px] text-gray-400">Postar até {fmtData(detalhe.prazo_postagem)}</p>
+                    )}
+                    {detalhe.envio_status && (
+                      <p className="text-[11px] text-gray-400">Envio no canal: <span className="font-mono">{detalhe.envio_status}{detalhe.envio_substatus ? ` / ${detalhe.envio_substatus}` : ''}</span></p>
+                    )}
+                    {detalhe.etiqueta_impressa_em ? (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <span className="text-[11px] text-teal-700">🖨 Etiqueta impressa {fmtData(detalhe.etiqueta_impressa_em)}{detalhe.etiqueta_impressa_por ? ` · ${detalhe.etiqueta_impressa_por}` : ''}</span>
+                        <button onClick={() => marcarImpressao([detalhe.id], false)} disabled={marcandoImpressao}
+                          className="text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-50 flex-shrink-0">Desfazer</button>
+                      </div>
+                    ) : (etapa === 'imprimir' || etapa === 'emitir') && (
+                      <button onClick={() => marcarImpressao([detalhe.id], true)} disabled={marcandoImpressao}
+                        className="w-full mt-1 py-1.5 border border-teal-300 text-teal-700 hover:bg-teal-50 disabled:opacity-50 text-xs font-medium rounded-lg transition-colors">
+                        🖨 Marcar etiqueta como impressa
+                      </button>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Cliente */}
               {detalhe.cliente_nome && (
@@ -823,7 +979,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
               </div>
 
               {/* Informar NF-e — só registro manual, pra quem já emitiu por fora */}
-              {(calcularEtapaExibicao(detalhe) === 'emitir' || calcularEtapaExibicao(detalhe) === 'reservar') && (
+              {!detalhe.nfe_informada_em && ['novos', 'emitir'].includes(etapaEsteira(detalhe)) && (
                 <div className="border border-gray-200 rounded-lg p-3 space-y-2">
                   <p className="text-xs font-semibold text-gray-600">Já emiti por fora — registrar manualmente</p>
                   <input value={nfeForm.numero} onChange={e => setNfeForm(p => ({ ...p, numero: e.target.value }))}
@@ -1045,6 +1201,8 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
           onAtualizado={onAnuncioMapeado}
         />
       )}
+
+      {romaneio && <RomaneioModal itens={romaneio} onFechar={() => setRomaneio(null)} />}
     </div>
   )
 }

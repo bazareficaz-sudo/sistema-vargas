@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { baixarEtiqueta } from '@/lib/shopee/logistics'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { registrarImpressao } from '@/lib/pedidos/impressao'
 
 export async function POST(req: Request) {
   const { canalId, pedidoId } = await req.json()
@@ -32,6 +33,17 @@ export async function POST(req: Request) {
 
   try {
     const resultado = await baixarEtiqueta(sb, canal, pedidoId)
+    // Baixou a etiqueta para imprimir → pedido vai para "Aguardando
+    // postagem". Só a primeira vez conta (reimpressão não mexe na data), e
+    // falha aqui não pode impedir a etiqueta de abrir.
+    try {
+      const { data: perfil } = await sb.from('profiles').select('nome').eq('id', user.id).maybeSingle()
+      await registrarImpressao(sb, {
+        empresaId, ids: [pedidoId], impresso: true,
+        usuarioId: user.id, usuarioNome: perfil?.nome ?? user.email ?? null,
+        origem: 'Etiqueta baixada (Shopee)',
+      })
+    } catch { /* o registro pode ser feito à mão na esteira */ }
     return NextResponse.json({ ok: true, ...resultado })
   } catch (e: any) {
     return NextResponse.json({ ok: false, erro: e?.message ?? 'Erro ao baixar etiqueta' }, { status: 400 })

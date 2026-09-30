@@ -15,7 +15,9 @@ const STATUS_MAP: Record<string, string> = {
   ON_HOLD: 'novo',
   AWAITING_SHIPMENT: 'confirmado',
   PARTIALLY_SHIPPING: 'confirmado',
-  AWAITING_COLLECTION: 'enviado',
+  // Etiqueta gerada, pacote esperando a coleta/postagem: ainda está no
+  // galpão — é o passo "Aguardando postagem" da esteira, não "enviado".
+  AWAITING_COLLECTION: 'confirmado',
   IN_TRANSIT: 'enviado',
   DELIVERED: 'entregue',
   COMPLETED: 'entregue',
@@ -28,9 +30,9 @@ const STATUS_MAP: Record<string, string> = {
 function calcularEtapaInterna(status: string, algumItemPendente: boolean): string {
   if (status === 'CANCELLED') return 'cancelado'
   if (status === 'COMPLETED' || status === 'DELIVERED') return 'concluido'
-  if (status === 'IN_TRANSIT' || status === 'AWAITING_COLLECTION') return 'enviado'
+  if (status === 'IN_TRANSIT') return 'enviado'
   if (algumItemPendente) return 'pendencia_mapeamento'
-  if (status === 'AWAITING_SHIPMENT' || status === 'PARTIALLY_SHIPPING') return 'pronto_expedicao'
+  if (status === 'AWAITING_SHIPMENT' || status === 'PARTIALLY_SHIPPING' || status === 'AWAITING_COLLECTION') return 'pronto_expedicao'
   return 'novo'
 }
 
@@ -108,6 +110,9 @@ export function mapOrderToPedidoRow(raw: TiktokOrder, canal: TiktokChannel, algu
     status_externo: status || null,
     etapa_interna: calcularEtapaInterna(status, algumItemPendente),
     data_pedido: raw.create_time ? new Date(raw.create_time * 1000).toISOString() : new Date().toISOString(),
+    // rts_sla_time: até quando o pacote tem de estar pronto para envio —
+    // o prazo de postagem da esteira (vem como fim do dia, horário de Brasília).
+    prazo_postagem: raw.rts_sla_time ? new Date(raw.rts_sla_time * 1000).toISOString() : null,
     dados_brutos: raw,
     ultima_sincronizacao: new Date().toISOString(),
     erro_sincronizacao: null,
