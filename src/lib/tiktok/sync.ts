@@ -1,5 +1,6 @@
 import { paginarProdutos, getDetalheProduto, getLojasAutorizadas } from './catalog'
-import type { SyncFailure, SyncResult, TiktokChannel, TiktokProduct } from './types'
+import { refreshAccessTokenIfNeeded } from './client'
+import type { SyncFailure, SyncResult, TiktokChannel, TiktokProduct, TiktokSku } from './types'
 
 // Teto de produtos por chamada de sincronização — mesmo princípio de
 // Shopee/Mercado Livre/Nuvemshop: sync síncrono e limitado, para não
@@ -44,10 +45,12 @@ function skuDoProduto(raw: TiktokProduct): string | null {
   return skus[0]?.seller_sku ? String(skus[0].seller_sku) : null
 }
 
+// `uri` é um identificador interno da TikTok (ex: "tos-alisg-i-.../<hash>"),
+// não um endereço — confirmado com dado real. O link abrível vem em url_list.
 function imagensDoProduto(raw: TiktokProduct): string[] {
   return (raw.main_images ?? [])
-    .map((img: any) => img.url ?? img.uri ?? img.url_list?.[0] ?? img.urls?.[0])
-    .filter((u): u is string => !!u)
+    .map((img: any) => img.url_list?.[0] ?? img.url ?? img.urls?.[0])
+    .filter((u): u is string => typeof u === 'string' && u.startsWith('http'))
 }
 
 // Mapeamento defensivo, mesmo espírito de Shopee/Nuvemshop: os nomes de
@@ -96,27 +99,90 @@ async function upsertAnuncio(sb: any, row: Record<string, any>): Promise<{ id: s
   return { id: data.id, produtoId: data.produto_id }
 }
 
+function nomeDaVariacao(sku: TiktokSku): string | null {
+  const partes = (sku.sales_attributes ?? []).map(a => a.value_name).filter((v): v is string => !!v)
+  if (partes.length > 0) return partes.join(' / ')
+  return sku.seller_sku || null
+}
+
+// Cada SKU vira uma variação — é o endereço (`model_id` = id do SKU) que a
+// fila usa para mandar estoque por modelo, igual à Shopee.
+export function mapSkuToVariacaoRow(sku: TiktokSku, anuncioId: string, empresaId: string): Record<string, any> {
+  const quantidades = (sku.inventory ?? []).map(i => i.quantity).filter((q): q is number => typeof q === 'number')
+  const preco = Number(sku.price?.sale_price ?? sku.price?.tax_exclusive_price)
+  return {
+    empresa_id: empresaId,
+    anuncio_id: anuncioId,
+    model_id: String(sku.id),
+    nome_variacao: nomeDaVariacao(sku),
+    sku_variacao: sku.seller_sku || null,
+    preco: Number.isFinite(preco) && preco > 0 ? preco : null,
+    estoque: quantidades.length > 0 ? quantidades.reduce((a, b) => a + b, 0) : null,
+    status_externo: sku.status_info?.status ?? null,
+    dados_brutos: sku,
+    sincronizado_em: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  // Sem produto_id, pelo mesmo motivo do anúncio: não desfazer vínculo manual.
+}
+
+async function upsertVariacao(sb: any, row: Record<string, any>) {
+  const { error } = await sb
+    .from('marketplace_anuncio_variacoes')
+    .upsert(row, { onConflict: 'anuncio_id,model_id' })
+  if (error) throw new Error(error.message)
+}
+
 export async function processarProduto(
   ctx: { sb: any; canal: TiktokChannel },
   raw: TiktokProduct,
-): Promise<{ anuncioId: string }> {
-  const { row } = mapProdutoToAnuncioRow(raw, ctx.canal)
-
+): Promise<{ anuncioId: string; failed: SyncFailure[] }> {
   // Search Products (paginarProdutos) confirmadamente não devolve
-  // main_images — só Get Product tem a imagem, mas é uma chamada extra por
-  // produto (sem lote), então só é feita quando falta imagem mesmo.
-  if (row.imagens.length === 0) {
+  // main_images nem o nome das variações (sales_attributes) — só Get Product
+  // tem. É uma chamada extra por produto (sem lote), então só acontece
+  // quando o que chegou está incompleto; quem já vem do detalhe não repete.
+  let fonte = raw
+  if (imagensDoProduto(raw).length === 0) {
     try {
       const detalhe = await getDetalheProduto(ctx.canal, String(raw.id))
-      if (detalhe) {
-        const imagensDetalhe = imagensDoProduto(detalhe)
-        if (imagensDetalhe.length > 0) row.imagens = imagensDetalhe
-      }
-    } catch { /* imagem é um extra — não pode derrubar a sincronização do produto */ }
+      if (detalhe) fonte = { ...raw, ...detalhe }
+    } catch { /* detalhe é complemento — não pode derrubar a sincronização do produto */ }
   }
 
+  const { row } = mapProdutoToAnuncioRow(fonte, ctx.canal)
   const anuncio = await upsertAnuncio(ctx.sb, row)
-  return { anuncioId: anuncio.id }
+
+  const failed: SyncFailure[] = []
+  // Produto de SKU único não é gravado como variação — mesma regra da
+  // Shopee: o anúncio simples já é o endereço dele.
+  const skus = fonte.skus ?? []
+  if (skus.length > 1) {
+    for (const sku of skus) {
+      if (sku?.id == null) continue
+      try {
+        await upsertVariacao(ctx.sb, mapSkuToVariacaoRow(sku, anuncio.id, ctx.canal.empresaId))
+      } catch (e: any) {
+        failed.push({ itemId: `${raw.id}:${sku.id}`, error: e?.message ?? 'Erro ao gravar variação' })
+      }
+    }
+  }
+
+  return { anuncioId: anuncio.id, failed }
+}
+
+// Ressincroniza um único anúncio (ação individual na tela de anúncios).
+export async function syncSingleItem(
+  sb: any, canalInicial: TiktokChannel, productId: string,
+): Promise<{ ok: true; anuncioId: string; warnings: SyncFailure[] } | { ok: false; error: string }> {
+  try {
+    const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
+    const detalhe = await getDetalheProduto(canal, productId)
+    if (!detalhe) return { ok: false, error: 'Produto não encontrado na TikTok Shop' }
+    const r = await processarProduto({ sb, canal }, { ...detalhe, id: detalhe.id ?? productId })
+    return { ok: true, anuncioId: r.anuncioId, warnings: r.failed }
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? 'Erro ao sincronizar anúncio' }
+  }
 }
 
 export async function testarConexao(
@@ -155,7 +221,8 @@ export async function syncCatalogo(
       if (totalFound >= maxItems) { truncated = true; break }
       totalFound += 1
       try {
-        await processarProduto(ctx, raw)
+        const r = await processarProduto(ctx, raw)
+        failed.push(...r.failed)
         upserted += 1
       } catch (e: any) {
         failed.push({ itemId: String(raw?.id ?? '?'), error: e?.message ?? 'Erro ao processar produto' })

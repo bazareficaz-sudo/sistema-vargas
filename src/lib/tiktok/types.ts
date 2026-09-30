@@ -52,13 +52,18 @@ export type TiktokProduct = {
   create_time?: number
   update_time?: number
   main_images?: Array<{ uri?: string; url?: string; urls?: string[] }>
-  skus?: Array<{
-    id?: string | number
-    seller_sku?: string
-    price?: { tax_exclusive_price?: string; sale_price?: string; currency?: string }
-    inventory?: Array<{ warehouse_id?: string; quantity?: number }>
-  }>
+  skus?: TiktokSku[]
   [key: string]: unknown
+}
+
+export type TiktokSku = {
+  id?: string | number
+  seller_sku?: string
+  price?: { tax_exclusive_price?: string; sale_price?: string; currency?: string }
+  inventory?: Array<{ warehouse_id?: string; quantity?: number }>
+  // Só vem no Get Product (detalhe), não no Search Products.
+  sales_attributes?: Array<{ name?: string; value_name?: string }>
+  status_info?: { status?: string }
 }
 
 // Tipo frouxo de propósito, mesmo princípio do TiktokProduct: o JSON de

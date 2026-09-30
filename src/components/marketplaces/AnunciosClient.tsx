@@ -195,17 +195,18 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // impedia o ML de ter atualizar/enviar/pausar/ativar e as regras em massa.
   const plataforma: string = canal.plataforma
   const ehML = plataforma === 'mercadolivre'
-  const nomeCanalPlataforma = ehML ? 'Mercado Livre' : 'Shopee'
-  const nomeCurto = ehML ? 'ML' : 'Shopee'
-  // Preposição certa: "na Shopee", "no Mercado Livre".
+  const ehTiktok = plataforma === 'tiktok'
+  const nomeCanalPlataforma = ehML ? 'Mercado Livre' : ehTiktok ? 'TikTok Shop' : 'Shopee'
+  const nomeCurto = ehML ? 'ML' : ehTiktok ? 'TikTok' : 'Shopee'
+  // Preposição certa: "na Shopee", "no Mercado Livre", "na TikTok Shop".
   const preposicao = ehML ? 'no' : 'na'
   function rotaCanal(recurso: string) {
-    return `/api/marketplace/${ehML ? 'mercadolivre' : 'shopee'}/${recurso}`
+    return `/api/marketplace/${ehML ? 'mercadolivre' : ehTiktok ? 'tiktok' : 'shopee'}/${recurso}`
   }
   // Plataformas que já têm módulo de escrita. Nuvemshop ainda não tem, então
   // os botões de envio não aparecem para ela — melhor ausente do que
   // presente e falhando.
-  const temEscrita = plataforma === 'shopee' || ehML
+  const temEscrita = plataforma === 'shopee' || ehML || ehTiktok
 
   // O nome da regra vem de `regras`, que a pagina ja carrega para o envio em
   // massa. Sem nome, a coluna mostraria um uuid.
@@ -1024,9 +1025,31 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   // toque (sem hover nenhum), a maioria simplesmente sumia ou era cortada
   // pela tabela. Agora só "Mapear/Trocar" fica solto (é a ação mais comum);
   // o resto mora neste menu — sempre alcançável, em qualquer largura.
-  const [menuAcoesAberto, setMenuAcoesAberto] = useState<string | null>(null)
+  //
+  // Posição FIXA, calculada a partir do botão: a tabela rola na horizontal
+  // (`overflow-x-auto`), e um menu `absolute` dentro dela seria cortado nas
+  // últimas linhas. Perto do rodapé da janela ele abre para cima. Rolar ou
+  // redimensionar fecha o menu, senão ele ficaria parado longe do botão.
+  const [menuAcoesAberto, setMenuAcoesAberto] = useState<{ id: string; top: number; left: number } | null>(null)
+  useEffect(() => {
+    if (!menuAcoesAberto) return
+    const fechar = () => setMenuAcoesAberto(null)
+    window.addEventListener('scroll', fechar, true)
+    window.addEventListener('resize', fechar)
+    return () => {
+      window.removeEventListener('scroll', fechar, true)
+      window.removeEventListener('resize', fechar)
+    }
+  }, [menuAcoesAberto])
+  function abrirMenuAcoes(id: string, botao: HTMLElement) {
+    const r = botao.getBoundingClientRect()
+    const LARGURA = 176, ALTURA = 200
+    const top = r.bottom + ALTURA + 8 > window.innerHeight ? Math.max(8, r.top - ALTURA - 4) : r.bottom + 4
+    const left = Math.min(Math.max(8, r.right - LARGURA), window.innerWidth - LARGURA - 8)
+    setMenuAcoesAberto({ id, top, left })
+  }
   function renderMenuAcoes(a: any) {
-    const aberto = menuAcoesAberto === a.id
+    const aberto = menuAcoesAberto?.id === a.id ? menuAcoesAberto : null
     const item = (label: string, onClick: () => void, cor = 'text-gray-700') => (
       <button onClick={() => { setMenuAcoesAberto(null); onClick() }}
         className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${cor}`}>
@@ -1035,7 +1058,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     )
     return (
       <div className="relative">
-        <button onClick={() => setMenuAcoesAberto(aberto ? null : a.id)}
+        <button onClick={e => aberto ? setMenuAcoesAberto(null) : abrirMenuAcoes(a.id, e.currentTarget)}
           title="Mais ações"
           className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 flex-shrink-0">
           ⋯
@@ -1044,10 +1067,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           <>
             {/* Fecha ao clicar fora — sem isto o menu só some clicando de novo no ⋯. */}
             <div className="fixed inset-0 z-10" onClick={() => setMenuAcoesAberto(null)} />
-            <div className="absolute right-0 z-20 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+            <div className="fixed z-20 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1"
+              style={{ top: aberto.top, left: aberto.left }}>
               {a.produtos && item('Enriquecer', () => setEnriquecendoAberto(a), 'text-emerald-700')}
-              {(canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre') && a.id_externo &&
-                item(`Enviar p/ ${canal.plataforma === 'mercadolivre' ? 'ML' : 'Shopee'}`, () => setEnviandoPrecoAberto(a), 'text-orange-700')}
+              {temEscrita && a.id_externo &&
+                item(`Enviar p/ ${nomeCurto}`, () => setEnviandoPrecoAberto(a), 'text-orange-700')}
               {item('Detalhes', () => setDetalheAberto(a))}
               {item('Editar', () => abrirEditar(a), 'text-blue-700')}
               {item('Excluir', () => excluir(a.id), 'text-red-600')}
@@ -1068,11 +1092,11 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     const anuncio = anuncios.find(a => a.id === id)
     const ehTogglePausarAtivar = (novoStatus === 'pausado' || novoStatus === 'ativo')
       && (anuncio?.status === 'pausado' || anuncio?.status === 'ativo')
-    const plataformaComEscrita = canal.plataforma === 'shopee' || canal.plataforma === 'mercadolivre'
+    const plataformaComEscrita = temEscrita
 
     if (plataformaComEscrita && ehTogglePausarAtivar && anuncio?.id_externo) {
       const acao = novoStatus === 'pausado' ? 'pausar' : 'ativar'
-      const nomePlataforma = canal.plataforma === 'mercadolivre' ? 'Mercado Livre' : 'Shopee'
+      const nomePlataforma = nomeCanalPlataforma
       try {
         const resp = await fetch(`/api/marketplace/${canal.plataforma}/pausar-ativar`, {
           method: 'POST',

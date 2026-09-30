@@ -8,8 +8,9 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
   onClose: () => void
   onEnviado: (anuncioAtualizado: any) => void
 }) {
-  const plataforma: 'shopee' | 'mercadolivre' = canal.plataforma === 'mercadolivre' ? 'mercadolivre' : 'shopee'
-  const nomePlataforma = plataforma === 'mercadolivre' ? 'o Mercado Livre' : 'a Shopee'
+  const plataforma: 'shopee' | 'mercadolivre' | 'tiktok' =
+    canal.plataforma === 'mercadolivre' ? 'mercadolivre' : canal.plataforma === 'tiktok' ? 'tiktok' : 'shopee'
+  const nomePlataforma = plataforma === 'mercadolivre' ? 'o Mercado Livre' : plataforma === 'tiktok' ? 'a TikTok Shop' : 'a Shopee'
 
   const [carregando, setCarregando] = useState(true)
   const [precoAnuncio, setPrecoAnuncio] = useState(String(anuncio.preco_venda ?? 0))
@@ -133,7 +134,7 @@ export default function EnviarPrecoEstoqueModal({ anuncio, canal, onClose, onEnv
 
         <div className="px-6 py-5 space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
-            ⚠️ Isso atualiza o preço/estoque direto n{plataforma === 'mercadolivre' ? 'o Mercado Livre' : 'a Shopee'} — a mudança fica visível para os clientes imediatamente.
+            ⚠️ Isso atualiza o preço/estoque direto n{nomePlataforma} — a mudança fica visível para os clientes imediatamente.
           </div>
 
           {carregando ? (

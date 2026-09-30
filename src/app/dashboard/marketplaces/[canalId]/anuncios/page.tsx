@@ -6,6 +6,7 @@ import AnunciosClient from '@/components/marketplaces/AnunciosClient'
 import { buscarConfigDoCanal } from '@/lib/precificacao/config'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { SELECT_LISTAGEM_ANUNCIO, normalizarTamanhoPagina } from '@/lib/marketplace/colunasAnuncio'
+import { PLATAFORMA_LOJA_ONLINE } from '@/lib/marketplace/canais'
 
 export const dynamic = 'force-dynamic'
 
@@ -129,7 +130,11 @@ export default async function AnunciosPage({ params, searchParams }: {
       selosCampanha={selos}
       canal={canal}
       configPreco={configPreco}
-      canais={canais ?? []}
+      // Seletor de canal e destinos de replicação: só canais ativos e que têm
+      // anúncio (a Loja Online não tem). O canal aberto fica na lista mesmo se
+      // desativado, senão o seletor mostraria outro canal selecionado.
+      canais={(canais ?? []).filter(c =>
+        c.id === canalId || (c.ativo !== false && c.plataforma !== PLATAFORMA_LOJA_ONLINE))}
       anuncios={anuncios ?? []}
       totalCanal={totalAnuncios ?? (anuncios ?? []).length}
       tamanhoInicial={tamanhoPagina}
