@@ -81,6 +81,16 @@ export function logisticaDaShopee(dadosBrutos: any): number[] {
   return lista.filter((l: any) => l?.enabled).map((l: any) => Number(l.logistic_id)).filter(Boolean)
 }
 
+/** Marca do anúncio Shopee como a Shopee devolveu no item (brand_id +
+ *  nome). brand_id 0 = "NoBrand", que também é uma marca válida para ela.
+ *  Faz parte do "resto igual" numa duplicação: categoria que exige marca
+ *  recusa o anúncio novo sem ela ("brand is mandatory"). */
+export function marcaDaShopee(dadosBrutos: any): { brandId: number; nome: string } | null {
+  const b = dadosBrutos?.brand
+  if (!b || b.brand_id == null || Number.isNaN(Number(b.brand_id))) return null
+  return { brandId: Number(b.brand_id), nome: String(b.original_brand_name ?? (Number(b.brand_id) === 0 ? 'NoBrand' : '')) }
+}
+
 // ── Imagens ─────────────────────────────────────────────────────────────────
 
 /**

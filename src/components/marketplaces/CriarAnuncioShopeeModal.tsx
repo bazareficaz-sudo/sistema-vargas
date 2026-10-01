@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, type ChangeEvent } from 'react'
+import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
 import { formatarTituloAnuncio } from '@/lib/texto/titulo'
@@ -58,6 +58,10 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
   const [valoresAtributos, setValoresAtributos] = useState<Record<number, ValorEscolhido>>({})
   const [marcas, setMarcas] = useState<Marca[]>([])
   const [brandId, setBrandId] = useState('')
+  // Marca do anúncio de origem ao duplicar/replicar entre lojas Shopee.
+  // Ref (não estado) porque é lida dentro de carregarAtributosEMarcas, que
+  // roda no meio da mesma sequência assíncrona que a preenche.
+  const marcaOrigemRef = useRef<{ brandId: number; nome: string } | null>(null)
   const [carregandoAtributos, setCarregandoAtributos] = useState(false)
 
   const [canaisLogistica, setCanaisLogistica] = useState<CanalLogistica[]>([])
@@ -293,6 +297,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
               const dCat = await respCat.json()
               if (!ativo) return
               if (dCat.ok && dCat.encontrado && dCat.caminho?.length > 0) {
+                marcaOrigemRef.current = o.marcaShopee ?? null
                 await aplicarCaminho(dCat, 'replicada')
                 // Os atributos vêm depois da categoria porque só existem
                 // dentro dela. attribute_id e value_id pertencem à categoria,
@@ -417,8 +422,21 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
       const data = await resp.json()
       if (!data.ok) { setErro(data.erro ?? 'Erro ao buscar atributos'); return null }
       setAtributos(data.atributos ?? [])
-      setMarcas(data.marcas ?? [])
+      let listaMarcas: Marca[] = data.marcas ?? []
+      const daOrigem = marcaOrigemRef.current
       setAtributosCarregados(true)
+      if (daOrigem) {
+        // Duplicando: a marca da origem vence. A lista da Shopee só traz as
+        // 100 primeiras marcas da categoria, então a da origem pode não estar
+        // nela — entra no topo para o select conseguir mostrá-la.
+        if (!listaMarcas.some(m => Number(m.brand_id) === daOrigem.brandId)) {
+          listaMarcas = [{ brand_id: daOrigem.brandId, original_brand_name: daOrigem.nome || `Marca ${daOrigem.brandId}` } as Marca, ...listaMarcas]
+        }
+        setMarcas(listaMarcas)
+        setBrandId(String(daOrigem.brandId))
+        return { atributos: data.atributos ?? [], marcas: listaMarcas }
+      }
+      setMarcas(listaMarcas)
       // Pré-seleciona a marca se o nome do produto bater com alguma da lista.
       if (produto?.marca && (data.marcas ?? []).length > 0) {
         const bate = data.marcas.find((m: Marca) => m.original_brand_name.toLowerCase() === produto.marca.toLowerCase())
@@ -580,7 +598,11 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
           categoriaIds: caminhoCategoria.map(c => c.category_id),
           titulo: titulo.trim(), descricao: descricao.trim(), preco: Number(preco), estoque: Number(estoque), condicao,
           peso: Number(peso), comprimento: comprimento || undefined, largura: largura || undefined, altura: altura || undefined,
-          brandId: brandId || undefined, brandNome: brandId ? marcas.find(m => String(m.brand_id) === brandId)?.original_brand_name : undefined,
+          // "Sem marca" vai como NoBrand (brand_id 0), que a Shopee aceita
+          // como marca. Mandar nada faz categoria que exige marca recusar o
+          // anúncio com "brand is mandatory".
+          brandId: brandId !== '' ? Number(brandId) : 0,
+          brandNome: brandId !== '' ? (marcas.find(m => String(m.brand_id) === brandId)?.original_brand_name ?? '') : 'NoBrand',
           // Só os que estão em jogo: se o pai mudou de valor, o filho que
           // ficou escondido não pode viajar junto com o anúncio.
           atributos: atributosEmJogo
@@ -840,7 +862,7 @@ export default function CriarAnuncioShopeeModal({ canal, canais, empresaId, prod
                       <label className="block text-xs font-medium text-gray-500 mb-1">Marca</label>
                       <select value={brandId} onChange={e => setBrandId(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
-                        <option value="">— Sem marca —</option>
+                        <option value="">— Sem marca (NoBrand) —</option>
                         {marcas.map(m => <option key={m.brand_id} value={m.brand_id}>{m.original_brand_name}</option>)}
                       </select>
                       <p className="text-xs text-gray-400 mt-1">Algumas categorias exigem marca — se a Shopee recusar sem marca, escolha uma da lista.</p>

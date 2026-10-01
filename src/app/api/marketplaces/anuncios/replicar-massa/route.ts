@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { criarAnuncio as criarAnuncioShopee, getLogisticsChannels } from '@/lib/shopee/listing'
+import { marcaDaShopee } from '@/lib/marketplace/conteudoAnuncio'
 import { criarAnuncio as criarAnuncioML, getAtributos, getTiposAnuncio } from '@/lib/mercadolivre/listing'
 import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { MLChannel } from '@/lib/mercadolivre/types'
@@ -136,6 +137,13 @@ export async function POST(req: Request) {
           atributos: [],
           logisticaHabilitada: logisticaShopee,
           fotoUrls,
+          // Marca do anúncio de origem (brand_id é da plataforma, vale na
+          // outra loja). Sem ela, categoria que exige marca recusava tudo com
+          // "brand is mandatory" mesmo com a marca cadastrada na origem.
+          ...(() => {
+            const m = marcaDaShopee(brutos)
+            return m ? { brandId: m.brandId, brandNome: m.nome } : {}
+          })(),
         })
         if (r.ok) resultados.push({ anuncioId: origem.id, titulo: rotulo, ok: true, itemId: r.itemId })
         else falhar(r.erro)

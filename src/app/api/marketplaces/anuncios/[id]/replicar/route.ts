@@ -4,7 +4,7 @@ import { mlGet, refreshAccessTokenIfNeeded } from '@/lib/mercadolivre/client'
 import type { MLChannel } from '@/lib/mercadolivre/types'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import {
-  atributosDaShopee, atributosDoMercadoLivre, logisticaDaShopee,
+  atributosDaShopee, atributosDoMercadoLivre, logisticaDaShopee, marcaDaShopee,
 } from '@/lib/marketplace/conteudoAnuncio'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -86,6 +86,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       atributos: plataforma === 'mercadolivre' ? atributosDoMercadoLivre(brutos) : [],
       atributosShopee: plataforma === 'shopee' ? atributosDaShopee(brutos) : [],
       logisticaHabilitada: plataforma === 'shopee' ? logisticaDaShopee(brutos) : [],
+      // brand_id é da plataforma, não da loja — vale igual na outra conta Shopee.
+      marcaShopee: plataforma === 'shopee' ? marcaDaShopee(brutos) : null,
       // 'NEW' | 'USED' na Shopee; no ML vem 'new'/'used' em minúsculas.
       condicao: typeof brutos?.condition === 'string' ? brutos.condition.toUpperCase() : null,
       // Peso/dimensões: a Shopee guarda em gramas-kg no próprio item; o
