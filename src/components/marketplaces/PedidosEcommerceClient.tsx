@@ -76,6 +76,16 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [romaneio, setRomaneio] = useState<{ fonte: string; id: string }[] | null>(null)
   const [marcandoImpressao, setMarcandoImpressao] = useState(false)
   const [avisoAcao, setAvisoAcao] = useState('')
+  // Impressão de etiquetas: formato e ordem ficam lembrados neste navegador
+  // (é escolha do posto de trabalho — a impressora é dele).
+  const [formatoEtiqueta, setFormatoEtiqueta] = useState<'paisagem' | 'original'>(() => {
+    try { return (localStorage.getItem('etiqueta_formato') as any) === 'original' ? 'original' : 'paisagem' } catch { return 'paisagem' }
+  })
+  const [ordemEtiqueta, setOrdemEtiqueta] = useState<'sku' | 'prazo' | 'canal'>(() => {
+    try { const v = localStorage.getItem('etiqueta_ordem'); return v === 'prazo' || v === 'canal' ? v : 'sku' } catch { return 'sku' }
+  })
+  const [imprimindo, setImprimindo] = useState(false)
+  const [resultadoEtiquetas, setResultadoEtiquetas] = useState<{ url: string | null; impressos: number; falhas: { id: string; pv: string; erro: string }[] } | null>(null)
   const [detalhe, setDetalhe] = useState<any | null>(null)
   const [modal, setModal] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -247,6 +257,35 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   }
 
   // Marca/desmarca a etiqueta como impressa (passo 3 → 4 da esteira).
+  // Baixa as etiquetas dos marketplaces, monta um PDF só e abre para
+  // imprimir. Quem entrou no PDF vira "etiqueta impressa"; quem não entrou
+  // aparece com o motivo.
+  async function imprimirEtiquetas(ids: string[]) {
+    if (ids.length === 0) return
+    try { localStorage.setItem('etiqueta_formato', formatoEtiqueta); localStorage.setItem('etiqueta_ordem', ordemEtiqueta) } catch { /* opcional */ }
+    setImprimindo(true); setResultadoEtiquetas(null)
+    try {
+      const resp = await fetch('/api/pedidos/etiquetas', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, formato: formatoEtiqueta, ordem: ordemEtiqueta }),
+      })
+      const data = await resp.json()
+      setResultadoEtiquetas({ url: data.url ?? null, impressos: data.impressos?.length ?? 0, falhas: data.falhas ?? [] })
+      if (data.ok && data.url) {
+        window.open(data.url, '_blank')
+        const agoraIso = new Date().toISOString()
+        const feitos = new Set<string>(data.impressos ?? [])
+        setPedidos(prev => prev.map(p => feitos.has(p.id) && !p.etiqueta_impressa_em ? { ...p, etiqueta_impressa_em: agoraIso, etiqueta_impressa_por: operador } : p))
+        setSelecionados(new Set())
+        router.refresh()
+      }
+    } catch (e: any) {
+      setResultadoEtiquetas({ url: null, impressos: 0, falhas: [{ id: '', pv: '—', erro: e?.message ?? 'Falha ao imprimir' }] })
+    } finally {
+      setImprimindo(false)
+    }
+  }
+
   async function marcarImpressao(ids: string[], impresso: boolean) {
     if (ids.length === 0) return
     setMarcandoImpressao(true); setAvisoAcao('')
@@ -780,9 +819,25 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
       {selecionados.size > 0 && (
         <div className="sticky top-0 z-10 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-blue-800 font-medium">{selecionados.size} selecionado(s)</span>
+          <button onClick={() => imprimirEtiquetas([...selecionados])} disabled={imprimindo}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+            {imprimindo ? 'Buscando etiquetas...' : '🖨 Imprimir etiquetas'}
+          </button>
+          <select value={formatoEtiqueta} onChange={e => setFormatoEtiqueta(e.target.value as any)} title="Formato da folha"
+            className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white">
+            <option value="paisagem">Paisagem + mini pedido</option>
+            <option value="original">Etiqueta original</option>
+          </select>
+          <select value={ordemEtiqueta} onChange={e => setOrdemEtiqueta(e.target.value as any)} title="Ordem das etiquetas no PDF"
+            className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white">
+            <option value="sku">Ordem: por produto</option>
+            <option value="prazo">Ordem: por prazo</option>
+            <option value="canal">Ordem: por canal</option>
+          </select>
           <button onClick={() => marcarImpressao([...selecionados], true)} disabled={marcandoImpressao}
-            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
-            🖨 Marcar etiqueta como impressa
+            title="Para etiqueta impressa fora do sistema"
+            className="px-3 py-1.5 border border-teal-300 bg-white text-teal-700 hover:bg-teal-50 disabled:opacity-50 text-xs font-medium rounded-lg">
+            ✓ Marcar como impressa
           </button>
           <button onClick={() => marcarImpressao([...selecionados], false)} disabled={marcandoImpressao}
             className="px-3 py-1.5 border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-xs font-medium rounded-lg">
@@ -793,6 +848,23 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
             📋 Romaneio de separação
           </button>
           <button onClick={() => setSelecionados(new Set())} className="ml-auto text-xs text-blue-600 hover:text-blue-800">Limpar seleção</button>
+        </div>
+      )}
+      {resultadoEtiquetas && (
+        <div className={`border text-xs px-4 py-2.5 rounded-lg mb-3 ${resultadoEtiquetas.impressos > 0 ? 'bg-blue-50 border-blue-200 text-blue-900' : 'bg-red-50 border-red-200 text-red-800'}`}>
+          <div className="flex items-center justify-between gap-2">
+            <span>
+              {resultadoEtiquetas.impressos > 0
+                ? <>🖨 {resultadoEtiquetas.impressos} etiqueta(s) no PDF — foram para "4. Aguardando postagem". {resultadoEtiquetas.url && <a href={resultadoEtiquetas.url} target="_blank" rel="noreferrer" className="underline font-medium">Abrir PDF para imprimir</a>}</>
+                : 'Nenhuma etiqueta pôde ser obtida.'}
+            </span>
+            <button onClick={() => setResultadoEtiquetas(null)} className="opacity-60 hover:opacity-100">✕</button>
+          </div>
+          {resultadoEtiquetas.falhas.length > 0 && (
+            <ul className="mt-1.5 space-y-0.5 text-red-700">
+              {resultadoEtiquetas.falhas.map((f, i) => <li key={f.id || i}>⚠ {f.pv}: {f.erro}</li>)}
+            </ul>
+          )}
         </div>
       )}
       {avisoAcao && (
@@ -991,8 +1063,17 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                     ) : (etapa === 'imprimir' || etapa === 'emitir') && (
                       <button onClick={() => marcarImpressao([detalhe.id], true)} disabled={marcandoImpressao}
                         className="w-full mt-1 py-1.5 border border-teal-300 text-teal-700 hover:bg-teal-50 disabled:opacity-50 text-xs font-medium rounded-lg transition-colors">
-                        🖨 Marcar etiqueta como impressa
+                        ✓ Marcar etiqueta como impressa
                       </button>
+                    )}
+                    {emAberto(etapa) && etapa !== 'pendencia' && (
+                      <button onClick={() => imprimirEtiquetas([detalhe.id])} disabled={imprimindo}
+                        className="w-full mt-1 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                        {imprimindo ? 'Buscando etiqueta...' : (detalhe.etiqueta_impressa_em ? '🖨 Reimprimir etiqueta' : '🖨 Imprimir etiqueta')}
+                      </button>
+                    )}
+                    {resultadoEtiquetas && resultadoEtiquetas.falhas.some(f => f.id === detalhe.id) && (
+                      <p className="text-[11px] text-red-700">⚠ {resultadoEtiquetas.falhas.find(f => f.id === detalhe.id)?.erro}</p>
                     )}
                   </div>
                 )

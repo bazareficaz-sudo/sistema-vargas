@@ -216,3 +216,36 @@ export async function baixarEtiqueta(sb: any, canalInicial: ShopeeChannel, pedid
   if (error || !data?.signedUrl) throw new Error(error?.message ?? 'Falha ao gerar link de download')
   return { url: data.signedUrl }
 }
+
+/**
+ * PDF da etiqueta TÉRMICA (100×150) de um pedido, para a impressão em lote.
+ *
+ * Diferente de `baixarEtiqueta` acima, não depende do fluxo "Preparar envio"
+ * feito por este sistema: o envio pode ter sido organizado em outro lugar
+ * (Seller Center, outro ERP). Tenta baixar direto; se a Shopee ainda não
+ * gerou o documento, pede a geração, espera ficar pronto e baixa. Pedido
+ * cujo envio ainda não foi organizado volta com a mensagem da Shopee.
+ */
+export async function baixarEtiquetaTermica(
+  sb: any, canalInicial: ShopeeChannel, orderSn: string, packageNumber?: string | null,
+): Promise<Uint8Array> {
+  const canal = await refreshAccessTokenIfNeeded(sb, canalInicial)
+  const ctx = { sb, canal }
+  const tipo: DocumentType = 'THERMAL_AIR_WAYBILL'
+  const lista = [{ order_sn: orderSn, ...(packageNumber ? { package_number: packageNumber } : {}) }]
+
+  try {
+    return new Uint8Array(await downloadShippingDocumentBytes(ctx, lista, tipo))
+  } catch { /* documento ainda não gerado — gera abaixo */ }
+
+  await createShippingDocument(ctx, lista, tipo)
+  for (let tentativa = 0; tentativa < 8; tentativa++) {
+    await new Promise(r => setTimeout(r, 1500))
+    const resultado = await getShippingDocumentResult(ctx, lista, tipo)
+    const item = resultado?.[0]
+    const status = String(item?.status ?? '').toUpperCase()
+    if (status.includes('READY')) break
+    if (status.includes('FAIL')) throw new Error(item?.fail_message ?? item?.fail_error ?? 'A Shopee não gerou a etiqueta')
+  }
+  return new Uint8Array(await downloadShippingDocumentBytes(ctx, lista, tipo))
+}
