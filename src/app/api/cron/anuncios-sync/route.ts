@@ -4,6 +4,9 @@ import { syncCatalogo as syncCatalogoShopee } from '@/lib/shopee/sync'
 import { syncCatalogo as syncCatalogoML } from '@/lib/mercadolivre/sync'
 import { syncCatalogo as syncCatalogoNuvemshop } from '@/lib/nuvemshop/sync'
 import { montarCanal as montarCanalNuvemshop } from '@/lib/nuvemshop/canal'
+import { syncCatalogo as syncCatalogoTiktok } from '@/lib/tiktok/sync'
+import { refreshAccessTokenIfNeeded as refreshTiktok } from '@/lib/tiktok/client'
+import { montarCanal as montarCanalTiktok } from '@/lib/tiktok/canal'
 import {
   decidirAcao, prazoDaRodada, abrirLog, fecharLog, recuperarRodadasMortas,
 } from '@/lib/marketplace/varredura'
@@ -72,7 +75,7 @@ export async function GET(req: Request) {
   // Sem filtro de plataforma de propósito: o critério é "canal conectado".
   const { data: canais, error: erroCanais } = await sb
     .from('marketplace_canais')
-    .select('id, nome, empresa_id, plataforma, seller_id, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas, varredura_status, varredura_cursor, varredura_iniciada_em, varredura_itens, varredura_rodadas, varredura_ultimo_em')
+    .select('id, nome, empresa_id, plataforma, seller_id, shop_cipher, access_token, refresh_token, token_expira_em, sincronizar_estoque, debitar_estoque_vendas, varredura_status, varredura_cursor, varredura_iniciada_em, varredura_itens, varredura_rodadas, varredura_ultimo_em')
     .not('access_token', 'is', null)
     // Quem foi atendido há mais tempo vem primeiro (nunca atendido, antes de
     // todos). Ordenar por NOME causava fome: os dois canais do Mercado Livre
@@ -155,6 +158,16 @@ export async function GET(req: Request) {
         // isso aparece como rodada estourando o tempo — e aí ganha cursor
         // também, em vez de falhar em silêncio.
         r = await syncCatalogoNuvemshop(sb, montarCanalNuvemshop(c))
+        r.passeCompleto = true
+        r.proximoCursor = null
+      } else if (c.plataforma === 'tiktok') {
+        // Mesmo esquema da Nuvemshop: catálogo pequeno, uma chamada percorre
+        // tudo. Sem isto o canal da TikTok caía no "sem importação" abaixo a
+        // cada 20 min, e preço/estoque lidos da TikTok só se renovavam no
+        // "Sincronizar agora" manual — a tela mostrava preço que já não
+        // estava no ar.
+        const canal = await refreshTiktok(sb, montarCanalTiktok(c))
+        r = await syncCatalogoTiktok(sb, canal)
         r.passeCompleto = true
         r.proximoCursor = null
       } else {
