@@ -5,6 +5,8 @@ import { refreshAccessTokenIfNeeded as refreshShopee } from '@/lib/shopee/client
 import { refreshAccessTokenIfNeeded as refreshML } from '@/lib/mercadolivre/client'
 import { pushPrecoEstoque } from '@/lib/shopee/write'
 import { atualizarPrecoEstoque } from '@/lib/mercadolivre/write'
+import { atualizarPrecoEstoque as atualizarPrecoTiktok } from '@/lib/tiktok/write'
+import { montarCanal as montarCanalTiktok } from '@/lib/tiktok/canal'
 import { resolverPrecoEfetivo } from '@/lib/precificacao/precos'
 import { criarResolvedor } from '@/lib/precificacao/contexto'
 
@@ -64,7 +66,7 @@ export async function POST(req: Request) {
 
   const canaisNecessarios = [...new Set((anuncios ?? []).map((a: any) => a.canal_id))]
   const { data: canaisRows } = await sb.from('marketplace_canais')
-    .select('id, nome, plataforma, empresa_id, seller_id, access_token, refresh_token, token_expira_em')
+    .select('id, nome, plataforma, empresa_id, seller_id, shop_cipher, access_token, refresh_token, token_expira_em')
     .in('id', canaisNecessarios).eq('empresa_id', guarda.empresaId)
   const canalPorId = new Map((canaisRows ?? []).map((c: any) => [c.id, c]))
   // Renova o token uma vez por canal, não uma vez por anúncio.
@@ -146,6 +148,18 @@ export async function POST(req: Request) {
           const r = await atualizarPrecoEstoque(sb, canal, String(a.id_externo), { preco })
           if (!r.ok) throw new Error(r.erro ?? 'O Mercado Livre recusou o preço')
           enviado = true
+        } else if (canalRow.plataforma === 'tiktok') {
+          // atualizarPrecoTiktok renova o token sozinho. Produto com mais de
+          // um SKU é recusado lá dentro com mensagem clara: um preço só não
+          // diz qual variação recebe — mesma regra de Shopee e ML acima.
+          const r = await atualizarPrecoTiktok(sb, montarCanalTiktok(canalRow), String(a.id_externo), [{ preco }])
+          if (!r.precoOk) throw new Error(r.erroPreco ?? r.erro ?? 'A TikTok Shop recusou o preço')
+          enviado = true
+        } else {
+          // Antes, plataforma sem envio caía aqui em silêncio: o preço ficava
+          // gravado no sistema, "enviado" falso e nenhum erro na tela — foi
+          // assim que a TikTok ficou sem receber preço da Precificação.
+          throw new Error(`Envio de preço para ${canalRow.plataforma} ainda não é suportado — o preço foi salvo só no sistema`)
         }
       } catch (e: any) {
         erroEnvio = e?.message ?? 'Erro ao enviar ao marketplace'
