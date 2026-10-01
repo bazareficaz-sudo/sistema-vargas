@@ -6,6 +6,7 @@ import {
 import { executarMargemBaixa, executarProdutoParado, executarInadimplencia, executarMetaVendas } from './tipos-alertas'
 import { executarEmissaoPorProduto, executarEmissaoPorFormaPagamento, executarEmissaoPorCliente } from './tipos-fiscal'
 import { executarReposicaoMinimo, executarPedidoAutomatico, executarCurvaAbc, executarProdutoParadoReposicao } from './tipos-reposicao'
+import { avisarFalhaSeConfigurado } from './alertaFalha'
 
 const HANDLERS: Record<string, (sb: any, a: any) => Promise<ResultadoExecucao>> = {
   emissao_fiscal_produto: executarEmissaoPorProduto,
@@ -33,7 +34,19 @@ function elegivelAgora(a: any): boolean {
     if (a.ultima_execucao_dia === hojeISO()) return false
     return horarioJaPassou(a.horario_envio)
   }
-  return true // tipos por evento: sempre elegíveis, o handler decide se há algo novo
+  // Tipos "por evento" (hoje: emissão fiscal) escolhem o próprio ritmo via
+  // `timing` — ver RegrasFiscais.tsx. Sem valor (regras antigas, antes
+  // deste campo existir), o padrão é o comportamento de sempre: imediato.
+  switch (a.timing) {
+    case 'horario_especifico':
+      if (a.ultima_execucao_dia === hojeISO()) return false
+      return horarioJaPassou(a.horario_envio)
+    case 'hora_em_hora':
+      if (!a.ultima_execucao) return true
+      return Date.now() - new Date(a.ultima_execucao).getTime() >= 60 * 60 * 1000
+    default:
+      return true // imediato: toda passada do cron
+  }
 }
 
 export async function executarAutomacoesPendentes(sb: any): Promise<{ processadas: number; sucesso: number; erro: number; semAcao: number }> {
@@ -64,10 +77,12 @@ export async function executarAutomacoesPendentes(sb: any): Promise<{ processada
       ultimo_status: resultado.status,
       ultimo_erro: resultado.status === 'erro' ? (resultado.erro ?? 'Erro desconhecido') : null,
     }
-    if (TIPOS_AGENDADOS_1X_DIA.has(a.tipo)) update.ultima_execucao_dia = hojeISO()
+    if (TIPOS_AGENDADOS_1X_DIA.has(a.tipo) || a.timing === 'horario_especifico') update.ultima_execucao_dia = hojeISO()
     if (resultado.avancarCursorPara) update.cursor_processado = resultado.avancarCursorPara
 
     await sb.from('automacoes').update(update).eq('id', a.id)
+
+    if (resultado.status === 'erro') await avisarFalhaSeConfigurado(sb, a, resultado.erro)
   }
 
   return { processadas, sucesso, erro, semAcao }
