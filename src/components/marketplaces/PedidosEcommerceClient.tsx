@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
 import RomaneioModal from '@/components/pedidos/RomaneioModal'
 import { ehHoje } from './utils'
-import { ESTEIRA, ESTEIRA_INFO, emAberto, etapaEsteira, fimDeHoje, janelaDoPrazo, textoPrazo, type EtapaEsteira } from '@/lib/pedidos/esteira'
+import { ESTEIRA, ESTEIRA_INFO, emAberto, etapaEsteira, fimDeHoje, janelaDoPrazo, notaResolvida, etiquetaImpressa, textoPrazo, type EtapaEsteira } from '@/lib/pedidos/esteira'
+import { meioDeEnvio, numeroInterno, NOME_PLATAFORMA } from '@/lib/pedidos/envio'
 
 const STATUS_CORES: Record<string, string> = {
   novo:       'bg-blue-100 text-blue-700',
@@ -24,9 +25,12 @@ const STATUS_LABEL: Record<string, string> = {
 
 // Abas abaixo dos passos. Os passos 1–4 são escolhidos pelos cards.
 type Aba = 'abertos' | 'todos' | EtapaEsteira
+// As etapas da esteira viram abas (antes eram cards à parte): uma linha só
+// diz onde está cada pedido e deixa o resto da tela para a lista.
 const PASSOS = ESTEIRA.filter(e => e.numero)
 const ABAS: [Aba, string][] = [
   ['abertos', 'Em aberto'],
+  ...PASSOS.map(e => [e.valor, `${e.numero}. ${e.label}`] as [Aba, string]),
   ['pendencia', ESTEIRA_INFO.pendencia.label],
   ['enviado', ESTEIRA_INFO.enviado.label],
   ['entregue', ESTEIRA_INFO.entregue.label],
@@ -34,7 +38,7 @@ const ABAS: [Aba, string][] = [
   ['todos', 'Todos'],
 ]
 const JANELAS: ['' | 'hoje' | 'atrasado' | 'futuro', string][] = [
-  ['', 'Todos os prazos'], ['hoje', 'Sai hoje'], ['atrasado', 'Atrasados'], ['futuro', 'Próximos dias'],
+  ['', 'Todos os prazos'], ['atrasado', 'Atrasados'], ['hoje', 'Sai hoje'], ['futuro', 'Reservados (envio futuro)'],
 ]
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
@@ -63,6 +67,10 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [q, setQ] = useState(qInicial)
   const [canalFiltro, setCanalFiltro] = useState(canalIdInicial)
   const [aba, setAba] = useState<Aba>('abertos')
+  const [plataformaFiltro, setPlataformaFiltro] = useState('')
+  const [meioFiltro, setMeioFiltro] = useState('')
+  const [soNfEmitida, setSoNfEmitida] = useState(false)
+  const [soImpressa, setSoImpressa] = useState(false)
   const [janela, setJanela] = useState<'' | 'hoje' | 'atrasado' | 'futuro'>('')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [romaneio, setRomaneio] = useState<{ fonte: string; id: string }[] | null>(null)
@@ -516,12 +524,21 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   // uma vez por render e usados pela lista, pelos contadores e pelo painel.
   const agora = new Date()
   const base = pedidos
-    .map(p => ({ p, etapa: etapaEsteira(p, agora), janela: janelaDoPrazo(p, agora) }))
-    .filter(({ p }) => {
+    .map(p => ({ p, etapa: etapaEsteira(p, agora), janela: janelaDoPrazo(p, agora), envio: meioDeEnvio(p) }))
+    .filter(({ p, envio }) => {
       const termo = q.trim().toLowerCase()
-      const matchQ = !termo || (p.cliente_nome ?? '').toLowerCase().includes(termo) || (p.numero_pedido ?? '').toLowerCase().includes(termo) || String(p.id_externo ?? '').toLowerCase().includes(termo)
+      // Busca também por produto e SKU: é como o separador procura ("cadê o
+      // pedido do arame farpado?"), não pelo número do marketplace.
+      const matchQ = !termo || [
+        p.cliente_nome, p.numero_pedido, p.id_externo, numeroInterno(p),
+        ...(p.marketplace_pedido_itens ?? []).flatMap((i: any) => [i.nome_produto, i.sku, i.produtos?.nome, i.produtos?.sku]),
+      ].some(v => String(v ?? '').toLowerCase().includes(termo))
       const matchC = !canalFiltro || p.canal_id === canalFiltro
-      return matchQ && matchC
+      const matchP = !plataformaFiltro || p.marketplace_canais?.plataforma === plataformaFiltro
+      const matchM = !meioFiltro || (envio.meio ?? 'Sem informação') === meioFiltro
+      const matchNf = !soNfEmitida || notaResolvida(p)
+      const matchImp = !soImpressa || etiquetaImpressa(p)
+      return matchQ && matchC && matchP && matchM && matchNf && matchImp
     })
 
   const contagem: Record<string, number> = {}
@@ -537,6 +554,12 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     const u = (urgentesPorEtapa[x.etapa] ??= { hoje: 0, atrasado: 0 })
     if (x.janela === 'atrasado') { atrasados++; u.atrasado++ }
     else if (x.janela === 'hoje' || x.janela === 'sem_prazo') { saemHoje++; u.hoje++ }
+  }
+
+  const plataformasPresentes = [...new Set(pedidos.map((p: any) => p.marketplace_canais?.plataforma).filter(Boolean))] as string[]
+  const meiosPresentes = [...new Set(pedidos.map((p: any) => meioDeEnvio(p).meio ?? 'Sem informação'))].sort()
+  const abrirPedido = (p: any) => {
+    setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }); abrirNotaFiscal(p)
   }
 
   const abaEmAberto = aba === 'abertos' || (aba !== 'todos' && emAberto(aba))
@@ -619,30 +642,34 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         )}
       </div>
 
-      {/* Esteira: 1 Novos → 2 Emitir NF → 3 Imprimir etiqueta → 4 Aguardando postagem */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-        {PASSOS.map(passo => {
-          const n = contagem[passo.valor] ?? 0
-          const urg = urgentesPorEtapa[passo.valor] ?? { hoje: 0, atrasado: 0 }
-          const ativo = aba === passo.valor
-          return (
-            <button key={passo.valor} onClick={() => setAba(ativo ? 'abertos' : passo.valor)} title={passo.ajuda}
-              className={`bg-white border rounded-xl p-3 text-left transition-all ${ativo ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-200 hover:border-gray-300'}`}>
-              <p className="text-xs text-gray-600 flex items-center gap-1.5">
-                <span className="inline-flex w-5 h-5 items-center justify-center rounded-full bg-gray-100 text-gray-700 font-semibold">{passo.numero}</span>
-                {passo.label}
-              </p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{n}</p>
-              <p className="text-[11px] mt-0.5 min-h-[1rem]">
-                {urg.atrasado > 0 && <span className="text-red-600 font-medium">{urg.atrasado} atrasado(s) </span>}
-                {urg.hoje > 0 && <span className="text-orange-600">{urg.hoje} para hoje</span>}
-                {urg.atrasado === 0 && urg.hoje === 0 && (
-                  <span className="text-gray-400">{passo.valor === 'novos' ? 'agendados para os próximos dias' : 'nada urgente'}</span>
-                )}
-              </p>
+      {/* Filtros: marketplace, canal, meio de envio, busca, nota e etiqueta */}
+      <div className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 mb-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1">
+          {['', ...plataformasPresentes].map(pl => (
+            <button key={pl || 'todos'} onClick={() => setPlataformaFiltro(pl)}
+              className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${plataformaFiltro === pl ? 'bg-blue-600 text-white border-blue-600 font-medium' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+              {pl ? (NOME_PLATAFORMA[pl] ?? pl) : 'Todos'}
             </button>
-          )
-        })}
+          ))}
+        </div>
+        <select value={canalFiltro} onChange={e => setCanalFiltro(e.target.value)}
+          className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Todos os canais</option>
+          {canais.filter(c => !plataformaFiltro || c.plataforma === plataformaFiltro).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
+        </select>
+        <select value={meioFiltro} onChange={e => setMeioFiltro(e.target.value)}
+          className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-blue-500 bg-white">
+          <option value="">Todo meio de envio</option>
+          {meiosPresentes.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cliente, produto, SKU, nº do pedido..."
+          className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-blue-500 flex-1 min-w-[180px] bg-white" />
+        <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={soNfEmitida} onChange={e => setSoNfEmitida(e.target.checked)} /> NF emitida
+        </label>
+        <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={soImpressa} onChange={e => setSoImpressa(e.target.checked)} /> Etiqueta impressa
+        </label>
       </div>
 
       {/* Abas: em aberto, pendências, histórico */}
@@ -697,49 +724,42 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         </div>
       )}
 
-      {/* Filtros */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar cliente, nº pedido, ID..."
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 w-full sm:w-72 bg-white" />
-        <select value={canalFiltro} onChange={e => setCanalFiltro(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 bg-white">
-          <option value="">Todas as lojas</option>
-          {canais.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* Lista */}
-        {/* Sem pedido aberto, a lista usa a largura toda — antes o quadro
-            vazio "Selecione um pedido" ocupava 2/5 da tela e cortava a coluna
-            de prazo, que é justamente a que diz o que sai hoje. */}
-        <div className={`${detalhe ? 'lg:col-span-3' : 'lg:col-span-5'} bg-white border border-gray-200 rounded-xl overflow-x-auto`}>
-          <table className="w-full text-sm min-w-[640px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-3 py-3 w-8">
-                  <input type="checkbox" aria-label="Selecionar todos"
-                    checked={filtrados.length > 0 && filtrados.every(x => selecionados.has(x.p.id))}
-                    onChange={e => setSelecionados(e.target.checked ? new Set(filtrados.map(x => x.p.id)) : new Set())} />
-                </th>
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Pedido / Cliente</th>
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Loja</th>
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-32">Etapa</th>
-                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Prazo</th>
-                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtrados.map(({ p, etapa }) => {
-                const prazo = emAberto(etapa) ? textoPrazo(p) : null
-                const primeiroItem = p.marketplace_pedido_itens?.[0]
-                const imagem = primeiroItem?.marketplace_anuncios?.imagens?.[0]
-                const qtdItens = p.marketplace_pedido_itens?.length ?? 0
-                const info = ESTEIRA_INFO[etapa]
-                return (
-                <tr key={p.id} onClick={() => { setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }); abrirNotaFiscal(p) }}
-                  className={`hover:bg-blue-50 transition-colors cursor-pointer ${detalhe?.id === p.id ? 'bg-blue-50' : ''}`}>
-                  <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+      {/* LISTA EM LARGURA TOTAL, agrupada por pedido: uma linha de cabeçalho
+          (nº interno, nota, avisos, canal) e uma linha por item. O separador
+          vê o pedido inteiro sem abrir nada; clicar abre o modal. Antes a
+          tela era dividida com o detalhe ao lado, e a lista ficava cortada. */}
+      <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        <table className="w-full text-sm min-w-[980px] table-fixed">
+          <colgroup>
+            <col className="w-9" /><col className="w-[27%]" /><col className="w-[15%]" /><col className="w-[14%]" />
+            <col className="w-[14%]" /><col className="w-[15%]" /><col className="w-[12%]" />
+          </colgroup>
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200 text-left">
+              <th className="px-3 py-2.5">
+                <input type="checkbox" aria-label="Selecionar todos"
+                  checked={filtrados.length > 0 && filtrados.every(x => selecionados.has(x.p.id))}
+                  onChange={e => setSelecionados(e.target.checked ? new Set(filtrados.map(x => x.p.id)) : new Set())} />
+              </th>
+              <th className="px-3 py-2.5 text-xs font-medium text-gray-600">Produto</th>
+              <th className="px-3 py-2.5 text-xs font-medium text-gray-600">Comprador</th>
+              <th className="px-3 py-2.5 text-xs font-medium text-gray-600">Pedido no marketplace</th>
+              <th className="px-3 py-2.5 text-xs font-medium text-gray-600">Tempo</th>
+              <th className="px-3 py-2.5 text-xs font-medium text-gray-600">Envio</th>
+              <th className="px-3 py-2.5 text-xs font-medium text-gray-600">Etapa</th>
+            </tr>
+          </thead>
+          {filtrados.map(({ p, etapa, envio }) => {
+            const prazo = emAberto(etapa) ? textoPrazo(p) : null
+            const itens: any[] = p.marketplace_pedido_itens ?? []
+            const semProduto = itens.filter(i => !i.produto_id).length
+            const info = ESTEIRA_INFO[etapa]
+            const nf = p.nfe_numero ? `NF-e ${p.nfe_numero}` : (notaResolvida(p) ? 'NF ok no canal' : null)
+            const linhasItens = itens.length > 0 ? itens : [null]
+            return (
+              <tbody key={p.id} className="border-t border-gray-200">
+                <tr className="bg-gray-50/80 text-xs">
+                  <td className="px-3 py-1.5" onClick={e => e.stopPropagation()}>
                     <input type="checkbox" aria-label="Selecionar pedido" checked={selecionados.has(p.id)}
                       onChange={e => setSelecionados(prev => {
                         const novo = new Set(prev)
@@ -747,56 +767,111 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                         return novo
                       })} />
                   </td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-9 h-9 flex-shrink-0 rounded-lg overflow-hidden bg-gray-50 border border-gray-200">
-                        {imagem ? <img src={imagem} alt="" className="w-full h-full object-cover" /> : (
-                          <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">📦</div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-medium text-gray-900 text-xs truncate">{p.numero_pedido || p.id_externo}</p>
-                        <p className="text-xs text-gray-500 truncate">
-                          {primeiroItem?.produtos?.nome ?? primeiroItem?.nome_produto ?? p.cliente_nome ?? '—'}
-                          {qtdItens > 1 ? ` +${qtdItens - 1}` : ''}
-                        </p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">{fmtData(p.data_pedido)}</p>
-                      </div>
-                    </div>
+                  <td colSpan={4} className="px-3 py-1.5">
+                    <button onClick={() => abrirPedido(p)} className="font-semibold text-blue-700 hover:underline">
+                      #{numeroInterno(p) ?? (p.numero_pedido || p.id_externo)}
+                    </button>
+                    {nf && <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[11px]">{nf}</span>}
+                    {semProduto > 0 && <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 text-[11px]">⚠ {semProduto} item(ns) sem produto</span>}
+                    {etiquetaImpressa(p) && emAberto(etapa) && <span className="ml-2 px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-[11px]">🖨 etiqueta impressa</span>}
+                    {prazo?.texto.startsWith('Atrasado') && <span className="ml-2 px-1.5 py-0.5 rounded bg-red-50 text-red-700 text-[11px] font-medium">{prazo.texto}</span>}
                   </td>
-                  <td className="px-3 py-3 text-xs text-gray-500 truncate max-w-[6rem]" title={p.marketplace_canais?.nome}>
-                    {p.marketplace_canais?.nome ?? '—'}
+                  <td colSpan={2} className="px-3 py-1.5 text-right text-gray-500">
+                    {p.marketplace_canais?.nome ?? '—'} · {NOME_PLATAFORMA[p.marketplace_canais?.plataforma] ?? p.marketplace_canais?.plataforma ?? ''}
                   </td>
-                  <td className="px-3 py-3">
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap ${info.cor}`}>
-                      {info.numero ? `${info.numero}. ` : ''}{info.label}
-                    </span>
-                    {p.status === 'novo' && etapa === 'novos' && <p className="text-[10px] text-gray-400 mt-0.5">aguardando pagamento</p>}
-                  </td>
-                  <td className={`px-3 py-3 text-xs ${prazo?.cor ?? 'text-gray-300'}`}>{prazo?.texto ?? '—'}</td>
-                  <td className="px-3 py-3 text-right font-medium text-gray-900 text-sm">{fmt(Number(p.valor_total))}</td>
                 </tr>
-              )})}
-              {filtrados.length === 0 && (
-                <tr><td colSpan={6} className="py-12 text-center text-gray-400 text-sm">Nenhum pedido nesta etapa.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                {linhasItens.map((item: any, idx: number) => {
+                  const imagem = item?.marketplace_anuncios?.imagens?.[0]
+                  const primeira = idx === 0
+                  return (
+                    <tr key={item?.id ?? 'vazio'} onClick={() => abrirPedido(p)} className="hover:bg-blue-50/50 cursor-pointer align-top text-xs">
+                      <td />
+                      <td className="px-3 py-2">
+                        {item ? (
+                          <div className="flex gap-2">
+                            <div className="w-10 h-10 flex-shrink-0 rounded-lg overflow-hidden bg-gray-50 border border-gray-200">
+                              {imagem ? <img src={imagem} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300">📦</div>}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-gray-900 leading-snug line-clamp-2">{item.produtos?.nome ?? item.nome_produto}</p>
+                              <p className="text-gray-500 mt-0.5">
+                                {item.produtos?.sku ?? item.sku ?? 's/ SKU'} · <span className="font-medium text-gray-700">{item.quantidade}×</span> · {fmt(Number(item.preco_unitario ?? 0))}
+                              </p>
+                              {!item.produto_id && (
+                                <button onClick={e => { e.stopPropagation(); abrirPedido(p); abrirMapeamentoItem(item) }}
+                                  className="mt-1 px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 text-[11px] font-medium">
+                                  🔗 Mapear
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : <span className="text-gray-400">Pedido sem itens</span>}
+                      </td>
+                      {primeira ? (
+                        <>
+                          <td className="px-3 py-2" rowSpan={linhasItens.length}>
+                            <p className="text-gray-900 truncate" title={p.cliente_nome ?? ''}>{p.cliente_nome ?? '—'}</p>
+                            <p className="text-gray-500 truncate">{[p.entrega_cidade, p.entrega_estado].filter(Boolean).join(', ') || '—'}</p>
+                            <p className="text-gray-400 mt-0.5">{fmt(Number(p.valor_total))}</p>
+                          </td>
+                          <td className="px-3 py-2 break-all text-gray-700" rowSpan={linhasItens.length}>{p.numero_pedido || p.id_externo}</td>
+                          <td className="px-3 py-2" rowSpan={linhasItens.length}>
+                            <p className="text-gray-400">Entrou</p>
+                            <p className="text-gray-700">{fmtData(p.data_pedido)}</p>
+                            {p.prazo_postagem && emAberto(etapa) && <>
+                              <p className="text-gray-400 mt-0.5">Postar até</p>
+                              <p className="text-gray-700">{fmtData(p.prazo_postagem)}</p>
+                            </>}
+                            {prazo && <p className={`mt-0.5 ${prazo.cor}`}>{prazo.texto}</p>}
+                          </td>
+                          <td className="px-3 py-2" rowSpan={linhasItens.length}>
+                            <p className="text-gray-800">{envio.meio ?? <span className="text-gray-300">—</span>}</p>
+                            {envio.detalhe && <p className="text-gray-500">{envio.detalhe}</p>}
+                            {envio.rastreio && <p className="text-gray-400 font-mono break-all mt-0.5">{envio.rastreio}</p>}
+                          </td>
+                          <td className="px-3 py-2" rowSpan={linhasItens.length}>
+                            <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap ${info.cor}`}>
+                              {info.numero ? `${info.numero}. ` : ''}{info.label}
+                            </span>
+                            {p.status === 'novo' && etapa === 'novos' && <p className="text-[11px] text-gray-400 mt-1">aguardando pagamento</p>}
+                          </td>
+                        </>
+                      ) : null}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            )
+          })}
+          {filtrados.length === 0 && (
+            <tbody><tr><td colSpan={7} className="py-12 text-center text-gray-400 text-sm">Nenhum pedido com esses filtros.</td></tr></tbody>
+          )}
+        </table>
+      </div>
 
-        {/* Detalhe do pedido selecionado */}
-        <div className={detalhe ? 'lg:col-span-2' : 'hidden'}>
+      {/* DETALHE EM MODAL — abre por cima da lista, que continua inteira atrás. */}
+      {detalhe && (
+        <div className="fixed inset-0 z-40 flex items-start justify-center p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setDetalhe(null)} />
+          <div className="relative w-full max-w-3xl my-6">
           {detalhe ? (
-            <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4 sticky top-4">
+            <div className="bg-white border border-gray-200 rounded-2xl shadow-2xl p-5 space-y-4">
               <div className="flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => setDetalhe(null)} title="Fechar e voltar a lista para a largura toda"
-                      className="text-gray-400 hover:text-gray-700 text-sm leading-none">✕</button>
-                    <h3 className="font-semibold text-gray-900">{detalhe.numero_pedido || detalhe.id_externo}</h3>
+                    <button onClick={() => setDetalhe(null)} title="Fechar"
+                      className="text-gray-400 hover:text-gray-700 text-base leading-none">✕</button>
+                    <h3 className="font-semibold text-gray-900">Pedido #{numeroInterno(detalhe) ?? (detalhe.numero_pedido || detalhe.id_externo)}</h3>
                   </div>
-                  <p className="text-xs text-gray-400 font-mono">ID: {detalhe.id_externo}</p>
-                  <p className="text-xs text-gray-400">{detalhe.marketplace_canais?.nome}</p>
+                  <p className="text-xs text-gray-500">
+                    {detalhe.marketplace_canais?.nome} · {NOME_PLATAFORMA[detalhe.marketplace_canais?.plataforma] ?? ''} · nº no marketplace <span className="font-mono">{detalhe.numero_pedido || detalhe.id_externo}</span>
+                  </p>
+                  {(() => {
+                    const e = meioDeEnvio(detalhe)
+                    return e.meio ? (
+                      <p className="text-xs text-gray-500">🚚 {e.meio}{e.detalhe ? ` · ${e.detalhe}` : ''}{e.rastreio ? <> · <span className="font-mono">{e.rastreio}</span></> : null}</p>
+                    ) : null
+                  })()}
                 </div>
                 <select value={detalhe.status} onChange={e => atualizarStatus(detalhe, e.target.value)}
                   className={`text-xs font-medium px-2 py-1 rounded-lg border-0 focus:outline-none cursor-pointer ${STATUS_CORES[detalhe.status]}`}>
@@ -1115,14 +1190,10 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                 <p className="text-xs text-gray-500 italic border-t border-gray-100 pt-3">{detalhe.observacoes}</p>
               )}
             </div>
-          ) : (
-            <div className="bg-white border border-dashed border-gray-200 rounded-xl p-8 text-center text-gray-400">
-              <p className="text-2xl mb-2">📋</p>
-              <p className="text-sm">Selecione um pedido para ver os detalhes</p>
-            </div>
-          )}
+          ) : null}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Modal lançar pedido manual */}
       {modal && (

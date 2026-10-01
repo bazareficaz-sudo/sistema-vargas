@@ -15,7 +15,13 @@ const COLUNAS = [
   'nfe_numero, nfe_chave, nfe_informada_em, venda_id',
   'envio_status, envio_substatus, etiqueta_impressa_em, etiqueta_impressa_por',
   'need_upload_invoice:dados_brutos->>need_upload_invoice',
-  'marketplace_pedido_itens(*, produtos(nome, sku), marketplace_anuncios(imagens))',
+  // Número interno e meio de envio/rastreio (ver src/lib/pedidos/envio.ts):
+  // extraídos aqui para a listagem não trazer o JSON inteiro de cada pedido.
+  'numero_interno, data_pagamento, created_at',
+  'envio_logistica:envio_dados->shipment->logistic->>type, envio_rastreio_ml:envio_dados->shipment->>tracking_number',
+  'tt_transportadora:dados_brutos->>shipping_provider, tt_opcao_entrega:dados_brutos->>delivery_option_name, tt_rastreio:dados_brutos->>tracking_number',
+  'sh_transportadora:dados_brutos->package_list->0->>shipping_carrier',
+  'marketplace_pedido_itens(*, produtos(nome, sku), marketplace_anuncios(imagens, id_externo, titulo))',
   'marketplace_pedido_pacotes(*)',
   'marketplace_canais(id, nome, plataforma)',
 ].join(', ')
