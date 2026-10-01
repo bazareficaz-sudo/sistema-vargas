@@ -482,6 +482,28 @@ export function arredondar(valor: number, regra: string): number {
 
 export const FAIXAS_SAUDE_PADRAO = { critica: 5, baixa: 10, saudavel: 20 }
 
+/**
+ * O número em que a saúde é medida, conforme a base das faixas do canal:
+ * margem líquida (lucro ÷ preço) ou lucro sobre o custo (lucro ÷ custo, que o
+ * motor já calcula como `roi`). Toda tela que pinta a bolinha de saúde passa
+ * por aqui, para a cor e o número mostrado ao lado serem sempre a mesma conta.
+ */
+export function medidaDeSaude(
+  r: { margemLiquida: number; roi: number },
+  faixas?: { base?: 'preco' | 'custo'; critica?: number; baixa?: number; saudavel?: number } | null,
+): { valor: number; base: 'preco' | 'custo'; rotulo: string } {
+  return faixas?.base === 'custo'
+    ? { valor: r.roi, base: 'custo', rotulo: 'de lucro s/ custo' }
+    : { valor: r.margemLiquida, base: 'preco', rotulo: 'de margem' }
+}
+
+export function saudeDoResultado(
+  r: { margemLiquida: number; roi: number; lucro?: number },
+  faixas?: (typeof FAIXAS_SAUDE_PADRAO & { base?: 'preco' | 'custo' }) | null,
+): SaudePreco {
+  return saudeDaMargem(medidaDeSaude(r, faixas).valor, faixas ?? FAIXAS_SAUDE_PADRAO)
+}
+
 export function saudeDaMargem(margemLiquida: number, faixas = FAIXAS_SAUDE_PADRAO): SaudePreco {
   if (margemLiquida < 0) return 'prejuizo'
   if (margemLiquida < faixas.critica) return 'critica'
@@ -492,8 +514,8 @@ export function saudeDaMargem(margemLiquida: number, faixas = FAIXAS_SAUDE_PADRA
 
 export const ROTULO_SAUDE: Record<SaudePreco, { emoji: string; texto: string; cor: string }> = {
   prejuizo:  { emoji: '🔴', texto: 'Prejuízo',        cor: 'text-red-700 bg-red-50 border-red-200' },
-  critica:   { emoji: '🟠', texto: 'Margem crítica',  cor: 'text-orange-700 bg-orange-50 border-orange-200' },
-  baixa:     { emoji: '🟡', texto: 'Margem baixa',    cor: 'text-yellow-700 bg-yellow-50 border-yellow-200' },
-  saudavel:  { emoji: '🟢', texto: 'Margem saudável', cor: 'text-green-700 bg-green-50 border-green-200' },
+  critica:   { emoji: '🟠', texto: 'Lucro crítico',   cor: 'text-orange-700 bg-orange-50 border-orange-200' },
+  baixa:     { emoji: '🟡', texto: 'Lucro baixo',     cor: 'text-yellow-700 bg-yellow-50 border-yellow-200' },
+  saudavel:  { emoji: '🟢', texto: 'Lucro saudável',  cor: 'text-green-700 bg-green-50 border-green-200' },
   excelente: { emoji: '💎', texto: 'Excelente',       cor: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
 }

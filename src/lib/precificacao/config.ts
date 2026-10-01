@@ -72,7 +72,14 @@ export function presetDaPlataforma(plataforma: string): Omit<ConfigTaxas, 'canal
   }
 }
 
-export type FaixasSaude = { critica: number; baixa: number; saudavel: number }
+// `base`: em que número as faixas são medidas.
+//   'preco' → margem líquida (lucro ÷ preço de venda) — o padrão;
+//   'custo' → lucro sobre o custo (lucro ÷ custo), o "markup líquido" de quem
+//             pensa em "quanto ganho em cima do que paguei".
+// O lucro é o mesmo nas duas — já descontadas todas as taxas do canal. Muda
+// só o divisor, e por isso os limites de uma base não servem na outra.
+export type BaseSaude = 'preco' | 'custo'
+export type FaixasSaude = { critica: number; baixa: number; saudavel: number; base?: BaseSaude }
 
 export function linhaParaConfig(row: any): ConfigTaxas & { faixasSaude: FaixasSaude } {
   return {
@@ -99,6 +106,7 @@ export function linhaParaConfig(row: any): ConfigTaxas & { faixasSaude: FaixasSa
       critica: Number(row.saude_critica ?? 5),
       baixa: Number(row.saude_baixa ?? 10),
       saudavel: Number(row.saude_saudavel ?? 20),
+      base: row.saude_base === 'custo' ? 'custo' : 'preco',
     },
   }
 }
@@ -127,6 +135,7 @@ export function configParaLinha(cfg: ConfigTaxas & { faixasSaude?: FaixasSaude }
     saude_critica: cfg.faixasSaude?.critica ?? 5,
     saude_baixa: cfg.faixasSaude?.baixa ?? 10,
     saude_saudavel: cfg.faixasSaude?.saudavel ?? 20,
+    saude_base: cfg.faixasSaude?.base === 'custo' ? 'custo' : 'preco',
     updated_at: new Date().toISOString(),
   }
 }
@@ -152,7 +161,7 @@ export async function buscarConfigDoCanal(
 
   const preset = presetDaPlataforma(canal.plataforma)
   return {
-    cfg: { ...preset, canalId: canal.id, faixasSaude: { critica: 5, baixa: 10, saudavel: 20 } },
+    cfg: { ...preset, canalId: canal.id, faixasSaude: { critica: 5, baixa: 10, saudavel: 20, base: 'preco' } },
     origem: 'preset',
   }
 }

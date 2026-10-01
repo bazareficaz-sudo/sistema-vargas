@@ -193,8 +193,29 @@ export default function TaxasCanal({ canal, configInicial, origem, onSalvo }: {
                   className={`${inputCls} w-16 mx-2`} />dias
               </label>
             </div>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <span className="text-xs text-gray-500">Medir a saúde por:</span>
+              {([
+                ['custo', 'Lucro sobre o custo', 'Quanto sobra de lucro em cima do que o produto custou (lucro ÷ custo). É a conta de quem trabalha com markup.'],
+                ['preco', 'Margem sobre o preço', 'Quanto do preço de venda sobra de lucro (lucro ÷ preço).'],
+              ] as const).map(([v, label, ajuda]) => {
+                const atual = (cfg.faixasSaude as any)?.base === 'custo' ? 'custo' : 'preco'
+                return (
+                  <button key={v} type="button" title={ajuda}
+                    onClick={() => set('faixasSaude' as any, { ...(cfg.faixasSaude ?? { critica: 5, baixa: 10, saudavel: 20 }), base: v } as any)}
+                    className={`px-2.5 py-1 text-xs rounded-lg border ${atual === v ? 'bg-blue-600 text-white border-blue-600 font-medium' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              O lucro é o mesmo nas duas — já descontados comissão, frete, imposto e embalagem. Muda só a divisão:
+              lucro de R$ 2 num produto que custa R$ 10 e é vendido a R$ 20 é 20% sobre o custo e 10% de margem.
+              Ao trocar a base, revise os limites abaixo.
+            </p>
             <div className="flex flex-wrap items-center gap-3 mt-3">
-              <span className="text-xs text-gray-500">Margem líquida:</span>
+              <span className="text-xs text-gray-500">{(cfg.faixasSaude as any)?.base === 'custo' ? 'Lucro sobre o custo:' : 'Margem líquida:'}</span>
               {([
                 ['critica', '🟠 crítica abaixo de'],
                 ['baixa', '🟡 baixa abaixo de'],

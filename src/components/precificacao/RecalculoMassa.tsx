@@ -113,7 +113,11 @@ export default function RecalculoMassa() {
       try {
         const d = await fetch('/api/precificacao/recalcular/ajustar-item', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ anuncioId: id, margem: valor }),
+          // Canal que mede a saúde pelo custo: o número digitado é lucro
+          // sobre o custo, não margem.
+          body: JSON.stringify(i.baseSaude === 'custo'
+            ? { anuncioId: id, lucroSobreCusto: valor }
+            : { anuncioId: id, margem: valor }),
         }).then(r => r.json())
         setAjustes(a => ({
           ...a,
@@ -191,9 +195,9 @@ export default function RecalculoMassa() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         regra: {
-          nome: `${i.produtoNome} — margem ${String(margem).replace('.', ',')}%`,
+          nome: `${i.produtoNome} — ${i.baseSaude === 'custo' ? 'lucro s/ custo' : 'margem'} ${String(margem).replace('.', ',')}%`,
           nivel: 'produto', alvo_id: i.produtoId,
-          objetivo_tipo: 'margem_liquida', objetivo_valor: margem,
+          objetivo_tipo: i.baseSaude === 'custo' ? 'sobre_custo' : 'margem_liquida', objetivo_valor: margem,
           arredondamento: 'nenhum', prioridade: 0, ativo: true,
         },
       }),
@@ -243,6 +247,10 @@ export default function RecalculoMassa() {
 
   const r = previa?.resumo
   const itens = previa?.itens ?? []
+  // Base em que a coluna de lucro é mostrada: a dos canais da prévia. Canais
+  // com bases diferentes misturados → cabeçalho neutro, e cada linha usa a sua.
+  const basesNaPrevia = new Set(itens.map((i: any) => i.baseSaude ?? 'preco'))
+  const baseColuna: 'preco' | 'custo' | 'mista' = basesNaPrevia.size > 1 ? 'mista' : (basesNaPrevia.has('custo') ? 'custo' : 'preco')
   const todosMarcados = itens.length > 0 && itens.every((i: any) => selecionados.has(i.anuncioId))
 
   return (
@@ -512,14 +520,18 @@ export default function RecalculoMassa() {
                         Frete
                       </th>
                       <th className="text-center px-3 py-2 text-xs font-medium text-gray-600"
-                        title="Margem líquida: quanto do preço de venda sobra de lucro, já descontados comissão, frete e taxas. Embaixo, o mesmo lucro dividido pelo custo — que é a base usada pelas regras.">
-                        Margem líquida
-                        <span className="block text-[10px] font-normal text-gray-400">lucro ÷ preço · s/ custo abaixo</span>
+                        title="Lucro já descontados comissão, frete, imposto e taxas. Em destaque, na base em que o canal mede a saúde (Taxas do canal → faixas de saúde); embaixo, a outra base.">
+                        {baseColuna === 'custo' ? 'Lucro s/ custo' : baseColuna === 'preco' ? 'Margem líquida' : 'Lucro'}
+                        <span className="block text-[10px] font-normal text-gray-400">
+                          {baseColuna === 'custo' ? 'lucro ÷ custo · margem abaixo' : baseColuna === 'preco' ? 'lucro ÷ preço · s/ custo abaixo' : 'na base de cada canal'}
+                        </span>
                       </th>
                       <th className="text-center px-3 py-2 text-xs font-medium text-gray-600"
-                        title="Margem líquida desejada (sobre o preço de venda). Em branco, vale o que a regra manda.">
-                        Margem desejada
-                        <span className="block text-[10px] font-normal text-gray-400">líquida, sobre o preço</span>
+                        title="Quanto você quer ganhar neste anúncio, na base do canal. Em branco, vale o que a regra manda.">
+                        {baseColuna === 'custo' ? 'Lucro desejado' : 'Margem desejada'}
+                        <span className="block text-[10px] font-normal text-gray-400">
+                          {baseColuna === 'custo' ? 'sobre o custo' : baseColuna === 'preco' ? 'líquida, sobre o preço' : 'na base de cada canal'}
+                        </span>
                       </th>
                     </tr>
                   </thead>
@@ -646,6 +658,20 @@ export default function RecalculoMassa() {
                             })()}
                           </td>
                           <td className="px-3 py-2 text-center whitespace-nowrap text-xs">
+                            {i.baseSaude === 'custo' ? (
+                              // Canal que mede pelo custo: o número em destaque
+                              // (com a bolinha) é o lucro sobre o custo, e a
+                              // margem desce para a linha de baixo.
+                              <>
+                                <span title={sa.texto}>{sa.emoji} {i.lucroSobreCustoAtual.toFixed(0)}%</span>
+                                <span className="text-gray-300 mx-1">→</span>
+                                <span title={sn.texto}>{sn.emoji} {lucroSobreCustoDe(i).toFixed(0)}%</span>
+                                <span className="block text-[10px] text-gray-400 mt-0.5"
+                                  title="Margem líquida: o mesmo lucro dividido pelo preço de venda.">
+                                  margem {i.margemAtual.toFixed(0)}% → {margemDe(i).toFixed(0)}%
+                                </span>
+                              </>
+                            ) : (<>
                             <span title={sa.texto}>{sa.emoji} {i.margemAtual.toFixed(0)}%</span>
                             <span className="text-gray-300 mx-1">→</span>
                             <span title={sn.texto}>{sn.emoji} {margemDe(i).toFixed(0)}%</span>
@@ -660,6 +686,7 @@ export default function RecalculoMassa() {
                                 s/ custo {i.lucroSobreCustoAtual.toFixed(0)}% → {lucroSobreCustoDe(i).toFixed(0)}%
                               </span>
                             )}
+                            </>)}
                           </td>
                           <td className="px-3 py-2 text-center">
                             <div className="flex items-center justify-center gap-1">
@@ -668,11 +695,13 @@ export default function RecalculoMassa() {
                                   produzir, não uma escolha de alguém. Iguais,
                                   o número da regra parecia configuração. */}
                               <CampoNumero valor={aj?.margemAlvo ?? null}
-                                placeholder={String(i.margemNova.toFixed(0))}
+                                placeholder={String((i.baseSaude === 'custo' ? i.lucroSobreCustoNovo : i.margemNova).toFixed(0))}
                                 onChange={v => mudarMargem(i, v)}
                                 title={aj?.margemAlvo != null
-                                  ? 'Margem que você definiu para este anúncio'
-                                  : `A regra entrega ${i.margemNova.toFixed(0)}% de margem líquida. Digite aqui só se quiser outra.`}
+                                  ? (i.baseSaude === 'custo' ? 'Lucro sobre o custo que você definiu para este anúncio' : 'Margem que você definiu para este anúncio')
+                                  : i.baseSaude === 'custo'
+                                    ? `A regra entrega ${i.lucroSobreCustoNovo.toFixed(0)}% de lucro sobre o custo. Digite aqui só se quiser outro.`
+                                    : `A regra entrega ${i.margemNova.toFixed(0)}% de margem líquida. Digite aqui só se quiser outra.`}
                                 className={`w-14 border rounded px-1.5 py-1 text-xs text-center focus:outline-none focus:border-blue-500 ${
                                   aj?.margemAlvo != null
                                     ? 'border-blue-400 text-gray-900 font-medium'

@@ -1,4 +1,4 @@
-import { calcular, saudeDaMargem } from './motor'
+import { calcular, saudeDoResultado } from './motor'
 import { aplicarRegra, type Regra } from './regras'
 import type { FaixasSaude } from './config'
 import type { ArredondamentoPreco, ConfigTaxas, FaixaFrete, Objetivo, Resultado, SaudePreco } from './tipos'
@@ -51,7 +51,7 @@ function montar(rotulo: string, e: EconomiaResolvida, r: Resultado): Cenario {
   return {
     rotulo,
     resultado: r,
-    saude: saudeDaMargem(r.margemLiquida, e.cfg.faixasSaude),
+    saude: saudeDoResultado(r, e.cfg.faixasSaude),
     lucroSobreCusto: Number(r.roi.toFixed(2)),
     valido: r.preco > 0,
   }

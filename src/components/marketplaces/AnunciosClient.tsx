@@ -22,7 +22,7 @@ import CriarAnuncioNuvemshopModal from './CriarAnuncioNuvemshopModal'
 import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
-import { calcular as calcularPreco, saudeDaMargem, ROTULO_SAUDE } from '@/lib/precificacao/motor'
+import { calcular as calcularPreco, saudeDoResultado, medidaDeSaude, ROTULO_SAUDE } from '@/lib/precificacao/motor'
 import { FALTAS_CATALOGO } from '@/lib/marketplace/qualidade'
 import { SELECT_LISTAGEM_ANUNCIO, TAMANHOS_PAGINA_ANUNCIOS, normalizarTamanhoPagina } from '@/lib/marketplace/colunasAnuncio'
 
@@ -37,10 +37,14 @@ function SaudeDoAnuncio({ anuncio, cfg }: { anuncio: any; cfg: any }) {
   if (!(custo > 0) || !(preco > 0)) return null
 
   const r = calcularPreco({ cfg, custoProduto: custo, objetivo: { tipo: 'preco', valor: preco } })
-  const s = ROTULO_SAUDE[saudeDaMargem(r.margemLiquida, cfg.faixasSaude)]
+  const s = ROTULO_SAUDE[saudeDoResultado(r, cfg.faixasSaude)]
+  // Mostra o número na base em que o canal mede a saúde (Precificação →
+  // taxas do canal); o outro vai no título.
+  const m = medidaDeSaude(r, cfg.faixasSaude)
   return (
-    <p className="text-xs text-gray-400 mt-0.5" title={`Lucro estimado ${r.lucro.toFixed(2)} · deduções ${r.totalDeducoes.toFixed(2)}`}>
-      {s.emoji} {r.margemLiquida.toFixed(0)}% de margem
+    <p className="text-xs text-gray-400 mt-0.5"
+      title={`Lucro estimado ${r.lucro.toFixed(2)} · deduções ${r.totalDeducoes.toFixed(2)} · margem ${r.margemLiquida.toFixed(0)}% · lucro s/ custo ${r.roi.toFixed(0)}%`}>
+      {s.emoji} {m.valor.toFixed(0)}% {m.rotulo}
     </p>
   )
 }

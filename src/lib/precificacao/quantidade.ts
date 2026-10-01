@@ -1,4 +1,4 @@
-import { calcular, saudeDaMargem } from './motor'
+import { calcular, saudeDoResultado } from './motor'
 import { classificarMargem, limitePromocionalEfetivo, type Margens, type ResultadoClassificacao } from './margens'
 import type { EconomiaResolvida } from './cenarios'
 import type { Resultado } from './tipos'
@@ -244,6 +244,6 @@ export function cabeAtacado(economia: EconomiaResolvida, margens: Margens, quant
 }
 
 /** Saúde da margem de cada faixa, no vocabulário que a tela já usa. */
-export function saudeDaFaixa(f: FaixaAvaliada, faixasSaude?: Parameters<typeof saudeDaMargem>[1]) {
-  return saudeDaMargem(f.resultado.margemLiquida, faixasSaude)
+export function saudeDaFaixa(f: FaixaAvaliada, faixasSaude?: Parameters<typeof saudeDoResultado>[1]) {
+  return saudeDoResultado(f.resultado, faixasSaude)
 }

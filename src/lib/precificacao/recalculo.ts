@@ -68,6 +68,8 @@ export type ItemRecalculo = {
   lucroSobreCustoNovo: number
   saudeAtual: SaudePreco
   saudeNova: SaudePreco
+  /** Base das faixas de saúde do canal: margem (preço) ou lucro s/ custo. */
+  baseSaude: 'preco' | 'custo'
   regraNome: string
   regraObjetivo: string
   regraId: string
@@ -312,6 +314,7 @@ export async function varrerRecalculo(
             lucroSobreCustoNovo: novo.lucroSobreCusto,
             saudeAtual: atual.saude,
             saudeNova: novo.saude,
+            baseSaude: ctx.economia.cfg.faixasSaude?.base === 'custo' ? 'custo' : 'preco',
             regraNome: resolucao.vencedora.nome,
             regraObjetivo: descreverObjetivo(resolucao.vencedora.objetivoTipo, resolucao.vencedora.objetivoValor),
             regraId: resolucao.vencedora.id,

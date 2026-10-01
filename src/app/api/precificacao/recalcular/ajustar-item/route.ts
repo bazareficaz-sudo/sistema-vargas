@@ -21,12 +21,15 @@ import { avaliarPreco, precificarPorObjetivo } from '@/lib/precificacao/cenarios
 // uma tela só usando.
 
 export async function POST(req: Request) {
-  const { anuncioId, margem, preco } = await req.json() as {
+  const { anuncioId, margem, preco, lucroSobreCusto } = await req.json() as {
     anuncioId: string; margem?: number; preco?: number
+    /** Alvo em lucro ÷ custo (%) — para quem mede a saúde pelo custo. */
+    lucroSobreCusto?: number
   }
   const querMargem = Number(margem) > 0
   const querPreco = Number(preco) > 0
-  if (!anuncioId || (!querMargem && !querPreco)) {
+  const querSobreCusto = Number(lucroSobreCusto) > 0
+  if (!anuncioId || (!querMargem && !querPreco && !querSobreCusto)) {
     return NextResponse.json({ ok: false, erro: 'Informe o anúncio e uma margem ou um preço' }, { status: 400 })
   }
 
@@ -57,7 +60,10 @@ export async function POST(req: Request) {
 
   const cenario = querPreco
     ? avaliarPreco(ctx.economia, Number(preco), 'preço informado')
-    : precificarPorObjetivo(ctx.economia, { tipo: 'margem_liquida', valor: Number(margem) })
+    : querSobreCusto
+      // Mesmo objetivo das regras "x% de lucro sobre o custo".
+      ? precificarPorObjetivo(ctx.economia, { tipo: 'sobre_custo', valor: Number(lucroSobreCusto) })
+      : precificarPorObjetivo(ctx.economia, { tipo: 'margem_liquida', valor: Number(margem) })
 
   const r = cenario.resultado
   return NextResponse.json({

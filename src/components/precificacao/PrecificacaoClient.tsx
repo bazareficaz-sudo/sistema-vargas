@@ -378,7 +378,7 @@ export default function PrecificacaoClient({ empresaId }: { empresaId: string })
                           {[
                             ['Margem', pct(r.resultado.margemLiquida)],
                             ['Markup', `${r.resultado.markup.toFixed(2).replace('.', ',')}×`],
-                            ['ROI', pct(r.resultado.roi)],
+                            ['Lucro s/ custo', pct(r.resultado.roi)],
                             ['Recebe', r.resultado.diasRecebimento ? `${r.resultado.diasRecebimento}d` : '—'],
                           ].map(([k, v]) => (
                             <div key={k} className="bg-gray-50 rounded-lg py-1.5">
