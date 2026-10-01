@@ -36,6 +36,11 @@ function calcularEtapaInterna(status: string, algumItemPendente: boolean): strin
   return 'novo'
 }
 
+function nivelEndereco(raw: TiktokOrder, nivel: string): { address_name?: string; iso_code?: string } | undefined {
+  const lista: any[] = (raw.recipient_address as any)?.district_info ?? []
+  return lista.find(d => d?.address_level === nivel)
+}
+
 function enderecoLinha(raw: TiktokOrder): string | null {
   const end = raw.recipient_address
   if (!end) return null
@@ -100,8 +105,10 @@ export function mapOrderToPedidoRow(raw: TiktokOrder, canal: TiktokChannel, algu
     entrega_cep: end.postal_code ?? null,
     entrega_logradouro: enderecoLinha(raw),
     entrega_bairro: end.district ?? null,
-    entrega_cidade: end.city ?? end.town ?? null,
-    entrega_estado: end.state ?? null,
+    // No Brasil a TikTok manda cidade e UF só em district_info (L1 = estado,
+    // L2 = município); city/state vêm vazios.
+    entrega_cidade: end.city ?? end.town ?? nivelEndereco(raw, 'L2')?.address_name ?? null,
+    entrega_estado: end.state ?? nivelEndereco(raw, 'L1')?.iso_code ?? nivelEndereco(raw, 'L1')?.address_name ?? null,
     valor_produtos: Number(pagamento.sub_total ?? 0),
     valor_frete: Number(pagamento.shipping_fee ?? 0),
     valor_desconto: Number(pagamento.seller_discount ?? 0) + Number(pagamento.platform_discount ?? 0),

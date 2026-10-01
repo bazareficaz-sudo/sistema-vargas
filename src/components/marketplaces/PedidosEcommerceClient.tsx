@@ -85,6 +85,9 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
 
   // Mapear item sem sair do pedido
   const [mapeandoItem, setMapeandoItem] = useState<any | null>(null)
+  // Mapeamento em GRUPO (aba Pendências): um anúncio sem vínculo, todos os
+  // pedidos dele resolvidos de uma vez.
+  const [grupoMapeando, setGrupoMapeando] = useState<{ anuncioId: string; canal: any } | null>(null)
   const [anuncioParaMapear, setAnuncioParaMapear] = useState<any | null>(null)
   const [carregandoAnuncio, setCarregandoAnuncio] = useState(false)
   const [buscaItemId, setBuscaItemId] = useState<string | null>(null)
@@ -375,6 +378,40 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     } catch { /* não crítico — próxima sincronização recalcula de novo */ }
   }
 
+  async function abrirMapeamentoGrupo(anuncioId: string, canal: any) {
+    setCarregandoAnuncio(true)
+    const sb = createClient()
+    const { data } = await sb.from('marketplace_anuncios').select('*').eq('id', anuncioId).single()
+    setCarregandoAnuncio(false)
+    if (data) { setAnuncioParaMapear(data); setGrupoMapeando({ anuncioId, canal }) }
+  }
+
+  // O anúncio já ficou vinculado (MapearAnuncioModal grava o vínculo nele);
+  // aqui cada item pendente desse anúncio recebe o produto, baixa estoque se
+  // o pedido já foi pago e tem a etapa recalculada.
+  async function onGrupoMapeado(anuncioAtualizado: any) {
+    if (!grupoMapeando || !anuncioAtualizado?.produto_id) { setGrupoMapeando(null); setAnuncioParaMapear(null); return }
+    const sb = createClient()
+    const alvos = pedidos.flatMap((ped: any) => (ped.marketplace_pedido_itens ?? [])
+      .filter((i: any) => i.anuncio_id === grupoMapeando.anuncioId && !i.produto_id)
+      .map((i: any) => ({ item: i, pedido: ped })))
+    for (const { item, pedido } of alvos) {
+      await sb.from('marketplace_pedido_itens').update({ produto_id: anuncioAtualizado.produto_id, status_mapeamento: 'mapeado' }).eq('id', item.id)
+      atualizarItemLocal(pedido.id, item.id, { produto_id: anuncioAtualizado.produto_id, status_mapeamento: 'mapeado' })
+      if (pedido.status !== 'novo' && pedido.status !== 'cancelado') {
+        try {
+          await fetch('/api/marketplace/shopee/baixar-estoque-item', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pedidoItemId: item.id }),
+          })
+        } catch { /* fica para "Tentar novamente" no pedido */ }
+      }
+    }
+    for (const pedidoId of new Set(alvos.map(a => a.pedido.id))) await recalcularEtapaLocal(pedidoId)
+    setAvisoAcao(`Anúncio vinculado: ${alvos.length} item(ns) em ${new Set(alvos.map(a => a.pedido.id)).size} pedido(s) resolvidos.`)
+    setGrupoMapeando(null); setAnuncioParaMapear(null)
+    router.refresh()
+  }
+
   async function onAnuncioMapeado(anuncioAtualizado: any) {
     if (!mapeandoItem) return
     const item = mapeandoItem
@@ -562,6 +599,23 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }); abrirNotaFiscal(p)
   }
 
+  // Pendências agrupadas por anúncio: mapear uma vez resolve todos os
+  // pedidos daquele anúncio. Item sem anúncio sincronizado não entra aqui —
+  // esse se mapeia pelo próprio pedido.
+  const gruposPendencia = (() => {
+    const mapa = new Map<string, { anuncioId: string; titulo: string; imagem: string | null; canal: any; pedidos: Set<string>; unidades: number }>()
+    for (const x of base) {
+      if (!emAberto(x.etapa) && x.etapa !== 'pendencia') continue
+      for (const i of (x.p.marketplace_pedido_itens ?? [])) {
+        if (i.produto_id || !i.anuncio_id) continue
+        const g = mapa.get(i.anuncio_id) ?? { anuncioId: i.anuncio_id, titulo: i.marketplace_anuncios?.titulo ?? i.nome_produto, imagem: i.marketplace_anuncios?.imagens?.[0] ?? null, canal: x.p.marketplace_canais, pedidos: new Set<string>(), unidades: 0 }
+        g.pedidos.add(x.p.id); g.unidades += Number(i.quantidade ?? 0)
+        mapa.set(i.anuncio_id, g)
+      }
+    }
+    return [...mapa.values()].sort((a, b) => b.pedidos.size - a.pedidos.size)
+  })()
+
   const abaEmAberto = aba === 'abertos' || (aba !== 'todos' && emAberto(aba))
   const prazoMs = (p: any) => p.prazo_postagem ? new Date(p.prazo_postagem).getTime() : fimDeHoje(agora).getTime()
   const filtrados = base
@@ -698,6 +752,30 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         )}
       </div>
 
+      {aba === 'pendencia' && gruposPendencia.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-3">
+          <p className="text-sm font-medium text-amber-900">Anúncios sem produto vinculado</p>
+          <p className="text-xs text-amber-800 mb-2">Vincule o anúncio uma vez: todos os pedidos dele saem da pendência e os próximos já chegam mapeados.</p>
+          <div className="divide-y divide-amber-200">
+            {gruposPendencia.map(g => (
+              <div key={g.anuncioId} className="flex items-center gap-3 py-2">
+                <div className="w-9 h-9 flex-shrink-0 rounded-lg overflow-hidden bg-white border border-amber-200">
+                  {g.imagem ? <img src={g.imagem} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300 text-xs">📦</div>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-900 truncate">{g.titulo}</p>
+                  <p className="text-[11px] text-gray-500">{g.canal?.nome} · {g.pedidos.size} pedido(s) · {g.unidades} un.</p>
+                </div>
+                <button onClick={() => abrirMapeamentoGrupo(g.anuncioId, g.canal)} disabled={carregandoAnuncio}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border border-amber-300 bg-white text-amber-800 hover:bg-amber-100 disabled:opacity-50">
+                  🔗 Mapear {g.pedidos.size > 1 ? `os ${g.pedidos.size} pedidos` : ''}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Ações em lote */}
       {selecionados.size > 0 && (
         <div className="sticky top-0 z-10 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-2 text-sm">
@@ -810,8 +888,13 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                       {primeira ? (
                         <>
                           <td className="px-3 py-2" rowSpan={linhasItens.length}>
-                            <p className="text-gray-900 truncate" title={p.cliente_nome ?? ''}>{p.cliente_nome ?? '—'}</p>
-                            <p className="text-gray-500 truncate">{[p.entrega_cidade, p.entrega_estado].filter(Boolean).join(', ') || '—'}</p>
+                            {/^\*+$/.test(String(p.cliente_nome ?? '').trim()) ? (
+                              // A Shopee mascara nome e endereço até a etiqueta ser gerada.
+                              <p className="text-gray-400 italic" title="A Shopee libera nome e endereço do comprador depois que a etiqueta é gerada.">oculto pela Shopee</p>
+                            ) : (<>
+                              <p className="text-gray-900 truncate" title={p.cliente_nome ?? ''}>{p.cliente_nome ?? '—'}</p>
+                              <p className="text-gray-500 truncate">{[p.entrega_cidade, p.entrega_estado].filter(c => c && !/^\*+$/.test(String(c))).join(', ') || '—'}</p>
+                            </>)}
                             <p className="text-gray-400 mt-0.5">{fmt(Number(p.valor_total))}</p>
                           </td>
                           <td className="px-3 py-2 break-all text-gray-700" rowSpan={linhasItens.length}>{p.numero_pedido || p.id_externo}</td>
@@ -1276,6 +1359,17 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
             </div>
           </div>
         </div>
+      )}
+
+      {grupoMapeando && anuncioParaMapear && (
+        <MapearAnuncioModal
+          anuncio={anuncioParaMapear}
+          canal={grupoMapeando.canal}
+          empresaId={empresaId}
+          operador={operador}
+          onClose={() => { setGrupoMapeando(null); setAnuncioParaMapear(null) }}
+          onAtualizado={onGrupoMapeado}
+        />
       )}
 
       {mapeandoItem && anuncioParaMapear && detalhe && (

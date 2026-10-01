@@ -269,6 +269,24 @@ function aplicarEnvio(row: Record<string, any>, envio: EnvioML, tags: string[], 
   row.envio_atualizado_em = envio.envio_atualizado_em
   if (envio.prazo_postagem) row.prazo_postagem = envio.prazo_postagem
   if (envio.envio_dados) row.envio_dados = envio.envio_dados
+  // DESTINATÁRIO E ENDEREÇO: o pedido do ML só traz o apelido do comprador
+  // (THIAGO1011) e nenhum endereço; o shipment traz o nome de quem recebe e
+  // para onde vai. Em entrega na agência do ML, o endereço é o da agência —
+  // marcado no logradouro para ninguém achar que é a casa do cliente.
+  const destino = envio.envio_dados?.shipment?.destination
+  const end = destino?.shipping_address
+  if (destino?.receiver_name) row.cliente_nome = String(destino.receiver_name).trim()
+  if (end) {
+    const naAgencia = destino?.type === 'agency'
+    row.entrega_cidade = end.city?.name ?? null
+    row.entrega_estado = String(end.state?.id ?? '').replace(/^BR-/, '') || end.state?.name || null
+    row.entrega_cep = end.zip_code ?? null
+    row.entrega_logradouro = naAgencia
+      ? `Retirada na agência: ${end.agency?.description ?? end.street_name ?? ''}`.trim()
+      : (end.street_name ?? end.address_line ?? null)
+    row.entrega_numero = naAgencia ? null : (end.street_number ?? null)
+    row.entrega_bairro = end.neighborhood?.name ?? null
+  }
   if (row.status === 'confirmado') {
     if (envio.envio_status === 'shipped') row.status = 'enviado'
     if (envio.envio_status === 'delivered') row.status = 'entregue'
@@ -280,19 +298,21 @@ function aplicarEnvio(row: Record<string, any>, envio: EnvioML, tags: string[], 
 // shipment é isolada: o pedido segue gravado com o que se sabia antes.
 async function envioDoPedido(sb: any, canal: MLChannel, rawOrder: any): Promise<EnvioML | null> {
   const shippingId = rawOrder.shipping?.id
-  if (!shippingId || rawOrder.status !== 'paid') return null
-  if ((rawOrder.tags ?? []).includes('delivered')) return null
 
   const { data: atual } = await sb.from('marketplace_pedidos')
-    .select('prazo_postagem, envio_status, envio_substatus, envio_atualizado_em')
+    .select('prazo_postagem, envio_status, envio_substatus, envio_atualizado_em, envio_dados')
     .eq('canal_id', canal.id).eq('id_externo', String(rawOrder.id))
     .maybeSingle()
-  // Envio já finalizado: não consulta de novo, mas REAPLICA o que está
-  // gravado — senão o upsert devolveria o pedido para "confirmado".
-  const gravado: EnvioML | null = atual?.envio_status ? {
-    envio_status: atual.envio_status, envio_substatus: atual.envio_substatus ?? null,
+  // O que já está gravado é REAPLICADO quando não há consulta nova: o upsert
+  // do pedido devolveria o status para "confirmado" e trocaria nome e
+  // endereço do destinatário pelo apelido e por vazio.
+  const gravado: EnvioML | null = atual?.envio_status || atual?.envio_dados ? {
+    envio_status: atual.envio_status ?? null, envio_substatus: atual.envio_substatus ?? null,
     envio_atualizado_em: atual.envio_atualizado_em ?? new Date().toISOString(),
+    ...(atual.envio_dados ? { envio_dados: atual.envio_dados } : {}),
   } : null
+  if (!shippingId || rawOrder.status !== 'paid') return gravado
+  if ((rawOrder.tags ?? []).includes('delivered')) return gravado
   if (gravado && ENVIO_FINAL.has(gravado.envio_status ?? '')) return gravado
 
   try {
