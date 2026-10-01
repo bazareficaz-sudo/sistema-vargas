@@ -710,7 +710,10 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {/* Lista */}
-        <div className="lg:col-span-3 bg-white border border-gray-200 rounded-xl overflow-x-auto">
+        {/* Sem pedido aberto, a lista usa a largura toda — antes o quadro
+            vazio "Selecione um pedido" ocupava 2/5 da tela e cortava a coluna
+            de prazo, que é justamente a que diz o que sai hoje. */}
+        <div className={`${detalhe ? 'lg:col-span-3' : 'lg:col-span-5'} bg-white border border-gray-200 rounded-xl overflow-x-auto`}>
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -782,12 +785,16 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         </div>
 
         {/* Detalhe do pedido selecionado */}
-        <div className="lg:col-span-2">
+        <div className={detalhe ? 'lg:col-span-2' : 'hidden'}>
           {detalhe ? (
             <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4 sticky top-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="font-semibold text-gray-900">{detalhe.numero_pedido || detalhe.id_externo}</h3>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setDetalhe(null)} title="Fechar e voltar a lista para a largura toda"
+                      className="text-gray-400 hover:text-gray-700 text-sm leading-none">✕</button>
+                    <h3 className="font-semibold text-gray-900">{detalhe.numero_pedido || detalhe.id_externo}</h3>
+                  </div>
                   <p className="text-xs text-gray-400 font-mono">ID: {detalhe.id_externo}</p>
                   <p className="text-xs text-gray-400">{detalhe.marketplace_canais?.nome}</p>
                 </div>
