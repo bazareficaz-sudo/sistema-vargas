@@ -59,7 +59,7 @@ export async function POST(req: Request) {
   }
   const ordenados = [...(pedidos ?? [])].sort((a: any, b: any) => chaveOrdem(a).localeCompare(chaveOrdem(b), 'pt-BR'))
 
-  const etiquetas: { pdf: Uint8Array; pedido: PedidoNaFolha; id: string }[] = []
+  const etiquetas: { pdf: Uint8Array; pedido: PedidoNaFolha; id: string; paginas: 'primeira' | 'todas' }[] = []
   const falhas: { id: string; pv: string; erro: string }[] = []
   for (const p of ordenados as any[]) {
     const pv = numeroInterno(p) ?? p.numero_pedido ?? p.id_externo
@@ -67,6 +67,9 @@ export async function POST(req: Request) {
       const pdf = await buscarEtiquetaDoPedido(sb, p.marketplace_canais, p)
       etiquetas.push({
         id: p.id, pdf,
+        // ML: a 2ª página é a lista de conteúdo do despacho — o mini pedido
+        // já faz esse papel, e ela viraria uma "etiqueta" a mais.
+        paginas: p.marketplace_canais?.plataforma === 'mercadolivre' ? 'primeira' : 'todas',
         pedido: {
           pv,
           canal: p.marketplace_canais?.nome ?? '',

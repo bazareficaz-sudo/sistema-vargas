@@ -38,6 +38,12 @@ const nextConfig: NextConfig = {
   // Não anunciar a tecnologia e a versão do servidor em toda resposta.
   poweredByHeader: false,
 
+  // pdf.js (recorte da etiqueta dentro da folha do marketplace) roda no
+  // servidor carregando o próprio worker por import dinâmico — empacotado
+  // pelo bundler ele não acha o arquivo. Fica fora do bundle, lido do
+  // node_modules em tempo de execução.
+  serverExternalPackages: ['pdfjs-dist'],
+
   async headers() {
     return [{ source: '/:path*', headers: SEGURANCA }]
   },
