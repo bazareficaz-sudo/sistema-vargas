@@ -105,13 +105,38 @@ export async function buscarMarcas(sb: any, canal: TiktokChannel, categoryId: st
 }
 
 /** Armazém de venda padrão da loja — o estoque da TikTok é por armazém. */
-async function armazemPadrao(opts: Ctx): Promise<string> {
-  const resp = await tiktokGet('/logistics/202309/warehouses', {}, opts)
+//
+// A consulta de armazéns é do pacote de Logística da TikTok, que o app pode
+// não ter ("Access denied ... access scope"). Nesse caso vale o armazém onde
+// os anúncios que a loja já tem guardam estoque — é o mesmo armazém de venda.
+async function armazemPadrao(sb: any, canal: TiktokChannel, opts: Ctx): Promise<string> {
+  let resp: any
+  try {
+    resp = await tiktokGet('/logistics/202309/warehouses', {}, opts)
+  } catch (e: any) {
+    const doCatalogo = await armazemDosAnuncios(sb, canal.id)
+    if (doCatalogo) return doCatalogo
+    throw new Error(`consulta do armazém: ${e?.message ?? e}`)
+  }
   const lista: any[] = resp?.data?.warehouses ?? []
   const deVenda = lista.filter(w => (w.type ?? 'SALES_WAREHOUSE') === 'SALES_WAREHOUSE' && (w.effect_status ?? 'ENABLED') === 'ENABLED')
   const escolhido = deVenda.find(w => w.is_default) ?? deVenda[0] ?? lista[0]
   if (!escolhido?.id) throw new Error('A loja TikTok não tem armazém de venda cadastrado — cadastre no Seller Center.')
   return String(escolhido.id)
+}
+
+/** Armazém mais usado nos SKUs dos anúncios já sincronizados do canal. */
+async function armazemDosAnuncios(sb: any, canalId: string): Promise<string | null> {
+  const { data } = await sb.from('marketplace_anuncios').select('dados_brutos').eq('canal_id', canalId).limit(200)
+  const contagem = new Map<string, number>()
+  for (const a of data ?? []) {
+    for (const sku of a?.dados_brutos?.skus ?? []) {
+      for (const inv of sku?.inventory ?? []) {
+        if (inv?.warehouse_id) contagem.set(String(inv.warehouse_id), (contagem.get(String(inv.warehouse_id)) ?? 0) + 1)
+      }
+    }
+  }
+  return [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
 }
 
 /** Sobe uma imagem (baixada da URL do cadastro) e devolve o `uri` da TikTok. */
@@ -180,7 +205,7 @@ export async function criarAnuncio(sb: any, canalInicial: TiktokChannel, input: 
       return { ok: false, erro: `Nenhuma imagem foi aceita pela TikTok: ${motivos.join(' | ')}` }
     }
 
-    const armazem = await armazemPadrao(opts)
+    const armazem = await armazemPadrao(sb, canal, opts)
     const eanLimpo = String(input.ean ?? '').replace(/\D/g, '')
     const corpo: Record<string, any> = {
       save_mode: 'LISTING',
@@ -210,7 +235,12 @@ export async function criarAnuncio(sb: any, canalInicial: TiktokChannel, input: 
       .map(a => ({ id: a.id, values: [a.valorId ? { id: a.valorId } : { name: a.valorTexto!.trim() }] }))
     if (atributos.length > 0) corpo.product_attributes = atributos
 
-    const resp = await tiktokPost('/product/202309/products', corpo, opts)
+    let resp: any
+    try {
+      resp = await tiktokPost('/product/202309/products', corpo, opts)
+    } catch (e: any) {
+      throw new Error(`criação do produto: ${e?.message ?? e}`)
+    }
     const productId = resp?.data?.product_id
     if (!productId) return { ok: false, erro: 'A TikTok não devolveu o id do produto criado.' }
 
