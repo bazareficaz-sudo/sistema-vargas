@@ -117,15 +117,24 @@ function desenharMiniPedido(page: PDFPage, p: PedidoNaFolha, f: PDFFont, fb: PDF
 export async function montarFolha(
   etiquetas: { pdf: Uint8Array; pedido: PedidoNaFolha }[],
   formato: FormatoEtiqueta,
-): Promise<Uint8Array> {
+): Promise<{ pdf: Uint8Array; falhas: { indice: number; erro: string }[] }> {
   const out = await PDFDocument.create()
   const f = await out.embedFont(StandardFonts.Helvetica)
   const fb = await out.embedFont(StandardFonts.HelveticaBold)
 
-  for (const { pdf, pedido } of etiquetas) {
-    const origem = await PDFDocument.load(pdf, { ignoreEncryption: true })
-    const indices = origem.getPageIndices()
-    const embutidas = await out.embedPdf(origem, indices)
+  // Uma etiqueta que não abre (PDF corrompido ou protegido) vira falha
+  // daquele pedido — as outras seguem para a impressão.
+  const falhas: { indice: number; erro: string }[] = []
+  for (const [indice, { pdf, pedido }] of etiquetas.entries()) {
+    let embutidas
+    try {
+      const origem = await PDFDocument.load(pdf, { ignoreEncryption: true })
+      if (origem.isEncrypted) throw new Error('o PDF da etiqueta veio protegido')
+      embutidas = await out.embedPdf(origem, origem.getPageIndices())
+    } catch (e: any) {
+      falhas.push({ indice, erro: `Não foi possível montar a etiqueta: ${e?.message ?? e}` })
+      continue
+    }
     for (const emb of embutidas) {
       if (formato === 'original') {
         // Etiqueta deitada (mais larga que alta) gira para caber em pé.
@@ -148,5 +157,5 @@ export async function montarFolha(
       desenharMiniPedido(page, pedido, f, fb, meio + 8, meio - 16)
     }
   }
-  return out.save()
+  return { pdf: await out.save(), falhas }
 }

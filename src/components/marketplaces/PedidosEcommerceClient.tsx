@@ -85,7 +85,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     try { const v = localStorage.getItem('etiqueta_ordem'); return v === 'prazo' || v === 'canal' ? v : 'sku' } catch { return 'sku' }
   })
   const [imprimindo, setImprimindo] = useState(false)
-  const [resultadoEtiquetas, setResultadoEtiquetas] = useState<{ url: string | null; impressos: number; falhas: { id: string; pv: string; erro: string }[] } | null>(null)
+  const [resultadoEtiquetas, setResultadoEtiquetas] = useState<{ url: string | null; impressos: number; falhas: { id: string; pv: string; erro: string }[]; erro?: string } | null>(null)
   const [detalhe, setDetalhe] = useState<any | null>(null)
   const [modal, setModal] = useState(false)
   const [salvando, setSalvando] = useState(false)
@@ -270,7 +270,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         body: JSON.stringify({ ids, formato: formatoEtiqueta, ordem: ordemEtiqueta }),
       })
       const data = await resp.json()
-      setResultadoEtiquetas({ url: data.url ?? null, impressos: data.impressos?.length ?? 0, falhas: data.falhas ?? [] })
+      setResultadoEtiquetas({ url: data.url ?? null, impressos: data.impressos?.length ?? 0, falhas: data.falhas ?? [], erro: data.ok ? undefined : data.erro })
       if (data.ok && data.url) {
         window.open(data.url, '_blank')
         const agoraIso = new Date().toISOString()
@@ -856,7 +856,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
             <span>
               {resultadoEtiquetas.impressos > 0
                 ? <>🖨 {resultadoEtiquetas.impressos} etiqueta(s) no PDF — foram para "4. Aguardando postagem". {resultadoEtiquetas.url && <a href={resultadoEtiquetas.url} target="_blank" rel="noreferrer" className="underline font-medium">Abrir PDF para imprimir</a>}</>
-                : 'Nenhuma etiqueta pôde ser obtida.'}
+                : (resultadoEtiquetas.erro || 'Nenhuma etiqueta pôde ser obtida.')}
             </span>
             <button onClick={() => setResultadoEtiquetas(null)} className="opacity-60 hover:opacity-100">✕</button>
           </div>

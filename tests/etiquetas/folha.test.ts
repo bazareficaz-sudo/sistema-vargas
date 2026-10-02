@@ -31,7 +31,7 @@ const pedido: PedidoNaFolha = {
 
 describe('folha de etiquetas', () => {
   test('paisagem: uma folha 6x4 por etiqueta, com mini pedido', async () => {
-    const pdf = await montarFolha([{ pdf: await etiquetaFalsa(), pedido }, { pdf: await etiquetaFalsa(2), pedido }], 'paisagem')
+    const { pdf } = await montarFolha([{ pdf: await etiquetaFalsa(), pedido }, { pdf: await etiquetaFalsa(2), pedido }], 'paisagem')
     const doc = await PDFDocument.load(pdf)
     assert.equal(doc.getPageCount(), 3)
     const { width, height } = doc.getPage(0).getSize()
@@ -39,13 +39,19 @@ describe('folha de etiquetas', () => {
     if (process.env.SALVAR_EXEMPLO) writeFileSync(process.env.SALVAR_EXEMPLO, pdf)
   })
   test('original: folha 4x6 em pé', async () => {
-    const pdf = await montarFolha([{ pdf: await etiquetaFalsa(), pedido }], 'original')
+    const { pdf } = await montarFolha([{ pdf: await etiquetaFalsa(), pedido }], 'original')
     const doc = await PDFDocument.load(pdf)
     const { width, height } = doc.getPage(0).getSize()
     assert.equal(Math.round(width), 288); assert.equal(Math.round(height), 432)
   })
   test('caracteres fora do Latin-1 não derrubam a montagem', async () => {
-    const pdf = await montarFolha([{ pdf: await etiquetaFalsa(), pedido: { ...pedido, comprador: 'José 😀 ✓', itens: [{ nome: 'Item → teste', sku: null, quantidade: 1 }] } }], 'paisagem')
+    const { pdf } = await montarFolha([{ pdf: await etiquetaFalsa(), pedido: { ...pedido, comprador: 'José 😀 ✓', itens: [{ nome: 'Item → teste', sku: null, quantidade: 1 }] } }], 'paisagem')
     assert.ok(pdf.length > 1000)
+  })
+  test('PDF inválido vira falha daquele pedido, sem derrubar o lote', async () => {
+    const r = await montarFolha([{ pdf: new Uint8Array([1, 2, 3]), pedido }, { pdf: await etiquetaFalsa(), pedido }], 'paisagem')
+    assert.equal(r.falhas.length, 1); assert.equal(r.falhas[0].indice, 0)
+    const doc = await PDFDocument.load(r.pdf)
+    assert.equal(doc.getPageCount(), 1)
   })
 })

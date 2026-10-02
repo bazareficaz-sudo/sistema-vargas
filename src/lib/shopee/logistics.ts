@@ -238,7 +238,16 @@ export async function baixarEtiquetaTermica(
     return new Uint8Array(await downloadShippingDocumentBytes(ctx, lista, tipo))
   } catch { /* documento ainda não gerado — gera abaixo */ }
 
-  await createShippingDocument(ctx, lista, tipo)
+  // A Shopee só gera o documento de pedido com rastreio — e diz isso como
+  // "All failed", com o motivo real escondido em result_list.
+  const rastreio = await getTrackingNumber(ctx, orderSn, packageNumber ?? undefined)
+  if (!rastreio) throw new Error('envio ainda não organizado na Shopee (sem código de rastreio). Organize o envio no Seller Center ou no sistema que emite a nota.')
+  try {
+    await createShippingDocument(ctx, [{ ...lista[0], tracking_number: rastreio } as any], tipo)
+  } catch (e: any) {
+    const item = e?.raw?.response?.result_list?.[0]
+    throw new Error(item?.fail_message || item?.fail_error || e?.message || 'a Shopee recusou gerar a etiqueta')
+  }
   for (let tentativa = 0; tentativa < 8; tentativa++) {
     await new Promise(r => setTimeout(r, 1500))
     const resultado = await getShippingDocumentResult(ctx, lista, tipo)

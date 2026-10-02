@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { buscarEtiquetaDoPedido } from '@/lib/etiquetas/buscar'
 import { montarFolha, type FormatoEtiqueta, type PedidoNaFolha } from '@/lib/etiquetas/folha'
@@ -94,15 +95,32 @@ export async function POST(req: Request) {
 
   let pdf: Uint8Array
   try {
-    pdf = await montarFolha(etiquetas, formato)
+    const montado = await montarFolha(etiquetas, formato)
+    pdf = montado.pdf
+    // Etiqueta que o canal mandou mas não abriu: sai do lote com o motivo.
+    for (const f of montado.falhas.sort((a, b) => b.indice - a.indice)) {
+      const [fora] = etiquetas.splice(f.indice, 1)
+      falhas.push({ id: fora.id, pv: fora.pedido.pv, erro: f.erro })
+    }
   } catch (e: any) {
+    console.error('[etiquetas] montagem', e?.message ?? e)
     return NextResponse.json({ ok: false, erro: `Falha ao montar o PDF: ${e?.message ?? e}`, falhas }, { status: 500 })
   }
+  if (etiquetas.length === 0) {
+    return NextResponse.json({ ok: false, erro: 'Nenhuma etiqueta pôde ser montada.', falhas }, { status: 400 })
+  }
 
+  // O arquivo é guardado e assinado PELO SERVIDOR: o bucket é privado e não
+  // tem regra de acesso para o navegador — a etiqueta carrega nome e
+  // endereço do comprador, e o único caminho até ela é o link curto abaixo.
+  const admin = createAdminClient()
   const caminho = `lotes/${guarda.empresaId}/${Date.now()}-${formato}.pdf`
-  const { error: erroUpload } = await sb.storage.from('etiquetas-envio').upload(caminho, pdf, { contentType: 'application/pdf', upsert: true })
-  if (erroUpload) return NextResponse.json({ ok: false, erro: erroUpload.message, falhas }, { status: 500 })
-  const { data: link, error: erroLink } = await sb.storage.from('etiquetas-envio').createSignedUrl(caminho, 900)
+  const { error: erroUpload } = await admin.storage.from('etiquetas-envio').upload(caminho, pdf, { contentType: 'application/pdf', upsert: true })
+  if (erroUpload) {
+    console.error('[etiquetas] upload', erroUpload.message)
+    return NextResponse.json({ ok: false, erro: `Falha ao guardar o PDF: ${erroUpload.message}`, falhas }, { status: 500 })
+  }
+  const { data: link, error: erroLink } = await admin.storage.from('etiquetas-envio').createSignedUrl(caminho, 900)
   if (erroLink || !link?.signedUrl) return NextResponse.json({ ok: false, erro: erroLink?.message ?? 'Falha ao gerar o link', falhas }, { status: 500 })
 
   const { data: perfil } = await sb.from('profiles').select('nome').eq('id', guarda.userId).maybeSingle()
