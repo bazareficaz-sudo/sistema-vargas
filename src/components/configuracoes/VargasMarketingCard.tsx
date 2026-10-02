@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { usePlan } from '@/contexts/PlanContext'
 
 // Conexão com o Vargas Marketing (sistema separado de divulgação).
 // O token dá ao Marketing leitura dos produtos com a tag "marketing" desta
@@ -19,6 +20,7 @@ export default function VargasMarketingCard() {
   const [erro, setErro] = useState('')
   // Momento de referência para "expirado", fixado na montagem (render puro).
   const [agora] = useState(() => Date.now())
+  const { vargasMarketingUrl } = usePlan()
 
   async function buscar(): Promise<{ tokens?: Token[]; erro?: string }> {
     const res = await fetch('/api/integracoes/marketing/tokens')
@@ -62,7 +64,13 @@ export default function VargasMarketingCard() {
 
   return (
     <div className="mb-5 bg-white border border-emerald-200 rounded-xl p-4">
-      <h2 className="text-sm font-semibold text-slate-800 mb-1">Vargas Marketing</h2>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <h2 className="text-sm font-semibold text-slate-800">Vargas Marketing</h2>
+        {vargasMarketingUrl && (
+          <a href={vargasMarketingUrl} target="_blank" rel="noopener noreferrer"
+            className="px-3 py-1.5 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700">Abrir Vargas Marketing ↗</a>
+        )}
+      </div>
       <p className="text-xs text-slate-500 mb-3">
         Envia para o Vargas Marketing os produtos marcados com a tag <b>marketing</b>: nome, preço, promoção,
         disponibilidade e fotos. Não envia custo, fornecedor, clientes, vendas nem dados fiscais.

@@ -11,6 +11,7 @@ import { provisionarEmpresaEUsuario } from '@/lib/signup/provisionar'
 import PlanProvider from '@/components/plan/PlanProvider'
 import DashboardShell from '@/components/DashboardShell'
 import { perfilDaSessao, empresasDoUsuario } from '@/lib/auth/empresaAtiva'
+import { urlVargasMarketing } from '@/lib/integracoes/marketing/acesso'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -52,7 +53,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   //  · acesso de suporte mais recente (vira o aviso do SupportModeBanner)
   //  · exceções de permissão configuradas em Usuários → Permissões
   //  · plano/assinatura da empresa
-  const [empresasDoOperador, { data: suporteRow }, excecoes, planoBase] = await Promise.all([
+  //  · atalho do Vargas Marketing (só com código de conexão ativo)
+  const [empresasDoOperador, { data: suporteRow }, excecoes, planoBase, vargasMarketingUrl] = await Promise.all([
     empresasDoUsuario(supabase, user.id),
     supabase
       .from('suporte_acessos')
@@ -63,6 +65,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       .maybeSingle(),
     buscarExcecoes(supabase, user.id),
     loadPlanData(empresaId, user.id),
+    urlVargasMarketing(empresaId),
   ])
 
   let suporte: PlanData['suporte'] = null
@@ -96,7 +99,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const bloqueadas = telasBloqueadas(excecoes)
   const planData = {
     ...planoBase,
-    role: profile?.role ?? null, permissoes, suporte, telasBloqueadas: bloqueadas,
+    role: profile?.role ?? null, permissoes, suporte, telasBloqueadas: bloqueadas, vargasMarketingUrl,
   }
 
   // Controle de acesso por tela. Este layout é por onde toda página do

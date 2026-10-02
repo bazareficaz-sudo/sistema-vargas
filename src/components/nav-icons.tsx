@@ -142,6 +142,15 @@ export function IconNews({ className }: IconProps) {
   )
 }
 
+export function IconMegaphone({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 20 20" className={className} {...base}>
+      <path d="M3 8.5v3a1 1 0 0 0 1 1h2l6 3.5v-12L6 7.5H4a1 1 0 0 0-1 1Z" />
+      <path d="M6.5 12.5 7.5 17h2l-.8-3.7M15 7.5a3.5 3.5 0 0 1 0 5" />
+    </svg>
+  )
+}
+
 export function IconLogout({ className }: IconProps) {
   return (
     <svg viewBox="0 0 20 20" className={className} {...base}>

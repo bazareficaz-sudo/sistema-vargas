@@ -47,6 +47,9 @@ export interface PlanData {
   // Endereços de tela que este usuário não pode abrir (bloqueio explícito em
   // Usuários → Permissões). Vazio para quase todo mundo: o padrão é liberado.
   telasBloqueadas?: string[]
+  // Endereço do Vargas Marketing quando a empresa tem o serviço (código de
+  // conexão ativo). null/ausente = sem atalho no menu.
+  vargasMarketingUrl?: string | null
   // Acesso de suporte (impersonação temporária) — também mesclado por quem
   // chama loadPlanData, a partir de suporte_acessos.
   suporte: {
