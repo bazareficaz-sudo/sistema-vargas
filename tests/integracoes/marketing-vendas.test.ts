@@ -29,3 +29,24 @@ test('soma por produto e dia, só produtos com a tag, valor em centavos', () => 
     { source_product_id: A, day: '2026-10-02', quantity: 1, revenue_minor: 0 },
   ])
 })
+
+test('devolução (quantidade negativa) desconta do dia; dia que zera não sai', () => {
+  const vendas = [
+    { id: 'v1', created_at: '2026-10-01T15:35:00Z' },
+    { id: 'v2', created_at: '2026-10-01T16:08:00Z' },
+    { id: 'v3', created_at: '2026-09-28T15:00:00Z' },
+    { id: 'v4', created_at: '2026-09-29T15:00:00Z' },
+    { id: 'v5', created_at: '2026-09-29T16:00:00Z' },
+  ]
+  const itens = [
+    { venda_id: 'v1', produto_id: A, quantidade: '2.000', preco_unitario: '3.50' },
+    { venda_id: 'v2', produto_id: A, quantidade: '-1.000', preco_unitario: '3.00' },
+    { venda_id: 'v3', produto_id: A, quantidade: '-2.000', preco_unitario: '15.00' },
+    { venda_id: 'v4', produto_id: A, quantidade: 1, preco_unitario: 5 },
+    { venda_id: 'v5', produto_id: A, quantidade: -1, preco_unitario: 5 },
+  ]
+  assert.deepEqual(agregarVendas(vendas, itens, new Set([A])), [
+    { source_product_id: A, day: '2026-09-28', quantity: -2, revenue_minor: -3000 },
+    { source_product_id: A, day: '2026-10-01', quantity: 1, revenue_minor: 400 },
+  ])
+})
