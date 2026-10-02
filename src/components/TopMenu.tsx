@@ -223,6 +223,20 @@ export default function TopMenu({ empresa, empresas = [], empresaAtivaId = '' }:
           )}
         </div>
 
+        {/* Vargas Marketing (sistema separado; só com o serviço ativo) */}
+        {plan.vargasMarketingUrl && (
+          <a
+            href={plan.vargasMarketingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Vargas Marketing"
+            className="flex-shrink-0 flex items-center gap-1.5 px-2.5 py-2 ml-1 rounded-lg text-xs text-emerald-300 hover:text-white hover:bg-white/8 transition-all"
+          >
+            <span className="text-sm leading-none">📣</span>
+            <span className="hidden lg:inline">Marketing</span>
+          </a>
+        )}
+
         {/* Novidades */}
         <Link
           href="/blog"

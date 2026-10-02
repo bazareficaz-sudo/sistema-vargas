@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlan } from '@/contexts/PlanContext'
 import { PlanBannerSidebar } from '@/components/plan/PlanBanner'
 import { useLS } from '@/hooks/useLS'
-import { GROUP_ICONS, IconClock, IconLogout, IconNews, IconSearch, IconStar } from '@/components/nav-icons'
+import { GROUP_ICONS, IconClock, IconLogout, IconMegaphone, IconNews, IconSearch, IconStar } from '@/components/nav-icons'
 import {
   NAV, ALL_ITEMS, temModulo as temModuloBase, filtrarItens as filtrarItensBase, isActive as isActiveBase,
   telaBloqueada, type NavItem,
@@ -252,6 +252,13 @@ export default function Sidebar({ empresa, empresas = [], empresaAtivaId = '' }:
 
         <div className="flex-shrink-0 w-full flex flex-col items-center gap-1 px-2 pt-1 border-t border-slate-100">
           <PlanBannerSidebar collapsed />
+          {plan.vargasMarketingUrl && (
+            <a href={plan.vargasMarketingUrl} target="_blank" rel="noopener noreferrer" title={expandido ? undefined : 'Vargas Marketing'}
+              className={`h-11 flex-shrink-0 flex items-center rounded-xl text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition-colors ${expandido ? 'w-full gap-3 px-2.5' : 'w-11 justify-center'}`}>
+              <span className="flex-shrink-0 flex items-center justify-center w-5 h-5"><IconMegaphone className="w-5 h-5" /></span>
+              {expandido && <span className="text-sm truncate">Vargas Marketing ↗</span>}
+            </a>
+          )}
           <RailLink href="/blog" icon={<IconNews className="w-5 h-5" />} label="Novidades" expanded={expandido} />
           <RailButton icon={<IconLogout className="w-5 h-5" />} label="Sair" onClick={logout} expanded={expandido} />
         </div>
