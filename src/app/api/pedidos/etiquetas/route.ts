@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao } from '@/lib/auth/permissoes'
-import { buscarEtiquetaDoPedido } from '@/lib/etiquetas/buscar'
+import { buscarEtiquetaDoPedido, EtiquetaJaUsada } from '@/lib/etiquetas/buscar'
 import { montarFolha, type FormatoEtiqueta, type PedidoNaFolha } from '@/lib/etiquetas/folha'
 import { registrarImpressao } from '@/lib/pedidos/impressao'
 import { numeroInterno } from '@/lib/pedidos/envio'
@@ -61,6 +61,9 @@ export async function POST(req: Request) {
 
   const etiquetas: { pdf: Uint8Array; pedido: PedidoNaFolha; id: string; paginas: 'primeira' | 'todas' }[] = []
   const falhas: { id: string; pv: string; erro: string }[] = []
+  // Pacotes que o canal diz já terem sido coletados: não entram no PDF, mas
+  // saem de "Imprimir etiqueta" (ver EtiquetaJaUsada).
+  const jaUsadas: { id: string; pv: string; erro: string }[] = []
   for (const p of ordenados as any[]) {
     const pv = numeroInterno(p) ?? p.numero_pedido ?? p.id_externo
     try {
@@ -85,8 +88,21 @@ export async function POST(req: Request) {
         },
       })
     } catch (e: any) {
-      falhas.push({ id: p.id, pv, erro: e?.message ?? 'Falha ao buscar a etiqueta' })
+      if (e instanceof EtiquetaJaUsada) jaUsadas.push({ id: p.id, pv, erro: e.message })
+      else falhas.push({ id: p.id, pv, erro: e?.message ?? 'Falha ao buscar a etiqueta' })
     }
+  }
+
+  const { data: perfil } = await sb.from('profiles').select('nome').eq('id', guarda.userId).maybeSingle()
+  if (jaUsadas.length > 0) {
+    try {
+      await registrarImpressao(sb, {
+        empresaId: guarda.empresaId, ids: jaUsadas.map(j => j.id), impresso: true,
+        usuarioId: guarda.userId, usuarioNome: perfil?.nome ?? null,
+        origem: 'Canal informou que o pacote já foi coletado (etiqueta usada fora do sistema)',
+      })
+    } catch { /* segue: o aviso aparece de qualquer jeito */ }
+    falhas.push(...jaUsadas)
   }
   for (const id of ids) {
     if (!(pedidos ?? []).some((p: any) => p.id === id)) falhas.push({ id, pv: '—', erro: 'Pedido não encontrado' })
@@ -126,7 +142,6 @@ export async function POST(req: Request) {
   const { data: link, error: erroLink } = await admin.storage.from('etiquetas-envio').createSignedUrl(caminho, 900)
   if (erroLink || !link?.signedUrl) return NextResponse.json({ ok: false, erro: erroLink?.message ?? 'Falha ao gerar o link', falhas }, { status: 500 })
 
-  const { data: perfil } = await sb.from('profiles').select('nome').eq('id', guarda.userId).maybeSingle()
   try {
     await registrarImpressao(sb, {
       empresaId: guarda.empresaId, ids: etiquetas.map(e => e.id), impresso: true,

@@ -20,6 +20,16 @@ import type { ShopeeChannel } from '@/lib/shopee/types'
 
 const ML_API = 'https://api.mercadolibre.com'
 
+/**
+ * O canal não libera mais a etiqueta porque o pacote JÁ FOI COLETADO pela
+ * transportadora — a etiqueta foi impressa e usada fora daqui (outro
+ * sistema, Seller Center). Não é falha de impressão: quem chama marca o
+ * pedido como "etiqueta impressa" em vez de deixá-lo parado em "Imprimir".
+ */
+export class EtiquetaJaUsada extends Error {
+  constructor(message: string) { super(message); this.name = 'EtiquetaJaUsada' }
+}
+
 function ehPdf(bytes: Uint8Array): boolean {
   return bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 // %PDF
 }
@@ -80,6 +90,11 @@ async function etiquetaTiktok(sb: any, canalRow: any, pedido: any): Promise<Uint
     const msg = String(e?.message ?? '')
     // Escopo de logística não liberado no app: precisa ativar no Partner
     // Center e reconectar a loja — o mesmo caminho dos escopos anteriores.
+    // "Documents couldn't be printed after the package has been pickup":
+    // a TikTok já tem o pacote, mas o status do pedido ainda não andou.
+    if (/after the package has been pick ?up|has been picked up|already.*(collected|shipped)/i.test(msg)) {
+      throw new EtiquetaJaUsada('TikTok: o pacote já foi coletado pela transportadora (etiqueta impressa e usada em outro lugar). Movido para "4. Aguardando postagem"; vai para Enviados quando a TikTok atualizar o status.')
+    }
     if (/scope|permission|access denied/i.test(msg)) {
       throw new Error('TikTok: o app ainda não tem permissão de logística (Fulfillment). Ative o escopo no Partner Center e reconecte a loja.')
     }

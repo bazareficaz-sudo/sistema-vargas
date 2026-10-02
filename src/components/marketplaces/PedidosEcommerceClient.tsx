@@ -277,8 +277,10 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
         const feitos = new Set<string>(data.impressos ?? [])
         setPedidos(prev => prev.map(p => feitos.has(p.id) && !p.etiqueta_impressa_em ? { ...p, etiqueta_impressa_em: agoraIso, etiqueta_impressa_por: operador } : p))
         setSelecionados(new Set())
-        router.refresh()
       }
+      // Recarrega mesmo sem PDF: pedido cujo pacote já foi coletado é
+      // marcado no servidor e precisa sair de "Imprimir etiqueta" na tela.
+      router.refresh()
     } catch (e: any) {
       setResultadoEtiquetas({ url: null, impressos: 0, falhas: [{ id: '', pv: '—', erro: e?.message ?? 'Falha ao imprimir' }] })
     } finally {
