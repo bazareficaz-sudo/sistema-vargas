@@ -75,14 +75,17 @@ export async function executarAutomacoesPendentes(sb: any): Promise<{ processada
       ultima_execucao: new Date().toISOString(),
       total_execucoes: (a.total_execucoes ?? 0) + (resultado.status === 'sem_acao' ? 0 : 1),
       ultimo_status: resultado.status,
-      ultimo_erro: resultado.status === 'erro' ? (resultado.erro ?? 'Erro desconhecido') : null,
+      // Falha parcial (ex: 3 de 10 emissões) volta com status 'ok' e `erro`
+      // preenchido — também precisa ficar registrada, não só o erro total.
+      ultimo_erro: resultado.status === 'erro' ? (resultado.erro ?? 'Erro desconhecido') : (resultado.erro ?? null),
     }
     if (TIPOS_AGENDADOS_1X_DIA.has(a.tipo) || a.timing === 'horario_especifico') update.ultima_execucao_dia = hojeISO()
     if (resultado.avancarCursorPara) update.cursor_processado = resultado.avancarCursorPara
 
     await sb.from('automacoes').update(update).eq('id', a.id)
 
-    if (resultado.status === 'erro') await avisarFalhaSeConfigurado(sb, a, resultado.erro)
+    // Avisa em erro total E em falha parcial (status 'ok' com `erro`).
+    if (resultado.status === 'erro' || resultado.erro) await avisarFalhaSeConfigurado(sb, a, resultado.erro)
   }
 
   return { processadas, sucesso, erro, semAcao }

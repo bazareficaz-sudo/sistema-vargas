@@ -13,14 +13,27 @@ export const TIPOS_AGENDADOS_1X_DIA = new Set([
   'reposicao_minimo', 'reposicao_pedido_automatico', 'reposicao_curva_abc', 'reposicao_produto_parado',
 ])
 
+// Horário e "dia" das automações são os do Brasil. O servidor roda em UTC
+// (sem TZ configurado na Vercel): sem isto, "18:10" disparava às 15:10 de
+// Brasília e a virada do dia caía às 21h.
+const FUSO = 'America/Sao_Paulo'
+
+function agoraNoFuso(): { hora: number; minuto: number } {
+  const partes = new Intl.DateTimeFormat('en-GB', {
+    timeZone: FUSO, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date())
+  const num = (tipo: string) => Number(partes.find(p => p.type === tipo)?.value ?? 0)
+  return { hora: num('hour'), minuto: num('minute') }
+}
+
 export function horarioJaPassou(horarioEnvio: string | null): boolean {
   if (!horarioEnvio) return true
-  const agora = new Date()
   const [h, m] = horarioEnvio.split(':').map(Number)
-  const alvo = new Date(agora); alvo.setHours(h ?? 0, m ?? 0, 0, 0)
-  return agora >= alvo
+  const { hora, minuto } = agoraNoFuso()
+  return hora * 60 + minuto >= (h ?? 0) * 60 + (m ?? 0)
 }
 
 export function hojeISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  // en-CA formata como AAAA-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: FUSO }).format(new Date())
 }

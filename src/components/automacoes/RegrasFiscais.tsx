@@ -204,7 +204,7 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
                 <p className="text-xs text-gray-500 mt-0.5">{resumoRegra(a)} · {labelTiming(a)}</p>
                 <p className="text-[10px] text-gray-400 mt-1">
                   {a.ultima_execucao ? `Última execução: ${fmtData(a.ultima_execucao)} · ${a.total_execucoes}x` : 'Ainda não executada'}
-                  {a.ultimo_status === 'erro' && a.ultimo_erro && <span className="text-red-500"> · {a.ultimo_erro}</span>}
+                  {a.ultimo_erro && <span className="text-red-500"> · {a.ultimo_erro}</span>}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
