@@ -27,6 +27,8 @@ export type Requisito = {
 export const REQUISITOS: Record<string, Requisito> = {
   shopee: { plataforma: 'Shopee', minimo: 500, recomendado: 1024, alvoAjuste: 1024, quadradaPreferida: true },
   mercadolivre: { plataforma: 'Mercado Livre', minimo: 500, recomendado: 1200, alvoAjuste: 1200, quadradaPreferida: true },
+  // TikTok recusa imagem abaixo de 300×300 no upload (e acima de 4000).
+  tiktok: { plataforma: 'TikTok Shop', minimo: 300, recomendado: 1024, alvoAjuste: 1024, quadradaPreferida: true },
   nuvemshop: {
     plataforma: 'Nuvemshop', minimo: 500, recomendado: 1024, alvoAjuste: 1024, quadradaPreferida: true,
     efeitoAbaixoDoMinimo: 'A loja publica assim mesmo, mas a foto sai borrada na vitrine e o zoom não funciona.',

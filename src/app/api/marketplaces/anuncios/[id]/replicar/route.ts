@@ -4,7 +4,7 @@ import { mlGet, refreshAccessTokenIfNeeded } from '@/lib/mercadolivre/client'
 import type { MLChannel } from '@/lib/mercadolivre/types'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import {
-  atributosDaShopee, atributosDoMercadoLivre, logisticaDaShopee, marcaDaShopee,
+  atributosDaShopee, atributosDoMercadoLivre, conteudoDaTiktok, logisticaDaShopee, marcaDaShopee,
 } from '@/lib/marketplace/conteudoAnuncio'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -65,6 +65,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
+  // TikTok: descrição, peso e medidas ficam no detalhe do produto (dados_brutos).
+  const tiktok = plataforma === 'tiktok' ? conteudoDaTiktok(brutos) : null
+  if (!descricao.trim() && tiktok?.descricao) descricao = tiktok.descricao
+
   return NextResponse.json({
     ok: true,
     origem: {
@@ -93,10 +97,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       // Peso/dimensões: a Shopee guarda em gramas-kg no próprio item; o
       // cadastro do produto costuma ter os mesmos valores, mas se o operador
       // ajustou só no anúncio, é esse número que vale.
-      pesoKg: typeof brutos?.weight === 'string' ? Number(brutos.weight) : (typeof brutos?.weight === 'number' ? brutos.weight : null),
-      comprimentoCm: brutos?.dimension?.package_length ?? null,
-      larguraCm: brutos?.dimension?.package_width ?? null,
-      alturaCm: brutos?.dimension?.package_height ?? null,
+      pesoKg: tiktok ? tiktok.pesoKg : typeof brutos?.weight === 'string' ? Number(brutos.weight) : (typeof brutos?.weight === 'number' ? brutos.weight : null),
+      comprimentoCm: tiktok ? tiktok.comprimentoCm : brutos?.dimension?.package_length ?? null,
+      larguraCm: tiktok ? tiktok.larguraCm : brutos?.dimension?.package_width ?? null,
+      alturaCm: tiktok ? tiktok.alturaCm : brutos?.dimension?.package_height ?? null,
+      // Categoria, marca e atributos da TikTok são da plataforma — valem
+      // direto noutra loja TikTok.
+      tiktok: tiktok ? { categoryId: tiktok.categoryId, categoriaCaminho: tiktok.categoriaCaminho, marca: tiktok.marca, atributos: tiktok.atributos } : null,
     },
   })
 }

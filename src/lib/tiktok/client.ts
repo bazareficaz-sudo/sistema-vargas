@@ -111,6 +111,33 @@ export async function tiktokPost(
   return parseResposta(res, path)
 }
 
+// Envio de ARQUIVO (multipart/form-data) — hoje só o upload de imagem de
+// produto. A assinatura é a mesma das outras chamadas, mas SEM o corpo: a
+// regra da TikTok exclui multipart do texto assinado (ver signing.ts).
+export async function tiktokPostArquivo(
+  path: string,
+  form: FormData,
+  opts: CallOpts,
+  extraQuery: Record<string, string | number> = {},
+) {
+  const query: Record<string, string | number> = {
+    app_key: opts.appKey,
+    timestamp: timestamp(),
+    ...(opts.shopCipher ? { shop_cipher: opts.shopCipher } : {}),
+    ...extraQuery,
+  }
+  const assinatura = sign({ path, query, appSecret: opts.appSecret })
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries({ ...query, sign: assinatura }).map(([k, v]) => [k, String(v)]))
+  )
+  const res = await fetch(`${API_BASE}${path}?${qs.toString()}`, {
+    method: 'POST',
+    headers: { ...(opts.accessToken ? { 'x-tts-access-token': opts.accessToken } : {}) },
+    body: form,
+  })
+  return parseResposta(res, path)
+}
+
 // Troca o auth_code (recebido no retorno do link de autorização) por um
 // access_token. Vai em GET, com os parâmetros na própria query — não é
 // assinado como as chamadas de API normais (é o próprio endpoint de token).

@@ -8,6 +8,7 @@ import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
 import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
 import CriarAnuncioNuvemshopModal from './CriarAnuncioNuvemshopModal'
+import CriarAnuncioTiktokModal from './CriarAnuncioTiktokModal'
 
 const fmt = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }))
 
@@ -135,7 +136,7 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
   // Uma rota por plataforma. Antes, o que não fosse Mercado Livre caía na
   // rota da Shopee — e um anúncio Nuvemshop voltava com "canal não
   // encontrado", erro que não explicava nada ao operador.
-  const PLATAFORMAS_COM_SYNC = ['shopee', 'mercadolivre', 'nuvemshop']
+  const PLATAFORMAS_COM_SYNC = ['shopee', 'mercadolivre', 'nuvemshop', 'tiktok']
 
   async function sincronizar(a: Anuncio) {
     if (!PLATAFORMAS_COM_SYNC.includes(a.plataforma)) {
@@ -395,9 +396,15 @@ export default function MapaAnunciosClient({ empresaId, podeVerCustos, podeVerGr
           modoDuplicar={criarAberto.duplicar}
           onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
       )}
+      {criarAberto && criarAberto.canal.plataforma === 'tiktok' && (
+        <CriarAnuncioTiktokModal canal={{ id: criarAberto.canal.id, nome: criarAberto.canal.nome }} empresaId={empresaId}
+          produtoIdInicial={criarAberto.produtoId} origemAnuncioId={criarAberto.origemAnuncioId}
+          modoDuplicar={criarAberto.duplicar}
+          onClose={() => setCriarAberto(null)} onCriado={() => { setCriarAberto(null); recarregar() }} />
+      )}
       {/* Plataforma sem tela de criação: avisar em vez de abrir nada, que era
           o que acontecia com a Nuvemshop antes — o botão não fazia nada. */}
-      {criarAberto && !['shopee', 'mercadolivre', 'nuvemshop'].includes(criarAberto.canal.plataforma) && (
+      {criarAberto && !['shopee', 'mercadolivre', 'nuvemshop', 'tiktok'].includes(criarAberto.canal.plataforma) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setCriarAberto(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">

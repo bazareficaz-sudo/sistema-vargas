@@ -19,6 +19,7 @@ import EnviarPrecoEstoqueModal from './EnviarPrecoEstoqueModal'
 import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
 import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
 import CriarAnuncioNuvemshopModal from './CriarAnuncioNuvemshopModal'
+import CriarAnuncioTiktokModal from './CriarAnuncioTiktokModal'
 import { fmt, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
@@ -350,6 +351,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
   const [criarAnuncioShopeeAberto, setCriarAnuncioShopeeAberto] = useState(false)
   const [criarAnuncioMLAberto, setCriarAnuncioMLAberto] = useState(false)
   const [criarAnuncioNuvemshopAberto, setCriarAnuncioNuvemshopAberto] = useState(false)
+  const [criarAnuncioTiktokAberto, setCriarAnuncioTiktokAberto] = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [mapeamentoRapido, setMapeamentoRapido] = useState<string[] | null>(null)
   // Replicação em massa pra outra conta do MESMO marketplace.
@@ -1248,6 +1250,13 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               Publicar na Nuvemshop
             </button>
           )}
+          {canal.plataforma === 'tiktok' && (
+            <button onClick={() => setCriarAnuncioTiktokAberto(true)}
+              title="Cria o produto de verdade na TikTok Shop via API, a partir de um produto do catálogo"
+              className="px-4 py-2 bg-gray-900 hover:bg-black text-white text-sm font-medium rounded-lg transition-colors">
+              Publicar na TikTok
+            </button>
+          )}
           {/* ATALHO PARA AS REGRAS, sem precisar selecionar anuncio.
               O outro botao "Gerenciar regras" mora na barra de selecao, e
               regra e configuracao do CANAL — nao tem nada a ver com quais
@@ -2004,6 +2013,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
           canal={{ id: canal.id, nome: canal.nome }}
           empresaId={empresaId}
           onClose={() => setCriarAnuncioNuvemshopAberto(false)}
+          onCriado={() => router.refresh()}
+        />
+      )}
+
+      {criarAnuncioTiktokAberto && (
+        <CriarAnuncioTiktokModal
+          canal={{ id: canal.id, nome: canal.nome }}
+          empresaId={empresaId}
+          onClose={() => setCriarAnuncioTiktokAberto(false)}
           onCriado={() => router.refresh()}
         />
       )}

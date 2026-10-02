@@ -91,6 +91,41 @@ export function marcaDaShopee(dadosBrutos: any): { brandId: number; nome: string
   return { brandId: Number(b.brand_id), nome: String(b.original_brand_name ?? (Number(b.brand_id) === 0 ? 'NoBrand' : '')) }
 }
 
+/** O que um anúncio TikTok carrega para outro anúncio TikTok: categoria,
+ *  marca e atributos são da PLATAFORMA (iguais em qualquer loja), então
+ *  valem direto numa replicação TikTok → TikTok. Vem do detalhe do produto;
+ *  sem ele (só a busca do catálogo) devolve o que houver. */
+export function conteudoDaTiktok(dadosBrutos: any): {
+  categoryId: string | null; categoriaCaminho: string | null
+  marca: { id: string; nome: string } | null
+  atributos: { id: string; valorId: string | null; valorTexto: string | null }[]
+  pesoKg: number | null; comprimentoCm: number | null; larguraCm: number | null; alturaCm: number | null
+  descricao: string | null
+} {
+  const chain: any[] = Array.isArray(dadosBrutos?.category_chains) ? dadosBrutos.category_chains : []
+  const folha = chain.find(c => c?.is_leaf) ?? chain[chain.length - 1]
+  const peso = dadosBrutos?.package_weight
+  let pesoKg: number | null = peso?.value != null ? Number(peso.value) : null
+  if (pesoKg != null && String(peso?.unit ?? '').toUpperCase() === 'GRAM') pesoKg = pesoKg / 1000
+  const dim = dadosBrutos?.package_dimensions
+  const cm = (v: any) => (v != null && !Number.isNaN(Number(v)) ? Number(v) : null)
+  const atributos = (Array.isArray(dadosBrutos?.product_attributes) ? dadosBrutos.product_attributes : [])
+    .map((a: any) => {
+      const v = Array.isArray(a?.values) ? a.values[0] : null
+      return { id: String(a?.id ?? ''), valorId: v?.id ? String(v.id) : null, valorTexto: v?.name ? String(v.name) : null }
+    })
+    .filter((a: any) => a.id && (a.valorId || a.valorTexto))
+  return {
+    categoryId: folha?.id ? String(folha.id) : null,
+    categoriaCaminho: chain.length ? chain.map(c => c?.local_name).filter(Boolean).join(' > ') : null,
+    marca: dadosBrutos?.brand?.id ? { id: String(dadosBrutos.brand.id), nome: String(dadosBrutos.brand.name ?? '') } : null,
+    atributos,
+    pesoKg: pesoKg && pesoKg > 0 ? pesoKg : null,
+    comprimentoCm: cm(dim?.length), larguraCm: cm(dim?.width), alturaCm: cm(dim?.height),
+    descricao: typeof dadosBrutos?.description === 'string' ? dadosBrutos.description : null,
+  }
+}
+
 // ── Imagens ─────────────────────────────────────────────────────────────────
 
 /**
