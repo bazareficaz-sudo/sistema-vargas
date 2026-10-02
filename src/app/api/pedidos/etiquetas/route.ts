@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { buscarEtiquetaDoPedido, EtiquetaJaUsada } from '@/lib/etiquetas/buscar'
+import { etiquetaGuardada } from '@/lib/etiquetas/preBaixar'
 import { montarFolha, type FormatoEtiqueta, type PedidoNaFolha } from '@/lib/etiquetas/folha'
 import { registrarImpressao } from '@/lib/pedidos/impressao'
 import { numeroInterno } from '@/lib/pedidos/envio'
@@ -24,7 +25,7 @@ type Ordem = 'sku' | 'prazo' | 'canal'
 
 const COLUNAS = [
   'id, empresa_id, canal_id, id_externo, numero_pedido, numero_interno, cliente_nome, entrega_cidade, entrega_estado',
-  'prazo_postagem, nfe_numero, observacoes, dados_brutos',
+  'prazo_postagem, nfe_numero, observacoes, dados_brutos, etiqueta_arquivo',
   'marketplace_pedido_itens(nome_produto, sku, quantidade, produtos(nome, sku))',
   'marketplace_canais(id, nome, plataforma, empresa_id, seller_id, shop_cipher, access_token, refresh_token, token_expira_em)',
 ].join(', ')
@@ -50,6 +51,8 @@ export async function POST(req: Request) {
     .in('id', ids).eq('empresa_id', guarda.empresaId)
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 500 })
 
+  const admin = createAdminClient()
+
   const chaveOrdem = (p: any): string => {
     const it = p.marketplace_pedido_itens?.[0]
     if (ordem === 'prazo') return p.prazo_postagem ?? '9999'
@@ -67,7 +70,9 @@ export async function POST(req: Request) {
   for (const p of ordenados as any[]) {
     const pv = numeroInterno(p) ?? p.numero_pedido ?? p.id_externo
     try {
-      const pdf = await buscarEtiquetaDoPedido(sb, p.marketplace_canais, p)
+      // Etiqueta já baixada pelo robô (cron/etiquetas) sai na hora; só vai
+      // ao canal a que ainda não está guardada.
+      const pdf = (await etiquetaGuardada(admin, p.etiqueta_arquivo)) ?? await buscarEtiquetaDoPedido(sb, p.marketplace_canais, p)
       etiquetas.push({
         id: p.id, pdf,
         // ML: a 2ª página é a lista de conteúdo do despacho — o mini pedido
@@ -132,7 +137,6 @@ export async function POST(req: Request) {
   // O arquivo é guardado e assinado PELO SERVIDOR: o bucket é privado e não
   // tem regra de acesso para o navegador — a etiqueta carrega nome e
   // endereço do comprador, e o único caminho até ela é o link curto abaixo.
-  const admin = createAdminClient()
   const caminho = `lotes/${guarda.empresaId}/${Date.now()}-${formato}.pdf`
   const { error: erroUpload } = await admin.storage.from('etiquetas-envio').upload(caminho, pdf, { contentType: 'application/pdf', upsert: true })
   if (erroUpload) {

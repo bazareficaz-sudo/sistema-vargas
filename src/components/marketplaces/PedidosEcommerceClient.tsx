@@ -926,6 +926,11 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                     {nf && <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[11px]">{nf}</span>}
                     {semProduto > 0 && <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 text-[11px]">⚠ {semProduto} item(ns) sem produto</span>}
                     {etiquetaImpressa(p) && emAberto(etapa) && <span className="ml-2 px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 text-[11px]">🖨 etiqueta impressa</span>}
+                    {/* Etiqueta pré-baixada pelo robô: imprime na hora. Sem ela,
+                        o motivo de o canal ainda não ter liberado vai no título. */}
+                    {!etiquetaImpressa(p) && etapa === 'imprimir' && (p.etiqueta_arquivo
+                      ? <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[11px]" title={p.etiqueta_baixada_em ? `Baixada em ${fmtData(p.etiqueta_baixada_em)}` : ''}>📄 etiqueta pronta</span>
+                      : <span className="ml-2 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 text-[11px]" title={p.etiqueta_erro ?? 'O sistema verifica a cada 10 minutos se o canal já liberou a etiqueta.'}>⏳ aguardando etiqueta</span>)}
                     {prazo?.texto.startsWith('Atrasado') && <span className="ml-2 px-1.5 py-0.5 rounded bg-red-50 text-red-700 text-[11px] font-medium">{prazo.texto}</span>}
                   </td>
                   <td colSpan={2} className="px-3 py-1.5 text-right text-gray-500">

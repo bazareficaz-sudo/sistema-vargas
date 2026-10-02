@@ -14,6 +14,7 @@ const COLUNAS = [
   'pendencia_motivo, prazo_postagem, data_pedido, data_envio, transportadora, codigo_rastreio, observacoes',
   'nfe_numero, nfe_chave, nfe_informada_em, venda_id',
   'envio_status, envio_substatus, etiqueta_impressa_em, etiqueta_impressa_por',
+  'etiqueta_arquivo, etiqueta_baixada_em, etiqueta_erro',
   'need_upload_invoice:dados_brutos->>need_upload_invoice',
   // Número interno e meio de envio/rastreio (ver src/lib/pedidos/envio.ts):
   // extraídos aqui para a listagem não trazer o JSON inteiro de cada pedido.
