@@ -9,8 +9,8 @@ export const maxDuration = 60
 
 // GET /api/integracoes/marketing/v1/vendas?desde=AAAA-MM-DD&ate=AAAA-MM-DD
 //
-// Vendas concluídas de produtos com a tag "marketing", somadas por produto e
-// por dia (fuso de São Paulo), no intervalo pedido (máx. 62 dias, inclusive).
+// Vendas concluídas de produtos com a tag "marketing", em saldo por produto e
+// por dia (fuso de São Paulo; devoluções descontam), no intervalo pedido (máx. 62 dias, inclusive).
 // Só quantidade e valor vendido: nada de cliente, venda individual, pagamento,
 // custo ou margem. Somente leitura.
 

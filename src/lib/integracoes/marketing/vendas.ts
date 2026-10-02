@@ -1,7 +1,7 @@
 // Vendas agregadas para o Vargas Marketing (contrato v1).
 //
 // O Marketing mede se um Status/Story trouxe venda comparando o produto antes
-// e depois da postagem. Para isso basta a soma por produto e por dia — nunca
+// e depois da postagem. Para isso basta o saldo por produto e por dia — nunca
 // sai cliente, venda individual, forma de pagamento, custo ou margem.
 
 export const FUSO_VENDAS = 'America/Sao_Paulo'
@@ -23,14 +23,18 @@ export function agregarVendas(vendas: VendaBase[], itens: ItemVenda[], comTag: S
     const dia = diaDaVenda.get(String(it.venda_id))
     if (!dia || !it.produto_id || !comTag.has(it.produto_id)) continue
     const qtd = Number(it.quantidade), preco = Number(it.preco_unitario)
-    if (!Number.isFinite(qtd) || qtd <= 0) continue
+    // Devolução entra como quantidade negativa no PDV: desconta do dia.
+    if (!Number.isFinite(qtd) || qtd === 0) continue
     const chave = `${it.produto_id}|${dia}`
     const atual = somas.get(chave) ?? { source_product_id: it.produto_id, day: dia, quantity: 0, revenue_minor: 0 }
     atual.quantity += qtd
     atual.revenue_minor += Number.isFinite(preco) && preco > 0 ? Math.round(qtd * preco * 100) : 0
     somas.set(chave, atual)
   }
+  // Saldo do dia (vendas − devoluções); pode ficar negativo quando a devolução
+  // é de uma venda de outro dia. Dia que zerou não é enviado.
   return [...somas.values()]
     .map(s => ({ ...s, quantity: Math.round(s.quantity * 1000) / 1000 }))
+    .filter(s => s.quantity !== 0 || s.revenue_minor !== 0)
     .sort((a, b) => a.day.localeCompare(b.day) || a.source_product_id.localeCompare(b.source_product_id))
 }
