@@ -124,7 +124,10 @@ async function subirImagem(opts: Ctx, url: string): Promise<string> {
   const form = new FormData()
   form.append('data', new Blob([bytes], { type: tipo }), `imagem.${ext}`)
   form.append('use_case', 'MAIN_IMAGE')
-  const resp = await tiktokPostArquivo('/product/202309/images/upload', form, opts)
+  // Upload de imagem não é de uma loja: a TikTok RECUSA o shop_cipher aqui
+  // ("Unexpected identifier ... not required for this request").
+  const { shopCipher: _semLoja, ...semCipher } = opts
+  const resp = await tiktokPostArquivo('/product/202309/images/upload', form, semCipher)
   const uri = resp?.data?.uri
   if (!uri) throw new Error('a TikTok não devolveu o identificador da imagem')
   return String(uri)
@@ -171,7 +174,11 @@ export async function criarAnuncio(sb: any, canalInicial: TiktokChannel, input: 
       try { uris.push(await subirImagem(opts, url)) }
       catch (e: any) { errosImagem.push(`imagem ${i + 1}: ${e?.message ?? e}`) }
     }
-    if (uris.length === 0) return { ok: false, erro: `Nenhuma imagem foi aceita pela TikTok (${errosImagem.join('; ')}). Imagens precisam ter entre 300 e 4000 px.` }
+    if (uris.length === 0) {
+      // Mesmo motivo em todas as fotos (o caso comum) aparece uma vez só.
+      const motivos = [...new Set(errosImagem.map(e => e.replace(/^imagem \d+: /, '')))]
+      return { ok: false, erro: `Nenhuma imagem foi aceita pela TikTok: ${motivos.join(' | ')}` }
+    }
 
     const armazem = await armazemPadrao(opts)
     const eanLimpo = String(input.ean ?? '').replace(/\D/g, '')
