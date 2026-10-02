@@ -71,6 +71,7 @@ export const NAV: NavGroup[] = [
           { href: '/dashboard/produtos',    label: 'Produtos',    icon: '📦', modulo: 'produtos' },
           { href: '/dashboard/categorias',  label: 'Categorias',  icon: '🗂', modulo: 'categorias' },
           { href: '/dashboard/marcas',      label: 'Marcas',      icon: '🏷', modulo: 'marcas' },
+          { href: '/dashboard/produtos/perfis-fiscais', label: 'Perfis Fiscais', icon: '🧾', modulo: 'produtos' },
         ],
       },
       {
