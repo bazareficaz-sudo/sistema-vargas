@@ -73,6 +73,20 @@ export async function prepararNfeDoPedido(sb: any, empresaId: string, pedidoId: 
   const { data: canal } = await sb.from('marketplace_canais').select(COLUNAS_CANAL).eq('id', pedido.canal_id).maybeSingle()
   if (!canal) return { ok: false, erro: 'Canal do pedido não encontrado' }
 
+  // Sem escolha no canal, resolverEmitente cairia na empresa que emite pelo
+  // PDV — no grupo, a Ouro e Prata, em produção. Para o PDV isso é a
+  // configuração certa; para marketplace, não: a NF-e tem de sair pelo CNPJ
+  // da conta de vendedor daquele canal, e "ML Eficaz" faturado pela Ouro e
+  // Prata seria uma nota real com o CNPJ errado. Então aqui a escolha é
+  // obrigatória.
+  if (!canal.empresa_fiscal_id) {
+    return {
+      ok: false,
+      erro: `Escolha qual empresa emite a nota do canal "${canal.nome}" em Marketplaces → canal → Configurar → Nota fiscal. ` +
+        `Precisa ser a empresa dona da conta de vendedor no marketplace.`,
+    }
+  }
+
   let emitente: Awaited<ReturnType<typeof resolverEmitente>>
   try {
     emitente = await resolverEmitente(sb, empresaId, canal.empresa_fiscal_id)
