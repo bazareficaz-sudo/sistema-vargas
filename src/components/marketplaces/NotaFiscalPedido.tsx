@@ -144,7 +144,9 @@ export default function NotaFiscalPedido({ pedido, emitidaPor, onFaturado }: {
       )}
       {emissao && emissao.status !== 'autorizada' && emissao.status !== 'processando' && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 whitespace-pre-line">
-          ⚠ Última tentativa {emissao.status === 'erro' ? 'com erro' : 'rejeitada'}<SeloAmbiente ambiente={emissao.ambiente} />
+          ⚠ {emissao.status === 'bloqueada'
+            ? 'A emissão automática não conseguiu montar a nota'
+            : `Última tentativa ${emissao.status === 'erro' ? 'com erro' : 'rejeitada'}`}<SeloAmbiente ambiente={emissao.ambiente} />
           {emissao.motivoRejeicao ? ` — ${emissao.motivoRejeicao}` : ''}
         </p>
       )}

@@ -174,11 +174,34 @@ export type ResultadoNfePedido = {
   erro?: string
   erros?: string[]
   jaEmitida?: boolean
+  /** A nota não pôde nem ser montada (produto sem perfil, endereço faltando…). */
+  bloqueada?: boolean
 }
 
-export async function emitirNfeDoPedido(sb: any, empresaId: string, pedidoId: string, operador?: string | null): Promise<ResultadoNfePedido> {
+// Bloqueio gravado no pedido — só quando quem chama pede (a automação). Sem
+// isso, a automação tentaria o mesmo pedido a cada 5 minutos, refazendo a
+// consulta ao marketplace, e ninguém veria o motivo na tela do pedido. O
+// clique manual não grava: ali o motivo já aparece na hora.
+async function registrarBloqueio(sb: any, pedidoId: string, statusAtual: string | null, motivo: string, operador?: string | null) {
+  const q = sb.from('marketplace_pedidos').update({
+    nfe_status: 'bloqueada',
+    nfe_emissao: { status: 'bloqueada', motivoRejeicao: motivo, em: new Date().toISOString(), operador: operador ?? null },
+  }).eq('id', pedidoId)
+  // Não atropela uma emissão que começou entre a leitura e esta escrita.
+  await (statusAtual == null ? q.is('nfe_status', null) : q.eq('nfe_status', statusAtual))
+}
+
+export async function emitirNfeDoPedido(
+  sb: any, empresaId: string, pedidoId: string, operador?: string | null,
+  opts?: { registrarBloqueio?: { statusAtual: string | null } },
+): Promise<ResultadoNfePedido> {
   const prep = await prepararNfeDoPedido(sb, empresaId, pedidoId)
-  if (!prep.ok) return { ok: false, erro: prep.erro }
+  if (!prep.ok) {
+    if (opts?.registrarBloqueio && prep.erro !== 'Pedido não encontrado') {
+      await registrarBloqueio(sb, pedidoId, opts.registrarBloqueio.statusAtual, prep.erro, operador)
+    }
+    return { ok: false, erro: prep.erro, bloqueada: true }
+  }
   const { pedido, emitente, montagem } = prep
 
   if (pedido.nfe_status === 'autorizada' && pedido.nfe_emissao?.ambiente === 'producao') {
@@ -189,7 +212,12 @@ export async function emitirNfeDoPedido(sb: any, empresaId: string, pedidoId: st
   if (pedido.nfe_numero && pedido.nfe_status !== 'autorizada') {
     return { ok: false, erro: `Este pedido já tem a NF-e nº ${pedido.nfe_numero} informada. Não é possível emitir outra.` }
   }
-  if (!montagem.ok) return { ok: false, erros: montagem.erros }
+  if (!montagem.ok) {
+    if (opts?.registrarBloqueio) {
+      await registrarBloqueio(sb, pedidoId, opts.registrarBloqueio.statusAtual, montagem.erros.join('\n'), operador)
+    }
+    return { ok: false, erros: montagem.erros, bloqueada: true }
+  }
 
   // Trava contra clique duplo / duas abas: só uma emissão por vez por pedido.
   // Otimista: só vira "processando" se o status ainda for o que acabamos de

@@ -114,6 +114,7 @@ export default function AutomacoesClient({ empresaId, automacoesIniciais, canais
                   {m.id === 'fiscal' && (
                     <RegrasFiscais
                       empresaId={empresaId}
+                      canais={canais}
                       automacoes={automacoes.filter(a => moduloDoTipo(a.tipo) === 'fiscal')}
                       onChange={novas => setAutomacoes(prev => [...prev.filter(a => moduloDoTipo(a.tipo) !== 'fiscal'), ...novas])}
                     />
