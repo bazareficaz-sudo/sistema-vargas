@@ -17,6 +17,9 @@
 --
 -- Pode rodar mais de uma vez: nada é duplicado e produto que já tem perfil
 -- não é reclassificado.
+--
+-- APLICADO EM PRODUÇÃO em 02/10/2026 (195 produtos com ST na Bazar Eficaz,
+-- o restante das duas empresas como revenda tributada).
 -- ============================================================
 
 -- ── 1. Tabelas ──────────────────────────────────────────────
@@ -170,8 +173,7 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_produtos_permissao_perfil_fiscal ON produtos;
-CREATE TRIGGER trg_produtos_permissao_perfil_fiscal
+CREATE OR REPLACE TRIGGER trg_produtos_permissao_perfil_fiscal
   BEFORE UPDATE OF perfil_fiscal_id ON produtos
   FOR EACH ROW EXECUTE FUNCTION produtos_checar_permissao_perfil_fiscal();
 
