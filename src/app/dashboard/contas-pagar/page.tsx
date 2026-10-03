@@ -2,17 +2,23 @@ import { createClient } from '@/lib/supabase/server'
 import ContasPagarClient from '@/components/ContasPagarClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { origemDaConta, pedidoDaConta, type DadosDaEntrada, type DadosDaNfe } from '@/lib/contas/origemDaConta'
+import { intervaloDoPeriodo, periodoValido, rotuloIntervalo, statusDaUrl } from '@/lib/contas/periodo'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ContasPagarPage({
   searchParams,
-}: { searchParams: Promise<{ status?: string; q?: string }> }) {
-  const { status = 'pendente', q = '' } = await searchParams
+}: { searchParams: Promise<{ status?: string; q?: string; periodo?: string; de?: string; ate?: string }> }) {
+  const { status = 'pendente', q = '', periodo, de = '', ate = '' } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
+
+  // Data de referência resolvida no servidor, em Brasília: o relógio do
+  // navegador pode estar em outro fuso ou simplesmente errado, e o do
+  // servidor está em UTC.
+  const hojeIso = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 
   // Atualiza status vencido automaticamente
   try { await supabase.rpc('atualizar_contas_vencidas') } catch {}
@@ -23,8 +29,19 @@ export default async function ContasPagarPage({
     .eq('empresa_id', empresaId)
     .order('vencimento', { ascending: true })
 
-  if (status !== 'todos') query = query.eq('status', status)
+  // `status` aceita vários separados por vírgula (ex: "pendente,vencido" =
+  // tudo que está em aberto). "todos" ou vazio = sem recorte de status.
+  const statusLista = statusDaUrl(status)
+  if (statusLista) query = query.in('status', statusLista)
   if (q) query = query.ilike('descricao', `%${q}%`)
+
+  // O recorte de período é no SERVIDOR, não na tela: a consulta é cortada em
+  // 200 linhas, e filtrar depois deixaria "este mês" de fora o que ficou
+  // além do corte.
+  const periodoEscolhido = periodoValido(periodo)
+  const intervalo = intervaloDoPeriodo(periodoEscolhido, hojeIso, de, ate)
+  if (intervalo?.ini) query = query.gte('vencimento', intervalo.ini)
+  if (intervalo?.fim) query = query.lte('vencimento', intervalo.fim)
 
   const { data: contas } = await query.limit(200)
   const lista = contas ?? []
@@ -100,16 +117,19 @@ export default async function ContasPagarPage({
     <ContasPagarClient
       contas={contasComOrigem}
       contasAbertas={abertas ?? []}
-      statusFiltro={status}
+      statusFiltro={statusLista ? statusLista.join(',') : 'todos'}
+      periodoFiltro={periodoEscolhido ?? ''}
+      deFiltro={de}
+      ateFiltro={ate}
+      intervaloRotulo={rotuloIntervalo(intervalo)}
       qInicial={q}
       empresaId={empresaId}
       totalPendente={totalPendente}
       totalVencido={totalVencido}
       totalPago={totalPago}
-      // Data de referência resolvida no servidor: o resumo do fornecedor
-      // classifica vencido/mês corrente/mês seguinte, e o relógio do
-      // navegador pode estar em outro fuso ou simplesmente errado.
-      hojeIso={new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })}
+      // O resumo do fornecedor classifica vencido/mês corrente/mês seguinte
+      // a partir desta data.
+      hojeIso={hojeIso}
     />
   )
 }
