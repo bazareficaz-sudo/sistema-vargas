@@ -1,5 +1,5 @@
 import { brasilNFeRequest, tipoAmbiente, type BrasilNFeCredentials } from './client'
-import { FiscalProviderError, type EmissaoNFCeInput, type EmissaoNFCeResultado, type StatusNFCe } from '../types'
+import { FiscalProviderError, type EmissaoNFCeInput, type EmissaoNFCeItem, type EmissaoNFCeResultado, type EmissaoNFeInput, type StatusNFCe } from '../types'
 
 // Endpoints e formatos cruzados contra o SDK PHP oficial da Brasil NFe
 // (github.com/BrasilNFe/brasilnfe-php-sdk) — valores monetários em decimal
@@ -22,6 +22,33 @@ import { FiscalProviderError, type EmissaoNFCeInput, type EmissaoNFCeResultado, 
 //   produto não foi informado."
 // Não enviamos alíquota de ICMS/PIS/COFINS: a API aceitou CST 00 e CSOSN 102
 // sem alíquota, e o cadastro de produto não obriga esses percentuais hoje.
+// Item da nota — o mesmo formato na NFC-e e na NF-e.
+function produtoPayload(it: EmissaoNFCeItem) {
+  return {
+    CodProdutoServico: it.codigoProduto,
+    NmProduto: it.descricao,
+    NCM: it.ncm,
+    // `Produtos[].CEST`, string de 7 dígitos, irmão de NCM — conferido na
+    // referência da própria Brasil NFe, não deduzido do padrão dos outros
+    // campos. Só vai quando existe: mandar vazio num produto sem ST seria
+    // declarar substituição tributária onde não há.
+    ...(it.cest ? { CEST: it.cest } : {}),
+    CFOP: Number(it.cfop),
+    UnidadeComercial: it.unidade,
+    Quantidade: it.quantidade,
+    ValorUnitario: it.valorUnitario,
+    // Valor bruto do item; o desconto vai separado (é assim que a API
+    // valida um contra o outro).
+    ValorTotal: Number((it.quantidade * it.valorUnitario).toFixed(2)),
+    ...(it.valorDesconto > 0 ? { ValorDesconto: it.valorDesconto } : {}),
+    Imposto: {
+      ICMS: { CodSituacaoTributaria: it.icmsSituacaoTributaria },
+      PIS: { CodSituacaoTributaria: it.pisCst },
+      COFINS: { CodSituacaoTributaria: it.cofinsCst },
+    },
+  }
+}
+
 function montarPayload(input: EmissaoNFCeInput, ambiente: 'producao' | 'homologacao') {
   return {
     ModeloDocumento: 65,
@@ -43,29 +70,7 @@ function montarPayload(input: EmissaoNFCeInput, ambiente: 'producao' | 'homologa
         IndicadorIe: 9, // não contribuinte — padrão do consumidor final no NFC-e
       },
     } : {}),
-    Produtos: input.itens.map(it => ({
-      CodProdutoServico: it.codigoProduto,
-      NmProduto: it.descricao,
-      NCM: it.ncm,
-      // `Produtos[].CEST`, string de 7 dígitos, irmão de NCM — conferido na
-      // referência da própria Brasil NFe, não deduzido do padrão dos outros
-      // campos. Só vai quando existe: mandar vazio num produto sem ST seria
-      // declarar substituição tributária onde não há.
-      ...(it.cest ? { CEST: it.cest } : {}),
-      CFOP: Number(it.cfop),
-      UnidadeComercial: it.unidade,
-      Quantidade: it.quantidade,
-      ValorUnitario: it.valorUnitario,
-      // Valor bruto do item; o desconto vai separado (é assim que a API
-      // valida um contra o outro).
-      ValorTotal: Number((it.quantidade * it.valorUnitario).toFixed(2)),
-      ...(it.valorDesconto > 0 ? { ValorDesconto: it.valorDesconto } : {}),
-      Imposto: {
-        ICMS: { CodSituacaoTributaria: it.icmsSituacaoTributaria },
-        PIS: { CodSituacaoTributaria: it.pisCst },
-        COFINS: { CodSituacaoTributaria: it.cofinsCst },
-      },
-    })),
+    Produtos: input.itens.map(produtoPayload),
     Pagamentos: input.pagamentos.map(p => ({
       FormaPagamento: p.codigoSefaz,
       VlPago: p.valor,
@@ -130,6 +135,91 @@ export async function emitirNFCe(creds: BrasilNFeCredentials, input: EmissaoNFCe
     throw new FiscalProviderError(json.Error, 'brasilnfe_erro', json)
   }
 
+  return mapResultado(json)
+}
+
+// NF-e modelo 55 — venda de marketplace. Nomes de campo conferidos contra o
+// SDK PHP oficial (src/Envio/NFe/NotaFiscalEnvio.php): Cliente herda
+// Endereco de Pessoa; Intermediador {Cnpj, IdCadIntTran} só vale com
+// IndicadorPresenca 2/3/4/9; ICMS.AliquotaICMS e PIS/COFINS.Aliquota.
+//
+// O QUE AINDA PRECISA DO TESTE EM HOMOLOGAÇÃO (Bazar Eficaz já está nele):
+//   · DIFAL — o SDK não tem campo para o grupo ICMSUFDest. Ou a Brasil NFe
+//     calcula sozinha (venda interestadual a não contribuinte), ou a SEFAZ
+//     recusa com a rejeição 694 e a mensagem volta para a tela.
+//   · Código IBGE do município — mandamos o nome e a UF; o SDK aceita
+//     `CodMunicipio`, mas não diz se é obrigatório.
+export function montarPayloadNFe(input: EmissaoNFeInput, ambiente: 'producao' | 'homologacao') {
+  const d = input.destinatario
+  return {
+    ModeloDocumento: 55,
+    TipoAmbiente: tipoAmbiente(ambiente),
+    Finalidade: 1,
+    IdentificadorInterno: input.referencia,
+    NaturezaOperacao: input.naturezaOperacao,
+    ConsumidorFinal: input.consumidorFinal,
+    IndicadorPresenca: 2, // não presencial, pela internet
+    ...(input.intermediador ? {
+      Intermediador: { Cnpj: input.intermediador.cnpj, IdCadIntTran: input.intermediador.idCadastro },
+    } : {}),
+    Cliente: {
+      CpfCnpj: d.cpf || d.cnpj,
+      NmCliente: d.nome,
+      IndicadorIe: d.indicadorIe,
+      ...(d.inscricaoEstadual ? { Ie: d.inscricaoEstadual } : {}),
+      Endereco: {
+        Cep: d.endereco.cep,
+        Logradouro: d.endereco.logradouro,
+        Numero: d.endereco.numero,
+        ...(d.endereco.complemento ? { Complemento: d.endereco.complemento } : {}),
+        Bairro: d.endereco.bairro,
+        Municipio: d.endereco.municipio,
+        Uf: d.endereco.uf,
+        CodPais: 1058,
+        Pais: 'BRASIL',
+      },
+    },
+    Produtos: input.itens.map(it => {
+      const base = produtoPayload(it)
+      return {
+        ...base,
+        OrigemProduto: Number(it.icmsOrigem),
+        Imposto: {
+          ICMS: {
+            ...base.Imposto.ICMS,
+            ...(it.aliquotaIcms != null ? { AliquotaICMS: it.aliquotaIcms } : {}),
+          },
+          PIS: { ...base.Imposto.PIS, ...(it.pisAliquota != null ? { Aliquota: it.pisAliquota } : {}) },
+          COFINS: { ...base.Imposto.COFINS, ...(it.cofinsAliquota != null ? { Aliquota: it.cofinsAliquota } : {}) },
+        },
+      }
+    }),
+    Pagamentos: input.pagamentos.map(p => ({
+      IndicadorPagamento: 0,
+      FormaPagamento: p.codigoSefaz,
+      VlPago: p.valor,
+      ...(p.descricao ? { Descricao: p.descricao } : {}),
+    })),
+    Transporte: { ModalidadeFrete: input.modalidadeFrete },
+    ...(input.observacao ? { Observacao: input.observacao } : {}),
+  }
+}
+
+export async function emitirNFe(creds: BrasilNFeCredentials, input: EmissaoNFeInput): Promise<EmissaoNFCeResultado> {
+  const { status, text } = await brasilNFeRequest(creds, '/services/fiscal/EnviarNotaFiscal', montarPayloadNFe(input, creds.ambiente))
+
+  let json: any
+  try {
+    json = text ? JSON.parse(text) : {}
+  } catch {
+    throw new FiscalProviderError(`Resposta inesperada da Brasil NFe ao emitir NF-e (status ${status}): ${text.slice(0, 300)}`, 'resposta_invalida')
+  }
+  if (!json?.ReturnNF && !json?.Error) {
+    throw new FiscalProviderError(`Erro ${status} ao emitir NF-e na Brasil NFe`, 'brasilnfe_erro', json)
+  }
+  if (!json?.ReturnNF && json?.Error) {
+    throw new FiscalProviderError(json.Error, 'brasilnfe_erro', json)
+  }
   return mapResultado(json)
 }
 

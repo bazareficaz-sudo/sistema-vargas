@@ -1,4 +1,4 @@
-import type { DfeListaResultado, EmissaoNFCeInput, EmissaoNFCeResultado, TipoManifesto } from './types'
+import type { DfeListaResultado, EmissaoNFCeInput, EmissaoNFCeResultado, EmissaoNFeInput, TipoManifesto } from './types'
 
 // Interface comum a qualquer provedor fiscal (Focus NFe, Brasil NFe, ...).
 // Dividida por capacidade porque um provedor pode amadurecer uma parte antes
@@ -18,6 +18,9 @@ export interface FiscalProvider {
 
   emissao: {
     emitirNFCe(input: EmissaoNFCeInput): Promise<EmissaoNFCeResultado>
+    // NF-e modelo 55 (venda de marketplace). O resultado tem o mesmo formato
+    // do da NFC-e: status, chave, número, protocolo, DANFE, XML.
+    emitirNFe(input: EmissaoNFeInput): Promise<EmissaoNFCeResultado>
     consultarNFCe(referencia: string): Promise<EmissaoNFCeResultado>
     // referencia = nosso id (usado pela Focus, que identifica a nota pela
     // referência que você mandou na emissão); chave/protocolo = usados pela

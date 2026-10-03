@@ -77,7 +77,49 @@ export type EmissaoNFCeInput = {
   pagamentos: EmissaoNFCePagamento[]
 }
 
-export type StatusNFCe = 'autorizada' | 'rejeitada' | 'cancelada' | 'processando' | 'erro'
+// NF-e modelo 55 — venda de marketplace. Reaproveita o item da NFC-e e
+// acrescenta o que a NF-e exige e a NFC-e de balcão não: alíquotas (regime
+// normal), destinatário com endereço, intermediador e presença "internet".
+// Montada em src/lib/fiscal/nfePedido.ts.
+export type EmissaoNFeItem = EmissaoNFCeItem & {
+  /** Alíquota de ICMS do item — regime normal com CST tributado (00). */
+  aliquotaIcms?: number
+  pisAliquota?: number
+  cofinsAliquota?: number
+}
+
+export type EmissaoNFeInput = {
+  referencia: string
+  cnpjEmitente: string
+  naturezaOperacao: string
+  consumidorFinal: boolean
+  destinatario: {
+    nome: string
+    cpf?: string
+    cnpj?: string
+    /** 1 contribuinte com IE · 9 não contribuinte */
+    indicadorIe: 1 | 9
+    inscricaoEstadual?: string
+    endereco: {
+      logradouro: string
+      numero: string
+      complemento?: string
+      bairro: string
+      cep: string
+      municipio: string
+      uf: string
+    }
+  }
+  /** Marketplace que intermediou a venda (indIntermed = 1). */
+  intermediador?: { cnpj: string; idCadastro: string }
+  /** 0 = frete contratado pelo remetente (CIF) — a logística do marketplace. */
+  modalidadeFrete: number
+  itens: EmissaoNFeItem[]
+  pagamentos: (EmissaoNFCePagamento & { descricao?: string })[]
+  observacao?: string
+}
+
+export type StatusNFCe ='autorizada' | 'rejeitada' | 'cancelada' | 'processando' | 'erro'
 
 export type EmissaoNFCeResultado = {
   status: StatusNFCe

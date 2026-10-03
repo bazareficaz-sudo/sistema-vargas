@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import MapearAnuncioModal from './MapearAnuncioModal'
+import NotaFiscalPedido from './NotaFiscalPedido'
 import RomaneioModal from '@/components/pedidos/RomaneioModal'
 import { ehHoje } from './utils'
 import { ESTEIRA, ESTEIRA_INFO, emAberto, etapaEsteira, fimDeHoje, janelaDoPrazo, notaResolvida, etiquetaImpressa, textoPrazo, type EtapaEsteira } from '@/lib/pedidos/esteira'
@@ -116,13 +117,6 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [nfeForm, setNfeForm] = useState({ numero: '', chave: '' })
   const [salvandoNfe, setSalvandoNfe] = useState(false)
 
-  // Emissão fiscal real (via venda criada sob demanda a partir do pedido)
-  const [nfceStatus, setNfceStatus] = useState<{
-    status?: string; numero?: string; chave?: string; danfeUrl?: string; motivoRejeicao?: string
-  } | null>(null)
-  const [emitindoNfce, setEmitindoNfce] = useState(false)
-  const [erroEmitirNfce, setErroEmitirNfce] = useState('')
-
   const canaisSincronizaveis = canais.filter(c => (c.plataforma === 'shopee' || c.plataforma === 'mercadolivre' || c.plataforma === 'tiktok') && c.ativo && c.access_token)
 
   const formPedidoVazio = {
@@ -220,40 +214,6 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
     if (detalhe?.id === pedido.id) setDetalhe((p: any) => ({ ...p, ...patch }))
     setNfeForm({ numero: '', chave: '' })
     setSalvandoNfe(false)
-  }
-
-  // Emissão fiscal real: se o pedido já tem venda vinculada, busca o status
-  // atual (mesmo padrão de DetalheVendaModal.tsx); senão fica pendente até
-  // o primeiro "Emitir NF-e".
-  async function abrirNotaFiscal(pedido: any) {
-    setErroEmitirNfce('')
-    if (!pedido.venda_id) { setNfceStatus(null); return }
-    const sb = createClient()
-    const { data } = await sb.from('vendas')
-      .select('nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf')
-      .eq('id', pedido.venda_id).maybeSingle()
-    setNfceStatus(data ? {
-      status: data.nfce_status, numero: data.nfce_numero, chave: data.nfce_chave,
-      motivoRejeicao: data.nfce_motivo_rejeicao, danfeUrl: data.nfce_url_pdf,
-    } : null)
-  }
-
-  async function emitirNfceDoPedido(pedido: any) {
-    setEmitindoNfce(true)
-    setErroEmitirNfce('')
-    try {
-      const resp = await fetch(`/api/marketplaces/pedidos/${pedido.id}/emitir-nfce`, { method: 'POST' })
-      const data = await resp.json()
-      if (!data.ok && !data.jaEmitida) { setErroEmitirNfce(data.erro ?? 'Erro ao emitir NF-e'); setNfceStatus({ status: 'erro', motivoRejeicao: data.erro }); return }
-      setNfceStatus({ status: data.status, numero: data.numero, chave: data.chave, danfeUrl: data.danfeUrl, motivoRejeicao: data.motivoRejeicao })
-      // O pedido pode não ter venda_id ainda na lista local (primeira emissão) — atualiza pra reabrir corretamente depois.
-      setPedidos(prev => prev.map(p => p.id === pedido.id ? { ...p, venda_id: p.venda_id } : p))
-      router.refresh()
-    } catch (e: any) {
-      setErroEmitirNfce(e?.message ?? 'Erro ao emitir NF-e')
-    } finally {
-      setEmitindoNfce(false)
-    }
   }
 
   // Marca/desmarca a etiqueta como impressa (passo 3 → 4 da esteira).
@@ -637,7 +597,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const plataformasPresentes = [...new Set(pedidos.map((p: any) => p.marketplace_canais?.plataforma).filter(Boolean))] as string[]
   const meiosPresentes = [...new Set(pedidos.map((p: any) => meioDeEnvio(p).meio ?? 'Sem informação'))].sort()
   const abrirPedido = (p: any) => {
-    setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' }); abrirNotaFiscal(p)
+    setDetalhe(p); setEtiquetaOpcoes(null); setErroEtiqueta(''); setEscolhaEnvio({}); setNfeForm({ numero: '', chave: '' })
   }
 
   // Pendências agrupadas por anúncio: mapear uma vez resolve todos os
@@ -1206,39 +1166,19 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                 </div>
               </div>
 
-              {/* Nota Fiscal — emissão real, mesmo padrão de DetalheVendaModal.tsx.
-                  Cria a venda por trás na primeira emissão (garantirVendaDoPedido),
-                  reaproveita nas próximas — reemitir/consultar usa a mesma venda. */}
-              <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-gray-600">Nota Fiscal</p>
-                  <p className="text-[11px] text-gray-400 truncate" title="Configurável por canal em Marketplaces → canal → Configurar">
-                    emitida por {emissorPorCanal[detalhe.canal_id] || empresaFiscalNome}
-                  </p>
-                </div>
-                {nfceStatus?.status === 'autorizada' ? (
-                  <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1.5">
-                    <p>✓ Autorizada — Nº <span className="font-mono">{nfceStatus.numero}</span></p>
-                    {nfceStatus.chave && <p className="font-mono text-[10px] break-all mt-0.5">{nfceStatus.chave}</p>}
-                    {nfceStatus.danfeUrl && <a href={nfceStatus.danfeUrl} target="_blank" rel="noreferrer" className="underline">Ver DANFE</a>}
-                  </div>
-                ) : (
-                  <>
-                    {nfceStatus?.status && nfceStatus.status !== 'pendente' && (
-                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
-                        ⚠ {nfceStatus.status === 'erro' ? 'Erro ao emitir' : 'Não emitida'}{nfceStatus.motivoRejeicao ? ` — ${nfceStatus.motivoRejeicao}` : ''}
-                      </p>
-                    )}
-                    {erroEmitirNfce && (
-                      <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{erroEmitirNfce}</p>
-                    )}
-                    <button onClick={() => emitirNfceDoPedido(detalhe)} disabled={emitindoNfce}
-                      className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
-                      {emitindoNfce ? 'Emitindo...' : (nfceStatus?.status === 'erro' ? '🧾 Tentar emitir de novo' : '🧾 Emitir NF-e')}
-                    </button>
-                  </>
-                )}
-              </div>
+              {/* Nota Fiscal — NF-e modelo 55 pelo perfil fiscal de cada produto
+                  (ver NotaFiscalPedido.tsx). Substitui a emissão de NFC-e que
+                  existia aqui: NFC-e é cupom de balcão (presencial, dentro do
+                  estado) e não serve para venda de marketplace. */}
+              <NotaFiscalPedido
+                key={detalhe.id}
+                pedido={detalhe}
+                emitidaPor={emissorPorCanal[detalhe.canal_id] || empresaFiscalNome}
+                onFaturado={patch => {
+                  setPedidos(prev => prev.map(p => p.id === detalhe.id ? { ...p, ...patch } : p))
+                  setDetalhe((p: any) => ({ ...p, ...patch }))
+                }}
+              />
 
               {/* Informar NF-e — só registro manual, pra quem já emitiu por fora */}
               {!detalhe.nfe_informada_em && ['novos', 'emitir'].includes(etapaEsteira(detalhe)) && (
