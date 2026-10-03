@@ -143,12 +143,16 @@ export async function emitirNFCe(creds: BrasilNFeCredentials, input: EmissaoNFCe
 // Endereco de Pessoa; Intermediador {Cnpj, IdCadIntTran} só vale com
 // IndicadorPresenca 2/3/4/9; ICMS.AliquotaICMS e PIS/COFINS.Aliquota.
 //
-// O QUE AINDA PRECISA DO TESTE EM HOMOLOGAÇÃO (Bazar Eficaz já está nele):
-//   · DIFAL — o SDK não tem campo para o grupo ICMSUFDest. Ou a Brasil NFe
-//     calcula sozinha (venda interestadual a não contribuinte), ou a SEFAZ
-//     recusa com a rejeição 694 e a mensagem volta para a tela.
-//   · Código IBGE do município — mandamos o nome e a UF; o SDK aceita
-//     `CodMunicipio`, mas não diz se é obrigatório.
+// CONFIRMADO EM HOMOLOGAÇÃO (03/10/2026, Bazar Eficaz → consumidor final em
+// SP, pedido TikTok 586327006856971804, nota autorizada):
+//   · DIFAL — o SDK não tem campo para o grupo ICMSUFDest, e não precisa: a
+//     Brasil NFe monta o grupo sozinha quando a venda é interestadual a não
+//     contribuinte (saiu pICMSUFDest 18, pICMSInter 12, vICMSUFDest 1,38).
+//   · Código IBGE do município — basta nome e UF; a Brasil NFe preenche o
+//     cMun do destinatário.
+//   · Ela também tira o ICMS da base de PIS/COFINS (vBC do PIS = produto −
+//     ICMS) — exclusão permitida (STF, Tema 69), mas é escolha que a
+//     contabilidade precisa conhecer.
 export function montarPayloadNFe(input: EmissaoNFeInput, ambiente: 'producao' | 'homologacao') {
   const d = input.destinatario
   return {
