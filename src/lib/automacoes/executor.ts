@@ -1,10 +1,11 @@
-import { TIPOS_AGENDADOS_1X_DIA, horarioJaPassou, hojeISO, type ResultadoExecucao } from './tipos'
+import { TIPOS_AGENDADOS_1X_DIA, horarioJaPassou, horarioMarcadoVenceu, hojeISO, type ResultadoExecucao } from './tipos'
 import {
   executarRelatorioDiario, executarPedidoCliente, executarAlertaProduto,
   executarAlertaPedidoMarketplace, executarEstoqueBaixo, executarContaReceber, executarContaPagar,
 } from './tipos-whatsapp'
 import { executarMargemBaixa, executarProdutoParado, executarInadimplencia, executarMetaVendas } from './tipos-alertas'
 import { executarEmissaoPorProduto, executarEmissaoPorFormaPagamento, executarEmissaoPorCliente } from './tipos-fiscal'
+import { executarEmissaoNfeMarketplace } from './tipos-nfe-marketplace'
 import { executarReposicaoMinimo, executarPedidoAutomatico, executarCurvaAbc, executarProdutoParadoReposicao } from './tipos-reposicao'
 import { avisarFalhaSeConfigurado } from './alertaFalha'
 
@@ -12,6 +13,7 @@ const HANDLERS: Record<string, (sb: any, a: any) => Promise<ResultadoExecucao>> 
   emissao_fiscal_produto: executarEmissaoPorProduto,
   emissao_fiscal_forma_pagamento: executarEmissaoPorFormaPagamento,
   emissao_fiscal_cliente: executarEmissaoPorCliente,
+  emissao_fiscal_marketplace: executarEmissaoNfeMarketplace,
   whatsapp_relatorio_diario: executarRelatorioDiario,
   whatsapp_pedido_cliente: executarPedidoCliente,
   whatsapp_alerta_produto: executarAlertaProduto,
@@ -39,8 +41,8 @@ function elegivelAgora(a: any): boolean {
   // deste campo existir), o padrão é o comportamento de sempre: imediato.
   switch (a.timing) {
     case 'horario_especifico':
-      if (a.ultima_execucao_dia === hojeISO()) return false
-      return horarioJaPassou(a.horario_envio)
+      // Um ou vários horários por dia ("10:00, 14:00"); cada um roda uma vez.
+      return horarioMarcadoVenceu(a.horario_envio, a.ultima_execucao)
     case 'hora_em_hora':
       if (!a.ultima_execucao) return true
       return Date.now() - new Date(a.ultima_execucao).getTime() >= 60 * 60 * 1000

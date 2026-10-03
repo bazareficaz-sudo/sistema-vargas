@@ -57,6 +57,7 @@ type Produto = {
   cofins_cst?: string | null
   cofins_percentual?: number | null
   ipi_percentual?: number | null
+  perfil_fiscal_id?: string | null
 }
 
 type KitItem = { id?: string; produto_id: string; nome: string; unidade: string; quantidade: number; controla_estoque: boolean }
@@ -119,6 +120,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [imprimindoEtiqueta, setImprimindoEtiqueta] = useState(false)
   const [preenchendoIA, setPreenchendoIA] = useState(false)
   const [mensagemIA, setMensagemIA] = useState('')
+  // Vazio também quando a tabela ainda não existe (SQL dos perfis não rodou):
+  // aí o seletor some e o cadastro funciona como antes.
+  const [perfisFiscais, setPerfisFiscais] = useState<{ id: string; nome: string }[]>([])
   const [tituloSugerido, setTituloSugerido] = useState('')
   const [anunciosVinculados, setAnunciosVinculados] = useState<AnuncioVinculado[]>([])
   const [carregandoAnuncios, setCarregandoAnuncios] = useState(false)
@@ -177,7 +181,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   // medidas, dados fiscais, código do fornecedor. Por isso o modal confere e,
   // se faltar, busca a linha inteira ele mesmo, em vez de confiar em quem o
   // chamou.
-  const COLUNAS_SO_DO_MODAL = ['peso_kg', 'csosn', 'codigo_fornecedor', 'subcategoria', 'precos_quantidade']
+  const COLUNAS_SO_DO_MODAL = ['peso_kg', 'csosn', 'codigo_fornecedor', 'subcategoria', 'precos_quantidade', 'perfil_fiscal_id']
 
   useEffect(() => {
     if (produto) {
@@ -200,6 +204,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
           .then(({ data }: any) => { if (data && data.id === produto.id) aplicar(data) })
       }
       setAba(abaInicial ?? 'geral')
+      sb.from('perfis_fiscais').select('id, nome').eq('ativo', true).order('nome')
+        .then(({ data }) => setPerfisFiscais(data ?? []))
       if (produto.tipo === 'kit') carregarKitItens(produto.id)
       carregarImagens(produto.id)
       carregarAnunciosVinculados(produto.id)
@@ -790,6 +796,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       ibs_cclasstrib: form.ibs_cclasstrib || null,
       ibs_aliquota: form.ibs_aliquota ?? null,
       cbs_aliquota: form.cbs_aliquota ?? null,
+      // Só quando a coluna veio do banco. Antes do SQL dos perfis rodar ela
+      // não existe, e mandá-la faria o salvar inteiro falhar.
+      ...('perfil_fiscal_id' in form ? { perfil_fiscal_id: form.perfil_fiscal_id || null } : {}),
       monitorar: form.monitorar ?? false,
       descricao_marketplace: form.descricao_marketplace || null,
       obs_interna: form.obs_interna || null,
@@ -1815,6 +1824,26 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
               {mensagemIA && (
                 <p className="text-xs text-violet-800 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">{mensagemIA}</p>
+              )}
+
+              {perfisFiscais.length > 0 && (
+                <div className="border border-gray-200 rounded-lg px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="text-xs font-medium text-gray-600">Perfil fiscal (NF-e)</label>
+                    <a href="/dashboard/produtos/perfis-fiscais" target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:text-blue-800">
+                      Ver regras dos perfis ↗
+                    </a>
+                  </div>
+                  <select value={form.perfil_fiscal_id ?? ''} onChange={e => campo('perfil_fiscal_id', e.target.value || null)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 bg-white">
+                    <option value="">— Sem perfil —</option>
+                    {perfisFiscais.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Na NF-e de marketplace o CFOP e o CSOSN/CST saem do perfil, conforme o estado e o tipo de cliente.
+                    O CFOP e os CST abaixo continuam valendo para a NFC-e do PDV.
+                  </p>
+                </div>
               )}
 
               <div className="grid grid-cols-2 gap-3">

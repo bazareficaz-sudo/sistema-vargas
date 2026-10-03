@@ -5,14 +5,23 @@ import { createClient } from '@/lib/supabase/client'
 import type { Automacao, ProdutoRef } from './AutomacoesClient'
 import BuscaProdutosMulti from './BuscaProdutosMulti'
 import BuscaCliente from './BuscaCliente'
+import { horariosDaRegra, LIMITE_NFE_MARKETPLACE_POR_RODADA } from '@/lib/automacoes/tipos'
 
 const TIPOS = [
+  { id: 'emissao_fiscal_marketplace', icone: '🛒', label: 'Pedidos de marketplace (NF-e)' },
   { id: 'emissao_fiscal_produto', icone: '📦', label: 'Por produto' },
   { id: 'emissao_fiscal_forma_pagamento', icone: '💳', label: 'Por forma de pagamento' },
   { id: 'emissao_fiscal_cliente', icone: '👤', label: 'Por cliente' },
 ] as const
 
 type TipoFiscal = typeof TIPOS[number]['id']
+
+type Canal = { id: string; nome: string; plataforma: string }
+
+const NOME_PLATAFORMA: Record<string, string> = {
+  mercadolivre: 'Mercado Livre', shopee: 'Shopee', tiktok: 'TikTok Shop', nuvemshop: 'Nuvemshop', loja_online: 'Loja Online',
+}
+const nomePlataforma = (p: string) => NOME_PLATAFORMA[p] ?? p
 
 const FORMAS_PAGAMENTO = [
   { id: 'dinheiro', label: 'Dinheiro' },
@@ -27,7 +36,7 @@ const FORMAS_PAGAMENTO = [
 const TIMINGS = [
   { id: 'imediato', label: 'Imediato', descricao: 'Assim que a venda entrar (checagem a cada poucos minutos)' },
   { id: 'hora_em_hora', label: 'De hora em hora', descricao: 'No máximo uma rodada por hora' },
-  { id: 'horario_especifico', label: 'Horário específico', descricao: '1x por dia, num horário fixo' },
+  { id: 'horario_especifico', label: 'Horários marcados', descricao: 'Um ou mais horários por dia (ex.: 10:00 e 14:00, antes de cada coleta)' },
 ] as const
 type Timing = typeof TIMINGS[number]['id']
 
@@ -41,8 +50,12 @@ const FORM_VAZIO = {
   cliente_nome: '',
   ativa: true,
   timing: 'imediato' as Timing,
-  horario_envio: '',
+  horarios: [''] as string[],
   alertar_erro_whatsapp: '',
+  // Pedidos de marketplace: um canal específico, ou todos os canais de um marketplace.
+  escopo: 'canal' as 'canal' | 'plataforma',
+  marketplace_canal_id: '',
+  plataforma: '',
 }
 
 function icone(tipo: string) { return TIPOS.find(t => t.id === tipo)?.icone ?? '📄' }
@@ -50,13 +63,19 @@ function labelTipo(tipo: string) { return TIPOS.find(t => t.id === tipo)?.label 
 function labelForma(f: string) { return FORMAS_PAGAMENTO.find(x => x.id === f)?.label ?? f }
 function labelTiming(a: Automacao) {
   if (a.timing === 'hora_em_hora') return '⏱ de hora em hora'
-  if (a.timing === 'horario_especifico') return `🕐 1x/dia às ${a.horario_envio ?? '--:--'}`
+  if (a.timing === 'horario_especifico') return `🕐 às ${horariosDaRegra(a.horario_envio).join(', ') || '--:--'}`
   return '⚡ imediato'
 }
 function fmtData(v: string | null) { return v ? new Date(v).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null }
 
-function resumoRegra(a: Automacao) {
+function resumoRegra(a: Automacao, canais: Canal[]) {
   switch (a.tipo) {
+    case 'emissao_fiscal_marketplace': {
+      const alvo = a.marketplace_canal_id
+        ? `do canal ${canais.find(c => c.id === a.marketplace_canal_id)?.nome ?? '(removido)'}`
+        : `de todos os canais ${nomePlataforma(a.canal_venda ?? '')}`
+      return `Emite NF-e dos pedidos pagos ${alvo}`
+    }
     case 'emissao_fiscal_produto':
       return `Emite NFC-e ao vender: ${(a.produtos ?? []).map(p => p.produto_nome).join(', ') || 'produto(s)'}`
     case 'emissao_fiscal_forma_pagamento':
@@ -68,9 +87,10 @@ function resumoRegra(a: Automacao) {
   }
 }
 
-export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
-  empresaId: string; automacoes: Automacao[]; onChange: (novas: Automacao[]) => void
+export default function RegrasFiscais({ empresaId, canais, automacoes, onChange }: {
+  empresaId: string; canais: Canal[]; automacoes: Automacao[]; onChange: (novas: Automacao[]) => void
 }) {
+  const plataformas = [...new Set(canais.map(c => c.plataforma))]
   const [modal, setModal] = useState(false)
   const [editando, setEditando] = useState<Automacao | null>(null)
   const [form, setForm] = useState(FORM_VAZIO)
@@ -98,8 +118,11 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
       cliente_nome: a.cliente_nome ?? '',
       ativa: a.ativa,
       timing: (a.timing as Timing) ?? 'imediato',
-      horario_envio: a.horario_envio ?? '',
+      horarios: horariosDaRegra(a.horario_envio).length > 0 ? horariosDaRegra(a.horario_envio) : [''],
       alertar_erro_whatsapp: a.alertar_erro_whatsapp ?? '',
+      escopo: a.marketplace_canal_id ? 'canal' : (a.canal_venda ? 'plataforma' : 'canal'),
+      marketplace_canal_id: a.marketplace_canal_id ?? '',
+      plataforma: a.canal_venda ?? '',
     })
     setErro('')
     setModal(true)
@@ -107,6 +130,10 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
 
   function nomeSugerido(): string {
     switch (form.tipo) {
+      case 'emissao_fiscal_marketplace':
+        return form.escopo === 'canal'
+          ? `Emitir NF-e — pedidos ${canais.find(c => c.id === form.marketplace_canal_id)?.nome ?? 'do canal'}`
+          : `Emitir NF-e — pedidos ${form.plataforma ? nomePlataforma(form.plataforma) : 'do marketplace'}`
       case 'emissao_fiscal_produto': return `Emitir NFC-e ao vender ${form.produtos[0]?.produto_nome ?? 'produto'}${form.produtos.length > 1 ? ` +${form.produtos.length - 1}` : ''}`
       case 'emissao_fiscal_forma_pagamento': return `Emitir NFC-e — pagamento ${labelForma(form.forma_pagamento)}`
       case 'emissao_fiscal_cliente': return `Emitir NFC-e para ${form.cliente_nome || 'cliente'}`
@@ -118,7 +145,11 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
     if (form.tipo === 'emissao_fiscal_produto' && form.produtos.length === 0) return 'Selecione pelo menos 1 produto.'
     if (form.tipo === 'emissao_fiscal_forma_pagamento' && !form.forma_pagamento) return 'Selecione a forma de pagamento.'
     if (form.tipo === 'emissao_fiscal_cliente' && !form.cliente_id) return 'Selecione o cliente.'
-    if (form.timing === 'horario_especifico' && !form.horario_envio) return 'Informe o horário de execução.'
+    if (form.tipo === 'emissao_fiscal_marketplace') {
+      if (form.escopo === 'canal' && !form.marketplace_canal_id) return 'Escolha o canal.'
+      if (form.escopo === 'plataforma' && !form.plataforma) return 'Escolha o marketplace.'
+    }
+    if (form.timing === 'horario_especifico' && horariosDaRegra(form.horarios.join(',')).length === 0) return 'Informe pelo menos um horário.'
     return ''
   }
 
@@ -134,13 +165,15 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
       tipo: form.tipo,
       ativa: form.ativa,
       observacao: form.observacao || null,
-      modelo_fiscal: 'nfce',
+      modelo_fiscal: form.tipo === 'emissao_fiscal_marketplace' ? 'nfe' : 'nfce',
+      marketplace_canal_id: form.tipo === 'emissao_fiscal_marketplace' && form.escopo === 'canal' ? form.marketplace_canal_id : null,
+      canal_venda: form.tipo === 'emissao_fiscal_marketplace' && form.escopo === 'plataforma' ? form.plataforma : null,
       produtos: form.tipo === 'emissao_fiscal_produto' ? form.produtos : null,
       forma_pagamento: form.tipo === 'emissao_fiscal_forma_pagamento' ? form.forma_pagamento : null,
       cliente_id: form.tipo === 'emissao_fiscal_cliente' ? form.cliente_id : null,
       cliente_nome: form.tipo === 'emissao_fiscal_cliente' ? form.cliente_nome : null,
       timing: form.timing,
-      horario_envio: form.timing === 'horario_especifico' ? form.horario_envio : null,
+      horario_envio: form.timing === 'horario_especifico' ? horariosDaRegra(form.horarios.join(',')).join(', ') : null,
       alertar_erro_whatsapp: form.alertar_erro_whatsapp.trim() || null,
       updated_at: new Date().toISOString(),
     }
@@ -175,7 +208,7 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
   return (
     <div>
       <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-2.5 mb-4 text-xs text-blue-700">
-        ℹ️ A NFC-e não é mais emitida automaticamente pra toda venda — só manualmente (botão "Emitir agora" na venda) ou quando uma dessas regras acertar a condição. Sem nenhuma regra ativa, nenhuma venda emite nota sozinha.
+        ℹ️ Nenhuma nota é emitida sozinha sem uma regra ativa. As regras <strong>por produto, pagamento e cliente</strong> emitem NFC-e das vendas do PDV; a regra de <strong>pedidos de marketplace</strong> emite NF-e dos pedidos pagos que ainda estão sem nota.
       </div>
 
       <div className="flex items-center justify-between mb-4">
@@ -198,10 +231,10 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
                 <div className="flex items-center gap-2">
                   <p className="font-medium text-gray-900 text-sm">{a.nome}</p>
                   <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full border border-blue-200">{labelTipo(a.tipo)}</span>
-                  <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">NFC-e</span>
+                  <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">{a.tipo === 'emissao_fiscal_marketplace' ? 'NF-e' : 'NFC-e'}</span>
                   {!a.ativa && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">inativa</span>}
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5">{resumoRegra(a)} · {labelTiming(a)}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{resumoRegra(a, canais)} · {labelTiming(a)}</p>
                 <p className="text-[10px] text-gray-400 mt-1">
                   {a.ultima_execucao ? `Última execução: ${fmtData(a.ultima_execucao)} · ${a.total_execucoes}x` : 'Ainda não executada'}
                   {a.ultimo_status === 'erro' && a.ultimo_erro && <span className="text-red-500"> · {a.ultimo_erro}</span>}
@@ -241,6 +274,39 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
                         <span className="text-gray-700">{t.label}</span>
                       </label>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {form.tipo === 'emissao_fiscal_marketplace' && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-700">Pedidos de qual canal?</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {([['canal', 'Um canal'], ['plataforma', 'Todos de um marketplace']] as const).map(([id, label]) => (
+                      <label key={id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm cursor-pointer ${form.escopo === id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                        <input type="radio" name="escopo" checked={form.escopo === id} onChange={() => f('escopo', id)} className="accent-blue-600" />
+                        <span className="text-gray-700">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {form.escopo === 'canal' ? (
+                    <select value={form.marketplace_canal_id} onChange={e => f('marketplace_canal_id', e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-500">
+                      <option value="">Escolha o canal...</option>
+                      {canais.map(c => <option key={c.id} value={c.id}>{c.nome} ({nomePlataforma(c.plataforma)})</option>)}
+                    </select>
+                  ) : (
+                    <select value={form.plataforma} onChange={e => f('plataforma', e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-500">
+                      <option value="">Escolha o marketplace...</option>
+                      {plataformas.map(p => <option key={p} value={p}>{nomePlataforma(p)}</option>)}
+                    </select>
+                  )}
+                  {canais.length === 0 && <p className="text-xs text-gray-400">Nenhum canal de marketplace ativo.</p>}
+                  <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 space-y-1">
+                    <p>Emite a NF-e dos pedidos <strong>pagos e ainda sem nota</strong> — a mesma do botão “Conferir/Emitir” do pedido, até {LIMITE_NFE_MARKETPLACE_POR_RODADA} por rodada.</p>
+                    <p>Não emite se o marketplace já tiver recebido nota (emitida em outro sistema) nem se a nota foi informada à mão. Pedido bloqueado (produto sem perfil fiscal, endereço faltando) fica marcado com o motivo e é tentado de novo 3h depois.</p>
+                    <p><strong>Atenção:</strong> canal cuja empresa emissora está em produção gera nota fiscal real.</p>
                   </div>
                 </div>
               )}
@@ -288,8 +354,22 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
                   ))}
                 </div>
                 {form.timing === 'horario_especifico' && (
-                  <input type="time" value={form.horario_envio} onChange={e => f('horario_envio', e.target.value)}
-                    className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                  <div className="mt-2 space-y-1.5">
+                    {form.horarios.map((h, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input type="time" value={h}
+                          onChange={e => f('horarios', form.horarios.map((x, j) => j === i ? e.target.value : x))}
+                          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                        {form.horarios.length > 1 && (
+                          <button type="button" onClick={() => f('horarios', form.horarios.filter((_, j) => j !== i))}
+                            className="text-gray-400 hover:text-red-500 text-sm px-2">✕</button>
+                        )}
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => f('horarios', [...form.horarios, ''])}
+                      className="text-xs text-blue-600 hover:text-blue-800">+ Adicionar horário</button>
+                    <p className="text-[11px] text-gray-400">Horário de Brasília. Cada horário roda uma vez por dia.</p>
+                  </div>
                 )}
               </div>
 

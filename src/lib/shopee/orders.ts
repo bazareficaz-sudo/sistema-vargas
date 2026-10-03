@@ -17,6 +17,9 @@ const RESPONSE_OPTIONAL_FIELDS = [
   'buyer_username', 'recipient_address', 'item_list', 'package_list', 'order_status',
   'total_amount', 'currency', 'create_time', 'update_time', 'ship_by_date',
   'estimated_shipping_fee', 'actual_shipping_fee', 'payment_method', 'note',
+  // CPF do comprador, só para pedido do Brasil — sem pedir, a Shopee não
+  // manda, e a NF-e não sai sem ele (ver src/lib/fiscal/destinatario.ts).
+  'buyer_cpf_id',
 ].join(',')
 
 type CallCtx = { sb: any; canal: ShopeeChannel }

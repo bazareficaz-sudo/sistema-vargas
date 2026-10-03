@@ -48,7 +48,7 @@ const CFOP_COM_ST = new Set([
 ])
 
 /** Situação tributária que declara ST — nos dois regimes. */
-const SITUACAO_COM_ST = new Set([
+export const SITUACAO_COM_ST = new Set([
   // Simples Nacional (CSOSN, 3 dígitos)
   '201', '202', '203', // com permissão/sem permissão de crédito, cobrando ST
   '500',               // ICMS cobrado anteriormente por ST — o caso do varejo

@@ -48,6 +48,8 @@ export default function CanalConfigClient({ canal: canalInicial, logs, regras, e
     aplicar_regra_produto: canalInicial.aplicar_regra_produto ?? false,
     regra_padrao_id: canalInicial.regra_padrao_id ?? '',
     empresa_fiscal_id: canalInicial.empresa_fiscal_id ?? '',
+    intermediador_cnpj: canalInicial.intermediador_cnpj ?? '',
+    intermediador_id: canalInicial.intermediador_id ?? '',
   })
 
   function f(k: string, v: any) { setForm(p => ({ ...p, [k]: v })) }
@@ -68,6 +70,8 @@ export default function CanalConfigClient({ canal: canalInicial, logs, regras, e
       aplicar_regra_produto: form.aplicar_regra_produto,
       regra_padrao_id: form.regra_padrao_id || null,
       empresa_fiscal_id: form.empresa_fiscal_id || null,
+      intermediador_cnpj: form.intermediador_cnpj.replace(/\D/g, '') || null,
+      intermediador_id: form.intermediador_id.trim() || null,
       updated_at: new Date().toISOString(),
     }).eq('id', canalInicial.id)
     setSalvando(false)
@@ -198,6 +202,25 @@ export default function CanalConfigClient({ canal: canalInicial, logs, regras, e
                 na conta de vendedor do marketplace, senão o canal recusa a nota.
               </p>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">CNPJ do marketplace (intermediador)</label>
+                <input value={form.intermediador_cnpj} onChange={e => f('intermediador_cnpj', e.target.value)}
+                  placeholder="CNPJ da empresa do marketplace"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Sua identificação no marketplace</label>
+                <input value={form.intermediador_id} onChange={e => f('intermediador_id', e.target.value)}
+                  placeholder={form.seller_id ? `Vazio = ${form.seller_id}` : 'Login ou ID da loja'}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+            </div>
+            <p className="text-xs text-gray-400">
+              Venda por marketplace leva na NF-e o CNPJ do marketplace e a sua identificação de vendedor nele (grupo
+              do intermediador, NT 2020.006). Sem o CNPJ, a NF-e dos pedidos deste canal não é emitida. Confirme o
+              CNPJ com a contabilidade ou no próprio marketplace.
+            </p>
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">

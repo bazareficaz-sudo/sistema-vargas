@@ -17,6 +17,7 @@ export function createBrasilNFeProvider(creds: BrasilNFeCredentials): FiscalProv
     },
     emissao: {
       emitirNFCe: (input) => emissao.emitirNFCe(creds, input),
+      emitirNFe: (input) => emissao.emitirNFe(creds, input),
       consultarNFCe: () => emissao.consultarNFCe(),
       cancelarNFCe: (alvo, justificativa) => emissao.cancelarNFCe(creds, alvo.chave, alvo.protocolo, justificativa),
     },

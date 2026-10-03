@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 
@@ -33,6 +33,17 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
   const [aplicarPdv, setAplicarPdv] = useState(false)
   const [disponivelPdv, setDisponivelPdv] = useState(true)
 
+  // Perfis fiscais vêm do banco aqui mesmo, em vez de pela lista de produtos:
+  // só esta tela precisa deles. Lista vazia (tabela ainda não criada, ou
+  // nenhum perfil) esconde a opção em vez de oferecer um select sem nada.
+  const [perfisFiscais, setPerfisFiscais] = useState<{ id: string; nome: string }[]>([])
+  const [aplicarPerfil, setAplicarPerfil] = useState(false)
+  const [perfilFiscal, setPerfilFiscal] = useState('')
+  useEffect(() => {
+    createClient().from('perfis_fiscais').select('id, nome').eq('ativo', true).order('nome')
+      .then(({ data }) => setPerfisFiscais(data ?? []))
+  }, [])
+
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
@@ -40,7 +51,7 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
     ? categoriasTodas.filter(c => c.pai_id && categoriasTodas.find(r => r.id === c.pai_id)?.nome === categoria)
     : []
 
-  const nenhumCampoSelecionado = !aplicarCategoria && !aplicarMarca && !aplicarNcm && !aplicarUnidade && !aplicarPdv
+  const nenhumCampoSelecionado = !aplicarCategoria && !aplicarMarca && !aplicarNcm && !aplicarUnidade && !aplicarPdv && !aplicarPerfil
 
   async function aplicar() {
     if (nenhumCampoSelecionado) { setErro('Marque ao menos um campo para aplicar.'); return }
@@ -52,6 +63,7 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
     if (aplicarNcm) payload.ncm = ncm.trim() || null
     if (aplicarUnidade) payload.unidade = unidade
     if (aplicarPdv) payload.disponivel_pdv = disponivelPdv
+    if (aplicarPerfil) payload.perfil_fiscal_id = perfilFiscal || null
 
     const sb = createClient()
     const { error } = await sb.from('produtos').update(payload).in('id', ids)
@@ -167,6 +179,26 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
               </div>
             )}
           </div>
+
+          {perfisFiscais.length > 0 && (
+            <div className="border border-gray-200 rounded-lg px-3 py-3">
+              <label className="flex items-center gap-2.5 cursor-pointer mb-2">
+                <input type="checkbox" checked={aplicarPerfil} onChange={e => setAplicarPerfil(e.target.checked)}
+                  className="w-4 h-4 accent-blue-600" />
+                <span className="text-sm font-medium text-gray-700">Perfil fiscal</span>
+              </label>
+              {aplicarPerfil && (
+                <div className="ml-6">
+                  <select value={perfilFiscal} onChange={e => setPerfilFiscal(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-700 focus:outline-none focus:border-blue-500 bg-white">
+                    <option value="">— Sem perfil —</option>
+                    {perfisFiscais.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">Define o CFOP e o CSOSN/CST da NF-e conforme a venda. Não altera a NFC-e do PDV.</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {erro && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{erro}</p>}
         </div>
