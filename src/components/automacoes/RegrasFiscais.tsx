@@ -24,6 +24,13 @@ const FORMAS_PAGAMENTO = [
   { id: 'multiplo', label: 'Múltiplo' },
 ]
 
+const TIMINGS = [
+  { id: 'imediato', label: 'Imediato', descricao: 'Assim que a venda entrar (checagem a cada poucos minutos)' },
+  { id: 'hora_em_hora', label: 'De hora em hora', descricao: 'No máximo uma rodada por hora' },
+  { id: 'horario_especifico', label: 'Horário específico', descricao: '1x por dia, num horário fixo' },
+] as const
+type Timing = typeof TIMINGS[number]['id']
+
 const FORM_VAZIO = {
   tipo: 'emissao_fiscal_produto' as TipoFiscal,
   nome: '',
@@ -33,11 +40,19 @@ const FORM_VAZIO = {
   cliente_id: null as string | null,
   cliente_nome: '',
   ativa: true,
+  timing: 'imediato' as Timing,
+  horario_envio: '',
+  alertar_erro_whatsapp: '',
 }
 
 function icone(tipo: string) { return TIPOS.find(t => t.id === tipo)?.icone ?? '📄' }
 function labelTipo(tipo: string) { return TIPOS.find(t => t.id === tipo)?.label ?? tipo }
 function labelForma(f: string) { return FORMAS_PAGAMENTO.find(x => x.id === f)?.label ?? f }
+function labelTiming(a: Automacao) {
+  if (a.timing === 'hora_em_hora') return '⏱ de hora em hora'
+  if (a.timing === 'horario_especifico') return `🕐 1x/dia às ${a.horario_envio ?? '--:--'}`
+  return '⚡ imediato'
+}
 function fmtData(v: string | null) { return v ? new Date(v).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null }
 
 function resumoRegra(a: Automacao) {
@@ -82,6 +97,9 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
       cliente_id: a.cliente_id,
       cliente_nome: a.cliente_nome ?? '',
       ativa: a.ativa,
+      timing: (a.timing as Timing) ?? 'imediato',
+      horario_envio: a.horario_envio ?? '',
+      alertar_erro_whatsapp: a.alertar_erro_whatsapp ?? '',
     })
     setErro('')
     setModal(true)
@@ -100,6 +118,7 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
     if (form.tipo === 'emissao_fiscal_produto' && form.produtos.length === 0) return 'Selecione pelo menos 1 produto.'
     if (form.tipo === 'emissao_fiscal_forma_pagamento' && !form.forma_pagamento) return 'Selecione a forma de pagamento.'
     if (form.tipo === 'emissao_fiscal_cliente' && !form.cliente_id) return 'Selecione o cliente.'
+    if (form.timing === 'horario_especifico' && !form.horario_envio) return 'Informe o horário de execução.'
     return ''
   }
 
@@ -120,6 +139,9 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
       forma_pagamento: form.tipo === 'emissao_fiscal_forma_pagamento' ? form.forma_pagamento : null,
       cliente_id: form.tipo === 'emissao_fiscal_cliente' ? form.cliente_id : null,
       cliente_nome: form.tipo === 'emissao_fiscal_cliente' ? form.cliente_nome : null,
+      timing: form.timing,
+      horario_envio: form.timing === 'horario_especifico' ? form.horario_envio : null,
+      alertar_erro_whatsapp: form.alertar_erro_whatsapp.trim() || null,
       updated_at: new Date().toISOString(),
     }
 
@@ -179,7 +201,7 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
                   <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">NFC-e</span>
                   {!a.ativa && <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">inativa</span>}
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5">{resumoRegra(a)}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{resumoRegra(a)} · {labelTiming(a)}</p>
                 <p className="text-[10px] text-gray-400 mt-1">
                   {a.ultima_execucao ? `Última execução: ${fmtData(a.ultima_execucao)} · ${a.total_execucoes}x` : 'Ainda não executada'}
                   {a.ultimo_status === 'erro' && a.ultimo_erro && <span className="text-red-500"> · {a.ultimo_erro}</span>}
@@ -251,6 +273,33 @@ export default function RegrasFiscais({ empresaId, automacoes, onChange }: {
                     onChange={(id, nome) => { f('cliente_id', id); f('cliente_nome', nome) }} />
                 </div>
               )}
+
+              <div>
+                <p className="text-xs font-semibold text-gray-700 mb-2">Quando rodar</p>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {TIMINGS.map(t => (
+                    <label key={t.id} className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-sm cursor-pointer ${form.timing === t.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                      <input type="radio" name="timing" checked={form.timing === t.id} onChange={() => f('timing', t.id)} className="accent-blue-600 mt-0.5" />
+                      <span>
+                        <span className="text-gray-700 block">{t.label}</span>
+                        <span className="text-gray-400 text-xs">{t.descricao}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {form.timing === 'horario_especifico' && (
+                  <input type="time" value={form.horario_envio} onChange={e => f('horario_envio', e.target.value)}
+                    className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Avisar por WhatsApp se der erro (opcional)</label>
+                <input value={form.alertar_erro_whatsapp} onChange={e => f('alertar_erro_whatsapp', e.target.value)}
+                  placeholder="(21) 99999-9999"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                <p className="text-[11px] text-gray-400 mt-1">Manda um aviso pra este número quando a emissão falhar (no máximo 1 aviso por hora, enquanto o problema persistir).</p>
+              </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Nome da regra</label>

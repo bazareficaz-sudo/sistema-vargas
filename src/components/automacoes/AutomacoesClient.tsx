@@ -24,6 +24,11 @@ export type Automacao = {
   modelo_fiscal: string | null
   numero_destino: string | null
   horario_envio: string | null
+  /** 'imediato' (padrão) | 'hora_em_hora' | 'horario_especifico' — ritmo de
+   * execução das regras "por evento" (hoje: emissão fiscal). */
+  timing: string | null
+  /** WhatsApp pra avisar quando a regra terminar com erro. Opcional. */
+  alertar_erro_whatsapp: string | null
   tipo_relatorio: string | null
   dias_alerta: number | null
   limite_estoque: number | null
