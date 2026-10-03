@@ -41,7 +41,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function ContasPagarClient({
   contas: inicial, contasAbertas, statusFiltro, periodoFiltro, deFiltro, ateFiltro, intervaloRotulo,
-  qInicial, empresaId, totalPendente, totalVencido, totalPago, hojeIso,
+  qInicial, empresaId, escopoCartoes, hojeIso,
 }: {
   contas: Conta[]
   /** TODAS as contas em aberto da empresa — a base do resumo por fornecedor. */
@@ -53,7 +53,8 @@ export default function ContasPagarClient({
   /** Intervalo já resolvido pelo servidor, em texto ("28/09/2026 a 04/10/2026"). */
   intervaloRotulo: string
   qInicial: string; empresaId: string
-  totalPendente: number; totalVencido: number; totalPago: number
+  /** Contas do período escolhido, de TODOS os status — base dos cartões do topo. */
+  escopoCartoes: { status: string; valor: number; fornecedor_id: string | null; descricao: string }[]
   hojeIso: string
 }) {
   const router = useRouter()
@@ -235,6 +236,22 @@ export default function ContasPagarClient({
       if (ordem === 'valor') return (b.valor ?? 0) - (a.valor ?? 0)
       return String(a.vencimento ?? '').localeCompare(String(b.vencimento ?? ''))
     })
+  // CARTÕES DO TOPO: mesmo recorte da lista (período, fornecedor, descrição),
+  // exceto o status — cada cartão É um status. Sai de `escopoCartoes`, não de
+  // `contas`: a lista vem cortada em 200 e já filtrada por status.
+  const cartoes = (() => {
+    const t = { pendente: 0, vencido: 0, pago: 0 }
+    const busca = q.toLowerCase()
+    for (const c of escopoCartoes) {
+      if (!(c.status in t)) continue // cancelado não entra em nenhum cartão
+      if (fornecedorFiltro && (c.fornecedor_id ?? '') !== fornecedorFiltro) continue
+      if (busca && !c.descricao.toLowerCase().includes(busca)) continue
+      t[c.status as keyof typeof t] += Number(c.valor)
+    }
+    return t
+  })()
+  const recorteAtivo = !!(periodoFiltro || fornecedorFiltro || q)
+
   const totalFiltrado = filtradas.reduce((s, c) => s + Number(c.valor), 0)
   // Conta paga ou cancelada não entra em pagamento em massa.
   const selecionaveis = filtradas.filter(c => c.status !== 'pago' && c.status !== 'cancelado')
@@ -268,20 +285,25 @@ export default function ContasPagarClient({
       </div>
 
       {/* Cards resumo */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-3 gap-4 mb-1">
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-xs text-gray-500 mb-1">A vencer</p>
-          <p className="text-2xl font-bold text-yellow-600">{fmt(totalPendente)}</p>
+          <p className="text-2xl font-bold text-yellow-600">{fmt(cartoes.pendente)}</p>
         </div>
         <div className="bg-white border border-red-100 rounded-xl p-4">
           <p className="text-xs text-gray-500 mb-1">Vencido</p>
-          <p className="text-2xl font-bold text-red-600">{fmt(totalVencido)}</p>
+          <p className="text-2xl font-bold text-red-600">{fmt(cartoes.vencido)}</p>
         </div>
         <div className="bg-white border border-green-100 rounded-xl p-4">
-          <p className="text-xs text-gray-500 mb-1">Pago (total)</p>
-          <p className="text-2xl font-bold text-green-600">{fmt(totalPago)}</p>
+          <p className="text-xs text-gray-500 mb-1">{recorteAtivo ? 'Pago' : 'Pago (total)'}</p>
+          <p className="text-2xl font-bold text-green-600">{fmt(cartoes.pago)}</p>
         </div>
       </div>
+      <p className="text-[11px] text-gray-400 mb-5">
+        {recorteAtivo
+          ? 'Totais do recorte atual (vencimento, fornecedor e descrição) — os botões de status só mudam a lista abaixo.'
+          : 'Totais de todas as contas.'}
+      </p>
 
       {/* Filtros */}
       <div className="flex items-center gap-3 mb-3 flex-wrap">
