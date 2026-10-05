@@ -17,6 +17,8 @@ import { createClient } from '@/lib/supabase/client'
 type Emissao = {
   status?: string; ambiente?: 'producao' | 'homologacao'; numero?: string | null; chave?: string | null
   danfeUrl?: string | null; motivoRejeicao?: string | null; emitenteNome?: string; em?: string
+  /** Entrega da nota ao marketplace (só nota de produção). */
+  enviadaAoCanalEm?: string | null; envioCanalErro?: string | null
 }
 
 type Linha = { nome: string; sku: string | null; quantidade: number; valor: number; perfil: string | null; cfop: string | null; icmsSituacao: string | null; aliquotaIcms: number | null }
@@ -58,13 +60,14 @@ async function lerEstado(pedidoId: string, vendaId: string | null): Promise<{
 export default function NotaFiscalPedido({ pedido, emitidaPor, onFaturado }: {
   pedido: { id: string; venda_id?: string | null; nfe_numero?: string | null }
   emitidaPor: string
-  onFaturado: (patch: { nfe_numero: string | null; nfe_chave: string | null }) => void
+  onFaturado: (patch: { nfe_numero?: string | null; nfe_chave?: string | null; nfe_informada_em?: string | null }) => void
 }) {
   const [emissao, setEmissao] = useState<Emissao | null>(null)
   const [nfceAntiga, setNfceAntiga] = useState<{ numero: string; danfeUrl: string | null } | null>(null)
   const [previa, setPrevia] = useState<Previa | null>(null)
   const [carregando, setCarregando] = useState(false)
   const [emitindo, setEmitindo] = useState(false)
+  const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
 
   const carregarEstado = useCallback(async () => {
@@ -99,6 +102,21 @@ export default function NotaFiscalPedido({ pedido, emitidaPor, onFaturado }: {
     }
   }
 
+  async function enviarAoCanal() {
+    setEnviando(true); setErro('')
+    try {
+      const resp = await fetch(`/api/marketplaces/pedidos/${pedido.id}/nfe/enviar-canal`, { method: 'POST' })
+      const data = await resp.json()
+      if (!data.ok) setErro(data.erro ?? 'Não foi possível enviar a nota ao marketplace')
+      else onFaturado({ nfe_informada_em: new Date().toISOString() })
+      await carregarEstado()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao enviar ao marketplace')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
   async function emitir() {
     setEmitindo(true); setErro('')
     try {
@@ -106,7 +124,12 @@ export default function NotaFiscalPedido({ pedido, emitidaPor, onFaturado }: {
       const data = await resp.json()
       if (data.erros?.length) setErro(data.erros.join('\n'))
       else if (!data.ok && data.erro) setErro(data.erro)
-      if (data.ok && data.ambiente === 'producao') onFaturado({ nfe_numero: data.numero ?? null, nfe_chave: data.chave ?? null })
+      if (data.ok && data.ambiente === 'producao') {
+        onFaturado({
+          nfe_numero: data.numero ?? null, nfe_chave: data.chave ?? null,
+          ...(data.envioCanal?.ok ? { nfe_informada_em: new Date().toISOString() } : {}),
+        })
+      }
       setPrevia(null)
       await carregarEstado()
     } catch (e) {
@@ -140,6 +163,21 @@ export default function NotaFiscalPedido({ pedido, emitidaPor, onFaturado }: {
           <p>✓ Autorizada — Nº <span className="font-mono">{emissao.numero}</span><SeloAmbiente ambiente={emissao.ambiente} /></p>
           {emissao.chave && <p className="font-mono text-[10px] break-all mt-0.5">{emissao.chave}</p>}
           {emissao.danfeUrl && <a href={emissao.danfeUrl} target="_blank" rel="noreferrer" className="underline">Ver DANFE</a>}
+          {emissao.ambiente === 'producao' && (
+            emissao.enviadaAoCanalEm ? (
+              <p className="mt-1">✓ Enviada ao marketplace em {new Date(emissao.enviadaAoCanalEm).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
+            ) : (
+              <div className="mt-1.5 space-y-1">
+                {emissao.envioCanalErro && (
+                  <p className="text-amber-800">⚠ Ainda não está no marketplace: {emissao.envioCanalErro}</p>
+                )}
+                <button onClick={enviarAoCanal} disabled={enviando}
+                  className="w-full py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[11px] font-medium rounded-md">
+                  {enviando ? 'Enviando...' : '📤 Enviar nota ao marketplace'}
+                </button>
+              </div>
+            )
+          )}
         </div>
       )}
       {emissao && emissao.status !== 'autorizada' && emissao.status !== 'processando' && (
