@@ -1026,6 +1026,14 @@ export default function NovaEntradaClient({
           .map(x => sb.from('produtos').update(x.upd).eq('id', x.produtoId)))
       }
 
+      // Custo do KIT acompanha o custo do componente. O recálculo lá em cima
+      // (no laço de estoque) rodava ANTES deste custo ser gravado e lia o
+      // valor velho — todo kit com esse componente ficava com o custo da nota
+      // anterior. Aqui o custo novo já está no banco.
+      for (const x of reajustesComPatch) {
+        if (x.upd.preco_custo !== undefined) await recalcularKitsQueUsam(sb, x.produtoId)
+      }
+
       // Entrada é onde o custo realmente muda no dia a dia: chega a nota,
       // o fornecedor subiu o preço, o markup recalcula a venda. Sem
       // propagar aqui, a empresa parceira ficaria com o custo velho e o
