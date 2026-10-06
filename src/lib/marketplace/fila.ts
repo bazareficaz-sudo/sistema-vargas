@@ -5,6 +5,7 @@ import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produt
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
 import { enviarParaAnuncio, sleep, THROTTLE_ENVIO_MS, type AlvoVariacao, type CanalEnvio } from './envio'
 import { precisaEnviar } from './precisaEnviar'
+import { PLATAFORMAS_CONFERIVEIS, conferencia, lerEstoqueNoCanal } from './conferirEstoque'
 import { canalAceitaEnvio, type CanalComInterruptores } from './canais'
 import {
   variacoesElegiveis, decidirPausaComVariacoes, rotuloDaVariacao, resumoDosAlvos,
@@ -527,9 +528,31 @@ export async function processarFilaDaEmpresa(
           })
           await sleep(THROTTLE_ENVIO_MS)
 
-          if (r.ok) {
+          // REENVIO SE CONFERE NA HORA: a medida que provocou o reenvio só
+          // mudaria na próxima sincronização de catálogo (diária na TikTok), e
+          // até lá o mesmo número seria mandado a cada rodada. Ver
+          // conferirEstoque.ts.
+          let medidoAgora: number | null = null
+          if (r.ok && decisaoEnvio.espelhoDivergente && estoqueNovo !== undefined
+            && PLATAFORMAS_CONFERIVEIS.has(canal.plataforma)) {
+            try {
+              await sleep(1000)
+              medidoAgora = await lerEstoqueNoCanal(sb, canal, String(a.id_externo))
+            } catch { /* sem leitura agora: a sincronização de catálogo confere depois */ }
+          }
+          const conf = medidoAgora != null && estoqueNovo !== undefined ? conferencia(estoqueNovo, medidoAgora) : null
+
+          if (r.ok && conf && !conf.confirmado) {
+            // Aceito e não aplicado. O espelho NÃO recebe o número: ele não
+            // está lá. A medida, sim — é a resposta da plataforma.
+            acao = 'erro'; falhasEnvio++
+            detalheFinal = conf.detalhe
+            comFalha.set(produto.id, detalheFinal)
+            await sb.from('marketplace_anuncios').update({ estoque_reservado: medidoAgora }).eq('id', a.id)
+          } else if (r.ok) {
             acao = 'enviado'; enviados++
             detalheFinal = `${detalheFinal}`
+              + (conf ? ` · ${conf.detalhe}` : '')
               + (r.pausado ? ` · anuncio pausado (${decisao.acao === 'pausar' ? decisao.motivo : ''})` : '')
               + (r.reativado ? ' · anuncio reativado (estoque voltou)' : '')
               + (decisao.acao === 'nada' && paraPausar === false && a.status === 'pausado'
@@ -543,6 +566,8 @@ export async function processarFilaDaEmpresa(
             // veria "sem mudanca" e nunca mais tentaria enviar.
             await sb.from('marketplace_anuncios').update({
               estoque_externo: estoqueNovo,
+              // Leitura feita agora na plataforma: vira a nova medida.
+              ...(medidoAgora != null ? { estoque_reservado: medidoAgora } : {}),
               ...(precoNovo != null && !emPromocao ? { preco_venda: precoNovo } : {}),
               // A ORIGEM DA PAUSA VAI JUNTO. Sem ela, a proxima reposicao de
               // estoque nao saberia se pode religar este anuncio.
