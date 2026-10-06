@@ -98,6 +98,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [busca, setBusca] = useState('')
   const [qtdInput, setQtdInput] = useState('1')
   const [sugestoes, setSugestoes] = useState<Produto[]>([])
+  // Miniatura de cada produto da lista de busca (id → url). Só ~6% do
+  // catálogo tem foto, então a ausência é o normal: a linha mostra um espaço
+  // reservado para as colunas não saltarem de uma linha para outra.
+  const [miniaturas, setMiniaturas] = useState<Record<string, string>>({})
+  // Produtos cuja foto já foi procurada (com ou sem resultado) — digitar mais
+  // uma letra não repete a consulta de quem já está na lista.
+  const miniaturasBuscadas = useRef(new Set<string>())
   const [buscando, setBuscando] = useState(false)
   const [itemSelecionado, setItemSelecionado] = useState<ItemVenda | null>(null)
   const [sugestaoIdx, setSugestaoIdx] = useState(-1)
@@ -311,6 +318,34 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       .then(({ data }) => { if (data) setVendedores(data as Vendedor[]) })
   }, [sb, empresaId])
 
+  // ── Miniaturas da lista de busca ───────────────────────────────
+  //
+  // Consulta SEPARADA e DEPOIS de a lista aparecer: o operador vê o resultado
+  // na hora e as fotos entram em seguida — a busca não fica mais lenta por
+  // causa delas. Sem join embutido (o PostgREST desta base não reconhece
+  // vários relacionamentos); só os ids que ainda não foram procurados.
+  const carregarMiniaturas = useCallback(async (lista: Produto[]) => {
+    const faltam = lista.map(p => p.id).filter(id => !miniaturasBuscadas.current.has(id))
+    if (faltam.length === 0) return
+    faltam.forEach(id => miniaturasBuscadas.current.add(id))
+
+    const { data, error } = await sb.from('produto_imagens')
+      .select('produto_id, url, ordem, principal')
+      .in('produto_id', faltam)
+      .order('ordem')
+    if (error) { faltam.forEach(id => miniaturasBuscadas.current.delete(id)); return }
+
+    // A marcada como principal; senão a de menor ordem (já vem ordenado).
+    const escolhida: Record<string, { url: string; principal: boolean }> = {}
+    for (const img of data ?? []) {
+      if (!img.url) continue
+      const atual = escolhida[img.produto_id]
+      if (!atual || (img.principal && !atual.principal)) escolhida[img.produto_id] = { url: img.url, principal: !!img.principal }
+    }
+    const novas = Object.fromEntries(Object.entries(escolhida).map(([id, e]) => [id, e.url]))
+    if (Object.keys(novas).length > 0) setMiniaturas(prev => ({ ...prev, ...novas }))
+  }, [sb])
+
   // ── Busca de produtos ──────────────────────────────────────────
   const buscarProdutos = useCallback(async (q: string) => {
     if (!q.trim() || q.length < 2) { setSugestoes([]); return }
@@ -345,7 +380,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       lista = (d2 ?? []) as Produto[]
     }
     setSugestoes(lista); setSugestaoIdx(-1); setBuscando(false)
-  }, [empresaEstoqueId])
+    void carregarMiniaturas(lista)
+  }, [empresaEstoqueId, carregarMiniaturas])
 
   useEffect(() => {
     const t = setTimeout(() => buscarProdutos(busca), 220)
@@ -1122,16 +1158,28 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           {buscando && <span className="absolute right-3 top-2.5 text-gray-400 text-xs">🔍</span>}
 
           {sugestoes.length > 0 && (
-            <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-              <div className="grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
-                <span>SKU</span><span>Nome</span><span>Marca</span><span className="text-center">Estoque</span><span className="text-right">Preço</span>
+            <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+              <div className="grid grid-cols-[44px_90px_1fr_130px_70px_110px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
+                <span /><span>SKU</span><span>Nome</span><span>Marca</span><span className="text-center">Estoque</span><span className="text-right">Preço</span>
               </div>
               <div ref={sugestaoListRef}>
                 {sugestoes.map((p, i) => {
                   const emPromo = promocaoVigente(p)
                   return (
                   <div key={p.id} onMouseDown={() => { confirmarAdicao(p); setSugestaoIdx(-1) }}
-                    className={`grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-2 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                    className={`grid grid-cols-[44px_90px_1fr_130px_70px_110px] gap-0 px-3 py-1.5 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                    <span className="w-9 h-9 flex items-center justify-center rounded bg-gray-100 overflow-hidden">
+                      {miniaturas[p.id] ? (
+                        // Hospedagens externas variam (algumas recusam referência
+                        // cruzada) e uma foto quebrada não pode estragar a
+                        // linha: se falhar, some e fica o espaço reservado.
+                        <img src={miniaturas[p.id]} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer"
+                          className="w-full h-full object-contain"
+                          onError={e => { e.currentTarget.style.display = 'none' }} />
+                      ) : (
+                        <span className="text-gray-300 text-sm" aria-hidden>📦</span>
+                      )}
+                    </span>
                     <span className="text-gray-400 text-xs font-mono truncate pr-2">{p.sku}</span>
                     <span className="font-medium text-gray-900 truncate pr-2 flex items-center gap-1">
                       {p.nome}
