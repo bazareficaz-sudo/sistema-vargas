@@ -64,6 +64,7 @@ export default function CheckoutCliente({
           entrega: { modo, ...form },
           pagamento,
           observacao: form.observacao,
+          site: form.site,
         }),
       })
       const dados = await r.json()
@@ -226,8 +227,16 @@ export default function CheckoutCliente({
             className={`${classesBotao('primario')} mt-4 w-full`} style={estiloPrimario}>
             {enviando ? 'Enviando…' : 'Confirmar pedido'}
           </button>
+          {/* Isca para robô: fora da tela e fora da ordem de tabulação. */}
+          <input
+            type="text" name="site" tabIndex={-1} autoComplete="off" aria-hidden="true"
+            value={form.site ?? ''} onChange={e => set('site', e.target.value)}
+            style={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+          />
           <p className="mt-2 text-center text-[0.6875rem] text-[var(--tinta-fraca)]">
-            Ao confirmar, a loja recebe seu pedido e entra em contato.
+            Ao confirmar, a loja recebe seu pedido e entra em contato. Leia a{' '}
+            <Link href="/p/privacidade" className="underline">política de privacidade</Link>{' '}
+            e as <Link href="/p/trocas-e-devolucoes" className="underline">trocas e devoluções</Link>.
           </p>
         </div>
       </aside>

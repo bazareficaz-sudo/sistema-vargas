@@ -2,8 +2,12 @@ import { NextResponse } from 'next/server'
 import { lojaAtual } from '@/lib/commerce/loja'
 import { criarPedido, mensagemDeErro } from '@/lib/commerce/pedido'
 import { notificarPedido } from '@/lib/commerce/notificar'
+import { ipDe, ipEstourou, limiteDoBancoEstourou } from '@/lib/commerce/limite'
 
 export const dynamic = 'force-dynamic'
+
+const MENSAGEM_LIMITE =
+  'Recebemos muitos pedidos seus em pouco tempo. Aguarde alguns minutos ou fale com a loja pelo WhatsApp.'
 
 // Fechamento do pedido da loja.
 //
@@ -25,6 +29,14 @@ export async function POST(req: Request) {
 
   const corpo = await req.json().catch(() => null) as Record<string, unknown> | null
   if (!corpo) return NextResponse.json({ erro: 'Requisição inválida' }, { status: 400 })
+
+  // Campo-isca: invisível para gente, preenchido por robô de formulário.
+  if (txt(corpo.site, 200)) {
+    return NextResponse.json({ erro: 'Requisição inválida' }, { status: 400 })
+  }
+  if (ipEstourou(ipDe(req))) {
+    return NextResponse.json({ erro: MENSAGEM_LIMITE }, { status: 429 })
+  }
 
   const itensBrutos = Array.isArray(corpo.itens) ? corpo.itens : []
   const itens = itensBrutos
@@ -51,6 +63,10 @@ export async function POST(req: Request) {
   // pagamento. Sem ele o pedido nasce sem caminho de volta.
   if (telefone.replace(/\D/g, '').length < 10) {
     return NextResponse.json({ erro: 'Informe um telefone com DDD.' }, { status: 400 })
+  }
+
+  if (await limiteDoBancoEstourou(loja, telefone.replace(/\D/g, ''))) {
+    return NextResponse.json({ erro: MENSAGEM_LIMITE }, { status: 429 })
   }
 
   const e = (corpo.entrega ?? {}) as Record<string, unknown>
