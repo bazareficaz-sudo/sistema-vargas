@@ -9,6 +9,7 @@ import { atualizarPrecoEstoque as atualizarPrecoTiktok } from '@/lib/tiktok/writ
 import { montarCanal as montarCanalTiktok } from '@/lib/tiktok/canal'
 import { resolverPrecoEfetivo } from '@/lib/precificacao/precos'
 import { criarResolvedor } from '@/lib/precificacao/contexto'
+import { COLUNAS_VARIACAO_PRECO, anuncioDaVariacao, type VariacaoPreco } from '@/lib/precificacao/variacoes'
 
 // Aplica o recálculo APENAS nos itens que o usuário aprovou na prévia.
 //
@@ -38,7 +39,7 @@ const MAX_POR_LOTE = 200
 
 export async function POST(req: Request) {
   const { itens, enviarAoMarketplace } = await req.json() as {
-    itens: { anuncioId: string; precoNovo: number; regraId?: string; regraNome?: string; regraObjetivo?: string; custo?: number; margemAtual?: number; margemNova?: number }[]
+    itens: { anuncioId: string; variacaoId?: string | null; precoNovo: number; regraId?: string; regraNome?: string; regraObjetivo?: string; custo?: number; margemAtual?: number; margemNova?: number }[]
     enviarAoMarketplace?: boolean
   }
 
@@ -64,6 +65,16 @@ export async function POST(req: Request) {
     .eq('empresa_id', guarda.empresaId)
   const porId = new Map((anuncios ?? []).map((a: any) => [a.id, a]))
 
+  // Linhas de variação (preço por variação). A posse vem do anúncio: a
+  // variação só vale se for do anúncio da mesma linha, conferido acima.
+  const idsVariacao = [...new Set(doLote.map(i => i.variacaoId).filter((id): id is string => !!id))]
+  const variacaoPorId = new Map<string, VariacaoPreco>()
+  if (idsVariacao.length > 0) {
+    const { data: vars } = await sb.from('marketplace_anuncio_variacoes')
+      .select(COLUNAS_VARIACAO_PRECO).in('id', idsVariacao)
+    for (const v of vars ?? []) variacaoPorId.set(v.id, v)
+  }
+
   const canaisNecessarios = [...new Set((anuncios ?? []).map((a: any) => a.canal_id))]
   const { data: canaisRows } = await sb.from('marketplace_canais')
     .select('id, nome, plataforma, empresa_id, seller_id, shop_cipher, access_token, refresh_token, token_expira_em')
@@ -72,7 +83,7 @@ export async function POST(req: Request) {
   // Renova o token uma vez por canal, não uma vez por anúncio.
   const canalPronto = new Map<string, any>()
 
-  const resultados: { anuncioId: string; ok: boolean; erro?: string; enviado: boolean }[] = []
+  const resultados: { anuncioId: string; variacaoId?: string | null; ok: boolean; erro?: string; enviado: boolean }[] = []
   const retidos: { anuncioId: string; titulo: string; motivo: string }[] = []
   const historico: any[] = []
   const agora = new Date()
@@ -91,28 +102,41 @@ export async function POST(req: Request) {
     const preco = Number(item.precoNovo)
     if (!(preco > 0)) { resultados.push({ anuncioId: item.anuncioId, ok: false, erro: 'Preço inválido', enviado: false }); continue }
 
+    const variacao = item.variacaoId ? variacaoPorId.get(item.variacaoId) ?? null : null
+    if (item.variacaoId && (!variacao || variacao.anuncio_id !== a.id)) {
+      resultados.push({ anuncioId: a.id, variacaoId: item.variacaoId, ok: false, erro: 'Variação não encontrada', enviado: false }); continue
+    }
+    // O que se precifica nesta linha: o anúncio, ou o anúncio com o preço da variação.
+    const alvo = variacao ? anuncioDaVariacao(a, variacao) : a
+
     // Campanha ou promoção vigente: o preço novo não teria efeito nenhum,
     // então não grava e não envia — e o operador fica sabendo por quê.
     const precos = resolverPrecoEfetivo({
-      anuncio: a, campanhas: campanhasPorCanal.get(a.canal_id) ?? [], agora,
+      anuncio: alvo, campanhas: campanhasPorCanal.get(a.canal_id) ?? [], agora,
     })
     if (precos.origemEfetivo !== 'base') {
       const de = precos.origemEfetivo === 'campanha'
         ? `a campanha "${precos.campanha?.nome ?? ''}"`
         : 'a promoção local'
       retidos.push({
-        anuncioId: a.id, titulo: a.titulo ?? '',
+        anuncioId: a.id, titulo: `${a.titulo ?? ''}${variacao ? ` — ${variacao.nome_variacao ?? 'variação'}` : ''}`,
         motivo: `${de} está vigente a R$ ${precos.efetivo.toFixed(2)} — o preço novo não valeria`,
       })
       continue
     }
 
-    const precoAnterior = Number(a.preco_venda ?? 0)
+    const precoAnterior = Number(alvo.preco_venda ?? 0)
 
-    const { error } = await sb.from('marketplace_anuncios')
-      .update({ preco_venda: preco, updated_at: new Date().toISOString() })
-      .eq('id', a.id).eq('empresa_id', guarda.empresaId)
-    if (error) { resultados.push({ anuncioId: a.id, ok: false, erro: error.message, enviado: false }); continue }
+    // Linha de variação grava o preço NA VARIAÇÃO; o do anúncio a próxima
+    // sincronização refaz a partir das variações.
+    const { error } = variacao
+      ? await sb.from('marketplace_anuncio_variacoes')
+          .update({ preco, updated_at: new Date().toISOString() })
+          .eq('id', variacao.id).eq('anuncio_id', a.id)
+      : await sb.from('marketplace_anuncios')
+          .update({ preco_venda: preco, updated_at: new Date().toISOString() })
+          .eq('id', a.id).eq('empresa_id', guarda.empresaId)
+    if (error) { resultados.push({ anuncioId: a.id, variacaoId: variacao?.id ?? null, ok: false, erro: error.message, enviado: false }); continue }
 
     let enviado = false
     let erroEnvio: string | null = null
@@ -121,6 +145,11 @@ export async function POST(req: Request) {
       const canalRow = canalPorId.get(a.canal_id)
       try {
         if (!canalRow?.access_token) throw new Error('Canal sem conexão ativa')
+
+        if (variacao && canalRow.plataforma !== 'tiktok') {
+          // Preço por variação só existe onde o envio por SKU foi feito.
+          throw new Error(`Preço por variação ainda não é enviado para ${canalRow.plataforma} — o preço foi salvo só no sistema`)
+        }
 
         if (canalRow.plataforma === 'shopee') {
           if (!canalPronto.has(a.canal_id)) {
@@ -149,10 +178,11 @@ export async function POST(req: Request) {
           if (!r.ok) throw new Error(r.erro ?? 'O Mercado Livre recusou o preço')
           enviado = true
         } else if (canalRow.plataforma === 'tiktok') {
-          // atualizarPrecoTiktok renova o token sozinho. Produto com mais de
-          // um SKU é recusado lá dentro com mensagem clara: um preço só não
-          // diz qual variação recebe — mesma regra de Shopee e ML acima.
-          const r = await atualizarPrecoTiktok(sb, montarCanalTiktok(canalRow), String(a.id_externo), [{ preco }])
+          // atualizarPrecoTiktok renova o token sozinho. Linha de variação
+          // vai para o SKU dela; linha de anúncio com mais de um SKU é
+          // recusada lá dentro — um preço só não diz qual variação recebe.
+          if (variacao && !variacao.model_id) throw new Error('Variação sem o id do SKU na TikTok — sincronize o anúncio')
+          const r = await atualizarPrecoTiktok(sb, montarCanalTiktok(canalRow), String(a.id_externo), [{ skuId: variacao?.model_id ?? null, preco }])
           if (!r.precoOk) throw new Error(r.erroPreco ?? r.erro ?? 'A TikTok Shop recusou o preço')
           enviado = true
         } else {
@@ -167,7 +197,8 @@ export async function POST(req: Request) {
     }
 
     historico.push({
-      empresa_id: guarda.empresaId, anuncio_id: a.id, canal_id: a.canal_id, produto_id: a.produto_id,
+      empresa_id: guarda.empresaId, anuncio_id: a.id, variacao_id: variacao?.id ?? null, canal_id: a.canal_id,
+      produto_id: variacao ? variacao.produto_id : a.produto_id,
       preco_anterior: precoAnterior, preco_novo: preco,
       custo_no_momento: item.custo ?? null,
       margem_anterior: item.margemAtual ?? null, margem_nova: item.margemNova ?? null,
@@ -177,7 +208,7 @@ export async function POST(req: Request) {
       usuario_id: guarda.userId, usuario_nome: operador,
     })
 
-    resultados.push({ anuncioId: a.id, ok: true, enviado, erro: erroEnvio ?? undefined })
+    resultados.push({ anuncioId: a.id, variacaoId: variacao?.id ?? null, ok: true, enviado, erro: erroEnvio ?? undefined })
   }
 
   if (historico.length > 0) await sb.from('precificacao_historico').insert(historico)

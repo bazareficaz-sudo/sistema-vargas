@@ -82,24 +82,24 @@ export default function RecalculoMassa() {
     }
   }
 
-  const precoDe = (i: any) => ajustes[i.anuncioId]?.preco ?? i.precoNovo
-  const margemDe = (i: any) => ajustes[i.anuncioId]?.margem ?? i.margemNova
-  const saudeDe = (i: any) => ajustes[i.anuncioId]?.saude ?? i.saudeNova
+  const precoDe = (i: any) => ajustes[i.chave]?.preco ?? i.precoNovo
+  const margemDe = (i: any) => ajustes[i.chave]?.margem ?? i.margemNova
+  const saudeDe = (i: any) => ajustes[i.chave]?.saude ?? i.saudeNova
   // O lado direito da linha inteiro sai do mesmo preço. Enquanto estes dois
   // liam o valor da REGRA, um ajuste de margem deixava a tela dizendo duas
   // coisas incompatíveis ao mesmo tempo: margem líquida 10% (do ajuste) ao
   // lado de "s/ custo → 20%" (da regra). É a unidade em que as regras são
   // escritas, então era justo o número em que o operador confiava.
-  const lucroSobreCustoDe = (i: { anuncioId: string; lucroSobreCustoNovo: number }) =>
-    ajustes[i.anuncioId]?.lucroSobreCusto ?? i.lucroSobreCustoNovo
+  const lucroSobreCustoDe = (i: { chave: string; lucroSobreCustoNovo: number }) =>
+    ajustes[i.chave]?.lucroSobreCusto ?? i.lucroSobreCustoNovo
   // O frete também muda com o preço: a escada do ML tem degraus, e um ajuste
   // pode atravessar um deles.
-  const freteDe = (i: { anuncioId: string; frete: number }) =>
-    ajustes[i.anuncioId]?.frete ?? i.frete
-  const foiAjustado = (i: any) => ajustes[i.anuncioId]?.preco != null
+  const freteDe = (i: { chave: string; frete: number }) =>
+    ajustes[i.chave]?.frete ?? i.frete
+  const foiAjustado = (i: any) => ajustes[i.chave]?.preco != null
 
   function mudarMargem(i: any, valor: number | null) {
-    const id = i.anuncioId
+    const id = i.chave
     setAjustes(a => ({ ...a, [id]: { ...a[id], margemAlvo: valor, erro: '', fixada: false } }))
     clearTimeout(timers.current[id])
     if (valor == null || !(valor > 0)) {
@@ -116,8 +116,8 @@ export default function RecalculoMassa() {
           // Canal que mede a saúde pelo custo: o número digitado é lucro
           // sobre o custo, não margem.
           body: JSON.stringify(i.baseSaude === 'custo'
-            ? { anuncioId: id, lucroSobreCusto: valor }
-            : { anuncioId: id, margem: valor }),
+            ? { anuncioId: i.anuncioId, variacaoId: i.variacaoId ?? null, lucroSobreCusto: valor }
+            : { anuncioId: i.anuncioId, variacaoId: i.variacaoId ?? null, margem: valor }),
         }).then(r => r.json())
         setAjustes(a => ({
           ...a,
@@ -188,9 +188,9 @@ export default function RecalculoMassa() {
   }
 
   async function fixarParaProduto(i: any) {
-    const margem = ajustes[i.anuncioId]?.margemAlvo
+    const margem = ajustes[i.chave]?.margemAlvo
     if (!(margem > 0)) return
-    setAjustes(a => ({ ...a, [i.anuncioId]: { ...a[i.anuncioId], fixando: true } }))
+    setAjustes(a => ({ ...a, [i.chave]: { ...a[i.chave], fixando: true } }))
     const d = await fetch('/api/precificacao/regras', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -204,12 +204,12 @@ export default function RecalculoMassa() {
     }).then(r => r.json())
     setAjustes(a => ({
       ...a,
-      [i.anuncioId]: { ...a[i.anuncioId], fixando: false, fixada: d.ok, erro: d.ok ? '' : (d.erro ?? 'Erro ao criar a regra') },
+      [i.chave]: { ...a[i.chave], fixando: false, fixada: d.ok, erro: d.ok ? '' : (d.erro ?? 'Erro ao criar a regra') },
     }))
   }
 
   async function aplicar() {
-    const escolhidos = previa.itens.filter((i: any) => selecionados.has(i.anuncioId))
+    const escolhidos = previa.itens.filter((i: any) => selecionados.has(i.chave))
     if (escolhidos.length === 0) return
     const texto = enviarAoMarketplace
       ? `Aplicar o novo preço em ${escolhidos.length} anúncio(s) e enviar para o marketplace?`
@@ -223,7 +223,7 @@ export default function RecalculoMassa() {
         body: JSON.stringify({
           enviarAoMarketplace,
           itens: escolhidos.map((i: any) => ({
-            anuncioId: i.anuncioId, precoNovo: precoDe(i), regraId: i.regraId,
+            anuncioId: i.anuncioId, variacaoId: i.variacaoId ?? null, precoNovo: precoDe(i), regraId: i.regraId,
             regraNome: i.regraNome,
             // O historico precisa dizer que o preco nao saiu puro da regra —
             // senao, meses depois, ninguem entende a diferenca.
@@ -251,7 +251,7 @@ export default function RecalculoMassa() {
   // com bases diferentes misturados → cabeçalho neutro, e cada linha usa a sua.
   const basesNaPrevia = new Set(itens.map((i: any) => i.baseSaude ?? 'preco'))
   const baseColuna: 'preco' | 'custo' | 'mista' = basesNaPrevia.size > 1 ? 'mista' : (basesNaPrevia.has('custo') ? 'custo' : 'preco')
-  const todosMarcados = itens.length > 0 && itens.every((i: any) => selecionados.has(i.anuncioId))
+  const todosMarcados = itens.length > 0 && itens.every((i: any) => selecionados.has(i.chave))
 
   return (
     <div className="space-y-5">
@@ -477,7 +477,7 @@ export default function RecalculoMassa() {
                 <div className="flex items-center gap-3">
                   <label className="flex items-center gap-2 text-sm text-gray-700">
                     <input type="checkbox" checked={todosMarcados}
-                      onChange={e => setSelecionados(e.target.checked ? new Set(itens.map((i: any) => i.anuncioId)) : new Set())}
+                      onChange={e => setSelecionados(e.target.checked ? new Set(itens.map((i: any) => i.chave)) : new Set())}
                       className="w-4 h-4 accent-blue-600" />
                     {selecionados.size > 0 ? `${selecionados.size} selecionado(s)` : 'Selecionar todos'}
                   </label>
@@ -537,22 +537,26 @@ export default function RecalculoMassa() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {itens.map((i: any) => {
-                      const aj = ajustes[i.anuncioId]
+                      const aj = ajustes[i.chave]
                       const ajustado = foiAjustado(i)
                       const dif = Number((precoDe(i) - i.precoAtual).toFixed(2))
                       const sa = ROTULO_SAUDE[i.saudeAtual as SaudePreco]
                       const sn = ROTULO_SAUDE[saudeDe(i) as SaudePreco]
                       return (
-                        <tr key={i.anuncioId} className="hover:bg-gray-50">
+                        <tr key={i.chave} className="hover:bg-gray-50">
                           <td className="px-3 py-2">
-                            <input type="checkbox" checked={selecionados.has(i.anuncioId)}
+                            <input type="checkbox" checked={selecionados.has(i.chave)}
                               onChange={e => setSelecionados(s => {
-                                const n = new Set(s); e.target.checked ? n.add(i.anuncioId) : n.delete(i.anuncioId); return n
+                                const n = new Set(s); e.target.checked ? n.add(i.chave) : n.delete(i.chave); return n
                               })}
                               className="w-4 h-4 accent-blue-600" />
                           </td>
                           <td className="px-3 py-2">
                             <p className="text-gray-900 truncate max-w-md">{i.titulo || i.produtoNome}</p>
+                            {/* Linha de variação: o preço e o custo são desta variação. */}
+                            {i.variacaoNome && (
+                              <p className="text-xs text-violet-700">↳ variação: {i.variacaoNome} · {i.produtoNome}</p>
+                            )}
                             <p className="text-xs text-gray-400">
                               {i.canalNome} · regra {i.regraNome} ({i.regraObjetivo})
                             </p>

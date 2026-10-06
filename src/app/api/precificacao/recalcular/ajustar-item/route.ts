@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { criarResolvedor, descreverOrigem, COLUNAS_ANUNCIO, COLUNAS_CANAL, COLUNAS_PRODUTO } from '@/lib/precificacao/contexto'
 import { avaliarPreco, precificarPorObjetivo } from '@/lib/precificacao/cenarios'
+import { COLUNAS_VARIACAO_PRECO, anuncioDaVariacao } from '@/lib/precificacao/variacoes'
 
 // Recalcula UM anúncio da prévia com uma margem diferente da que a regra
 // manda — ou avalia um preço que o operador informou.
@@ -21,8 +22,10 @@ import { avaliarPreco, precificarPorObjetivo } from '@/lib/precificacao/cenarios
 // uma tela só usando.
 
 export async function POST(req: Request) {
-  const { anuncioId, margem, preco, lucroSobreCusto } = await req.json() as {
+  const { anuncioId, variacaoId, margem, preco, lucroSobreCusto } = await req.json() as {
     anuncioId: string; margem?: number; preco?: number
+    /** Linha de variação (preço por variação): custo e preço são os dela. */
+    variacaoId?: string | null
     /** Alvo em lucro ÷ custo (%) — para quem mede a saúde pelo custo. */
     lucroSobreCusto?: number
   }
@@ -37,12 +40,23 @@ export async function POST(req: Request) {
   const guarda = await exigirPermissao(sb, 'gerenciar_marketplaces')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
 
-  const { data: anuncio } = await sb.from('marketplace_anuncios')
+  const { data: anuncioRow } = await sb.from('marketplace_anuncios')
     .select(`${COLUNAS_ANUNCIO}, produtos(${COLUNAS_PRODUTO})`)
     .eq('id', anuncioId).eq('empresa_id', guarda.empresaId).maybeSingle()
-  if (!anuncio) return NextResponse.json({ ok: false, erro: 'Anúncio não encontrado' }, { status: 404 })
+  if (!anuncioRow) return NextResponse.json({ ok: false, erro: 'Anúncio não encontrado' }, { status: 404 })
 
-  const p: any = (anuncio as any).produtos
+  let anuncio: any = anuncioRow
+  let p: any = (anuncioRow as any).produtos
+  if (variacaoId) {
+    // A variação precisa ser DESTE anúncio — que já foi conferido como da empresa.
+    const { data: v } = await sb.from('marketplace_anuncio_variacoes')
+      .select(`${COLUNAS_VARIACAO_PRECO}, produtos(${COLUNAS_PRODUTO})`)
+      .eq('id', variacaoId).eq('anuncio_id', anuncioId).maybeSingle()
+    if (!v) return NextResponse.json({ ok: false, erro: 'Variação não encontrada' }, { status: 404 })
+    anuncio = anuncioDaVariacao(anuncioRow as any, v)
+    p = (v as any).produtos
+    if (!p) return NextResponse.json({ ok: false, erro: 'Variação sem produto vinculado' }, { status: 400 })
+  }
   if (!p) return NextResponse.json({ ok: false, erro: 'Anúncio sem produto vinculado' }, { status: 400 })
 
   // O canal é buscado pela empresa da sessão, não só pelo id que veio do
