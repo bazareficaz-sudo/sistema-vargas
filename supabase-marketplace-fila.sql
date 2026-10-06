@@ -119,6 +119,11 @@ BEGIN
   ON CONFLICT (empresa_id, produto_id) DO UPDATE SET
     sujo_em = now(),
     motivo  = EXCLUDED.motivo,
+    -- Remarcar LIMPA o envio anterior: pendente é `enviado_em IS NULL`.
+    -- Sem esta linha o produto some da fila (ver
+    -- supabase-fila-remarcar-limpa-envio.sql, regressão de 03/09/2026).
+    enviado_em = NULL,
+    tentativas = 0,
     -- Prioridade só sobe: se o produto já estava marcado como urgente, uma
     -- movimentação comum depois não pode rebaixá-lo.
     prioridade = GREATEST(marketplace_fila.prioridade, EXCLUDED.prioridade);
