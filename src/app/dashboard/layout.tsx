@@ -12,6 +12,7 @@ import PlanProvider from '@/components/plan/PlanProvider'
 import DashboardShell from '@/components/DashboardShell'
 import { perfilDaSessao, empresasDoUsuario } from '@/lib/auth/empresaAtiva'
 import { urlVargasMarketing } from '@/lib/integracoes/marketing/acesso'
+import { carregarConfigSessao } from '@/lib/auth/configSessao'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -54,7 +55,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   //  · exceções de permissão configuradas em Usuários → Permissões
   //  · plano/assinatura da empresa
   //  · atalho do Vargas Marketing (só com código de conexão ativo)
-  const [empresasDoOperador, { data: suporteRow }, excecoes, planoBase, vargasMarketingUrl] = await Promise.all([
+  //  · regra de encerramento automático da sessão (Sessão e Segurança)
+  const [empresasDoOperador, { data: suporteRow }, excecoes, planoBase, vargasMarketingUrl, configSessao] = await Promise.all([
     empresasDoUsuario(supabase, user.id),
     supabase
       .from('suporte_acessos')
@@ -66,6 +68,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     buscarExcecoes(supabase, user.id),
     loadPlanData(empresaId, user.id),
     urlVargasMarketing(empresaId),
+    carregarConfigSessao(supabase, empresaId),
   ])
 
   let suporte: PlanData['suporte'] = null
@@ -114,7 +117,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     const tela = telaDoPathname(pathname)
     return (
       <PlanProvider data={planData}>
-        <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId}>
+        <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId} configSessao={configSessao}>
           <div className="p-6 max-w-lg">
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
               <span className="text-3xl block mb-2">🔒</span>
@@ -138,7 +141,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <PlanProvider data={planData}>
-      <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId}>{children}</DashboardShell>
+      <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId} configSessao={configSessao}>{children}</DashboardShell>
     </PlanProvider>
   )
 }

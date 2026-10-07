@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { descreverMinutos, minutosValidos } from '@/lib/auth/configSessao'
 
 export default function LoginPage() {
   return (
@@ -27,7 +28,11 @@ function LoginForm() {
     if (erroParam === 'acesso_bloqueado') {
       setErro('Seu acesso foi bloqueado ou inativado por um administrador.')
     } else if (erroParam === 'inatividade') {
-      setErro('Sua sessão expirou por inatividade (30 min sem uso). Entre novamente.')
+      // O tempo vem na URL porque é configurável por empresa e, aqui, já
+      // não há sessão para consultar a configuração.
+      const min = Number(searchParams.get('min'))
+      const tempo = minutosValidos(min) ? ` (${descreverMinutos(min)} sem uso)` : ''
+      setErro(`Sua sessão expirou por inatividade${tempo}. Entre novamente.`)
     } else if (erroParam === 'virada_dia') {
       setErro('Sua sessão do dia anterior expirou. Entre novamente.')
     } else if (erroParam === 'outra_aba') {
