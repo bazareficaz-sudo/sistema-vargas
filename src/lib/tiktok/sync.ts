@@ -26,7 +26,7 @@ function precoDoProduto(raw: TiktokProduct): number {
   return precos.length > 0 ? Math.min(...precos) : 0
 }
 
-function estoqueDoProduto(raw: TiktokProduct): number | null {
+export function estoqueDoProduto(raw: TiktokProduct): number | null {
   const skus = raw.skus ?? []
   if (skus.length === 0) return null
   let soma = 0

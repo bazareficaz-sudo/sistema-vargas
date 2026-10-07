@@ -198,6 +198,18 @@ export default async function DashboardPage({
   const cpAVencer = cp.filter(c => c.status === 'pendente' && c.vencimento > todayStr).reduce((s, c) => s + Number(c.valor ?? 0), 0)
   const cpTotal = cpVencidas + cpHoje + cpAVencer
 
+  // CARTÃO "A PAGAR": só o que está em aberto e VENCE NESTE MÊS (inclui o que
+  // já venceu dentro do mês). O total de todas as contas (`cpTotal`) somava
+  // parcelas de meses futuros e dívidas antigas num número só, e o gestor não
+  // sabia o que pesa no caixa deste mês. `cpTotal` segue valendo para o saldo
+  // previsto e demais indicadores, que comparam totais.
+  const mesAtual = todayStr.slice(0, 7)
+  const cpDoMes = cp.filter(c => (c.status === 'pendente' || c.status === 'vencido') && String(c.vencimento ?? '').slice(0, 7) === mesAtual)
+  const cpMesTotal = cpDoMes.reduce((s, c) => s + Number(c.valor ?? 0), 0)
+  const cpMesJaVencido = cpDoMes
+    .filter(c => c.status === 'vencido' || String(c.vencimento ?? '') < todayStr)
+    .reduce((s, c) => s + Number(c.valor ?? 0), 0)
+
   // Séries compactas dos cards. Vendas olham 14 dias para trás; receber e
   // pagar mostram o acúmulo de títulos pelos próximos 14 dias, começando pelo
   // que já está vencido. Assim o traço sempre comunica dados reais.
@@ -223,8 +235,11 @@ export default async function DashboardPage({
   const serieReceber = chavesFuturas14.map((_, indice) => crVencido + (crRes.data ?? [])
     .filter(conta => ['aberto', 'parcial'].includes(conta.status) && conta.data_vencimento && String(conta.data_vencimento).slice(0, 10) <= chavesFuturas14[indice])
     .reduce((total, conta) => total + Number(conta.valor_aberto ?? 0), 0))
-  const seriePagar = chavesFuturas14.map((_, indice) => cpVencidas + cp
-    .filter(conta => conta.status === 'pendente' && conta.vencimento && conta.vencimento <= chavesFuturas14[indice])
+  // Parte do que já venceu NO MÊS e soma, dia a dia, o que ainda vence dentro
+  // do mês — mesmo recorte do número do cartão. (Antes partia de todo o
+  // vencido e somava de novo os pendentes já vencidos.)
+  const seriePagar = chavesFuturas14.map((_, indice) => cpMesJaVencido + cpDoMes
+    .filter(conta => conta.status === 'pendente' && String(conta.vencimento ?? '') >= todayStr && String(conta.vencimento ?? '') <= chavesFuturas14[indice])
     .reduce((total, conta) => total + Number(conta.valor ?? 0), 0))
 
   const vendasConcluidasHoje = (ultimasVendasRes.data ?? []).filter(venda => venda.status === 'concluida')
@@ -508,10 +523,10 @@ export default async function DashboardPage({
           )}
           {tem('contas_pagar') && (
             <KpiCard
-              label="A pagar" value={brl(cpTotal)} sub={cpVencidas > 0 ? `${brl(cpVencidas)} vencido` : cpHoje > 0 ? `${brl(cpHoje)} vencem hoje` : 'em dia'}
+              label="A pagar no mês" value={brl(cpMesTotal)} sub={cpVencidas > 0 ? `${brl(cpVencidas)} vencido (todos os meses)` : cpHoje > 0 ? `${brl(cpHoje)} vencem hoje` : 'em dia'}
               icon="💳" accent={cpVencidas > 0 ? '#ef4444' : cpHoje > 0 ? '#f59e0b' : '#64748b'} bg={cpVencidas > 0 ? 'from-red-50 to-rose-50' : 'from-slate-50 to-gray-50'}
               href="/dashboard/contas-pagar" alert={cpVencidas > 0}
-              sparkline={seriePagar} sparklineLabel="Pagamentos acumulados por vencimento nos próximos 14 dias"
+              sparkline={seriePagar} sparklineLabel="Pagamentos do mês acumulados por vencimento nos próximos 14 dias"
             />
           )}
         </div>

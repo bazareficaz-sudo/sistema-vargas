@@ -5,7 +5,15 @@
 // botão "Recalcular" no EditarProdutoModal quanto antes de enviar preço/
 // estoque de kits para a Shopee.
 
-export type ResultadoKit = { custo: number; estoque: number }
+// `custoConfiavel` = false quando a soma não representa o custo do kit: um
+// componente sem custo (a soma sairia parcial ou zero), componente apagado,
+// ou quantidade absurda na composição (0,0002 por engano). Nesses casos o
+// custo que já estava gravado vale mais que o calculado — ver
+// `recalcularKitsQueUsam` e `custo_do_kit()` no banco (mesma regra).
+export type ResultadoKit = { custo: number; estoque: number; custoConfiavel: boolean }
+
+// Quantidade de componente abaixo disso é erro de cadastro, não receita.
+export const QTD_MINIMA_COMPONENTE = 0.01
 
 export async function calcularKit(
   sb: any,
@@ -41,10 +49,12 @@ export async function calcularKit(
   }
 
   let custo = 0
+  let custoConfiavel = true
   let estoqueMinimo = Infinity
   for (const item of itens) {
     const componente = (componentes ?? []).find((c: any) => c.id === item.produto_id)
-    if (!componente) continue
+    if (!componente) { custoConfiavel = false; continue }
+    if (!((componente.preco_custo ?? 0) > 0) || !(item.quantidade >= QTD_MINIMA_COMPONENTE)) custoConfiavel = false
     custo += (componente.preco_custo ?? 0) * item.quantidade
     // Componente marcado como "não controlar estoque" (ex: parafusos,
     // buchas) nunca limita quantos kits dá pra montar — trata como se
@@ -54,13 +64,27 @@ export async function calcularKit(
     estoqueMinimo = Math.min(estoqueMinimo, Math.floor(estoqueComponente / item.quantidade))
   }
 
-  return { custo, estoque: estoqueMinimo === Infinity ? 0 : Math.max(0, estoqueMinimo) }
+  return { custo, estoque: estoqueMinimo === Infinity ? 0 : Math.max(0, estoqueMinimo), custoConfiavel }
 }
 
 // Quando um componente muda de custo/estoque (salvo como produto normal),
 // os kits que o usam ficam desatualizados até alguém abrir e recalcular
 // manualmente. Isso propaga o recálculo pra todos os kits que usam esse
 // componente, gravando direto em `produtos`.
+//
+// Três cuidados, todos aprendidos com kit errado na listagem:
+//
+//  1. ESTOQUE E CUSTO EM GRAVAÇÕES SEPARADAS. Antes iam num UPDATE só; o
+//     gatilho de permissão do banco recusa mudar `preco_custo` sem
+//     `editar_produtos`, e a recusa levava junto o estoque — operador que só
+//     mexe em estoque deixava o kit sem atualizar nenhum dos dois, em silêncio.
+//  2. O ERRO NÃO É MAIS ENGOLIDO. Era ignorado; agora vai para o console.
+//  3. CUSTO NÃO CONFIÁVEL NÃO SOBRESCREVE. Componente sem custo, apagado ou
+//     com quantidade absurda dá uma soma que não é o custo do kit — o valor
+//     gravado, que alguém pode ter digitado da nota, vale mais.
+//
+// E só grava o que mudou: cada UPDATE em `produtos` enfileira o item para o
+// marketplace, e reescrever número igual seria trabalho à toa.
 export async function recalcularKitsQueUsam(sb: any, componenteId: string): Promise<void> {
   const { data: itens } = await sb
     .from('kit_itens')
@@ -68,12 +92,28 @@ export async function recalcularKitsQueUsam(sb: any, componenteId: string): Prom
     .eq('produto_id', componenteId)
 
   const kitIds = Array.from(new Set<string>((itens ?? []).map((i: any) => String(i.kit_id))))
+  if (kitIds.length === 0) return
+
+  const { data: atuais } = await sb.from('produtos').select('id, estoque, preco_custo').in('id', kitIds)
+  const gravado = new Map<string, { estoque: number | null; preco_custo: number | null }>(
+    (atuais ?? []).map((k: any) => [k.id, k]),
+  )
+
   for (const kitId of kitIds) {
     const resultado = await calcularKit(sb, kitId)
-    if (resultado) {
-      await sb.from('produtos')
-        .update({ preco_custo: resultado.custo, estoque: resultado.estoque, updated_at: new Date().toISOString() })
-        .eq('id', kitId)
+    if (!resultado) continue
+    const atual = gravado.get(kitId)
+    const agora = new Date().toISOString()
+
+    if (Number(atual?.estoque ?? NaN) !== resultado.estoque) {
+      const { error } = await sb.from('produtos').update({ estoque: resultado.estoque, updated_at: agora }).eq('id', kitId)
+      if (error) console.error(`[kit] estoque do kit ${kitId} não atualizado:`, error.message)
+    }
+
+    const custo = Math.round(resultado.custo * 100) / 100
+    if (resultado.custoConfiavel && Number(atual?.preco_custo ?? NaN) !== custo) {
+      const { error } = await sb.from('produtos').update({ preco_custo: custo, updated_at: agora }).eq('id', kitId)
+      if (error) console.error(`[kit] custo do kit ${kitId} não atualizado:`, error.message)
     }
   }
 }

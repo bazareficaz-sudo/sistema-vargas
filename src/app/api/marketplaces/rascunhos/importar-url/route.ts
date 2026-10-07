@@ -60,18 +60,12 @@ export async function POST(req: Request) {
   // A primeira versao dizia "o ML negou a leitura, reconecte a conta" para um
   // link de catalogo — conselho errado para um problema que nao era de
   // autorizacao. A pessoa iria reconectar e continuaria sem funcionar.
+  //
+  // CATÁLOGO (/p/ e /up/) passou a ser lido em 07/10/2026 — ver
+  // `buscarAnuncioPorUrl`: o anúncio que o link indica, conferido contra o
+  // catálogo; senão o produto do catálogo do ML, com o preço de quem está na
+  // caixa de compra.
   const alvo = classificarUrlML(url)
-
-  if (alvo.tipo === 'catalogo') {
-    return NextResponse.json({
-      ok: false,
-      tipoLink: 'catalogo',
-      erro: 'Este link e da pagina de CATALOGO do Mercado Livre (/p/ ou /up/), que nao pertence a um '
-        + 'vendedor — nela varios vendedores disputam a caixa de compra, e o ganhador muda. '
-        + 'Abra o anuncio do vendedor especifico e cole aquele endereco: na pagina do catalogo, o '
-        + 'caminho e clicar no nome do vendedor ou em "outras opcoes de compra".',
-    }, { status: 400 })
-  }
 
   if (alvo.tipo === 'nenhum') {
     return NextResponse.json({
@@ -82,19 +76,21 @@ export async function POST(req: Request) {
     }, { status: 400 })
   }
 
-  const idExterno = alvo.itemId
-
   // JÁ CAPTURADO? Devolve o existente em vez de criar duplicado — mesma regra
   // da extensão. Sem isto, colar o mesmo link duas vezes criaria dois
   // rascunhos do mesmo anúncio, e o mapeamento teria que ser feito duas vezes.
-  const { data: existente } = await sb.from('anuncio_rascunhos')
-    .select('id, titulo, status, capturado_em, origem')
-    .eq('empresa_id', empresaId)
-    .eq('origem_marketplace', 'mercadolivre')
-    .eq('origem_id_externo', idExterno)
-    .maybeSingle()
-
-  if (existente) {
+  //
+  // Num link de anúncio o id já está no caminho, e a checagem vem ANTES da
+  // leitura (poupa as chamadas ao ML). Num link de catálogo o id só é
+  // conhecido depois — pode ser o anúncio indicado ou o produto do catálogo.
+  async function jaCapturado(idExterno: string) {
+    const { data: existente } = await sb.from('anuncio_rascunhos')
+      .select('id, titulo, status, capturado_em, origem')
+      .eq('empresa_id', empresaId)
+      .eq('origem_marketplace', 'mercadolivre')
+      .eq('origem_id_externo', idExterno)
+      .maybeSingle()
+    if (!existente) return null
     return NextResponse.json({
       ok: true,
       duplicado: true,
@@ -105,6 +101,11 @@ export async function POST(req: Request) {
     })
   }
 
+  if (alvo.tipo === 'anuncio') {
+    const repetido = await jaCapturado(alvo.itemId)
+    if (repetido) return repetido
+  }
+
   const { data: canais } = await sb.from('marketplace_canais')
     .select('id, empresa_id, seller_id, access_token, refresh_token, token_expira_em')
     .eq('empresa_id', empresaId).eq('plataforma', 'mercadolivre')
@@ -112,10 +113,28 @@ export async function POST(req: Request) {
 
   const leitura = await lerAnuncioPorUrl(sb, (canais ?? []) as CanalParaLeitura[], url, canalId)
   if (!leitura.ok) {
+    // Negado num link de catálogo = produto de OUTRO vendedor. Medido em
+    // 07/10/2026: a API nega anúncio de terceiro às contas da empresa, e a
+    // página pública, lida fora do navegador, cai na verificação de conta do
+    // ML. "Reconecte a conta" seria o conselho errado — o caminho é a
+    // extensão, que lê a página no navegador de quem está logado.
+    if (leitura.negadoPeloML && alvo.tipo === 'catalogo') {
+      return NextResponse.json({
+        ok: false,
+        erro: 'Este produto é de outro vendedor, e o Mercado Livre não libera a leitura de anúncios de '
+          + 'terceiros pela API. Abra o link no Chrome e capture com a Extensão do Chrome — ela lê a '
+          + 'página no seu navegador e traz o anúncio do mesmo jeito.',
+      }, { status: 400 })
+    }
     return NextResponse.json({ ok: false, erro: leitura.erro }, { status: 400 })
   }
 
   const d = leitura.dados
+  const idExterno = d.idExterno
+  if (alvo.tipo === 'catalogo') {
+    const repetido = await jaCapturado(idExterno)
+    if (repetido) return repetido
+  }
   const imagens = [...new Set(d.imagens)].slice(0, 30)
 
   // O MESMO FORMATO de `dados_origem` que a extensão grava, com os campos que
@@ -129,8 +148,8 @@ export async function POST(req: Request) {
     // Só a página renderizada tem estes. A API não os expõe.
     precoDe: null,
     precoPromocional: null,
-    tipoPagina: 'anuncio',
-    idAnuncioVencedor: null,
+    tipoPagina: d.tipoPagina,
+    idAnuncioVencedor: d.idAnuncioVencedor,
     vendedor: null,
     quantidadeVendida: null,
     categoriaAparente: d.categoriaNomeExterna,
@@ -177,7 +196,11 @@ export async function POST(req: Request) {
     user_id: user.id,
     acao: 'capturado',
     dados_depois: { url, marketplace: 'mercadolivre', titulo: d.titulo, qtdImagens: imagens.length },
-    observacao: 'Importado por link, lido pela API do Mercado Livre',
+    observacao: d.tipoPagina === 'catalogo'
+      ? 'Importado por link de catálogo — conteúdo do produto do catálogo do Mercado Livre, preço do anúncio na caixa de compra'
+      : alvo.tipo === 'catalogo'
+        ? 'Importado por link de catálogo — anúncio indicado no link, conferido contra o catálogo'
+        : 'Importado por link, lido pela API do Mercado Livre',
   })
 
   return NextResponse.json({
@@ -190,5 +213,8 @@ export async function POST(req: Request) {
     // O que esta origem NÃO trouxe. A tela mostra para o operador saber que
     // precisa conferir, em vez de descobrir na hora de publicar.
     naoDisponivelPorLink: ['preço riscado', 'quantidade vendida', 'vendedor'],
+    // Catálogo lido como PRODUTO: título, fotos e ficha são do catálogo do ML,
+    // e o preço é o de quem está na caixa de compra agora.
+    tipoPagina: d.tipoPagina,
   })
 }

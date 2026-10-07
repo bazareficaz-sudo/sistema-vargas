@@ -581,6 +581,11 @@ export default function EntradaXmlDetalheClient({
         const { error } = await sb.from('produtos').update(patch)
           .eq('id', item.produto_id).eq('empresa_id', empresaId)
         if (error) throw error
+
+        // Custo gravado acima: kits que usam este produto acompanham. Esta
+        // tela salvava o custo sem recalcular — só a finalização recalculava,
+        // e custo salvo depois dela passava batido.
+        if (item.produto_id) await recalcularKitsQueUsam(sb, item.produto_id)
       }
 
       const { error: erroEntrada } = await sb.from('nfe_entradas').update({ status: 'aguardando_financeiro' }).eq('id', entrada.id)

@@ -11,6 +11,9 @@ import type { ClassificacaoMargem, Margens } from './margens'
 import type { OrigemPrecoEfetivo, CampanhaVigenteResumo } from './precos'
 import type { SaudePreco } from './tipos'
 import { selosDoAnuncio, type SeloCampanha } from '@/lib/marketplace/seloCampanha'
+import {
+  COLUNAS_VARIACAO_PRECO, anuncioDaVariacao, chaveDoItem, nomeDaVariacao, precificaPorVariacao, type VariacaoPreco,
+} from './variacoes'
 
 // O cliente do Supabase é `any` em todo o repositório: tipá-lo exigiria os
 // tipos gerados do banco, que este projeto não usa. O alias existe para a
@@ -33,7 +36,17 @@ type ClienteSupabase = any
 // preços dependendo da tela.
 
 export type ItemRecalculo = {
+  /**
+   * Identidade da linha: o anúncio, ou anúncio + variação quando a plataforma
+   * é precificada por variação (ver variacoes.ts). Seleção, ajuste e
+   * aplicação andam por ela — `anuncioId` sozinho repetiria entre as
+   * variações do mesmo anúncio.
+   */
+  chave: string
   anuncioId: string
+  /** Variação precificada nesta linha; null = preço do anúncio. */
+  variacaoId: string | null
+  variacaoNome: string | null
   canalId: string
   canalNome: string
   /** Plataforma do canal. A tela usa para saber o que pode oferecer. */
@@ -248,10 +261,47 @@ export async function varrerRecalculo(
       const { data } = await q
       const lote = data ?? []
 
+      // PREÇO POR VARIAÇÃO: nas plataformas em que ele existe, o anúncio com
+      // variações vira uma unidade por variação, cada uma com o produto (e o
+      // custo) dela. Uma consulta por lote, não por anúncio.
+      const idsComVariacao = lote
+        .filter((a: { tem_variacao?: boolean | null }) => precificaPorVariacao(canal.plataforma, a.tem_variacao))
+        .map((a: { id: string }) => a.id)
+      const variacoesPorAnuncio = new Map<string, (VariacaoPreco & { produtos: unknown })[]>()
+      if (idsComVariacao.length > 0) {
+        const { data: vars } = await sb.from('marketplace_anuncio_variacoes')
+          .select(`${COLUNAS_VARIACAO_PRECO}, produtos(${COLUNAS_PRODUTO})`)
+          .in('anuncio_id', idsComVariacao)
+          .order('id', { ascending: true })
+        for (const v of vars ?? []) {
+          const lista = variacoesPorAnuncio.get(v.anuncio_id) ?? []
+          lista.push(v)
+          variacoesPorAnuncio.set(v.anuncio_id, lista)
+        }
+      }
+
+      type Unidade = { a: typeof lote[number]; p: unknown; variacao: VariacaoPreco | null }
+      const unidades: Unidade[] = []
       for (const a of lote) {
+        if (!precificaPorVariacao(canal.plataforma, a.tem_variacao)) {
+          unidades.push({ a, p: a.produtos, variacao: null })
+          continue
+        }
+        const vars = variacoesPorAnuncio.get(a.id) ?? []
+        // Variações ainda não sincronizadas: o anúncio conta, sem produto.
+        if (vars.length === 0) { unidades.push({ a, p: null, variacao: null }); continue }
+        for (const v of vars) {
+          // Entrada de mercadoria restringe por PRODUTO: aqui o produto é o da variação.
+          if (idsProduto && (!v.produto_id || !idsProduto.includes(v.produto_id))) continue
+          unidades.push({ a: anuncioDaVariacao(a, v), p: v.produtos, variacao: v })
+        }
+      }
+
+      for (const { a, p: produtoDaUnidade, variacao } of unidades) {
         resumo.totalAnuncios++
-        const p = a.produtos as ProdutoPrecificacao & { estoque?: number | null } | null
+        const p = produtoDaUnidade as ProdutoPrecificacao & { estoque?: number | null } | null
         if (!p) { resumo.semProduto++; continue }
+        const chave = chaveDoItem(a.id, variacao?.id)
 
         // As três peneiras vêm ANTES do contexto completo, e nesta ordem, de
         // propósito: resolver o contexto pode significar consultar comissão e
@@ -298,7 +348,10 @@ export async function varrerRecalculo(
 
         if (itens.length < limiteItens && Math.abs(diferenca) > TOLERANCIA) {
           itens.push({
-            anuncioId: a.id, canalId: canal.id, canalNome: canal.nome,
+            chave, anuncioId: a.id,
+            variacaoId: variacao?.id ?? null,
+            variacaoNome: variacao ? nomeDaVariacao(variacao) : null,
+            canalId: canal.id, canalNome: canal.nome,
             canalPlataforma: canal.plataforma,
             titulo: a.titulo ?? '', produtoId: p.id, produtoNome: p.nome ?? '(produto)', sku: p.sku ?? null,
             custo: ctx.economia.custo,
@@ -339,7 +392,7 @@ export async function varrerRecalculo(
             avisos: [...ctx.avisos, ...novo.resultado.avisos],
           })
 
-          contextoDoItem.set(a.id, {
+          contextoDoItem.set(chave, {
             estrategia,
             economia: ctx.economia,
             produto: { id: p.id, estoque: p.estoque ?? null, tipo: p.tipo ?? null },
@@ -407,17 +460,17 @@ async function anexarRecomendacoes(
   if (itens.length === 0) return
 
   const produtos = [...new Map(
-    itens.map(i => contextos.get(i.anuncioId)?.produto).filter(Boolean)
+    itens.map(i => contextos.get(i.chave)?.produto).filter(Boolean)
       .map(p => [p!.id, p!] as const),
   ).values()]
 
   const [estoques, vendas] = await Promise.all([
     estoquePorProduto(sb, empresaId, produtos),
-    vendasPorAnuncio(sb, empresaId, itens.map(i => i.anuncioId), { agora }),
+    vendasPorAnuncio(sb, empresaId, [...new Set(itens.map(i => i.anuncioId))], { agora }),
   ])
 
   for (const item of itens) {
-    const ctx = contextos.get(item.anuncioId)
+    const ctx = contextos.get(item.chave)
     if (!ctx) continue
 
     const capacidades = capacidadesDoCanal(ctx.plataforma, { temCredencial: ctx.temCredencial })

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -318,6 +319,10 @@ export default function EditarEntradaClient({
       await sincronizarProdutoVinculado(sb, r.produto_id, {}, {
         preco_venda: r.novo_preco, preco_custo: r.custo_novo,
       })
+
+      // O custo do componente mudou: os kits que o usam precisam acompanhar.
+      // Esta tela não chamava, e o kit ficava com o custo da compra anterior.
+      await recalcularKitsQueUsam(sb, r.produto_id)
 
       // Cria histórico
       const { data: hist } = await sb.from('historico_precos').insert({
