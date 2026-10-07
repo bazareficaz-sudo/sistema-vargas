@@ -9,6 +9,7 @@ import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produt
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { promocaoVigente, precoPorQuantidade, type ProdutoComFaixas } from '@/lib/produtos/promocao'
 import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
+import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produtos/similares'
 import {
   promocaoValeNasFormas, gruposDePagamento,
   type ConfigPromocaoPagamento,
@@ -21,6 +22,9 @@ type Produto = {
   promocao_ativa: boolean; preco_promocional: number | null
   promocao_inicio?: string | null; promocao_fim?: string | null
   precos_quantidade?: unknown
+  foto_url?: string | null
+  /** Rótulo que junta o mesmo item de marcas diferentes (ver lib/produtos/similares). */
+  grupo_similar?: string | null
 }
 type ItemVenda = {
   id: string; produto_id: string; nome: string; sku: string
@@ -48,6 +52,9 @@ type Vendedor = { id: string; codigo: string | null; nome: string }
 // A lista mora em `lib/pdv/formasPagamento.ts`: a tela de configuração e a
 // rota que a valida precisam da MESMA lista, e uma cópia divergiria.
 const FORMAS = FORMAS_PAGAMENTO
+
+const COLS_PRODUTO_PDV = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional, promocao_inicio, promocao_fim, precos_quantidade'
+const COLS_PRODUTO_PDV_NOVAS = 'foto_url, grupo_similar'
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 function uid() { return Math.random().toString(36).slice(2) }
@@ -104,6 +111,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [modoDevol, setModoDevol] = useState(false) // toggle rápido devolução
 
   const [produtoPendente, setProdutoPendente] = useState<Produto | null>(null)
+  // Modal de produtos similares: o produto escolhido na busca tem grupo, e o
+  // vendedor confirma a marca vendo todas as opções lado a lado.
+  const [similares, setSimilares] = useState<{
+    opcoes: Produto[]; idx: number; acao: 'selecionar' | 'adicionar'
+  } | null>(null)
+  const similaresRef = useRef<HTMLDivElement>(null)
 
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [modalCliente, setModalCliente] = useState(false)
@@ -312,40 +325,59 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   }, [sb, empresaId])
 
   // ── Busca de produtos ──────────────────────────────────────────
+  // Consulta de produtos com as colunas novas (foto e grupo de similares) e,
+  // se o banco ainda não tiver `grupo_similar` (migração não aplicada), a
+  // mesma consulta sem elas. Sem esse recuo, uma coluna faltando derrubaria a
+  // busca inteira do PDV — o caixa parado por causa de um recurso acessório.
+  const colunasNovasOkRef = useRef(true)
+  const consultarProdutos = useCallback(async (
+    montar: (cols: string) => PromiseLike<{ data: unknown[] | null; error: { code?: string; message?: string } | null }>,
+  ): Promise<Produto[]> => {
+    if (colunasNovasOkRef.current) {
+      const r = await montar(`${COLS_PRODUTO_PDV}, ${COLS_PRODUTO_PDV_NOVAS}`)
+      const faltaColuna = r.error && (r.error.code === '42703' || /grupo_similar|foto_url/.test(r.error.message ?? ''))
+      if (!faltaColuna) return (r.error ? [] : r.data ?? []) as Produto[]
+      colunasNovasOkRef.current = false
+    }
+    const r = await montar(COLS_PRODUTO_PDV)
+    return (r.error ? [] : r.data ?? []) as Produto[]
+  }, [])
+
   const buscarProdutos = useCallback(async (q: string) => {
     if (!q.trim() || q.length < 2) { setSugestoes([]); return }
     setBuscando(true)
     const palavras = q.trim().split(/\s+/).filter(Boolean)
-    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional, promocao_inicio, promocao_fim, precos_quantidade'
+    const base = (cols: string) => sb.from('produtos').select(cols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
 
     if (palavras.length === 1 && /^\d{8,14}$/.test(palavras[0])) {
-      const { data } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true).eq('ean', palavras[0]).limit(1)
-      if (data && data.length > 0) {
-        adicionarProdutoE(data[0] as Produto)
+      const data = await consultarProdutos(cols => base(cols).eq('ean', palavras[0]).limit(1))
+      if (data.length > 0) {
+        adicionarProdutoE(data[0])
         setBusca(''); setSugestoes([]); setBuscando(false); return
       }
     }
     if (palavras.length === 1) {
-      const { data } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true).eq('sku', palavras[0]).limit(1)
-      if (data && data.length > 0) {
-        adicionarProdutoE(data[0] as Produto)
+      const data = await consultarProdutos(cols => base(cols).eq('sku', palavras[0]).limit(1))
+      if (data.length > 0) {
+        adicionarProdutoE(data[0])
         setBusca(''); setSugestoes([]); setBuscando(false); return
       }
     }
-    let query = sb.from('produtos').select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
-    for (const p of palavras) { query = query.ilike('nome', `%${p}%`) }
-    const { data, error } = await query.order('nome').limit(20)
-    let lista: Produto[] = (error ? [] : data ?? []) as Produto[]
+    // Cada palavra precisa aparecer no nome OU na marca: "disj 32a steck"
+    // acha o disjuntor da Steck mesmo quando "Steck" não está no nome.
+    let lista = await consultarProdutos(cols => {
+      let query = base(cols)
+      for (const p of palavras) {
+        const f = filtroNomeOuMarca(p)
+        if (f) query = query.or(f)
+      }
+      return query.order('nome').limit(20)
+    })
     if (lista.length === 0) {
-      const { data: d2 } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
-        .ilike('sku', `%${palavras[0]}%`).order('nome').limit(20)
-      lista = (d2 ?? []) as Produto[]
+      lista = await consultarProdutos(cols => base(cols).ilike('sku', `%${palavras[0]}%`).order('nome').limit(20))
     }
     setSugestoes(lista); setSugestaoIdx(-1); setBuscando(false)
-  }, [empresaEstoqueId])
+  }, [empresaEstoqueId, consultarProdutos])
 
   useEffect(() => {
     const t = setTimeout(() => buscarProdutos(busca), 220)
@@ -407,6 +439,54 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   }
 
   function adicionarProdutoE(p: Produto, qtd?: number) { confirmarAdicao(p, qtd) }
+
+  /**
+   * Escolha feita NA LISTA DA BUSCA (Enter/Tab ou clique).
+   *
+   * Produto com grupo de similares abre o modal com as outras marcas antes de
+   * seguir. Código de barras e SKU digitado não passam por aqui: eles já
+   * identificam a marca exata, e parar o caixa nesses casos só atrasaria.
+   */
+  async function escolherDaLista(p: Produto, acao: 'selecionar' | 'adicionar') {
+    const seguir = (escolhido: Produto) => acao === 'selecionar' ? selecionarProduto(escolhido) : confirmarAdicao(escolhido)
+    if (!p.grupo_similar) { seguir(p); return }
+
+    const { data, error } = await sb.from('produtos')
+      .select(`${COLS_PRODUTO_PDV}, ${COLS_PRODUTO_PDV_NOVAS}`)
+      .eq('empresa_id', empresaEstoqueId).eq('ativo', true)
+      .eq('grupo_similar', p.grupo_similar)
+      .order('estoque', { ascending: false }).limit(30)
+    const opcoes = (error ? [] : data ?? []) as unknown as Produto[]
+    // Falha na consulta ou grupo de um produto só: segue com o escolhido.
+    // O modal é ajuda, nunca pode ser o motivo de a venda não andar.
+    if (opcoes.length < 2) { seguir(p); return }
+
+    if (!opcoes.some(o => o.id === p.id)) opcoes.unshift(p)
+    setSugestoes([])
+    setSimilares({ opcoes, idx: Math.max(0, opcoes.findIndex(o => o.id === p.id)), acao })
+    setTimeout(() => similaresRef.current?.focus(), 30)
+  }
+
+  function confirmarSimilar(escolhido: Produto) {
+    const acao = similares?.acao
+    setSimilares(null)
+    if (acao === 'selecionar') selecionarProduto(escolhido)
+    else confirmarAdicao(escolhido)
+  }
+
+  function cancelarSimilares() {
+    setSimilares(null)
+    setTimeout(() => buscaRef.current?.focus(), 30)
+  }
+
+  function onSimilaresKey(e: React.KeyboardEvent) {
+    if (!similares) return
+    const { opcoes, idx } = similares
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSimilares({ ...similares, idx: Math.min(idx + 1, opcoes.length - 1) }) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSimilares({ ...similares, idx: Math.max(idx - 1, 0) }) }
+    else if (e.key === 'Enter') { e.preventDefault(); confirmarSimilar(opcoes[idx]) }
+    else if (/^[1-9]$/.test(e.key) && opcoes[Number(e.key) - 1]) { e.preventDefault(); confirmarSimilar(opcoes[Number(e.key) - 1]) }
+  }
 
   // Recalcula quantidade, preço e total de um item do carrinho.
   //
@@ -948,7 +1028,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   // ── Atalhos globais ─────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito || modalVendedor) return
+      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito || modalVendedor || similares) return
       switch (e.key) {
         case 'F2': e.preventDefault(); abrirPagamento(); break
         case 'F3': e.preventDefault(); setDescontoInput(String(descontoGlobal)); setModalDesc(true); break
@@ -974,7 +1054,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito, modalVendedor,
+  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito, modalVendedor, similares,
       itens, total, itemSelecionado, descontoGlobal, modoDevol])
 
   useEffect(() => {
@@ -1035,10 +1115,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     if (e.key === 'Enter') {
       e.preventDefault()
       const alvo = sugestaoIdx >= 0 ? sugestoes[sugestaoIdx] : sugestoes.length === 1 ? sugestoes[0] : null
-      if (alvo) { selecionarProduto(alvo); setSugestaoIdx(-1) }
+      if (alvo) { escolherDaLista(alvo, 'selecionar'); setSugestaoIdx(-1) }
     }
     if (e.key === 'Tab' && sugestoes.length > 0) {
-      e.preventDefault(); selecionarProduto(sugestoes[sugestaoIdx >= 0 ? sugestaoIdx : 0])
+      e.preventDefault(); escolherDaLista(sugestoes[sugestaoIdx >= 0 ? sugestaoIdx : 0], 'selecionar')
     }
     if (e.key === 'Escape') { setSugestoes([]); setProdutoPendente(null); setBusca('') }
   }
@@ -1051,6 +1131,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     }
     if (e.key === 'Escape') { setProdutoPendente(null); setBusca(''); setQtdInput('1'); buscaRef.current?.focus() }
   }
+
+  const nomesRepetidos = contarNomesRepetidos(sugestoes)
 
   const clientesFiltrados = clientes.filter(c =>
     c.nome.toLowerCase().includes(buscaCliente.toLowerCase()) ||
@@ -1123,21 +1205,34 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
           {sugestoes.length > 0 && (
             <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-              <div className="grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
-                <span>SKU</span><span>Nome</span><span>Marca</span><span className="text-center">Estoque</span><span className="text-right">Preço</span>
+              <div className="grid grid-cols-[40px_90px_1fr_70px_110px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
+                <span></span><span>SKU</span><span>Produto / Marca</span><span className="text-center">Estoque</span><span className="text-right">Preço</span>
               </div>
               <div ref={sugestaoListRef}>
                 {sugestoes.map((p, i) => {
                   const emPromo = promocaoVigente(p)
+                  // Mesmo nome na lista = só a marca diferencia. Marca o par
+                  // mesmo que o gestor ainda não o tenha agrupado.
+                  const nomeRepetido = (nomesRepetidos.get(chaveNome(p.nome)) ?? 0) > 1
                   return (
-                  <div key={p.id} onMouseDown={() => { confirmarAdicao(p); setSugestaoIdx(-1) }}
-                    className={`grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-2 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  <div key={p.id} onMouseDown={() => { escolherDaLista(p, 'adicionar'); setSugestaoIdx(-1) }}
+                    className={`grid grid-cols-[40px_90px_1fr_70px_110px] gap-0 px-3 py-1.5 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : nomeRepetido ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-gray-50'}`}>
+                    <FotoProduto url={p.foto_url} nome={p.nome} tamanho="w-8 h-8" />
                     <span className="text-gray-400 text-xs font-mono truncate pr-2">{p.sku}</span>
-                    <span className="font-medium text-gray-900 truncate pr-2 flex items-center gap-1">
-                      {p.nome}
-                      {emPromo && <span className="shrink-0 text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded">PROMO</span>}
+                    <span className="min-w-0 pr-2">
+                      <span className="font-medium text-gray-900 flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{p.nome}</span>
+                        {emPromo && <span className="shrink-0 text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded">PROMO</span>}
+                      </span>
+                      <span className="flex items-center gap-1.5 mt-0.5">
+                        <SeloMarca marca={p.marca} />
+                        {p.grupo_similar ? (
+                          <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 rounded">⇄ tem similares</span>
+                        ) : nomeRepetido && (
+                          <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 rounded">⚠ mesmo nome, confira a marca</span>
+                        )}
+                      </span>
                     </span>
-                    <span className="text-indigo-600 text-xs truncate pr-2">{p.marca ?? '—'}</span>
                     <span className={`text-center text-xs font-medium ${p.estoque <= 0 ? 'text-red-500' : p.estoque <= 5 ? 'text-orange-500' : 'text-gray-500'}`}>
                       {p.estoque} {p.unidade}
                     </span>
@@ -1237,13 +1332,16 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                               <span className="text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded flex-shrink-0">PROMO</span>
                             )}
                           </div>
-                          {item.em_promocao ? (
-                            <div className="text-xs text-orange-600 font-medium">
-                              de <span className="line-through text-gray-400">{fmt(item.preco_original)}</span> por {fmt(item.preco_unitario)}
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-400">{item.sku} · {item.unidade}</div>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {item.produto?.marca && <SeloMarca marca={item.produto.marca} />}
+                            {item.em_promocao ? (
+                              <span className="text-xs text-orange-600 font-medium">
+                                de <span className="line-through text-gray-400">{fmt(item.preco_original)}</span> por {fmt(item.preco_unitario)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400">{item.sku} · {item.unidade}</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -2043,8 +2141,74 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           </div>
         </div>
       )}
+
+      {/* ── MODAL PRODUTOS SIMILARES ──────────────────────────────── */}
+      {similares && (
+        <Modal titulo="Produtos similares — confira a marca" onClose={cancelarSimilares} largura="max-w-2xl">
+          <p className="text-xs text-gray-500 mb-3">
+            Estes produtos são o mesmo item de marcas diferentes. Escolha a marca que o cliente vai levar.
+          </p>
+          <div ref={similaresRef} tabIndex={0} onKeyDown={onSimilaresKey}
+            className="border border-gray-200 rounded-xl overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-300">
+            {similares.opcoes.map((p, i) => {
+              const emPromo = promocaoVigente(p)
+              const ativo = i === similares.idx
+              return (
+                <button key={p.id} type="button" tabIndex={-1}
+                  onMouseEnter={() => setSimilares(s => s ? { ...s, idx: i } : s)}
+                  onClick={() => confirmarSimilar(p)}
+                  className={`w-full grid grid-cols-[24px_56px_1fr_90px_110px] gap-3 items-center px-3 py-2.5 text-left border-b border-gray-100 last:border-0 ${ativo ? 'bg-blue-50' : 'bg-white hover:bg-gray-50'}`}>
+                  <span className={`text-xs font-bold text-center ${ativo ? 'text-blue-700' : 'text-gray-400'}`}>{i < 9 ? i + 1 : ''}</span>
+                  <FotoProduto url={p.foto_url} nome={p.nome} tamanho="w-14 h-14" />
+                  <span className="min-w-0">
+                    <span className="block"><SeloMarca marca={p.marca} grande /></span>
+                    <span className="block text-sm text-gray-900 truncate mt-1">{p.nome}</span>
+                    <span className="block text-[11px] text-gray-400 font-mono">{p.sku}</span>
+                  </span>
+                  <span className={`text-center text-sm font-semibold ${p.estoque <= 0 ? 'text-red-600' : p.estoque <= 5 ? 'text-orange-500' : 'text-emerald-700'}`}>
+                    {p.estoque <= 0 ? 'Sem estoque' : `${p.estoque} ${p.unidade}`}
+                  </span>
+                  <span className="text-right">
+                    {emPromo ? (
+                      <>
+                        <span className="block text-[10px] text-gray-400 line-through">{fmt(p.preco_venda)}</span>
+                        <span className="font-bold text-orange-600">{fmt(p.preco_promocional!)}</span>
+                      </>
+                    ) : (
+                      <span className="font-semibold text-blue-700">{fmt(p.preco_venda)}</span>
+                    )}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-3">
+            ↑ ↓ para escolher · Enter confirma · 1–9 escolhe direto · Esc volta para a busca
+          </p>
+        </Modal>
+      )}
     </div>
   )
+}
+
+/** Marca em destaque — é o que diferencia produtos de nome igual. */
+function SeloMarca({ marca, grande = false }: { marca: string | null | undefined; grande?: boolean }) {
+  if (!marca) {
+    return <span className={`${grande ? 'text-xs' : 'text-[10px]'} text-gray-400 italic`}>sem marca</span>
+  }
+  return (
+    <span className={`inline-block font-bold uppercase tracking-wide bg-indigo-600 text-white rounded ${grande ? 'text-xs px-2 py-0.5' : 'text-[10px] px-1.5 py-px'}`}>
+      {marca}
+    </span>
+  )
+}
+
+function FotoProduto({ url, nome, tamanho }: { url: string | null | undefined; nome: string; tamanho: string }) {
+  if (!url) {
+    return <span className={`${tamanho} rounded-md bg-gray-100 text-gray-300 flex items-center justify-center text-xs shrink-0`}>▧</span>
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={nome} loading="lazy" className={`${tamanho} rounded-md object-cover border border-gray-200 shrink-0 bg-white`} />
 }
 
 function BtnToolbar({ label, atalho, onClick, cor, icon }: { label: string; atalho: string; onClick: () => void; cor: string; icon?: string }) {
