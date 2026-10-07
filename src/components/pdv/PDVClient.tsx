@@ -40,7 +40,11 @@ type ItemVenda = {
   precoManual?: boolean
   /** Preço veio de uma faixa de quantidade (atacado). */
   faixaAplicada?: boolean
+  /** Entrou na venda por uma sugestão do PDV (ex.: 'compre_junto'). */
+  origemSugestao?: string
 }
+/** Sugestão do Compre Junto: o produto e com quem ele costuma sair. */
+type SugestaoCJ = Produto & { vezes: number; baseNome: string; fixo: boolean }
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
   limite_credito: number; saldo_credito: number; saldo_devedor: number
@@ -117,6 +121,11 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     opcoes: Produto[]; idx: number; acao: 'selecionar' | 'adicionar'
   } | null>(null)
   const similaresRef = useRef<HTMLDivElement>(null)
+  // Compre Junto: o que costuma sair junto com o que já está no carrinho.
+  // `dispensadas` são as que o vendedor fechou NESTA venda — não voltam até a
+  // próxima, senão o painel insistiria no que o cliente já recusou.
+  const [compreJunto, setCompreJunto] = useState<SugestaoCJ[]>([])
+  const [dispensadas, setDispensadas] = useState<Set<string>>(new Set())
 
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [modalCliente, setModalCliente] = useState(false)
@@ -384,6 +393,46 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     return () => clearTimeout(t)
   }, [busca, buscarProdutos])
 
+  // ── Compre Junto ─────────────────────────────────────────────
+  // Recalcula quando muda O QUE está no carrinho (não a quantidade): a chave
+  // é a lista ordenada de produtos vendidos. Devolução não entra — quem está
+  // devolvendo não está comprando.
+  const chaveCarrinho = [...new Set(itens.filter(i => i.tipo === 'venda').map(i => i.produto_id))].sort().join(',')
+  useEffect(() => {
+    let cancelado = false
+    const t = setTimeout(async () => {
+      const ids = chaveCarrinho ? chaveCarrinho.split(',') : []
+      if (ids.length === 0) { if (!cancelado) setCompreJunto([]); return }
+      // Erro aqui (função ausente, rede) só esvazia o painel: sugestão é
+      // ajuda, nunca motivo de a venda travar.
+      const { data: sug, error } = await sb.rpc('compre_junto_sugestoes', { p_produto_ids: ids, p_limite: 10 })
+      if (cancelado) return
+      if (error || !sug?.length) { setCompreJunto([]); return }
+      const linhas = sug as { produto_id: string; base_id: string; vezes: number; fixo: boolean }[]
+      const produtos = await consultarProdutos(cols => sb.from('produtos').select(cols)
+        .in('id', linhas.map(l => l.produto_id)).eq('ativo', true))
+      if (cancelado) return
+      const porId = new Map(produtos.map(p => [p.id, p]))
+      const nomeBase = new Map(itens.map(i => [i.produto_id, i.nome]))
+      const lista: SugestaoCJ[] = []
+      for (const l of linhas) {
+        const p = porId.get(l.produto_id)
+        if (p) lista.push({ ...p, vezes: l.vezes, fixo: l.fixo, baseNome: nomeBase.get(l.base_id) ?? '' })
+      }
+      // Com estoque primeiro: oferecer o que não tem para entregar só
+      // frustra o cliente. Sem estoque continua visível, no fim, porque pode
+      // haver encomenda ou o cadastro estar desatualizado.
+      lista.sort((a, b) => Number(b.estoque > 0) - Number(a.estoque > 0))
+      setCompreJunto(lista)
+    }, 400)
+    return () => { cancelado = true; clearTimeout(t) }
+    // `itens` fica fora de propósito: só o nome dos itens é lido, e a chave já
+    // muda quando o conjunto de produtos muda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaveCarrinho, consultarProdutos])
+
+  const compreJuntoVisiveis = modoDevol ? [] : compreJunto.filter(s => !dispensadas.has(s.id)).slice(0, 6)
+
   useEffect(() => {
     if (sugestaoIdx < 0 || !sugestaoListRef.current) return
     const el = sugestaoListRef.current.children[sugestaoIdx] as HTMLElement | undefined
@@ -400,7 +449,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     }
   }, [clienteSelecionado, modalCliente])
 
-  function confirmarAdicao(p: Produto, qtd?: number) {
+  function confirmarAdicao(p: Produto, qtd?: number, origemSugestao?: string) {
     const rawQ = qtd !== undefined ? qtd : (parseFloat(qtdInput.replace(',', '.')) || 1)
     // Modo devolução: qty sempre negativa
     const q = modoDevol ? -Math.abs(rawQ) : rawQ
@@ -424,6 +473,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         em_promocao: emPromo, preco_original: p.preco_venda,
         produto: p,
         faixaAplicada: precoFinal < (emPromo ? p.preco_promocional! : p.preco_venda),
+        ...(origemSugestao ? { origemSugestao } : {}),
       }]
     })
     setBusca(''); setSugestoes([]); setQtdInput('1'); setProdutoPendente(null)
@@ -612,6 +662,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     // O vendedor é POR VENDA: quem atendeu a anterior pode não ser quem
     // atende a próxima, e herdar em silêncio credita comissão errada.
     setVendedor(null); setModalVendedor(false); setCodigoVendedor(''); setErroVendedor('')
+    setCompreJunto([]); setDispensadas(new Set())
     buscaRef.current?.focus()
   }
 
@@ -768,6 +819,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         quantidade: i.quantidade, preco_unitario: i.preco_unitario, desconto: i.desconto, total: i.total,
         custo_unitario: i.custo,
         tipo: i.tipo,
+        origem_sugestao: i.origemSugestao ?? null,
       })))
       if (erroItens) throw erroItens
 
@@ -1384,6 +1436,46 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           </table>
         )}
       </div>
+
+      {/* ── COMPRE JUNTO ──────────────────────────────────────────── */}
+      {compreJuntoVisiveis.length > 0 && (
+        <div className="flex-shrink-0 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-bold text-amber-800">💡 Ofereça também</span>
+            <span className="text-[11px] text-amber-700/80">o que os clientes costumam levar junto com estes itens</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {compreJuntoVisiveis.map(s => {
+              const preco = promocaoVigente(s) ? s.preco_promocional! : s.preco_venda
+              return (
+                <div key={s.id}
+                  className={`relative shrink-0 w-56 flex gap-2 items-center bg-white border rounded-lg p-1.5 pr-6 ${s.estoque > 0 ? 'border-amber-200' : 'border-gray-200 opacity-60'}`}>
+                  <FotoProduto url={s.foto_url} nome={s.nome} tamanho="w-10 h-10" />
+                  <button type="button" onClick={() => confirmarAdicao(s, 1, 'compre_junto')}
+                    title={`Adicionar 1 ${s.unidade} à venda`}
+                    className="min-w-0 flex-1 text-left">
+                    <span className="block text-xs font-medium text-gray-900 truncate">{s.nome}</span>
+                    <span className="flex items-center gap-1 mt-0.5">
+                      {s.marca && <SeloMarca marca={s.marca} />}
+                      <span className="text-xs font-semibold text-blue-700">{fmt(preco)}</span>
+                      <span className={`text-[10px] ${s.estoque > 0 ? 'text-gray-500' : 'text-red-500'}`}>
+                        {s.estoque > 0 ? `· ${s.estoque} ${s.unidade}` : '· sem estoque'}
+                      </span>
+                    </span>
+                    <span className="block text-[10px] text-amber-700 truncate"
+                      title={s.fixo ? 'Sugestão definida no cadastro do produto' : `Levado junto em ${s.vezes} vendas`}>
+                      {s.fixo ? '★ indicado' : `junto em ${s.vezes} vendas`}{s.baseNome ? ` · ${s.baseNome}` : ''}
+                    </span>
+                  </button>
+                  <button type="button" title="Dispensar nesta venda"
+                    onClick={() => setDispensadas(d => new Set(d).add(s.id))}
+                    className="absolute top-0.5 right-1 text-gray-300 hover:text-gray-500 text-sm leading-none">×</button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── SAÚDE DA VENDA ────────────────────────────────────────── */}
       {itens.length > 0 && (
