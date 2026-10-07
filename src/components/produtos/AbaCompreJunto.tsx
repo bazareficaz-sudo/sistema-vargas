@@ -198,7 +198,7 @@ function LinhaSugestao({ l, ocupado, children }: { l: Linha; ocupado: boolean; c
         <p className="text-[11px] text-gray-500">
           {l.marca && <span className="font-semibold text-indigo-600 mr-2">{l.marca}</span>}
           {l.sku && <span className="font-mono mr-2">{l.sku}</span>}
-          {fmt(l.preco_venda)} · {l.estoque} {l.unidade}
+          {fmt(l.preco_venda)} · <span className={l.estoque > 0 ? 'text-emerald-600' : 'text-red-500'}>{l.estoque} {l.unidade}</span>
         </p>
       </div>
       <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${l.fixo ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}`}>

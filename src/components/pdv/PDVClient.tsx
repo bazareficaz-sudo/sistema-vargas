@@ -11,6 +11,7 @@ import { promocaoVigente, precoPorQuantidade, type ProdutoComFaixas } from '@/li
 import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
 import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produtos/similares'
 import CampoNumero from '@/components/pdv/CampoNumero'
+import { ListaPedidosPdv, ListaOrcamentosPdv } from '@/components/pdv/ListagensPdv'
 import {
   promocaoValeNasFormas, gruposDePagamento,
   type ConfigPromocaoPagamento,
@@ -125,6 +126,9 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   // Compre Junto: o que costuma sair junto com o que já está no carrinho.
   // `dispensadas` são as que o vendedor fechou NESTA venda — não voltam até a
   // próxima, senão o painel insistiria no que o cliente já recusou.
+  // Listagens de consulta (F10 pedidos, F1 orçamentos) — abrem por cima da
+  // venda sem mexer no carrinho.
+  const [listagem, setListagem] = useState<'pedidos' | 'orcamentos' | null>(null)
   const [compreJunto, setCompreJunto] = useState<SugestaoCJ[]>([])
   const [dispensadas, setDispensadas] = useState<Set<string>>(new Set())
 
@@ -1081,8 +1085,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   // ── Atalhos globais ─────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito || modalVendedor || similares) return
+      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito || modalVendedor || similares || listagem) return
       switch (e.key) {
+        // F1 e F10 têm ação padrão no navegador (ajuda e menu); o
+        // preventDefault é o que as deixa livres para o PDV.
+        case 'F10': e.preventDefault(); setListagem('pedidos'); break
+        case 'F1': e.preventDefault(); setListagem('orcamentos'); break
         case 'F2': e.preventDefault(); abrirPagamento(); break
         case 'F3': e.preventDefault(); setDescontoInput(String(descontoGlobal)); setModalDesc(true); break
         case 'F4': e.preventDefault(); setModalObs(true); break
@@ -1107,7 +1115,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito, modalVendedor, similares,
+  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito, modalVendedor, similares, listagem,
       itens, total, itemSelecionado, descontoGlobal, modoDevol])
 
   useEffect(() => {
@@ -1219,6 +1227,9 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           atalho="F6"
           label={modoDevol ? '🔄 DEVOLVENDO' : '🔄 Devolver'}
         />
+        <div className="w-px h-5 bg-gray-300 mx-1" />
+        <BtnToolbar onClick={() => setListagem('pedidos')} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F10" label="Pedidos" icon="🧾" />
+        <BtnToolbar onClick={() => setListagem('orcamentos')} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F1" label="Orçamentos" icon="🗂️" />
         <div className="flex-1" />
         <span className="text-gray-400 px-2">{operadorNome.split('@')[0]}</span>
         <button onClick={() => router.push('/dashboard')} className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded text-xs">← Painel</button>
@@ -1286,7 +1297,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                         )}
                       </span>
                     </span>
-                    <span className={`text-center text-xs font-medium ${p.estoque <= 0 ? 'text-red-500' : p.estoque <= 5 ? 'text-orange-500' : 'text-gray-500'}`}>
+                    <span className={`text-center text-xs font-medium ${p.estoque > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                       {p.estoque} {p.unidade}
                     </span>
                     <div className="text-right">
@@ -1456,7 +1467,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                     <span className="flex items-center gap-1 mt-0.5">
                       {s.marca && <SeloMarca marca={s.marca} />}
                       <span className="text-xs font-semibold text-blue-700">{fmt(preco)}</span>
-                      <span className={`text-[10px] ${s.estoque > 0 ? 'text-gray-500' : 'text-red-500'}`}>
+                      <span className={`text-[10px] ${s.estoque > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                         {s.estoque > 0 ? `· ${s.estoque} ${s.unidade}` : '· sem estoque'}
                       </span>
                     </span>
@@ -2232,6 +2243,18 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         </div>
       )}
 
+      {/* ── LISTAGENS: PEDIDOS E ORÇAMENTOS ───────────────────────── */}
+      {listagem === 'pedidos' && (
+        <Modal titulo="Pedidos" onClose={() => setListagem(null)} largura="max-w-4xl">
+          <ListaPedidosPdv empresaId={empresaId} />
+        </Modal>
+      )}
+      {listagem === 'orcamentos' && (
+        <Modal titulo="Orçamentos" onClose={() => setListagem(null)} largura="max-w-4xl">
+          <ListaOrcamentosPdv empresaId={empresaId} />
+        </Modal>
+      )}
+
       {/* ── MODAL PRODUTOS SIMILARES ──────────────────────────────── */}
       {similares && (
         <Modal titulo="Produtos similares — confira a marca" onClose={cancelarSimilares} largura="max-w-2xl">
@@ -2255,7 +2278,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                     <span className="block text-sm text-gray-900 truncate mt-1">{p.nome}</span>
                     <span className="block text-[11px] text-gray-400 font-mono">{p.sku}</span>
                   </span>
-                  <span className={`text-center text-sm font-semibold ${p.estoque <= 0 ? 'text-red-600' : p.estoque <= 5 ? 'text-orange-500' : 'text-emerald-700'}`}>
+                  <span className={`text-center text-sm font-semibold ${p.estoque > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                     {p.estoque <= 0 ? 'Sem estoque' : `${p.estoque} ${p.unidade}`}
                   </span>
                   <span className="text-right">
@@ -2294,11 +2317,14 @@ function SeloMarca({ marca, grande = false }: { marca: string | null | undefined
 }
 
 function FotoProduto({ url, nome, tamanho }: { url: string | null | undefined; nome: string; tamanho: string }) {
-  if (!url) {
+  // Link de foto quebrado (arquivo apagado, URL expirada) mostrava o ícone de
+  // imagem partida do navegador; cai no mesmo marcador de "sem foto".
+  const [falhou, setFalhou] = useState(false)
+  if (!url || falhou) {
     return <span className={`${tamanho} rounded-md bg-gray-100 text-gray-300 flex items-center justify-center text-xs shrink-0`}>▧</span>
   }
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt={nome} loading="lazy" className={`${tamanho} rounded-md object-cover border border-gray-200 shrink-0 bg-white`} />
+  return <img src={url} alt={nome} loading="lazy" onError={() => setFalhou(true)} className={`${tamanho} rounded-md object-cover border border-gray-200 shrink-0 bg-white`} />
 }
 
 function BtnToolbar({ label, atalho, onClick, cor, icon }: { label: string; atalho: string; onClick: () => void; cor: string; icon?: string }) {
