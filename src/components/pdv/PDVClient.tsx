@@ -682,8 +682,14 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   }
 
   // ── Pagamento ─────────────────────────────────────────────────
-  function abrirPagamento() {
+  /**
+   * `vendedorEscolhido` vem de quem ACABOU de escolher o vendedor: o estado
+   * `vendedor` só chega no próximo render, e esta função, chamada na mesma
+   * volta, enxergaria nulo e pediria o código de novo.
+   */
+  function abrirPagamento(vendedorEscolhido?: Vendedor) {
     if (itens.length === 0) return
+    const vendedorAtual = vendedorEscolhido ?? vendedor
 
     // O VENDEDOR VEM ANTES DE QUALQUER CAMINHO DE FECHAMENTO — pagamento,
     // troca ou crédito. Perguntar só no fluxo de pagamento deixaria a troca
@@ -691,7 +697,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     //
     // Empresa sem vendedor cadastrado não é interrompida: a venda segue como
     // sempre seguiu, e a comissão simplesmente não tem a quem atribuir.
-    if (!vendedor && vendedores.length > 0) {
+    if (!vendedorAtual && vendedores.length > 0) {
       setCodigoVendedor(''); setErroVendedor('')
       setModalVendedor(true)
       setTimeout(() => codigoVendedorRef.current?.focus(), 80)
@@ -753,10 +759,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     setVendedor(escolhido)
     setModalVendedor(false)
     setErroVendedor('')
-    // O estado ainda não chegou nesta volta do render, então o desvio do
-    // `abrirPagamento` acima olharia um `vendedor` nulo e reabriria este
-    // mesmo modal. Passar pelo próximo tick resolve sem duplicar a lógica.
-    setTimeout(() => abrirPagamento(), 0)
+    // O vendedor vai por parâmetro. O `setTimeout` que havia aqui não
+    // adiantava: ele chamava a MESMA função deste render, que ainda via
+    // `vendedor` nulo — e o PDV pedia o código duas vezes.
+    abrirPagamento(escolhido)
   }
 
   const isFiado = formas.length === 1 && formas[0].tipo === 'fiado'
@@ -1114,13 +1120,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         // preventDefault é o que as deixa livres para o PDV.
         case 'F10': e.preventDefault(); setListagem('pedidos'); break
         case 'F1': e.preventDefault(); setListagem('orcamentos'); break
-        case 'F2': e.preventDefault(); abrirPagamento(); break
+        // F9 fecha a venda: é a tecla do PDV antigo, que o balcão já tem no
+        // dedo. Entrega, que ocupava o F9, foi para o F2.
+        case 'F9': e.preventDefault(); abrirPagamento(); break
         case 'F3': e.preventDefault(); setDescontoInput(String(descontoGlobal)); setModalDesc(true); break
         case 'F4': e.preventDefault(); setModalObs(true); break
         case 'F5': e.preventDefault(); setModalCliente(true); break
         case 'F6': e.preventDefault(); setModoDevol(m => !m); break
         case 'F8': e.preventDefault(); if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } break
-        case 'F9': e.preventDefault(); setModalEntrega(true); break
+        case 'F2': e.preventDefault(); setModalEntrega(true); break
         // F7 — NOVA VENDA. Confirma só quando há o que perder: pedir
         // confirmação com o carrinho vazio treinaria o balconista a apertar
         // "sim" sem ler, e é justamente na venda cheia que ele precisa ler.
@@ -1155,7 +1163,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         aplicarFormas([{ tipo: forma.id, valor: 0 }]); setFormaIdx(0)
         setTimeout(() => { valorRefs.current[0]?.focus(); valorRefs.current[0]?.select() }, 30)
       }
-      if (e.key === 'Enter' && !e.shiftKey) {
+      // F9 também conclui: quem fecha a venda no F9 aperta F9 de novo. Tecla
+      // SEGURADA não conta — a repetição automática abriria o pagamento e
+      // concluiria a venda no mesmo gesto, sem o vendedor conferir nada.
+      if ((e.key === 'Enter' && !e.shiftKey) || (e.key === 'F9' && !e.repeat)) {
         e.preventDefault()
         // Mesma trava do botão: Enter não pode contornar documento incompleto.
         if (!cpfNotaIncompleto && (isFiado || totalPago >= total)) concluirVenda(hasDevolucao ? 'mista' : 'venda')
@@ -1229,13 +1240,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
       {/* ── TOOLBAR ──────────────────────────────────────────────── */}
       <div className="flex items-center gap-1 px-2 py-1.5 bg-gray-100 border-b border-gray-300 text-xs flex-shrink-0">
-        <BtnToolbar onClick={abrirPagamento} cor="bg-blue-600 hover:bg-blue-700 text-white" atalho="F2" label="Concluir" />
+        <BtnToolbar onClick={() => abrirPagamento()} cor="bg-blue-600 hover:bg-blue-700 text-white" atalho="F9" label="Concluir" />
         <BtnToolbar onClick={() => setModalCliente(true)} cor="bg-white hover:bg-gray-50 text-blue-700 border border-blue-300" atalho="F5"
           label={clienteSelecionado ? clienteSelecionado.nome.split(' ')[0] : 'Cliente'} icon="👤" />
         <BtnToolbar onClick={() => { setDescontoInput(String(descontoGlobal)); setModalDesc(true) }} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F3" label="Desc" icon="%" />
         <BtnToolbar onClick={() => setModalObs(true)} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F4" label="Obs" icon="💬" />
         <BtnToolbar onClick={() => { if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } }} cor="bg-white hover:bg-gray-50 text-amber-700 border border-amber-300" atalho="F8" label="Orçamento" icon="📋" />
-        <BtnToolbar onClick={() => setModalEntrega(true)} cor={`bg-white hover:bg-gray-50 border border-gray-300 ${entrega ? 'text-orange-600 border-orange-300' : 'text-gray-700'}`} atalho="F9" label={entrega ? '🛵 Entrega' : 'Entregar'} />
+        <BtnToolbar onClick={() => setModalEntrega(true)} cor={`bg-white hover:bg-gray-50 border border-gray-300 ${entrega ? 'text-orange-600 border-orange-300' : 'text-gray-700'}`} atalho="F2" label={entrega ? '🛵 Entrega' : 'Entregar'} />
         {/* Zerar e começar outra. O balconista precisa disso quando o cliente
             desiste no meio — sem ele, a saída era apagar item por item. */}
         <BtnToolbar
@@ -1518,9 +1529,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             <span className="font-semibold" style={{ color: saude.faixa?.cor ?? '#374151' }}>
               {saude.faixa?.nome ?? 'Calculando...'}
             </span>
-            <span className="text-gray-500">Margem:</span>
+            {/* Markup sobre o custo (pedido do gestor: é o número que o balcão
+                usa). A cor e o nome da faixa continuam vindo da margem
+                líquida — é sobre ela que as faixas são configuradas. */}
+            <span className="text-gray-500">Markup:</span>
             <span className="font-bold" style={{ color: saude.faixa?.cor ?? '#374151' }}>
-              {saude.margem.toFixed(1)}%
+              {saude.markup.toFixed(1)}%
             </span>
             {saude.lucroLiquido !== 0 && cfg.exibir_lucro_vendedor && (
               <>
@@ -1568,6 +1582,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 <SaudeCard label="Taxa Pagamento" valor={`${saude.taxaPagPct.toFixed(1)}% = ${fmt(saude.custoTaxaPag)}`} />
                 {cfg.exibir_lucro_vendedor && <SaudeCard label="Lucro Bruto" valor={fmt(saude.lucroBruto)} cor={saude.lucroBruto >= 0 ? '#16a34a' : '#dc2626'} />}
                 {cfg.exibir_lucro_vendedor && <SaudeCard label="Lucro Líquido" valor={fmt(saude.lucroLiquido)} cor={saude.lucroLiquido >= 0 ? '#16a34a' : '#dc2626'} />}
+                <SaudeCard label="Markup" valor={`${saude.markup.toFixed(1)}%`} cor={saude.faixa?.cor} />
                 {cfg.exibir_margem_vendedor && <SaudeCard label="Margem Bruta" valor={`${saude.margemBruta.toFixed(1)}%`} />}
                 {cfg.exibir_margem_vendedor && <SaudeCard label="Margem Líquida" valor={`${saude.margem.toFixed(1)}%`} cor={saude.faixa?.cor} />}
                 <SaudeCard label="Desc. restante" valor={`${fmt(saude.descontoRestante)} (${saude.descontoMaxPct}% máx.)`} />
@@ -1658,15 +1673,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             <span className={`text-2xl font-bold ${saldoFinal < 0 ? 'text-amber-600' : saldoFinal === 0 && hasDevolucao ? 'text-emerald-600' : 'text-blue-700'}`}>
               {saldoFinal < 0 ? fmt(valorCredito) : fmt(total)}
             </span>
-            <button onClick={abrirPagamento} disabled={itens.length === 0}
+            <button onClick={() => abrirPagamento()} disabled={itens.length === 0}
               className={`ml-4 px-6 py-2 disabled:opacity-40 text-white font-semibold rounded-lg text-sm transition-colors ${
                 saldoFinal < 0 ? 'bg-amber-500 hover:bg-amber-600' :
                 saldoFinal === 0 && hasDevolucao ? 'bg-emerald-600 hover:bg-emerald-700' :
                 'bg-blue-600 hover:bg-blue-700'
               }`}>
-              {saldoFinal < 0 ? '💳 Gerar Crédito (F2)' :
-               saldoFinal === 0 && hasDevolucao ? '🔄 Confirmar Troca (F2)' :
-               'Concluir (F2)'}
+              {saldoFinal < 0 ? '💳 Gerar Crédito (F9)' :
+               saldoFinal === 0 && hasDevolucao ? '🔄 Confirmar Troca (F9)' :
+               'Concluir (F9)'}
             </button>
           </div>
         </div>
