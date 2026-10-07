@@ -1239,7 +1239,9 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     <div className="flex flex-col h-screen bg-white select-none" style={{ fontFamily: 'var(--font-inter), Inter, sans-serif' }}>
 
       {/* ── TOOLBAR ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-gray-100 border-b border-gray-300 text-xs flex-shrink-0">
+      {/* Sem quebra de linha nos botões: em tela estreita a barra rola de lado
+          em vez de partir "Nova venda" em duas linhas. */}
+      <div className="flex items-center gap-1 px-2 py-1.5 bg-gray-100 border-b border-gray-300 text-xs flex-shrink-0 overflow-x-auto">
         <BtnToolbar onClick={() => abrirPagamento()} cor="bg-blue-600 hover:bg-blue-700 text-white" atalho="F9" label="Concluir" />
         <BtnToolbar onClick={() => setModalCliente(true)} cor="bg-white hover:bg-gray-50 text-blue-700 border border-blue-300" atalho="F5"
           label={clienteSelecionado ? clienteSelecionado.nome.split(' ')[0] : 'Cliente'} icon="👤" />
@@ -2387,7 +2389,7 @@ function FotoProduto({ url, nome, tamanho }: { url: string | null | undefined; n
 
 function BtnToolbar({ label, atalho, onClick, cor, icon }: { label: string; atalho: string; onClick: () => void; cor: string; icon?: string }) {
   return (
-    <button onClick={onClick} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${cor}`}>
+    <button onClick={onClick} className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${cor}`}>
       {icon && <span>{icon}</span>}
       <span>{label}</span>
       <span className="opacity-60 text-[10px]">({atalho})</span>
