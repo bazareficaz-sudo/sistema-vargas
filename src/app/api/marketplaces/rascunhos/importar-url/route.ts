@@ -113,6 +113,19 @@ export async function POST(req: Request) {
 
   const leitura = await lerAnuncioPorUrl(sb, (canais ?? []) as CanalParaLeitura[], url, canalId)
   if (!leitura.ok) {
+    // Negado num link de catálogo = produto de OUTRO vendedor. Medido em
+    // 07/10/2026: a API nega anúncio de terceiro às contas da empresa, e a
+    // página pública, lida fora do navegador, cai na verificação de conta do
+    // ML. "Reconecte a conta" seria o conselho errado — o caminho é a
+    // extensão, que lê a página no navegador de quem está logado.
+    if (leitura.negadoPeloML && alvo.tipo === 'catalogo') {
+      return NextResponse.json({
+        ok: false,
+        erro: 'Este produto é de outro vendedor, e o Mercado Livre não libera a leitura de anúncios de '
+          + 'terceiros pela API. Abra o link no Chrome e capture com a Extensão do Chrome — ela lê a '
+          + 'página no seu navegador e traz o anúncio do mesmo jeito.',
+      }, { status: 400 })
+    }
     return NextResponse.json({ ok: false, erro: leitura.erro }, { status: 400 })
   }
 
