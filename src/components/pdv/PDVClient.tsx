@@ -10,6 +10,7 @@ import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { promocaoVigente, precoPorQuantidade, type ProdutoComFaixas } from '@/lib/produtos/promocao'
 import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
 import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produtos/similares'
+import CampoNumero from '@/components/pdv/CampoNumero'
 import {
   promocaoValeNasFormas, gruposDePagamento,
   type ConfigPromocaoPagamento,
@@ -1403,8 +1404,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                           className={`w-6 h-6 rounded flex items-center justify-center text-base leading-none ${isDev ? 'bg-red-100 hover:bg-red-200 text-red-700' : 'bg-gray-200 hover:bg-gray-300 text-gray-600'}`}>
                           {isDev ? '+' : '−'}
                         </button>
-                        <input value={item.quantidade} onChange={e => alterarQtd(item.id, parseFloat(e.target.value) || 0)}
-                          onClick={e => e.stopPropagation()}
+                        <CampoNumero valor={item.quantidade} onValor={v => alterarQtd(item.id, v)}
                           className={`w-14 text-center border rounded px-1 py-0.5 text-sm font-semibold focus:outline-none ${isDev ? 'border-red-300 text-red-700 bg-red-50' : 'border-gray-300 focus:border-blue-400'}`} />
                         <button onMouseDown={e => { e.stopPropagation(); alterarQtd(item.id, item.quantidade + (isDev ? -1 : 1)) }}
                           className={`w-6 h-6 rounded flex items-center justify-center text-base leading-none ${isDev ? 'bg-red-100 hover:bg-red-200 text-red-700' : 'bg-gray-200 hover:bg-gray-300 text-gray-600'}`}>
@@ -1413,13 +1413,11 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                       </div>
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <input value={item.preco_unitario.toFixed(2)} onChange={e => alterarPreco(item.id, parseFloat(e.target.value) || 0)}
-                        onClick={e => e.stopPropagation()}
+                      <CampoNumero valor={item.preco_unitario} casas={2} onValor={v => alterarPreco(item.id, v)}
                         className="w-24 text-right border border-gray-200 rounded px-2 py-0.5 text-sm focus:outline-none focus:border-blue-400" />
                     </td>
                     <td className="px-2 py-2 text-center">
-                      <input value={item.desconto} onChange={e => alterarDesc(item.id, parseFloat(e.target.value) || 0)}
-                        onClick={e => e.stopPropagation()}
+                      <CampoNumero valor={item.desconto} onValor={v => alterarDesc(item.id, v)}
                         className="w-16 text-center border border-gray-200 rounded px-2 py-0.5 text-sm focus:outline-none focus:border-blue-400" />
                     </td>
                     <td className={`px-3 py-2 text-right font-semibold ${isDev ? 'text-red-600' : 'text-gray-900'}`}>
