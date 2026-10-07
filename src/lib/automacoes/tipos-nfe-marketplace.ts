@@ -1,4 +1,5 @@
 import { emitirNfeDoPedido } from '@/lib/fiscal/emitirNfePedido'
+import { enviarNfeAoMarketplace } from '@/lib/fiscal/enviarNfeAoMarketplace'
 import { notaResolvida } from '@/lib/pedidos/esteira'
 import { LIMITE_NFE_MARKETPLACE_POR_RODADA, type ResultadoExecucao } from './tipos'
 
@@ -50,6 +51,19 @@ export function pedidoAptoParaNfeAutomatica(p: any, agora = Date.now()): boolean
   return !notaResolvida(p)
 }
 
+// Nota autorizada em produção cujo envio ao marketplace falhou (canal fora do
+// ar, token vencido): a automação reenvia, no máximo a cada 30 min. A nota
+// em si não é emitida de novo — só a entrega ao canal.
+const REENVIO_ESPERA_MS = 30 * 60 * 1000
+
+/** Nota emitida aqui, em produção, que o canal ainda não recebeu. Puro. */
+export function pedidoAguardandoEnvioAoCanal(p: any, agora = Date.now()): boolean {
+  if (p.status !== 'confirmado' || p.nfe_status !== 'autorizada' || p.nfe_informada_em) return false
+  if (p.nfe_ambiente !== 'producao' || p.nfe_enviada_em) return false
+  const tentativa = Date.parse(p.nfe_envio_tentativa_em ?? '')
+  return !Number.isFinite(tentativa) || agora - tentativa >= REENVIO_ESPERA_MS
+}
+
 const COLUNAS = [
   'id, canal_id, status, status_externo, etapa_interna, envio_status, envio_substatus',
   'nfe_status, nfe_numero, nfe_informada_em, data_pedido',
@@ -84,26 +98,44 @@ export async function executarEmissaoNfeMarketplace(sb: any, a: any): Promise<Re
   // Erro de consulta não pode virar "nada a fazer" silencioso.
   if (error) throw new Error(`Pedidos elegíveis: ${error.message}`)
 
+  const { data: semEnvio, error: erroEnvio } = await sb.from('marketplace_pedidos')
+    .select('id, status, nfe_status, nfe_informada_em, nfe_ambiente:nfe_emissao->>ambiente, nfe_enviada_em:nfe_emissao->>enviadaAoCanalEm, nfe_envio_tentativa_em:nfe_emissao->>envioCanalTentativaEm')
+    .eq('empresa_id', a.empresa_id)
+    .in('canal_id', canalIds)
+    .eq('status', 'confirmado')
+    .eq('nfe_status', 'autorizada')
+    .is('nfe_informada_em', null)
+    .limit(100)
+  if (erroEnvio) throw new Error(`Notas sem envio ao canal: ${erroEnvio.message}`)
+
   const aptos = (pedidos ?? []).filter((p: any) => pedidoAptoParaNfeAutomatica(p)).slice(0, LIMITE_NFE_MARKETPLACE_POR_RODADA)
-  if (aptos.length === 0) return { status: 'sem_acao', avancarCursorPara: agora }
+  const reenviar = (semEnvio ?? []).filter((p: any) => pedidoAguardandoEnvioAoCanal(p)).slice(0, LIMITE_NFE_MARKETPLACE_POR_RODADA)
+  if (aptos.length === 0 && reenviar.length === 0) return { status: 'sem_acao', avancarCursorPara: agora }
 
   const inicio = Date.now()
-  let autorizadas = 0, rejeitadas = 0, bloqueadas = 0
+  let autorizadas = 0, rejeitadas = 0, bloqueadas = 0, naoEnviadas = 0
   const motivos: string[] = []
+  for (const p of reenviar) {
+    if (Date.now() - inicio > ORCAMENTO_MS) break
+    const r = await enviarNfeAoMarketplace(sb, a.empresa_id, p.id)
+    if (!r.ok && !r.jaEnviada) { naoEnviadas++; motivos.push(`envio ao canal: ${r.erro}`) }
+  }
   for (const p of aptos) {
     if (Date.now() - inicio > ORCAMENTO_MS) break
     const r = await emitirNfeDoPedido(sb, a.empresa_id, p.id, `automação: ${a.nome}`, {
       registrarBloqueio: { statusAtual: p.nfe_status ?? null },
     })
-    if (r.ok || r.jaEmitida) autorizadas++
-    else if (r.bloqueada) { bloqueadas++; motivos.push(r.erro ?? r.erros?.[0] ?? 'bloqueada') }
+    if (r.ok || r.jaEmitida) {
+      autorizadas++
+      if (r.envioCanal && !r.envioCanal.ok) { naoEnviadas++; motivos.push(`envio ao canal: ${r.envioCanal.erro}`) }
+    } else if (r.bloqueada) { bloqueadas++; motivos.push(r.erro ?? r.erros?.[0] ?? 'bloqueada') }
     else { rejeitadas++; motivos.push(r.motivoRejeicao ?? r.erro ?? 'rejeitada') }
   }
 
-  const falhas = rejeitadas + bloqueadas
+  const falhas = rejeitadas + bloqueadas + naoEnviadas
   if (falhas === 0) return { status: 'ok', avancarCursorPara: agora }
-  const resumo = `${autorizadas} emitida(s), ${rejeitadas} rejeitada(s), ${bloqueadas} bloqueada(s). ` +
-    `Primeiro motivo: ${motivos[0]}`
+  const resumo = `${autorizadas} emitida(s), ${rejeitadas} rejeitada(s), ${bloqueadas} bloqueada(s), ` +
+    `${naoEnviadas} sem envio ao marketplace. Primeiro motivo: ${motivos[0]}`
   // Qualquer falha vira 'erro' — é o que dispara o aviso por WhatsApp da
   // regra. Pedido parado sem nota atrasa o despacho; melhor avisar.
   return { status: 'erro', erro: resumo, avancarCursorPara: agora }

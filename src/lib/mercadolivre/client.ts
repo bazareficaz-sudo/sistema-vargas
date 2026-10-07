@@ -70,6 +70,18 @@ export async function mlGet(path: string, params: Record<string, string | number
   return parseMLResponse(res, path)
 }
 
+// Envio de arquivo (multipart/form-data) — hoje, o XML da NF-e para o pack
+// (POST /packs/{id}/fiscal_documents). Sem Content-Type manual: o fetch põe
+// o boundary sozinho.
+export async function mlPostArquivo(path: string, form: FormData, accessToken: string) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  })
+  return parseMLResponse(res, path)
+}
+
 export async function mlPost(path: string, body: unknown, accessToken: string) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',

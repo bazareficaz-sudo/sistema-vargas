@@ -9,6 +9,7 @@ import { montarNfeDoPedido, type ItemDoPedido, type ResultadoMontagem } from './
 import type { RegraPerfil } from './perfilFiscal'
 import { buscarDadosFaturamentoML } from '@/lib/mercadolivre/billing'
 import { refreshAccessTokenIfNeeded } from '@/lib/mercadolivre/client'
+import { enviarNfeAoMarketplace, type ResultadoEnvioCanal } from './enviarNfeAoMarketplace'
 
 // NF-e DE PEDIDO DE MARKETPLACE — a parte que fala com banco e rede.
 //
@@ -176,6 +177,8 @@ export type ResultadoNfePedido = {
   jaEmitida?: boolean
   /** A nota não pôde nem ser montada (produto sem perfil, endereço faltando…). */
   bloqueada?: boolean
+  /** Envio da nota ao marketplace, feito logo após a autorização em produção. */
+  envioCanal?: ResultadoEnvioCanal
 }
 
 // Bloqueio gravado no pedido — só quando quem chama pede (a automação). Sem
@@ -271,9 +274,23 @@ export async function emitirNfeDoPedido(
       })
     } catch {}
 
+    // Nota autorizada em produção vai direto para o marketplace — é o que
+    // libera a etiqueta. Falha aqui NÃO desfaz a nota: ela está emitida; o
+    // erro fica no pedido, com botão para reenviar e nova tentativa da
+    // automação. Por isso o try próprio, fora do catch de emissão abaixo.
+    let envioCanal: ResultadoEnvioCanal | undefined
+    if (faturou) {
+      try {
+        envioCanal = await enviarNfeAoMarketplace(sb, empresaId, pedidoId)
+      } catch (e: any) {
+        envioCanal = { ok: false, erro: e?.message ?? 'Erro ao enviar a nota ao marketplace' }
+      }
+    }
+
     return {
       ok: r.status === 'autorizada', status: r.status, ambiente: emitente.ambiente,
       numero: r.numero, chave: r.chave, danfeUrl: r.danfeUrl, motivoRejeicao: r.motivoRejeicao,
+      envioCanal,
     }
   } catch (e: any) {
     const erro = e instanceof FiscalProviderError ? e.message : (e?.message ?? 'Erro ao emitir NF-e')
