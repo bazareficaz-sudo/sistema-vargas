@@ -13,7 +13,7 @@ import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produt
 import CampoNumero from '@/components/pdv/CampoNumero'
 import { ListaPedidosPdv, ListaOrcamentosPdv } from '@/components/pdv/ListagensPdv'
 import {
-  promocaoValeNasFormas, gruposDePagamento,
+  promocaoValeNasFormas, gruposDePagamento, promocaoNoCarrinho,
   type ConfigPromocaoPagamento,
 } from '@/lib/pdv/promocaoPagamento'
 
@@ -253,6 +253,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const tiposEscolhidos = formas.map(f => f.tipo)
   const veredito        = promocaoValeNasFormas(cfgPdv, tiposEscolhidos)
   const gruposPromo     = gruposDePagamento(cfgPdv, FORMAS.map(f => f.id))
+  // Preço do carrinho FORA da tela de pagamento (Configurações → PDV): o
+  // promocional (padrão) ou o normal. Dentro do pagamento, quem decide é a
+  // forma escolhida (`veredito`).
+  const promoCarrinho   = promocaoNoCarrinho(cfgPdv, FORMAS.map(f => f.id))
+  const promoAgora      = modalPag ? veredito.vale : promoCarrinho
+  /** Rótulo das formas com desconto, para "R$ 188,00 no DIN / PIX". */
+  const rotuloPromo     = gruposPromo?.rotuloComDesconto ?? ''
   const temItemEmPromo  = itens.some(i => i.em_promocao)
 
   /**
@@ -469,7 +476,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         return prev.map((i, ix) => (ix === idx ? reprecificar(i, newQ) : i))
       }
       const emPromo = promocaoVigente(p)
-      const precoFinal = precoPorQuantidade(p as any, q)
+      const precoFinal = precoPorQuantidade(p as any, q, new Date(), promoAgora)
       return [...prev, {
         id: uid(), produto_id: p.id, nome: p.nome, sku: p.sku,
         quantidade: q, preco_unitario: precoFinal, desconto: 0,
@@ -477,7 +484,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         tipo: tipoItem, custo: p.preco_custo,
         em_promocao: emPromo, preco_original: p.preco_venda,
         produto: p,
-        faixaAplicada: precoFinal < (emPromo ? p.preco_promocional! : p.preco_venda),
+        faixaAplicada: precoFinal < (emPromo && promoAgora ? p.preco_promocional! : p.preco_venda),
         ...(origemSugestao ? { origemSugestao } : {}),
       }]
     })
@@ -553,8 +560,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     if (item.precoManual || !item.produto) {
       return { ...item, quantidade: novaQtd, total: novaQtd * item.preco_unitario * (1 - item.desconto / 100) }
     }
-    const preco = precoPorQuantidade(item.produto as any, novaQtd)
-    const semFaixa = item.em_promocao ? item.produto.preco_promocional! : item.produto.preco_venda
+    // Mesmo modo de preço em que o carrinho está agora — sem isto, mudar a
+    // quantidade depois de escolher cartão devolvia o item ao promocional.
+    const preco = precoPorQuantidade(item.produto as any, novaQtd, new Date(), promoAgora)
+    const semFaixa = item.em_promocao && promoAgora ? item.produto.preco_promocional! : item.produto.preco_venda
     return {
       ...item,
       quantidade: novaQtd,
@@ -668,6 +677,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     // atende a próxima, e herdar em silêncio credita comissão errada.
     setVendedor(null); setModalVendedor(false); setCodigoVendedor(''); setErroVendedor('')
     setCompreJunto([]); setDispensadas(new Set())
+    setFormas([{ tipo: 'dinheiro', valor: 0 }])
     buscaRef.current?.focus()
   }
 
@@ -706,11 +716,24 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       return
     }
 
-    // Pagamento normal (saldo > 0)
-    setFormas([{ tipo: 'dinheiro', valor: total }])
+    // Pagamento normal (saldo > 0). Pelo caminho que reprecifica: com o
+    // carrinho no preço normal, abrir já em dinheiro precisa aplicar o
+    // desconto, e o valor sugerido tem que ser o total JÁ reprecificado.
+    aplicarFormas([{ tipo: 'dinheiro', valor: 0 }])
     setFormaIdx(0)
     setModalPag(true)
     setTimeout(() => valorRefs.current[0]?.focus(), 80)
+  }
+
+  /**
+   * Sai do pagamento SEM concluir: o carrinho volta ao preço da configuração.
+   * Sem isto, escolher cartão e desistir deixava o carrinho no preço normal
+   * (ou, no modo "preço normal", escolher Pix e desistir deixava o desconto).
+   */
+  function fecharPagamento() {
+    setModalPag(false)
+    setItens(itensNoModo(promoCarrinho))
+    setFormas([{ tipo: 'dinheiro', valor: 0 }])
   }
 
   /**
@@ -1300,16 +1323,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                     <span className={`text-center text-xs font-medium ${p.estoque > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                       {p.estoque} {p.unidade}
                     </span>
-                    <div className="text-right">
-                      {emPromo ? (
-                        <>
-                          <span className="block text-[10px] text-gray-400 line-through">{fmt(p.preco_venda)}</span>
-                          <span className="font-bold text-orange-600">{fmt(p.preco_promocional!)}</span>
-                        </>
-                      ) : (
-                        <span className="font-semibold text-blue-700">{fmt(p.preco_venda)}</span>
-                      )}
-                    </div>
+                    <PrecoLista produto={p} emPromo={emPromo} promoNaTela={promoCarrinho} rotuloPromo={rotuloPromo} />
                   </div>
                   )
                 })}
@@ -1398,9 +1412,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                           </div>
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {item.produto?.marca && <SeloMarca marca={item.produto.marca} />}
-                            {item.em_promocao ? (
+                            {item.em_promocao && item.preco_unitario < item.preco_original ? (
                               <span className="text-xs text-orange-600 font-medium">
                                 de <span className="line-through text-gray-400">{fmt(item.preco_original)}</span> por {fmt(item.preco_unitario)}
+                              </span>
+                            ) : item.em_promocao && item.produto?.preco_promocional && !promoAgora && rotuloPromo ? (
+                              // Carrinho no preço normal: a promoção existe, mas só vale
+                              // pagando nas formas com direito — o vendedor vê quanto fica.
+                              <span className="text-xs text-emerald-700 font-medium">
+                                {fmt(item.produto.preco_promocional)} no {rotuloPromo}
                               </span>
                             ) : (
                               <span className="text-xs text-gray-400">{item.sku} · {item.unidade}</span>
@@ -1455,7 +1475,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {compreJuntoVisiveis.map(s => {
-              const preco = promocaoVigente(s) ? s.preco_promocional! : s.preco_venda
+              const preco = promocaoVigente(s) && promoCarrinho ? s.preco_promocional! : s.preco_venda
               return (
                 <div key={s.id}
                   className={`relative shrink-0 w-56 flex gap-2 items-center bg-white border rounded-lg p-1.5 pr-6 ${s.estoque > 0 ? 'border-amber-200' : 'border-gray-200 opacity-60'}`}>
@@ -1770,12 +1790,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       )}
 
       {modalPag && (
-        <Modal titulo="Pagamento" onClose={() => setModalPag(false)} largura="max-w-md">
+        <Modal titulo="Pagamento" onClose={fecharPagamento} largura="max-w-md">
           <div className="space-y-4">
             {vendedor && (
               <div className="flex items-center justify-between text-xs bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
                 <span className="text-indigo-900">🧑‍💼 Venda de <strong>{vendedor.nome}</strong></span>
-                <button onClick={() => { setModalPag(false); setCodigoVendedor(vendedor.codigo ?? ''); setModalVendedor(true); setTimeout(() => codigoVendedorRef.current?.select(), 80) }}
+                <button onClick={() => { fecharPagamento(); setCodigoVendedor(vendedor.codigo ?? ''); setModalVendedor(true); setTimeout(() => codigoVendedorRef.current?.select(), 80) }}
                   className="text-indigo-600 hover:text-indigo-800 underline">trocar</button>
               </div>
             )}
@@ -1963,7 +1983,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             )}
 
             <div className="flex gap-2 pt-1">
-              <button onClick={() => { setModalPag(false); setErrFiado('') }} className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cancelar (Esc)</button>
+              <button onClick={() => { fecharPagamento(); setErrFiado('') }} className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cancelar (Esc)</button>
               <button onClick={() => concluirVenda(hasDevolucao ? 'mista' : 'venda')}
                 disabled={salvando || (!isFiado && totalPago < total) || (isCarteira && !clienteSelecionado) || cpfNotaIncompleto}
                 className={`flex-1 py-2.5 disabled:opacity-40 text-white font-semibold rounded-lg text-sm transition-colors ${isFiado ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
@@ -2281,16 +2301,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                   <span className={`text-center text-sm font-semibold ${p.estoque > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                     {p.estoque <= 0 ? 'Sem estoque' : `${p.estoque} ${p.unidade}`}
                   </span>
-                  <span className="text-right">
-                    {emPromo ? (
-                      <>
-                        <span className="block text-[10px] text-gray-400 line-through">{fmt(p.preco_venda)}</span>
-                        <span className="font-bold text-orange-600">{fmt(p.preco_promocional!)}</span>
-                      </>
-                    ) : (
-                      <span className="font-semibold text-blue-700">{fmt(p.preco_venda)}</span>
-                    )}
-                  </span>
+                  <PrecoLista produto={p} emPromo={emPromo} promoNaTela={promoCarrinho} rotuloPromo={rotuloPromo} />
                 </button>
               )
             })}
@@ -2300,6 +2311,38 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           </p>
         </Modal>
       )}
+    </div>
+  )
+}
+
+/**
+ * Preço de um produto nas listas do PDV (busca e similares).
+ *
+ * `promoNaTela` segue Configurações → PDV: com o carrinho no preço normal, o
+ * preço grande é o normal e o promocional aparece embaixo, com as formas que
+ * dão direito — é o mesmo preço que vai entrar no carrinho.
+ */
+function PrecoLista({ produto, emPromo, promoNaTela, rotuloPromo }: {
+  produto: { preco_venda: number; preco_promocional: number | null }
+  emPromo: boolean; promoNaTela: boolean; rotuloPromo: string
+}) {
+  if (!emPromo || produto.preco_promocional == null) {
+    return <div className="text-right"><span className="font-semibold text-blue-700">{fmt(produto.preco_venda)}</span></div>
+  }
+  if (promoNaTela) {
+    return (
+      <div className="text-right">
+        <span className="block text-[10px] text-gray-400 line-through">{fmt(produto.preco_venda)}</span>
+        <span className="font-bold text-orange-600">{fmt(produto.preco_promocional)}</span>
+      </div>
+    )
+  }
+  return (
+    <div className="text-right">
+      <span className="block font-semibold text-blue-700">{fmt(produto.preco_venda)}</span>
+      <span className="block text-[10px] font-semibold text-emerald-700">
+        {fmt(produto.preco_promocional)}{rotuloPromo ? ` no ${rotuloPromo}` : ''}
+      </span>
     </div>
   )
 }

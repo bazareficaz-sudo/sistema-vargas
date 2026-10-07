@@ -26,11 +26,36 @@ export type ConfigPromocaoPagamento = {
   exigirFormaPagamento: boolean
   /** Formas que autorizam o preço promocional, ex.: ['pix', 'dinheiro']. */
   formasPermitidas: string[]
+  /**
+   * Preço que entra no carrinho antes de o pagamento ser escolhido.
+   * 'promocional' (padrão, comportamento de sempre) ou 'normal'.
+   * Ausente = 'promocional'.
+   */
+  precoNoCarrinho?: PrecoNoCarrinho
 }
+
+export type PrecoNoCarrinho = 'promocional' | 'normal'
 
 export const CONFIG_PADRAO: ConfigPromocaoPagamento = {
   exigirFormaPagamento: false,
   formasPermitidas: [],
+  precoNoCarrinho: 'promocional',
+}
+
+/**
+ * O carrinho, FORA da tela de pagamento, mostra o preço promocional?
+ *
+ * Só responde "não" quando a empresa escolheu mostrar o preço normal E a
+ * restrição está de fato valendo (ligada, com formas escolhidas, e com formas
+ * dos dois lados). Sem restrição a promoção vale em qualquer pagamento, e
+ * esconder o preço promocional seria cobrar a mais de quem tinha direito.
+ */
+export function promocaoNoCarrinho(
+  cfg: ConfigPromocaoPagamento | null | undefined,
+  todasAsFormas: string[],
+): boolean {
+  if (cfg?.precoNoCarrinho !== 'normal') return true
+  return gruposDePagamento(cfg, todasAsFormas) === null
 }
 
 export type VereditoPromocao = {
