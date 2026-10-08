@@ -40,6 +40,17 @@ const dataComSemana = (iso: string) => {
 }
 const hoje = () => new Date(Date.now() - 3 * 3_600_000).toISOString().slice(0, 10)
 
+/** "shopee", "ML", "mercado livre", "Shp Ouro" → plataforma ou nome de canal. */
+export function normalizarCanal(texto: string): { plataforma?: string; nome?: string } {
+  const t = texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+  if (!t) return {}
+  if (/^(shopee|shp)$/.test(t)) return { plataforma: 'shopee' }
+  if (/^(ml|mercado ?livre|meli)$/.test(t)) return { plataforma: 'mercadolivre' }
+  if (/^(tiktok|tik tok|tiktok shop|tt)$/.test(t)) return { plataforma: 'tiktok' }
+  if (/^(nuvemshop|nuvem|loja virtual)$/.test(t)) return { plataforma: 'nuvemshop' }
+  return { nome: texto.trim().replace(/[,()%]/g, ' ') }
+}
+
 /**
  * Os produtos de que o dono está falando, pela busca de balcão: os que
  * batem com todos os termos; sem nenhum, os parecidos (faltou um termo).
@@ -227,6 +238,69 @@ export const CONSULTAS_GETULIO: Consulta[] = [
         ...(Array.isArray(s.dados?.maiores) ? { maiores: s.dados.maiores } : {}),
       }))
       return { linhas, periodo: 'situação na última varredura (feita de hora em hora)' }
+    },
+  },
+  {
+    nome: 'anuncios_filtrados',
+    descricao: 'Lista anúncios cruzando MARCA, CANAL e SITUAÇÃO de estoque/status — ex.: "produtos Guepar anunciados na Shopee que estão zerados", "anúncios pausados do ML", "o que está ativo no TikTok sem estoque no sistema". Mostra o estoque do sistema E o do anúncio, com totais por canal.',
+    parametros: {
+      type: 'object',
+      properties: {
+        marca: { type: 'string', description: 'Marca (ou palavra do nome) dos produtos. Opcional.' },
+        canal: { type: 'string', description: 'Plataforma ("shopee", "mercadolivre", "tiktok", "nuvemshop") ou nome do canal ("Shp Ouro"). Opcional.' },
+        situacao: { type: 'string', description: '"zerado_no_anuncio" (anúncio com estoque 0 no canal), "zerado_no_sistema" (produto sem estoque no sistema), "qualquer_zerado" (um ou outro), "ativos", "pausados" ou "todos".' },
+      },
+      required: ['situacao'],
+    },
+    async executar(sb, empresaId, args) {
+      const marca = String(args.marca ?? '').trim().replace(/[,()%]/g, ' ').trim()
+      const canalTxt = normalizarCanal(String(args.canal ?? ''))
+      const situacao = String(args.situacao ?? 'todos')
+      const validas = ['zerado_no_anuncio', 'zerado_no_sistema', 'qualquer_zerado', 'ativos', 'pausados', 'todos']
+      if (!validas.includes(situacao)) return erro(`Situação inválida. Use: ${validas.join(', ')}.`)
+
+      let q = sb.from('marketplace_anuncios')
+        .select('titulo, status, status_externo, estoque_externo, preco_venda, marketplace_canais!inner(nome, plataforma, empresa_id), produtos!inner(nome, sku, marca, estoque)')
+        .eq('marketplace_canais.empresa_id', empresaId)
+      if (canalTxt.plataforma) q = q.eq('marketplace_canais.plataforma', canalTxt.plataforma)
+      else if (canalTxt.nome) q = q.ilike('marketplace_canais.nome', `%${canalTxt.nome}%`)
+      if (marca) q = q.or(`marca.ilike.%${marca}%,nome.ilike.%${marca}%`, { referencedTable: 'produtos' })
+      if (situacao === 'ativos') q = q.eq('status', 'ativo')
+      if (situacao === 'pausados') q = q.eq('status', 'pausado')
+      if (situacao === 'zerado_no_anuncio') q = q.lte('estoque_externo', 0)
+      if (situacao === 'zerado_no_sistema') q = q.lte('produtos.estoque', 0)
+      const { data, error } = await q.limit(2000)
+      if (error) return erro(error.message)
+
+      let lista = (data ?? []) as any[]
+      if (situacao === 'qualquer_zerado') {
+        lista = lista.filter(a => Number(a.estoque_externo ?? 0) <= 0 || Number(a.produtos?.estoque ?? 0) <= 0)
+      }
+      // Encerrado não interessa a ninguém numa lista dessas.
+      lista = lista.filter(a => a.status !== 'encerrado')
+
+      const porCanal = new Map<string, number>()
+      for (const a of lista) porCanal.set(a.marketplace_canais.nome, (porCanal.get(a.marketplace_canais.nome) ?? 0) + 1)
+      const linhas = lista
+        .sort((x, y) => String(x.produtos?.nome).localeCompare(String(y.produtos?.nome)))
+        .map(a => ({
+          canal: a.marketplace_canais.nome, produto: a.produtos?.nome, sku: a.produtos?.sku,
+          estoque_sistema: Number(a.produtos?.estoque ?? 0), estoque_no_anuncio: a.estoque_externo,
+          status: a.status, preco: r2(a.preco_venda),
+        }))
+      return {
+        linhas: [
+          ...[...porCanal].map(([canal, n]) => ({ canal, TOTAL_DE_ANUNCIOS: n })),
+          ...linhas.slice(0, MAX_LINHAS),
+        ],
+        periodo: 'situação atual (última sincronização de cada canal)',
+        truncado: linhas.length > MAX_LINHAS,
+        ressalvas: [
+          '"Zerado no anúncio" = o canal está mostrando 0; "zerado no sistema" = não há o produto em estoque. São coisas diferentes: zerado no sistema e com estoque no anúncio é risco de vender o que não tem; com estoque no sistema e zerado no anúncio é venda perdida.',
+          'Anúncio com variações (vinculado por variação) não entra nesta lista.',
+          ...(linhas.length > MAX_LINHAS ? [`Mostrando ${MAX_LINHAS} de ${linhas.length}; os totais por canal estão completos.`] : []),
+        ],
+      }
     },
   },
   {

@@ -31,3 +31,15 @@ describe('chave do webhook', () => {
     assert.equal(chaveConfere('INST1', k.slice(0, -1) + (k.endsWith('a') ? 'b' : 'a')), false)
   })
 })
+
+describe('canal falado → filtro', () => {
+  test('apelidos de plataforma e nome de canal', async () => {
+    const { normalizarCanal } = await import('../../src/lib/getulio/consultas')
+    assert.deepEqual(normalizarCanal('Shopee'), { plataforma: 'shopee' })
+    assert.deepEqual(normalizarCanal('mercado livre'), { plataforma: 'mercadolivre' })
+    assert.deepEqual(normalizarCanal('ML'), { plataforma: 'mercadolivre' })
+    assert.deepEqual(normalizarCanal('TikTok'), { plataforma: 'tiktok' })
+    assert.deepEqual(normalizarCanal('Shp Ouro'), { nome: 'Shp Ouro' })
+    assert.deepEqual(normalizarCanal(''), {})
+  })
+})
