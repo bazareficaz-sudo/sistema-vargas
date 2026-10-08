@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import EnviarWhatsAppModal from '@/components/integracoes/EnviarWhatsAppModal'
 import VendaDaContaModal from './VendaDaContaModal'
 import ReceberEmMassaModal from './ReceberEmMassaModal'
+import { metricasContasReceber, somaEmAberto } from '@/lib/contas-receber/metricas'
 import Link from 'next/link'
 
 type Conta = {
@@ -49,13 +50,6 @@ type CreditoDisp = {
   descricao: string | null
 }
 
-type Metricas = {
-  totalAberto: number
-  totalVencido: number
-  totalHoje: number
-  totalEm30: number
-}
-
 const STATUS_LABEL: Record<string, string> = {
   aberto: 'Aberto', parcial: 'Parcial', recebido: 'Recebido',
   vencido: 'Vencido', cancelado: 'Cancelado', renegociado: 'Renegociado'
@@ -87,14 +81,13 @@ function diasAtraso(venc: string) {
 }
 
 export default function ContasReceberClient({
-  empresaId, operador, contasIniciais, clientes, creditosDisponiveis, metricas
+  empresaId, operador, contasIniciais, clientes, creditosDisponiveis,
 }: {
   empresaId: string
   operador: string
   contasIniciais: Conta[]
   clientes: Cliente[]
   creditosDisponiveis: CreditoDisp[]
-  metricas: Metricas
 }) {
   const sb = createClient()
   const [contas, setContas] = useState<Conta[]>(contasIniciais)
@@ -160,6 +153,19 @@ export default function ContasReceberClient({
     if (filtroCliente) list = list.filter(c => c.cliente_id === filtroCliente)
     return list
   }, [contas, filtroStatus, busca, filtroVenc, filtroCliente, hoje])
+
+  // ── Cards ────────────────────────────────────────────────────
+  // Calculados aqui, e não recebidos prontos do servidor: com um cliente
+  // escolhido, os cards passam a responder "quanto ESTE cliente me deve" — e
+  // acompanham na hora cada recebimento feito na tela.
+  const contasDoCliente = useMemo(
+    () => (filtroCliente ? contas.filter(c => c.cliente_id === filtroCliente) : contas),
+    [contas, filtroCliente])
+  const metricas = useMemo(() => metricasContasReceber(contasDoCliente, hoje), [contasDoCliente, hoje])
+  const clienteFiltrado = filtroCliente ? clientes.find(c => c.id === filtroCliente) ?? null : null
+  const creditoDoClienteFiltrado = filtroCliente
+    ? creditosDisponiveis.filter(c => c.cliente_id === filtroCliente).reduce((s, c) => s + c.saldo_disponivel, 0)
+    : 0
 
   const clienteCredito = contaReceber
     ? creditosDisponiveis.filter(c => c.cliente_id === contaReceber.cliente_id)
@@ -461,16 +467,33 @@ export default function ContasReceberClient({
       </div>
 
       {/* ── Métricas ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-4 gap-3">
+      {clienteFiltrado && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span className="text-slate-500">Mostrando somente</span>
+          <span className="font-semibold text-slate-900">{clienteFiltrado.nome}</span>
+          {creditoDoClienteFiltrado > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Crédito disponível: {fmt(creditoDoClienteFiltrado)}
+            </span>
+          )}
+          <button onClick={() => setFiltroCliente('')} className="text-xs text-blue-600 hover:text-blue-800">
+            ver todos os clientes
+          </button>
+        </div>
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Total em Aberto', valor: metricas.totalAberto, cor: 'text-blue-600' },
-          { label: 'Vencido',         valor: metricas.totalVencido, cor: 'text-red-600' },
-          { label: 'Vence Hoje',      valor: metricas.totalHoje,   cor: 'text-amber-600' },
-          { label: 'Próximos 30d',    valor: metricas.totalEm30,   cor: 'text-emerald-600' },
+          { label: clienteFiltrado ? 'Total que ele deve' : 'Total em Aberto', valor: metricas.totalAberto, cor: 'text-blue-600',
+            detalhe: `${metricas.qtdAberto} conta(s)` },
+          { label: 'Vencido', valor: metricas.totalVencido, cor: 'text-red-600',
+            detalhe: metricas.qtdVencido > 0 ? `${metricas.qtdVencido} conta(s) em atraso` : 'nada em atraso' },
+          { label: 'Vence Hoje',      valor: metricas.totalHoje,   cor: 'text-amber-600', detalhe: '' },
+          { label: 'Próximos 30d',    valor: metricas.totalEm30,   cor: 'text-emerald-600', detalhe: 'de hoje até 30 dias' },
         ].map(m => (
-          <div key={m.label} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <div key={m.label} className={`bg-white border rounded-2xl p-4 shadow-sm ${clienteFiltrado ? 'border-blue-200' : 'border-slate-100'}`}>
             <p className="text-slate-500 text-xs">{m.label}</p>
             <p className={`text-lg font-bold mt-1 ${m.cor}`}>{fmt(m.valor)}</p>
+            {m.detalhe && <p className="text-[11px] text-slate-400 mt-0.5">{m.detalhe}</p>}
           </div>
         ))}
       </div>
@@ -511,13 +534,34 @@ export default function ContasReceberClient({
             {motivoSemMassa}
           </p>
         )}
-        {contasSel.length > 0 && (
+      </div>
+
+      {/* ── Soma da seleção ──────────────────────────────────────── */}
+      {/* O que o gestor fazia na calculadora: marcar as contas e saber o total. */}
+      {contasSel.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+          <span className="text-sm text-blue-900">
+            <b>{contasSelecionadas.length}</b> conta(s) selecionada(s)
+          </span>
+          <span className="text-sm text-blue-900">
+            Total em aberto: <b className="text-base">{fmt(somaEmAberto(contasSelecionadas))}</b>
+          </span>
+          {contasSelecionadas.some(c => c.data_vencimento < hoje) && (
+            <span className="text-xs text-red-700">
+              {fmt(somaEmAberto(contasSelecionadas.filter(c => c.data_vencimento < hoje)))} vencido
+            </span>
+          )}
+          {contasSelecionadas.length > contasFiltradas.filter(c => contasSel.includes(c.id)).length && (
+            <span className="text-xs text-amber-700">
+              (inclui conta(s) fora do filtro atual)
+            </span>
+          )}
           <button onClick={() => setContasSel([])}
-            className="px-3 py-2 bg-slate-100 text-slate-700 text-sm rounded-xl hover:bg-slate-200">
+            className="ml-auto px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-xs rounded-lg hover:bg-blue-100">
             ✕ Limpar seleção
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── Tabela ───────────────────────────────────────────────── */}
       <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
