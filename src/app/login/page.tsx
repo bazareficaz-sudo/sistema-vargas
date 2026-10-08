@@ -74,7 +74,18 @@ function LoginForm() {
       redirectTo: `${window.location.origin}/auth/callback?next=/auth/definir-senha`,
     })
     setEnviandoRecuperacao(false)
-    if (error) { setErro('Não foi possível enviar o e-mail: ' + error.message); return }
+    if (error) {
+      // O envio padrão do Supabase tem cota de poucos e-mails por HORA para o
+      // projeto inteiro. Esgotada, ele responde em inglês e a pessoa fica sem
+      // saber o que fazer — diz o que houve e qual é a saída.
+      if (/rate limit/i.test(error.message)) {
+        setErro('Muitos e-mails de senha foram enviados na última hora e o envio está temporariamente bloqueado. '
+          + 'Tente de novo mais tarde ou peça ao administrador um link de nova senha em Usuários.')
+      } else {
+        setErro('Não foi possível enviar o e-mail: ' + error.message)
+      }
+      return
+    }
     setAvisoRecuperacao('Enviamos um link para ' + email.trim() + '. Abra o e-mail e crie sua nova senha.')
   }
 
