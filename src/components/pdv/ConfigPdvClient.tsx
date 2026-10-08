@@ -14,6 +14,7 @@ import { listar } from '@/lib/pdv/promocaoPagamento'
 export default function ConfigPdvClient() {
   const [exigir, setExigir] = useState(false)
   const [formas, setFormas] = useState<string[]>([])
+  const [precoNoCarrinho, setPrecoNoCarrinho] = useState<'promocional' | 'normal'>('promocional')
   const [carregando, setCarregando] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [aviso, setAviso] = useState('')
@@ -23,7 +24,10 @@ export default function ConfigPdvClient() {
     fetch('/api/pdv/config')
       .then(r => r.json())
       .then(d => {
-        if (d?.ok) { setExigir(!!d.config.exigirFormaPagamento); setFormas(d.config.formasPermitidas ?? []) }
+        if (d?.ok) {
+          setExigir(!!d.config.exigirFormaPagamento); setFormas(d.config.formasPermitidas ?? [])
+          setPrecoNoCarrinho(d.config.precoNoCarrinho === 'normal' ? 'normal' : 'promocional')
+        }
       })
       .finally(() => setCarregando(false))
   }, [])
@@ -39,7 +43,7 @@ export default function ConfigPdvClient() {
       const d = await fetch('/api/pdv/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ exigirFormaPagamento: exigir, formasPermitidas: formas }),
+        body: JSON.stringify({ exigirFormaPagamento: exigir, formasPermitidas: formas, precoNoCarrinho }),
       }).then(r => r.json())
       if (!d.ok) { setErro(d.erro ?? 'Não foi possível salvar'); return }
       setAviso('Salvo. Os caixas abertos passam a usar a nova regra ao recarregar o PDV.')
@@ -105,6 +109,33 @@ export default function ConfigPdvClient() {
               <p className="text-sm text-gray-400">— escolha ao menos uma forma —</p>
             )}
           </div>
+
+          {/* Qual dos dois preços o vendedor vê enquanto passa os itens. */}
+          <div className="mt-5">
+            <p className="text-xs font-medium text-gray-600 mb-2">Preço que aparece na busca e no carrinho</p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {([
+                { v: 'promocional', titulo: 'Preço promocional', desc: 'O item entra com o preço da promoção. Se o cliente pagar em outra forma, o preço sobe na hora do pagamento.' },
+                { v: 'normal', titulo: 'Preço normal', desc: `O item entra com o preço normal. Se o cliente pagar em ${formas.length > 0 ? listar(formas) : 'uma forma com direito'}, o desconto da promoção é aplicado na hora do pagamento.` },
+              ] as const).map(o => (
+                <label key={o.v}
+                  className={`flex items-start gap-2 px-3 py-2.5 rounded-xl border-2 cursor-pointer transition-colors ${
+                    precoNoCarrinho === o.v ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+                  }`}>
+                  <input type="radio" name="preco-carrinho" checked={precoNoCarrinho === o.v}
+                    onChange={() => { setPrecoNoCarrinho(o.v); setErro(''); setAviso('') }}
+                    className="w-4 h-4 mt-0.5 accent-blue-600" />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-900">{o.titulo}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5 leading-relaxed">{o.desc}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">
+              Nos dois casos o rodapé do PDV continua mostrando os dois totais, para o vendedor informar o cliente.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -129,10 +160,11 @@ export default function ConfigPdvClient() {
       <div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
         <p className="text-sm font-medium text-gray-900 mb-2">Como fica no caixa</p>
         <ul className="text-xs text-gray-600 space-y-1.5 list-disc pl-5 leading-relaxed">
-          <li>Enquanto os itens entram, o preço mostrado é o promocional — é o da etiqueta, e é o que o cliente já viu.</li>
+          <li>Enquanto os itens entram, o preço mostrado é o escolhido acima: o promocional (o da etiqueta) ou o normal.</li>
           <li>O rodapé do PDV avisa a condição e quanto o total sobe fora dela, antes de qualquer escolha.</li>
           <li>Na tela de pagamento, as formas que mantêm o desconto ficam marcadas com <strong>promo</strong>.</li>
-          <li>Ao escolher uma forma sem direito, os preços passam para o normal e o PDV diz o quanto aumentou e como recuperar.</li>
+          <li>Ao escolher uma forma sem direito, os preços passam para o normal; com direito, para o promocional. O PDV mostra a diferença.</li>
+          <li>Se o pagamento for cancelado, o carrinho volta ao preço escolhido acima.</li>
           <li>Pagamento dividido só mantém o desconto se <strong>todas</strong> as formas derem direito — meia venda no cartão não cumpre a condição.</li>
           <li>Faixa de atacado não muda: quem leva 60 paga o preço de 60 em qualquer forma de pagamento.</li>
         </ul>

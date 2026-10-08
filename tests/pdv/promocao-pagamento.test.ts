@@ -2,7 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   promocaoValeNasFormas, listar, CONFIG_PADRAO,
-  gruposDePagamento, rotuloCurtoDoGrupo,
+  gruposDePagamento, rotuloCurtoDoGrupo, promocaoNoCarrinho,
 } from '../../src/lib/pdv/promocaoPagamento'
 import { precoVigente, precoPorQuantidade } from '../../src/lib/produtos/promocao'
 
@@ -167,5 +167,28 @@ describe('os dois preços, como etiqueta', () => {
     // Mostrar "R$ 22,00 / R$ 22,00" seria ruído com cara de informação.
     const todasValem = { exigirFormaPagamento: true, formasPermitidas: TODAS }
     assert.equal(gruposDePagamento(todasValem, TODAS), null)
+  })
+})
+
+describe('preço que entra no carrinho (Configurações → PDV)', () => {
+  const TODAS = ['dinheiro', 'pix', 'debito', 'credito', 'carteira', 'fiado']
+
+  test('padrão continua sendo o promocional', () => {
+    assert.equal(promocaoNoCarrinho(SO_PIX_E_DINHEIRO, TODAS), true)
+    assert.equal(promocaoNoCarrinho({ ...SO_PIX_E_DINHEIRO, precoNoCarrinho: 'promocional' }, TODAS), true)
+    assert.equal(promocaoNoCarrinho(null, TODAS), true)
+  })
+
+  test('com a restrição valendo, "normal" mostra o preço sem desconto', () => {
+    assert.equal(promocaoNoCarrinho({ ...SO_PIX_E_DINHEIRO, precoNoCarrinho: 'normal' }, TODAS), false)
+  })
+
+  test('sem restrição de pagamento, "normal" não esconde a promoção de quem tem direito', () => {
+    // Regra desligada: a promoção vale em qualquer forma.
+    assert.equal(promocaoNoCarrinho({ exigirFormaPagamento: false, formasPermitidas: ['pix'], precoNoCarrinho: 'normal' }, TODAS), true)
+    // Ligada sem forma escolhida: configuração pela metade, promoção vale.
+    assert.equal(promocaoNoCarrinho({ exigirFormaPagamento: true, formasPermitidas: [], precoNoCarrinho: 'normal' }, TODAS), true)
+    // Todas as formas autorizadas: não existe "outro preço".
+    assert.equal(promocaoNoCarrinho({ exigirFormaPagamento: true, formasPermitidas: TODAS, precoNoCarrinho: 'normal' }, TODAS), true)
   })
 })

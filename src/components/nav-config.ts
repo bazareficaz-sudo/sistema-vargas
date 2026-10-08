@@ -275,6 +275,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/agentes',                   label: 'Agentes de IA',   icon: '🤖' },
       { href: '/dashboard/configuracoes/marketplaces', label: 'Marketplaces — diagnóstico', icon: '🔎', modulo: 'marketplace' },
       { href: '/dashboard/configuracoes/aparencia',   label: 'Aparência',       icon: '🎨' },
+      { href: '/dashboard/configuracoes/sessao',      label: 'Sessão e Segurança', icon: '🔒' },
     ],
   },
 ]

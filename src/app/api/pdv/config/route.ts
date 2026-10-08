@@ -17,7 +17,7 @@ export async function GET() {
 
   const { data } = await sb
     .from('empresa_config_pdv')
-    .select('promocao_exige_forma, promocao_formas')
+    .select('promocao_exige_forma, promocao_formas, promocao_preco_carrinho')
     .eq('empresa_id', profile.empresa_id)
     .maybeSingle()
 
@@ -28,6 +28,7 @@ export async function GET() {
     config: {
       exigirFormaPagamento: !!data?.promocao_exige_forma,
       formasPermitidas: (data?.promocao_formas ?? []) as string[],
+      precoNoCarrinho: data?.promocao_preco_carrinho === 'normal' ? 'normal' : 'promocional',
     },
   })
 }
@@ -57,10 +58,15 @@ export async function POST(req: Request) {
     }, { status: 400 })
   }
 
+  // Qual preço o carrinho mostra antes do pagamento. Qualquer valor fora dos
+  // dois conhecidos vira o padrão — nunca um terceiro estado no banco.
+  const precoNoCarrinho = body.precoNoCarrinho === 'normal' ? 'normal' : 'promocional'
+
   const { error } = await sb.from('empresa_config_pdv').upsert({
     empresa_id: guarda.empresaId,
     promocao_exige_forma: exigir,
     promocao_formas: formas,
+    promocao_preco_carrinho: precoNoCarrinho,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'empresa_id' })
 
@@ -68,6 +74,6 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    config: { exigirFormaPagamento: exigir, formasPermitidas: formas },
+    config: { exigirFormaPagamento: exigir, formasPermitidas: formas, precoNoCarrinho },
   })
 }

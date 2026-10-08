@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react'
 import AbaEnderecos from '@/components/produtos/AbaEnderecos'
+import AbaCompreJunto from '@/components/produtos/AbaCompreJunto'
 import { createClient } from '@/lib/supabase/client'
 import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { faixasDoProduto } from '@/lib/produtos/promocao'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { normalizarGrupoSimilar } from '@/lib/produtos/similares'
 import VisualizadorImagem from './VisualizadorImagem'
 import EnviarImagensWhatsappModal from './EnviarImagensWhatsappModal'
 import { botao } from '@/components/ui/botao'
@@ -58,6 +60,7 @@ type Produto = {
   cofins_percentual?: number | null
   ipi_percentual?: number | null
   perfil_fiscal_id?: string | null
+  grupo_similar?: string | null
 }
 
 type KitItem = { id?: string; produto_id: string; nome: string; unidade: string; quantidade: number; controla_estoque: boolean }
@@ -85,7 +88,7 @@ type Props = {
   abaInicial?: Aba
 }
 
-type Aba = 'geral' | 'preco' | 'promocao' | 'imagens' | 'kit' | 'fiscal' | 'anuncios' | 'enderecos'
+type Aba = 'geral' | 'preco' | 'promocao' | 'imagens' | 'kit' | 'fiscal' | 'anuncios' | 'enderecos' | 'compre_junto'
 
 const PLATAFORMA_LABEL: Record<string, string> = {
   mercadolivre: 'Mercado Livre', shopee: 'Shopee', amazon: 'Amazon', magalu: 'Magalu', outro: 'Outro',
@@ -107,6 +110,11 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [categorias, setCategorias] = useState<{ id: string; nome: string; pai_id: string | null }[]>([])
   const [criandoSub, setCriandoSub] = useState(false)
   const [marcas, setMarcas] = useState<{ id: string; nome: string }[]>([])
+  // Grupos de similares já usados na empresa (para o campo sugerir e não
+  // nascer "DISJUNTOR 32A" e "DISJUNTOR DIN 32A" como dois grupos) e os
+  // outros produtos do grupo deste — o gestor vê na hora quem está junto.
+  const [gruposSimilares, setGruposSimilares] = useState<string[]>([])
+  const [membrosGrupo, setMembrosGrupo] = useState<{ id: string; nome: string; marca: string | null }[]>([])
   const [kitItens, setKitItens] = useState<KitItem[]>([])
   const [recalculandoKit, setRecalculandoKit] = useState(false)
   const [buscaKit, setBuscaKit] = useState('')
@@ -181,7 +189,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   // medidas, dados fiscais, código do fornecedor. Por isso o modal confere e,
   // se faltar, busca a linha inteira ele mesmo, em vez de confiar em quem o
   // chamou.
-  const COLUNAS_SO_DO_MODAL = ['peso_kg', 'csosn', 'codigo_fornecedor', 'subcategoria', 'precos_quantidade', 'perfil_fiscal_id']
+  const COLUNAS_SO_DO_MODAL = ['peso_kg', 'csosn', 'codigo_fornecedor', 'subcategoria', 'precos_quantidade', 'perfil_fiscal_id', 'grupo_similar']
 
   useEffect(() => {
     if (produto) {
@@ -391,11 +399,31 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     Promise.all([
       sb.from('categorias').select('id, nome, pai_id').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
       sb.from('marcas').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true).order('nome'),
-    ]).then(([cats, mks]) => {
+      // Sem DISTINCT no PostgREST: traz os rótulos e deduplica aqui. Banco
+      // sem a coluna (migração não aplicada) devolve erro e a lista fica vazia.
+      sb.from('produtos').select('grupo_similar').eq('empresa_id', empresaId)
+        .not('grupo_similar', 'is', null).limit(5000),
+    ]).then(([cats, mks, grupos]) => {
       setCategorias(cats.data ?? [])
       setMarcas(mks.data ?? [])
+      const rotulos = new Set(((grupos.data ?? []) as { grupo_similar: string | null }[])
+        .map(g => g.grupo_similar).filter((g): g is string => !!g))
+      setGruposSimilares([...rotulos].sort((a, b) => a.localeCompare(b, 'pt-BR')))
     })
   }, [empresaId])
+
+  const grupoSimilarAtual = normalizarGrupoSimilar(form?.grupo_similar)
+  useEffect(() => {
+    const produtoId = form?.id
+    const t = setTimeout(() => {
+      if (!grupoSimilarAtual || !produtoId) { setMembrosGrupo([]); return }
+      sb.from('produtos').select('id, nome, marca')
+        .eq('empresa_id', empresaId).eq('grupo_similar', grupoSimilarAtual).neq('id', produtoId)
+        .order('marca').limit(30)
+        .then(({ data }) => setMembrosGrupo((data ?? []) as { id: string; nome: string; marca: string | null }[]))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [grupoSimilarAtual, form?.id, empresaId])
 
   // Produto gravado com uma categoria que hoje é SUBcategoria de outra — o que
   // acontece assim que o gestor organiza a árvore e move, por exemplo,
@@ -799,6 +827,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       // Só quando a coluna veio do banco. Antes do SQL dos perfis rodar ela
       // não existe, e mandá-la faria o salvar inteiro falhar.
       ...('perfil_fiscal_id' in form ? { perfil_fiscal_id: form.perfil_fiscal_id || null } : {}),
+      // Mesma regra: só com a coluna presente (migração de produtos similares).
+      ...('grupo_similar' in form ? { grupo_similar: normalizarGrupoSimilar(form.grupo_similar) } : {}),
       monitorar: form.monitorar ?? false,
       descricao_marketplace: form.descricao_marketplace || null,
       obs_interna: form.obs_interna || null,
@@ -952,6 +982,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     { key: 'fiscal',   label: 'Fiscal' },
     { key: 'anuncios', label: `Anúncios${anunciosVinculados.length > 0 ? ` (${anunciosVinculados.length})` : ''}` },
     { key: 'enderecos', label: 'Endereços' },
+    { key: 'compre_junto', label: 'Compre junto' },
   ]
 
   return (
@@ -1180,6 +1211,38 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                     {marcas.map(m => <option key={m.id} value={m.nome}>{m.nome}</option>)}
                   </select>
                 </div>
+                {'grupo_similar' in form && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Grupo de similares
+                      <span className="ml-1 font-normal text-gray-400" title="Produtos com o mesmo grupo são o mesmo item de marcas diferentes. No PDV, ao escolher um deles na busca, o vendedor vê todos com marca e estoque para confirmar.">ⓘ</span>
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input value={form.grupo_similar ?? ''} list="grupos-similares"
+                        onChange={e => campo('grupo_similar', e.target.value)}
+                        onBlur={e => campo('grupo_similar', normalizarGrupoSimilar(e.target.value))}
+                        placeholder="Ex.: DISJUNTOR MONO DIN 32A"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 uppercase focus:outline-none focus:border-blue-500" />
+                      {!form.grupo_similar && form.nome && (
+                        <button type="button" onClick={() => campo('grupo_similar', normalizarGrupoSimilar(form.nome))}
+                          title="Usar o nome deste produto como nome do grupo"
+                          className="px-2.5 py-2 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">
+                          Usar nome
+                        </button>
+                      )}
+                    </div>
+                    <datalist id="grupos-similares">
+                      {gruposSimilares.map(g => <option key={g} value={g} />)}
+                    </datalist>
+                    {grupoSimilarAtual && (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        {membrosGrupo.length === 0
+                          ? 'Nenhum outro produto neste grupo ainda. Use o mesmo nome de grupo nos produtos de outras marcas.'
+                          : <>Também neste grupo: {membrosGrupo.map(m => `${m.nome}${m.marca ? ` (${m.marca})` : ''}`).join(' · ')}</>}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Estoque */}
@@ -1976,6 +2039,10 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               onde ele estava guardado. */}
           {aba === 'enderecos' && form?.id && (
             <AbaEnderecos produtoId={form.id} empresaId={empresaId} />
+          )}
+
+          {aba === 'compre_junto' && form?.id && (
+            <AbaCompreJunto produtoId={form.id} empresaId={empresaId} podeEditar={podeEditarProdutos} />
           )}
 
           {aba === 'anuncios' && (

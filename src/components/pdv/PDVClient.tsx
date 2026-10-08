@@ -9,8 +9,11 @@ import { registrarMovimentoEstoque, buscarDepositoPrincipal } from '@/lib/produt
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { promocaoVigente, precoPorQuantidade, type ProdutoComFaixas } from '@/lib/produtos/promocao'
 import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
+import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produtos/similares'
+import CampoNumero from '@/components/pdv/CampoNumero'
+import { ListaPedidosPdv, ListaOrcamentosPdv } from '@/components/pdv/ListagensPdv'
 import {
-  promocaoValeNasFormas, gruposDePagamento,
+  promocaoValeNasFormas, gruposDePagamento, promocaoNoCarrinho,
   type ConfigPromocaoPagamento,
 } from '@/lib/pdv/promocaoPagamento'
 
@@ -21,6 +24,9 @@ type Produto = {
   promocao_ativa: boolean; preco_promocional: number | null
   promocao_inicio?: string | null; promocao_fim?: string | null
   precos_quantidade?: unknown
+  foto_url?: string | null
+  /** Rótulo que junta o mesmo item de marcas diferentes (ver lib/produtos/similares). */
+  grupo_similar?: string | null
 }
 type ItemVenda = {
   id: string; produto_id: string; nome: string; sku: string
@@ -36,7 +42,11 @@ type ItemVenda = {
   precoManual?: boolean
   /** Preço veio de uma faixa de quantidade (atacado). */
   faixaAplicada?: boolean
+  /** Entrou na venda por uma sugestão do PDV (ex.: 'compre_junto'). */
+  origemSugestao?: string
 }
+/** Sugestão do Compre Junto: o produto e com quem ele costuma sair. */
+type SugestaoCJ = Produto & { vezes: number; baseNome: string; fixo: boolean }
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
   limite_credito: number; saldo_credito: number; saldo_devedor: number
@@ -48,6 +58,9 @@ type Vendedor = { id: string; codigo: string | null; nome: string }
 // A lista mora em `lib/pdv/formasPagamento.ts`: a tela de configuração e a
 // rota que a valida precisam da MESMA lista, e uma cópia divergiria.
 const FORMAS = FORMAS_PAGAMENTO
+
+const COLS_PRODUTO_PDV = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional, promocao_inicio, promocao_fim, precos_quantidade'
+const COLS_PRODUTO_PDV_NOVAS = 'foto_url, grupo_similar'
 
 function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 function uid() { return Math.random().toString(36).slice(2) }
@@ -104,6 +117,20 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [modoDevol, setModoDevol] = useState(false) // toggle rápido devolução
 
   const [produtoPendente, setProdutoPendente] = useState<Produto | null>(null)
+  // Modal de produtos similares: o produto escolhido na busca tem grupo, e o
+  // vendedor confirma a marca vendo todas as opções lado a lado.
+  const [similares, setSimilares] = useState<{
+    opcoes: Produto[]; idx: number; acao: 'selecionar' | 'adicionar'
+  } | null>(null)
+  const similaresRef = useRef<HTMLDivElement>(null)
+  // Compre Junto: o que costuma sair junto com o que já está no carrinho.
+  // `dispensadas` são as que o vendedor fechou NESTA venda — não voltam até a
+  // próxima, senão o painel insistiria no que o cliente já recusou.
+  // Listagens de consulta (F10 pedidos, F1 orçamentos) — abrem por cima da
+  // venda sem mexer no carrinho.
+  const [listagem, setListagem] = useState<'pedidos' | 'orcamentos' | null>(null)
+  const [compreJunto, setCompreJunto] = useState<SugestaoCJ[]>([])
+  const [dispensadas, setDispensadas] = useState<Set<string>>(new Set())
 
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [modalCliente, setModalCliente] = useState(false)
@@ -226,6 +253,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const tiposEscolhidos = formas.map(f => f.tipo)
   const veredito        = promocaoValeNasFormas(cfgPdv, tiposEscolhidos)
   const gruposPromo     = gruposDePagamento(cfgPdv, FORMAS.map(f => f.id))
+  // Preço do carrinho FORA da tela de pagamento (Configurações → PDV): o
+  // promocional (padrão) ou o normal. Dentro do pagamento, quem decide é a
+  // forma escolhida (`veredito`).
+  const promoCarrinho   = promocaoNoCarrinho(cfgPdv, FORMAS.map(f => f.id))
+  const promoAgora      = modalPag ? veredito.vale : promoCarrinho
+  /** Rótulo das formas com desconto, para "R$ 188,00 no DIN / PIX". */
+  const rotuloPromo     = gruposPromo?.rotuloComDesconto ?? ''
   const temItemEmPromo  = itens.some(i => i.em_promocao)
 
   /**
@@ -312,45 +346,104 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   }, [sb, empresaId])
 
   // ── Busca de produtos ──────────────────────────────────────────
+  // Consulta de produtos com as colunas novas (foto e grupo de similares) e,
+  // se o banco ainda não tiver `grupo_similar` (migração não aplicada), a
+  // mesma consulta sem elas. Sem esse recuo, uma coluna faltando derrubaria a
+  // busca inteira do PDV — o caixa parado por causa de um recurso acessório.
+  const colunasNovasOkRef = useRef(true)
+  const consultarProdutos = useCallback(async (
+    montar: (cols: string) => PromiseLike<{ data: unknown[] | null; error: { code?: string; message?: string } | null }>,
+  ): Promise<Produto[]> => {
+    if (colunasNovasOkRef.current) {
+      const r = await montar(`${COLS_PRODUTO_PDV}, ${COLS_PRODUTO_PDV_NOVAS}`)
+      const faltaColuna = r.error && (r.error.code === '42703' || /grupo_similar|foto_url/.test(r.error.message ?? ''))
+      if (!faltaColuna) return (r.error ? [] : r.data ?? []) as Produto[]
+      colunasNovasOkRef.current = false
+    }
+    const r = await montar(COLS_PRODUTO_PDV)
+    return (r.error ? [] : r.data ?? []) as Produto[]
+  }, [])
+
   const buscarProdutos = useCallback(async (q: string) => {
     if (!q.trim() || q.length < 2) { setSugestoes([]); return }
     setBuscando(true)
     const palavras = q.trim().split(/\s+/).filter(Boolean)
-    const selectCols = 'id, nome, sku, ean, preco_venda, preco_custo, estoque, unidade, marca, promocao_ativa, preco_promocional, promocao_inicio, promocao_fim, precos_quantidade'
+    const base = (cols: string) => sb.from('produtos').select(cols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
 
     if (palavras.length === 1 && /^\d{8,14}$/.test(palavras[0])) {
-      const { data } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true).eq('ean', palavras[0]).limit(1)
-      if (data && data.length > 0) {
-        adicionarProdutoE(data[0] as Produto)
+      const data = await consultarProdutos(cols => base(cols).eq('ean', palavras[0]).limit(1))
+      if (data.length > 0) {
+        adicionarProdutoE(data[0])
         setBusca(''); setSugestoes([]); setBuscando(false); return
       }
     }
     if (palavras.length === 1) {
-      const { data } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true).eq('sku', palavras[0]).limit(1)
-      if (data && data.length > 0) {
-        adicionarProdutoE(data[0] as Produto)
+      const data = await consultarProdutos(cols => base(cols).eq('sku', palavras[0]).limit(1))
+      if (data.length > 0) {
+        adicionarProdutoE(data[0])
         setBusca(''); setSugestoes([]); setBuscando(false); return
       }
     }
-    let query = sb.from('produtos').select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
-    for (const p of palavras) { query = query.ilike('nome', `%${p}%`) }
-    const { data, error } = await query.order('nome').limit(20)
-    let lista: Produto[] = (error ? [] : data ?? []) as Produto[]
+    // Cada palavra precisa aparecer no nome OU na marca: "disj 32a steck"
+    // acha o disjuntor da Steck mesmo quando "Steck" não está no nome.
+    let lista = await consultarProdutos(cols => {
+      let query = base(cols)
+      for (const p of palavras) {
+        const f = filtroNomeOuMarca(p)
+        if (f) query = query.or(f)
+      }
+      return query.order('nome').limit(20)
+    })
     if (lista.length === 0) {
-      const { data: d2 } = await sb.from('produtos')
-        .select(selectCols).eq('empresa_id', empresaEstoqueId).eq('ativo', true)
-        .ilike('sku', `%${palavras[0]}%`).order('nome').limit(20)
-      lista = (d2 ?? []) as Produto[]
+      lista = await consultarProdutos(cols => base(cols).ilike('sku', `%${palavras[0]}%`).order('nome').limit(20))
     }
     setSugestoes(lista); setSugestaoIdx(-1); setBuscando(false)
-  }, [empresaEstoqueId])
+  }, [empresaEstoqueId, consultarProdutos])
 
   useEffect(() => {
     const t = setTimeout(() => buscarProdutos(busca), 220)
     return () => clearTimeout(t)
   }, [busca, buscarProdutos])
+
+  // ── Compre Junto ─────────────────────────────────────────────
+  // Recalcula quando muda O QUE está no carrinho (não a quantidade): a chave
+  // é a lista ordenada de produtos vendidos. Devolução não entra — quem está
+  // devolvendo não está comprando.
+  const chaveCarrinho = [...new Set(itens.filter(i => i.tipo === 'venda').map(i => i.produto_id))].sort().join(',')
+  useEffect(() => {
+    let cancelado = false
+    const t = setTimeout(async () => {
+      const ids = chaveCarrinho ? chaveCarrinho.split(',') : []
+      if (ids.length === 0) { if (!cancelado) setCompreJunto([]); return }
+      // Erro aqui (função ausente, rede) só esvazia o painel: sugestão é
+      // ajuda, nunca motivo de a venda travar.
+      const { data: sug, error } = await sb.rpc('compre_junto_sugestoes', { p_produto_ids: ids, p_limite: 10 })
+      if (cancelado) return
+      if (error || !sug?.length) { setCompreJunto([]); return }
+      const linhas = sug as { produto_id: string; base_id: string; vezes: number; fixo: boolean }[]
+      const produtos = await consultarProdutos(cols => sb.from('produtos').select(cols)
+        .in('id', linhas.map(l => l.produto_id)).eq('ativo', true))
+      if (cancelado) return
+      const porId = new Map(produtos.map(p => [p.id, p]))
+      const nomeBase = new Map(itens.map(i => [i.produto_id, i.nome]))
+      const lista: SugestaoCJ[] = []
+      for (const l of linhas) {
+        const p = porId.get(l.produto_id)
+        if (p) lista.push({ ...p, vezes: l.vezes, fixo: l.fixo, baseNome: nomeBase.get(l.base_id) ?? '' })
+      }
+      // Com estoque primeiro: oferecer o que não tem para entregar só
+      // frustra o cliente. Sem estoque continua visível, no fim, porque pode
+      // haver encomenda ou o cadastro estar desatualizado.
+      lista.sort((a, b) => Number(b.estoque > 0) - Number(a.estoque > 0))
+      setCompreJunto(lista)
+    }, 400)
+    return () => { cancelado = true; clearTimeout(t) }
+    // `itens` fica fora de propósito: só o nome dos itens é lido, e a chave já
+    // muda quando o conjunto de produtos muda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaveCarrinho, consultarProdutos])
+
+  const compreJuntoVisiveis = modoDevol ? [] : compreJunto.filter(s => !dispensadas.has(s.id)).slice(0, 6)
 
   useEffect(() => {
     if (sugestaoIdx < 0 || !sugestaoListRef.current) return
@@ -368,7 +461,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     }
   }, [clienteSelecionado, modalCliente])
 
-  function confirmarAdicao(p: Produto, qtd?: number) {
+  function confirmarAdicao(p: Produto, qtd?: number, origemSugestao?: string) {
     const rawQ = qtd !== undefined ? qtd : (parseFloat(qtdInput.replace(',', '.')) || 1)
     // Modo devolução: qty sempre negativa
     const q = modoDevol ? -Math.abs(rawQ) : rawQ
@@ -383,7 +476,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         return prev.map((i, ix) => (ix === idx ? reprecificar(i, newQ) : i))
       }
       const emPromo = promocaoVigente(p)
-      const precoFinal = precoPorQuantidade(p as any, q)
+      const precoFinal = precoPorQuantidade(p as any, q, new Date(), promoAgora)
       return [...prev, {
         id: uid(), produto_id: p.id, nome: p.nome, sku: p.sku,
         quantidade: q, preco_unitario: precoFinal, desconto: 0,
@@ -391,7 +484,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         tipo: tipoItem, custo: p.preco_custo,
         em_promocao: emPromo, preco_original: p.preco_venda,
         produto: p,
-        faixaAplicada: precoFinal < (emPromo ? p.preco_promocional! : p.preco_venda),
+        faixaAplicada: precoFinal < (emPromo && promoAgora ? p.preco_promocional! : p.preco_venda),
+        ...(origemSugestao ? { origemSugestao } : {}),
       }]
     })
     setBusca(''); setSugestoes([]); setQtdInput('1'); setProdutoPendente(null)
@@ -408,6 +502,54 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
   function adicionarProdutoE(p: Produto, qtd?: number) { confirmarAdicao(p, qtd) }
 
+  /**
+   * Escolha feita NA LISTA DA BUSCA (Enter/Tab ou clique).
+   *
+   * Produto com grupo de similares abre o modal com as outras marcas antes de
+   * seguir. Código de barras e SKU digitado não passam por aqui: eles já
+   * identificam a marca exata, e parar o caixa nesses casos só atrasaria.
+   */
+  async function escolherDaLista(p: Produto, acao: 'selecionar' | 'adicionar') {
+    const seguir = (escolhido: Produto) => acao === 'selecionar' ? selecionarProduto(escolhido) : confirmarAdicao(escolhido)
+    if (!p.grupo_similar) { seguir(p); return }
+
+    const { data, error } = await sb.from('produtos')
+      .select(`${COLS_PRODUTO_PDV}, ${COLS_PRODUTO_PDV_NOVAS}`)
+      .eq('empresa_id', empresaEstoqueId).eq('ativo', true)
+      .eq('grupo_similar', p.grupo_similar)
+      .order('estoque', { ascending: false }).limit(30)
+    const opcoes = (error ? [] : data ?? []) as unknown as Produto[]
+    // Falha na consulta ou grupo de um produto só: segue com o escolhido.
+    // O modal é ajuda, nunca pode ser o motivo de a venda não andar.
+    if (opcoes.length < 2) { seguir(p); return }
+
+    if (!opcoes.some(o => o.id === p.id)) opcoes.unshift(p)
+    setSugestoes([])
+    setSimilares({ opcoes, idx: Math.max(0, opcoes.findIndex(o => o.id === p.id)), acao })
+    setTimeout(() => similaresRef.current?.focus(), 30)
+  }
+
+  function confirmarSimilar(escolhido: Produto) {
+    const acao = similares?.acao
+    setSimilares(null)
+    if (acao === 'selecionar') selecionarProduto(escolhido)
+    else confirmarAdicao(escolhido)
+  }
+
+  function cancelarSimilares() {
+    setSimilares(null)
+    setTimeout(() => buscaRef.current?.focus(), 30)
+  }
+
+  function onSimilaresKey(e: React.KeyboardEvent) {
+    if (!similares) return
+    const { opcoes, idx } = similares
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSimilares({ ...similares, idx: Math.min(idx + 1, opcoes.length - 1) }) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSimilares({ ...similares, idx: Math.max(idx - 1, 0) }) }
+    else if (e.key === 'Enter') { e.preventDefault(); confirmarSimilar(opcoes[idx]) }
+    else if (/^[1-9]$/.test(e.key) && opcoes[Number(e.key) - 1]) { e.preventDefault(); confirmarSimilar(opcoes[Number(e.key) - 1]) }
+  }
+
   // Recalcula quantidade, preço e total de um item do carrinho.
   //
   // O preço muda com a quantidade porque a faixa de atacado só se conhece
@@ -418,8 +560,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     if (item.precoManual || !item.produto) {
       return { ...item, quantidade: novaQtd, total: novaQtd * item.preco_unitario * (1 - item.desconto / 100) }
     }
-    const preco = precoPorQuantidade(item.produto as any, novaQtd)
-    const semFaixa = item.em_promocao ? item.produto.preco_promocional! : item.produto.preco_venda
+    // Mesmo modo de preço em que o carrinho está agora — sem isto, mudar a
+    // quantidade depois de escolher cartão devolvia o item ao promocional.
+    const preco = precoPorQuantidade(item.produto as any, novaQtd, new Date(), promoAgora)
+    const semFaixa = item.em_promocao && promoAgora ? item.produto.preco_promocional! : item.produto.preco_venda
     return {
       ...item,
       quantidade: novaQtd,
@@ -532,12 +676,20 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     // O vendedor é POR VENDA: quem atendeu a anterior pode não ser quem
     // atende a próxima, e herdar em silêncio credita comissão errada.
     setVendedor(null); setModalVendedor(false); setCodigoVendedor(''); setErroVendedor('')
+    setCompreJunto([]); setDispensadas(new Set())
+    setFormas([{ tipo: 'dinheiro', valor: 0 }])
     buscaRef.current?.focus()
   }
 
   // ── Pagamento ─────────────────────────────────────────────────
-  function abrirPagamento() {
+  /**
+   * `vendedorEscolhido` vem de quem ACABOU de escolher o vendedor: o estado
+   * `vendedor` só chega no próximo render, e esta função, chamada na mesma
+   * volta, enxergaria nulo e pediria o código de novo.
+   */
+  function abrirPagamento(vendedorEscolhido?: Vendedor) {
     if (itens.length === 0) return
+    const vendedorAtual = vendedorEscolhido ?? vendedor
 
     // O VENDEDOR VEM ANTES DE QUALQUER CAMINHO DE FECHAMENTO — pagamento,
     // troca ou crédito. Perguntar só no fluxo de pagamento deixaria a troca
@@ -545,7 +697,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     //
     // Empresa sem vendedor cadastrado não é interrompida: a venda segue como
     // sempre seguiu, e a comissão simplesmente não tem a quem atribuir.
-    if (!vendedor && vendedores.length > 0) {
+    if (!vendedorAtual && vendedores.length > 0) {
       setCodigoVendedor(''); setErroVendedor('')
       setModalVendedor(true)
       setTimeout(() => codigoVendedorRef.current?.focus(), 80)
@@ -570,11 +722,24 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       return
     }
 
-    // Pagamento normal (saldo > 0)
-    setFormas([{ tipo: 'dinheiro', valor: total }])
+    // Pagamento normal (saldo > 0). Pelo caminho que reprecifica: com o
+    // carrinho no preço normal, abrir já em dinheiro precisa aplicar o
+    // desconto, e o valor sugerido tem que ser o total JÁ reprecificado.
+    aplicarFormas([{ tipo: 'dinheiro', valor: 0 }])
     setFormaIdx(0)
     setModalPag(true)
     setTimeout(() => valorRefs.current[0]?.focus(), 80)
+  }
+
+  /**
+   * Sai do pagamento SEM concluir: o carrinho volta ao preço da configuração.
+   * Sem isto, escolher cartão e desistir deixava o carrinho no preço normal
+   * (ou, no modo "preço normal", escolher Pix e desistir deixava o desconto).
+   */
+  function fecharPagamento() {
+    setModalPag(false)
+    setItens(itensNoModo(promoCarrinho))
+    setFormas([{ tipo: 'dinheiro', valor: 0 }])
   }
 
   /**
@@ -594,10 +759,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     setVendedor(escolhido)
     setModalVendedor(false)
     setErroVendedor('')
-    // O estado ainda não chegou nesta volta do render, então o desvio do
-    // `abrirPagamento` acima olharia um `vendedor` nulo e reabriria este
-    // mesmo modal. Passar pelo próximo tick resolve sem duplicar a lógica.
-    setTimeout(() => abrirPagamento(), 0)
+    // O vendedor vai por parâmetro. O `setTimeout` que havia aqui não
+    // adiantava: ele chamava a MESMA função deste render, que ainda via
+    // `vendedor` nulo — e o PDV pedia o código duas vezes.
+    abrirPagamento(escolhido)
   }
 
   const isFiado = formas.length === 1 && formas[0].tipo === 'fiado'
@@ -688,6 +853,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         quantidade: i.quantidade, preco_unitario: i.preco_unitario, desconto: i.desconto, total: i.total,
         custo_unitario: i.custo,
         tipo: i.tipo,
+        origem_sugestao: i.origemSugestao ?? null,
       })))
       if (erroItens) throw erroItens
 
@@ -948,15 +1114,21 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   // ── Atalhos globais ─────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito || modalVendedor) return
+      if (modalPag || modalCliente || modalDesc || modalObs || modalEntrega || modalTroca || modalCredito || modalVendedor || similares || listagem) return
       switch (e.key) {
-        case 'F2': e.preventDefault(); abrirPagamento(); break
+        // F1 e F10 têm ação padrão no navegador (ajuda e menu); o
+        // preventDefault é o que as deixa livres para o PDV.
+        case 'F10': e.preventDefault(); setListagem('pedidos'); break
+        case 'F1': e.preventDefault(); setListagem('orcamentos'); break
+        // F9 fecha a venda: é a tecla do PDV antigo, que o balcão já tem no
+        // dedo. Entrega, que ocupava o F9, foi para o F2.
+        case 'F9': e.preventDefault(); abrirPagamento(); break
         case 'F3': e.preventDefault(); setDescontoInput(String(descontoGlobal)); setModalDesc(true); break
         case 'F4': e.preventDefault(); setModalObs(true); break
         case 'F5': e.preventDefault(); setModalCliente(true); break
         case 'F6': e.preventDefault(); setModoDevol(m => !m); break
         case 'F8': e.preventDefault(); if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } break
-        case 'F9': e.preventDefault(); setModalEntrega(true); break
+        case 'F2': e.preventDefault(); setModalEntrega(true); break
         // F7 — NOVA VENDA. Confirma só quando há o que perder: pedir
         // confirmação com o carrinho vazio treinaria o balconista a apertar
         // "sim" sem ler, e é justamente na venda cheia que ele precisa ler.
@@ -974,7 +1146,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito, modalVendedor,
+  }, [modalPag, modalCliente, modalDesc, modalObs, modalEntrega, modalTroca, modalCredito, modalVendedor, similares, listagem,
       itens, total, itemSelecionado, descontoGlobal, modoDevol])
 
   useEffect(() => {
@@ -991,7 +1163,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         aplicarFormas([{ tipo: forma.id, valor: 0 }]); setFormaIdx(0)
         setTimeout(() => { valorRefs.current[0]?.focus(); valorRefs.current[0]?.select() }, 30)
       }
-      if (e.key === 'Enter' && !e.shiftKey) {
+      // F9 também conclui: quem fecha a venda no F9 aperta F9 de novo. Tecla
+      // SEGURADA não conta — a repetição automática abriria o pagamento e
+      // concluiria a venda no mesmo gesto, sem o vendedor conferir nada.
+      if ((e.key === 'Enter' && !e.shiftKey) || (e.key === 'F9' && !e.repeat)) {
         e.preventDefault()
         // Mesma trava do botão: Enter não pode contornar documento incompleto.
         if (!cpfNotaIncompleto && (isFiado || totalPago >= total)) concluirVenda(hasDevolucao ? 'mista' : 'venda')
@@ -1035,10 +1210,10 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     if (e.key === 'Enter') {
       e.preventDefault()
       const alvo = sugestaoIdx >= 0 ? sugestoes[sugestaoIdx] : sugestoes.length === 1 ? sugestoes[0] : null
-      if (alvo) { selecionarProduto(alvo); setSugestaoIdx(-1) }
+      if (alvo) { escolherDaLista(alvo, 'selecionar'); setSugestaoIdx(-1) }
     }
     if (e.key === 'Tab' && sugestoes.length > 0) {
-      e.preventDefault(); selecionarProduto(sugestoes[sugestaoIdx >= 0 ? sugestaoIdx : 0])
+      e.preventDefault(); escolherDaLista(sugestoes[sugestaoIdx >= 0 ? sugestaoIdx : 0], 'selecionar')
     }
     if (e.key === 'Escape') { setSugestoes([]); setProdutoPendente(null); setBusca('') }
   }
@@ -1052,6 +1227,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     if (e.key === 'Escape') { setProdutoPendente(null); setBusca(''); setQtdInput('1'); buscaRef.current?.focus() }
   }
 
+  const nomesRepetidos = contarNomesRepetidos(sugestoes)
+
   const clientesFiltrados = clientes.filter(c =>
     c.nome.toLowerCase().includes(buscaCliente.toLowerCase()) ||
     (c.cpf_cnpj ?? '').includes(buscaCliente) ||
@@ -1062,14 +1239,16 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     <div className="flex flex-col h-screen bg-white select-none" style={{ fontFamily: 'var(--font-inter), Inter, sans-serif' }}>
 
       {/* ── TOOLBAR ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-gray-100 border-b border-gray-300 text-xs flex-shrink-0">
-        <BtnToolbar onClick={abrirPagamento} cor="bg-blue-600 hover:bg-blue-700 text-white" atalho="F2" label="Concluir" />
+      {/* Sem quebra de linha nos botões: em tela estreita a barra rola de lado
+          em vez de partir "Nova venda" em duas linhas. */}
+      <div className="flex items-center gap-1 px-2 py-1.5 bg-gray-100 border-b border-gray-300 text-xs flex-shrink-0 overflow-x-auto">
+        <BtnToolbar onClick={() => abrirPagamento()} cor="bg-blue-600 hover:bg-blue-700 text-white" atalho="F9" label="Concluir" />
         <BtnToolbar onClick={() => setModalCliente(true)} cor="bg-white hover:bg-gray-50 text-blue-700 border border-blue-300" atalho="F5"
           label={clienteSelecionado ? clienteSelecionado.nome.split(' ')[0] : 'Cliente'} icon="👤" />
         <BtnToolbar onClick={() => { setDescontoInput(String(descontoGlobal)); setModalDesc(true) }} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F3" label="Desc" icon="%" />
         <BtnToolbar onClick={() => setModalObs(true)} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F4" label="Obs" icon="💬" />
         <BtnToolbar onClick={() => { if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } }} cor="bg-white hover:bg-gray-50 text-amber-700 border border-amber-300" atalho="F8" label="Orçamento" icon="📋" />
-        <BtnToolbar onClick={() => setModalEntrega(true)} cor={`bg-white hover:bg-gray-50 border border-gray-300 ${entrega ? 'text-orange-600 border-orange-300' : 'text-gray-700'}`} atalho="F9" label={entrega ? '🛵 Entrega' : 'Entregar'} />
+        <BtnToolbar onClick={() => setModalEntrega(true)} cor={`bg-white hover:bg-gray-50 border border-gray-300 ${entrega ? 'text-orange-600 border-orange-300' : 'text-gray-700'}`} atalho="F2" label={entrega ? '🛵 Entrega' : 'Entregar'} />
         {/* Zerar e começar outra. O balconista precisa disso quando o cliente
             desiste no meio — sem ele, a saída era apagar item por item. */}
         <BtnToolbar
@@ -1084,6 +1263,9 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           atalho="F6"
           label={modoDevol ? '🔄 DEVOLVENDO' : '🔄 Devolver'}
         />
+        <div className="w-px h-5 bg-gray-300 mx-1" />
+        <BtnToolbar onClick={() => setListagem('pedidos')} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F10" label="Pedidos" icon="🧾" />
+        <BtnToolbar onClick={() => setListagem('orcamentos')} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F1" label="Orçamentos" icon="🗂️" />
         <div className="flex-1" />
         <span className="text-gray-400 px-2">{operadorNome.split('@')[0]}</span>
         <button onClick={() => router.push('/dashboard')} className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded text-xs">← Painel</button>
@@ -1123,34 +1305,38 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
 
           {sugestoes.length > 0 && (
             <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-b-lg shadow-lg z-50 max-h-80 overflow-y-auto">
-              <div className="grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
-                <span>SKU</span><span>Nome</span><span>Marca</span><span className="text-center">Estoque</span><span className="text-right">Preço</span>
+              <div className="grid grid-cols-[40px_90px_1fr_70px_110px] gap-0 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide sticky top-0">
+                <span></span><span>SKU</span><span>Produto / Marca</span><span className="text-center">Estoque</span><span className="text-right">Preço</span>
               </div>
               <div ref={sugestaoListRef}>
                 {sugestoes.map((p, i) => {
                   const emPromo = promocaoVigente(p)
+                  // Mesmo nome na lista = só a marca diferencia. Marca o par
+                  // mesmo que o gestor ainda não o tenha agrupado.
+                  const nomeRepetido = (nomesRepetidos.get(chaveNome(p.nome)) ?? 0) > 1
                   return (
-                  <div key={p.id} onMouseDown={() => { confirmarAdicao(p); setSugestaoIdx(-1) }}
-                    className={`grid grid-cols-[90px_1fr_130px_70px_110px] gap-0 px-3 py-2 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                  <div key={p.id} onMouseDown={() => { escolherDaLista(p, 'adicionar'); setSugestaoIdx(-1) }}
+                    className={`grid grid-cols-[40px_90px_1fr_70px_110px] gap-0 px-3 py-1.5 cursor-pointer text-sm border-b border-gray-50 last:border-0 items-center ${i === sugestaoIdx ? 'bg-blue-50' : nomeRepetido ? 'bg-amber-50/40 hover:bg-amber-50' : 'hover:bg-gray-50'}`}>
+                    <FotoProduto url={p.foto_url} nome={p.nome} tamanho="w-8 h-8" />
                     <span className="text-gray-400 text-xs font-mono truncate pr-2">{p.sku}</span>
-                    <span className="font-medium text-gray-900 truncate pr-2 flex items-center gap-1">
-                      {p.nome}
-                      {emPromo && <span className="shrink-0 text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded">PROMO</span>}
+                    <span className="min-w-0 pr-2">
+                      <span className="font-medium text-gray-900 flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{p.nome}</span>
+                        {emPromo && <span className="shrink-0 text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded">PROMO</span>}
+                      </span>
+                      <span className="flex items-center gap-1.5 mt-0.5">
+                        <SeloMarca marca={p.marca} />
+                        {p.grupo_similar ? (
+                          <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 rounded">⇄ tem similares</span>
+                        ) : nomeRepetido && (
+                          <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 rounded">⚠ mesmo nome, confira a marca</span>
+                        )}
+                      </span>
                     </span>
-                    <span className="text-indigo-600 text-xs truncate pr-2">{p.marca ?? '—'}</span>
-                    <span className={`text-center text-xs font-medium ${p.estoque <= 0 ? 'text-red-500' : p.estoque <= 5 ? 'text-orange-500' : 'text-gray-500'}`}>
+                    <span className={`text-center text-xs font-medium ${p.estoque > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                       {p.estoque} {p.unidade}
                     </span>
-                    <div className="text-right">
-                      {emPromo ? (
-                        <>
-                          <span className="block text-[10px] text-gray-400 line-through">{fmt(p.preco_venda)}</span>
-                          <span className="font-bold text-orange-600">{fmt(p.preco_promocional!)}</span>
-                        </>
-                      ) : (
-                        <span className="font-semibold text-blue-700">{fmt(p.preco_venda)}</span>
-                      )}
-                    </div>
+                    <PrecoLista produto={p} emPromo={emPromo} promoNaTela={promoCarrinho} rotuloPromo={rotuloPromo} />
                   </div>
                   )
                 })}
@@ -1237,13 +1423,22 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                               <span className="text-[9px] font-bold bg-orange-500 text-white px-1 py-0.5 rounded flex-shrink-0">PROMO</span>
                             )}
                           </div>
-                          {item.em_promocao ? (
-                            <div className="text-xs text-orange-600 font-medium">
-                              de <span className="line-through text-gray-400">{fmt(item.preco_original)}</span> por {fmt(item.preco_unitario)}
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-400">{item.sku} · {item.unidade}</div>
-                          )}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {item.produto?.marca && <SeloMarca marca={item.produto.marca} />}
+                            {item.em_promocao && item.preco_unitario < item.preco_original ? (
+                              <span className="text-xs text-orange-600 font-medium">
+                                de <span className="line-through text-gray-400">{fmt(item.preco_original)}</span> por {fmt(item.preco_unitario)}
+                              </span>
+                            ) : item.em_promocao && item.produto?.preco_promocional && !promoAgora && rotuloPromo ? (
+                              // Carrinho no preço normal: a promoção existe, mas só vale
+                              // pagando nas formas com direito — o vendedor vê quanto fica.
+                              <span className="text-xs text-emerald-700 font-medium">
+                                {fmt(item.produto.preco_promocional)} no {rotuloPromo}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400">{item.sku} · {item.unidade}</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -1253,8 +1448,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                           className={`w-6 h-6 rounded flex items-center justify-center text-base leading-none ${isDev ? 'bg-red-100 hover:bg-red-200 text-red-700' : 'bg-gray-200 hover:bg-gray-300 text-gray-600'}`}>
                           {isDev ? '+' : '−'}
                         </button>
-                        <input value={item.quantidade} onChange={e => alterarQtd(item.id, parseFloat(e.target.value) || 0)}
-                          onClick={e => e.stopPropagation()}
+                        <CampoNumero valor={item.quantidade} onValor={v => alterarQtd(item.id, v)}
                           className={`w-14 text-center border rounded px-1 py-0.5 text-sm font-semibold focus:outline-none ${isDev ? 'border-red-300 text-red-700 bg-red-50' : 'border-gray-300 focus:border-blue-400'}`} />
                         <button onMouseDown={e => { e.stopPropagation(); alterarQtd(item.id, item.quantidade + (isDev ? -1 : 1)) }}
                           className={`w-6 h-6 rounded flex items-center justify-center text-base leading-none ${isDev ? 'bg-red-100 hover:bg-red-200 text-red-700' : 'bg-gray-200 hover:bg-gray-300 text-gray-600'}`}>
@@ -1263,13 +1457,11 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                       </div>
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <input value={item.preco_unitario.toFixed(2)} onChange={e => alterarPreco(item.id, parseFloat(e.target.value) || 0)}
-                        onClick={e => e.stopPropagation()}
+                      <CampoNumero valor={item.preco_unitario} casas={2} onValor={v => alterarPreco(item.id, v)}
                         className="w-24 text-right border border-gray-200 rounded px-2 py-0.5 text-sm focus:outline-none focus:border-blue-400" />
                     </td>
                     <td className="px-2 py-2 text-center">
-                      <input value={item.desconto} onChange={e => alterarDesc(item.id, parseFloat(e.target.value) || 0)}
-                        onClick={e => e.stopPropagation()}
+                      <CampoNumero valor={item.desconto} onValor={v => alterarDesc(item.id, v)}
                         className="w-16 text-center border border-gray-200 rounded px-2 py-0.5 text-sm focus:outline-none focus:border-blue-400" />
                     </td>
                     <td className={`px-3 py-2 text-right font-semibold ${isDev ? 'text-red-600' : 'text-gray-900'}`}>
@@ -1287,6 +1479,46 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         )}
       </div>
 
+      {/* ── COMPRE JUNTO ──────────────────────────────────────────── */}
+      {compreJuntoVisiveis.length > 0 && (
+        <div className="flex-shrink-0 border-t border-amber-200 bg-amber-50/60 px-3 py-2">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-xs font-bold text-amber-800">💡 Ofereça também</span>
+            <span className="text-[11px] text-amber-700/80">o que os clientes costumam levar junto com estes itens</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {compreJuntoVisiveis.map(s => {
+              const preco = promocaoVigente(s) && promoCarrinho ? s.preco_promocional! : s.preco_venda
+              return (
+                <div key={s.id}
+                  className={`relative shrink-0 w-56 flex gap-2 items-center bg-white border rounded-lg p-1.5 pr-6 ${s.estoque > 0 ? 'border-amber-200' : 'border-gray-200 opacity-60'}`}>
+                  <FotoProduto url={s.foto_url} nome={s.nome} tamanho="w-10 h-10" />
+                  <button type="button" onClick={() => confirmarAdicao(s, 1, 'compre_junto')}
+                    title={`Adicionar 1 ${s.unidade} à venda`}
+                    className="min-w-0 flex-1 text-left">
+                    <span className="block text-xs font-medium text-gray-900 truncate">{s.nome}</span>
+                    <span className="flex items-center gap-1 mt-0.5">
+                      {s.marca && <SeloMarca marca={s.marca} />}
+                      <span className="text-xs font-semibold text-blue-700">{fmt(preco)}</span>
+                      <span className={`text-[10px] ${s.estoque > 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                        {s.estoque > 0 ? `· ${s.estoque} ${s.unidade}` : '· sem estoque'}
+                      </span>
+                    </span>
+                    <span className="block text-[10px] text-amber-700 truncate"
+                      title={s.fixo ? 'Sugestão definida no cadastro do produto' : `Levado junto em ${s.vezes} vendas`}>
+                      {s.fixo ? '★ indicado' : `junto em ${s.vezes} vendas`}{s.baseNome ? ` · ${s.baseNome}` : ''}
+                    </span>
+                  </button>
+                  <button type="button" title="Dispensar nesta venda"
+                    onClick={() => setDispensadas(d => new Set(d).add(s.id))}
+                    className="absolute top-0.5 right-1 text-gray-300 hover:text-gray-500 text-sm leading-none">×</button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* ── SAÚDE DA VENDA ────────────────────────────────────────── */}
       {itens.length > 0 && (
         <div className="flex-shrink-0 border-t border-gray-200" style={{ backgroundColor: saude.faixa?.cor_fundo ?? '#f9fafb' }}>
@@ -1299,9 +1531,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             <span className="font-semibold" style={{ color: saude.faixa?.cor ?? '#374151' }}>
               {saude.faixa?.nome ?? 'Calculando...'}
             </span>
-            <span className="text-gray-500">Margem:</span>
+            {/* Markup sobre o custo (pedido do gestor: é o número que o balcão
+                usa). A cor e o nome da faixa continuam vindo da margem
+                líquida — é sobre ela que as faixas são configuradas. */}
+            <span className="text-gray-500">Markup:</span>
             <span className="font-bold" style={{ color: saude.faixa?.cor ?? '#374151' }}>
-              {saude.margem.toFixed(1)}%
+              {saude.markup.toFixed(1)}%
             </span>
             {saude.lucroLiquido !== 0 && cfg.exibir_lucro_vendedor && (
               <>
@@ -1349,6 +1584,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 <SaudeCard label="Taxa Pagamento" valor={`${saude.taxaPagPct.toFixed(1)}% = ${fmt(saude.custoTaxaPag)}`} />
                 {cfg.exibir_lucro_vendedor && <SaudeCard label="Lucro Bruto" valor={fmt(saude.lucroBruto)} cor={saude.lucroBruto >= 0 ? '#16a34a' : '#dc2626'} />}
                 {cfg.exibir_lucro_vendedor && <SaudeCard label="Lucro Líquido" valor={fmt(saude.lucroLiquido)} cor={saude.lucroLiquido >= 0 ? '#16a34a' : '#dc2626'} />}
+                <SaudeCard label="Markup" valor={`${saude.markup.toFixed(1)}%`} cor={saude.faixa?.cor} />
                 {cfg.exibir_margem_vendedor && <SaudeCard label="Margem Bruta" valor={`${saude.margemBruta.toFixed(1)}%`} />}
                 {cfg.exibir_margem_vendedor && <SaudeCard label="Margem Líquida" valor={`${saude.margem.toFixed(1)}%`} cor={saude.faixa?.cor} />}
                 <SaudeCard label="Desc. restante" valor={`${fmt(saude.descontoRestante)} (${saude.descontoMaxPct}% máx.)`} />
@@ -1439,15 +1675,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             <span className={`text-2xl font-bold ${saldoFinal < 0 ? 'text-amber-600' : saldoFinal === 0 && hasDevolucao ? 'text-emerald-600' : 'text-blue-700'}`}>
               {saldoFinal < 0 ? fmt(valorCredito) : fmt(total)}
             </span>
-            <button onClick={abrirPagamento} disabled={itens.length === 0}
+            <button onClick={() => abrirPagamento()} disabled={itens.length === 0}
               className={`ml-4 px-6 py-2 disabled:opacity-40 text-white font-semibold rounded-lg text-sm transition-colors ${
                 saldoFinal < 0 ? 'bg-amber-500 hover:bg-amber-600' :
                 saldoFinal === 0 && hasDevolucao ? 'bg-emerald-600 hover:bg-emerald-700' :
                 'bg-blue-600 hover:bg-blue-700'
               }`}>
-              {saldoFinal < 0 ? '💳 Gerar Crédito (F2)' :
-               saldoFinal === 0 && hasDevolucao ? '🔄 Confirmar Troca (F2)' :
-               'Concluir (F2)'}
+              {saldoFinal < 0 ? '💳 Gerar Crédito (F9)' :
+               saldoFinal === 0 && hasDevolucao ? '🔄 Confirmar Troca (F9)' :
+               'Concluir (F9)'}
             </button>
           </div>
         </div>
@@ -1571,12 +1807,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       )}
 
       {modalPag && (
-        <Modal titulo="Pagamento" onClose={() => setModalPag(false)} largura="max-w-md">
+        <Modal titulo="Pagamento" onClose={fecharPagamento} largura="max-w-md">
           <div className="space-y-4">
             {vendedor && (
               <div className="flex items-center justify-between text-xs bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
                 <span className="text-indigo-900">🧑‍💼 Venda de <strong>{vendedor.nome}</strong></span>
-                <button onClick={() => { setModalPag(false); setCodigoVendedor(vendedor.codigo ?? ''); setModalVendedor(true); setTimeout(() => codigoVendedorRef.current?.select(), 80) }}
+                <button onClick={() => { fecharPagamento(); setCodigoVendedor(vendedor.codigo ?? ''); setModalVendedor(true); setTimeout(() => codigoVendedorRef.current?.select(), 80) }}
                   className="text-indigo-600 hover:text-indigo-800 underline">trocar</button>
               </div>
             )}
@@ -1764,7 +2000,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             )}
 
             <div className="flex gap-2 pt-1">
-              <button onClick={() => { setModalPag(false); setErrFiado('') }} className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cancelar (Esc)</button>
+              <button onClick={() => { fecharPagamento(); setErrFiado('') }} className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Cancelar (Esc)</button>
               <button onClick={() => concluirVenda(hasDevolucao ? 'mista' : 'venda')}
                 disabled={salvando || (!isFiado && totalPago < total) || (isCarteira && !clienteSelecionado) || cpfNotaIncompleto}
                 className={`flex-1 py-2.5 disabled:opacity-40 text-white font-semibold rounded-lg text-sm transition-colors ${isFiado ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
@@ -2043,13 +2279,117 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
           </div>
         </div>
       )}
+
+      {/* ── LISTAGENS: PEDIDOS E ORÇAMENTOS ───────────────────────── */}
+      {listagem === 'pedidos' && (
+        <Modal titulo="Pedidos" onClose={() => setListagem(null)} largura="max-w-4xl">
+          <ListaPedidosPdv empresaId={empresaId} />
+        </Modal>
+      )}
+      {listagem === 'orcamentos' && (
+        <Modal titulo="Orçamentos" onClose={() => setListagem(null)} largura="max-w-4xl">
+          <ListaOrcamentosPdv empresaId={empresaId} />
+        </Modal>
+      )}
+
+      {/* ── MODAL PRODUTOS SIMILARES ──────────────────────────────── */}
+      {similares && (
+        <Modal titulo="Produtos similares — confira a marca" onClose={cancelarSimilares} largura="max-w-2xl">
+          <p className="text-xs text-gray-500 mb-3">
+            Estes produtos são o mesmo item de marcas diferentes. Escolha a marca que o cliente vai levar.
+          </p>
+          <div ref={similaresRef} tabIndex={0} onKeyDown={onSimilaresKey}
+            className="border border-gray-200 rounded-xl overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-300">
+            {similares.opcoes.map((p, i) => {
+              const emPromo = promocaoVigente(p)
+              const ativo = i === similares.idx
+              return (
+                <button key={p.id} type="button" tabIndex={-1}
+                  onMouseEnter={() => setSimilares(s => s ? { ...s, idx: i } : s)}
+                  onClick={() => confirmarSimilar(p)}
+                  className={`w-full grid grid-cols-[24px_56px_1fr_90px_110px] gap-3 items-center px-3 py-2.5 text-left border-b border-gray-100 last:border-0 ${ativo ? 'bg-blue-50' : 'bg-white hover:bg-gray-50'}`}>
+                  <span className={`text-xs font-bold text-center ${ativo ? 'text-blue-700' : 'text-gray-400'}`}>{i < 9 ? i + 1 : ''}</span>
+                  <FotoProduto url={p.foto_url} nome={p.nome} tamanho="w-14 h-14" />
+                  <span className="min-w-0">
+                    <span className="block"><SeloMarca marca={p.marca} grande /></span>
+                    <span className="block text-sm text-gray-900 truncate mt-1">{p.nome}</span>
+                    <span className="block text-[11px] text-gray-400 font-mono">{p.sku}</span>
+                  </span>
+                  <span className={`text-center text-sm font-semibold ${p.estoque > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {p.estoque <= 0 ? 'Sem estoque' : `${p.estoque} ${p.unidade}`}
+                  </span>
+                  <PrecoLista produto={p} emPromo={emPromo} promoNaTela={promoCarrinho} rotuloPromo={rotuloPromo} />
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-3">
+            ↑ ↓ para escolher · Enter confirma · 1–9 escolhe direto · Esc volta para a busca
+          </p>
+        </Modal>
+      )}
     </div>
   )
 }
 
+/**
+ * Preço de um produto nas listas do PDV (busca e similares).
+ *
+ * `promoNaTela` segue Configurações → PDV: com o carrinho no preço normal, o
+ * preço grande é o normal e o promocional aparece embaixo, com as formas que
+ * dão direito — é o mesmo preço que vai entrar no carrinho.
+ */
+function PrecoLista({ produto, emPromo, promoNaTela, rotuloPromo }: {
+  produto: { preco_venda: number; preco_promocional: number | null }
+  emPromo: boolean; promoNaTela: boolean; rotuloPromo: string
+}) {
+  if (!emPromo || produto.preco_promocional == null) {
+    return <div className="text-right"><span className="font-semibold text-blue-700">{fmt(produto.preco_venda)}</span></div>
+  }
+  if (promoNaTela) {
+    return (
+      <div className="text-right">
+        <span className="block text-[10px] text-gray-400 line-through">{fmt(produto.preco_venda)}</span>
+        <span className="font-bold text-orange-600">{fmt(produto.preco_promocional)}</span>
+      </div>
+    )
+  }
+  return (
+    <div className="text-right">
+      <span className="block font-semibold text-blue-700">{fmt(produto.preco_venda)}</span>
+      <span className="block text-[10px] font-semibold text-emerald-700">
+        {fmt(produto.preco_promocional)}{rotuloPromo ? ` no ${rotuloPromo}` : ''}
+      </span>
+    </div>
+  )
+}
+
+/** Marca em destaque — é o que diferencia produtos de nome igual. */
+function SeloMarca({ marca, grande = false }: { marca: string | null | undefined; grande?: boolean }) {
+  if (!marca) {
+    return <span className={`${grande ? 'text-xs' : 'text-[10px]'} text-gray-400 italic`}>sem marca</span>
+  }
+  return (
+    <span className={`inline-block font-bold uppercase tracking-wide bg-indigo-600 text-white rounded ${grande ? 'text-xs px-2 py-0.5' : 'text-[10px] px-1.5 py-px'}`}>
+      {marca}
+    </span>
+  )
+}
+
+function FotoProduto({ url, nome, tamanho }: { url: string | null | undefined; nome: string; tamanho: string }) {
+  // Link de foto quebrado (arquivo apagado, URL expirada) mostrava o ícone de
+  // imagem partida do navegador; cai no mesmo marcador de "sem foto".
+  const [falhou, setFalhou] = useState(false)
+  if (!url || falhou) {
+    return <span className={`${tamanho} rounded-md bg-gray-100 text-gray-300 flex items-center justify-center text-xs shrink-0`}>▧</span>
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt={nome} loading="lazy" onError={() => setFalhou(true)} className={`${tamanho} rounded-md object-cover border border-gray-200 shrink-0 bg-white`} />
+}
+
 function BtnToolbar({ label, atalho, onClick, cor, icon }: { label: string; atalho: string; onClick: () => void; cor: string; icon?: string }) {
   return (
-    <button onClick={onClick} className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${cor}`}>
+    <button onClick={onClick} className={`shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${cor}`}>
       {icon && <span>{icon}</span>}
       <span>{label}</span>
       <span className="opacity-60 text-[10px]">({atalho})</span>
