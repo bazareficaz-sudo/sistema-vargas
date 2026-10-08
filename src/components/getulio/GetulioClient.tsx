@@ -121,6 +121,8 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
         destinatarios: destinatarios.filter(x => x.numero.trim()),
         vigias_desligados: config.vigias_desligados ?? [],
         responder_whatsapp: !!config.responder_whatsapp,
+        alertas_imediatos: config.alertas_imediatos !== false,
+        resumo_semanal: config.resumo_semanal !== false,
       })
       if (!d.ok) { setAviso({ tipo: 'erro', texto: d.erro ?? 'Falha ao salvar' }); return }
       setConfig(d.config)
@@ -281,6 +283,18 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
               <input type="time" value={config.horario_resumo} onChange={e => setConfig(c => ({ ...c, horario_resumo: e.target.value }))}
                 className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
               <p className="text-[11px] text-gray-400 mt-1">Ele olha o negócio a cada hora; a mensagem sai uma vez por dia, neste horário.</p>
+              <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
+                <input type="checkbox" checked={config.resumo_semanal !== false}
+                  onChange={e => setConfig(c => ({ ...c, resumo_semanal: e.target.checked }))} className="w-4 h-4 mt-0.5 accent-emerald-600" />
+                <span>Na segunda, abrir com a semana que passou
+                  <span className="block text-[11px] text-gray-400 leading-snug">Vendas da semana por canal, comparadas com a semana anterior.</span></span>
+              </label>
+              <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
+                <input type="checkbox" checked={config.alertas_imediatos !== false}
+                  onChange={e => setConfig(c => ({ ...c, alertas_imediatos: e.target.checked }))} className="w-4 h-4 mt-0.5 accent-emerald-600" />
+                <span>Alertas imediatos
+                  <span className="block text-[11px] text-gray-400 leading-snug">Canal recusando atualizações, produto zerado à venda e pedido atrasado vão na hora, sem esperar o resumo. Das 7h às 21h, no máximo 4 por dia.</span></span>
+              </label>
             </div>
 
             <div>
@@ -398,7 +412,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
                 {mensagens.map(m => (
                   <li key={m.id} className="text-xs">
                     <button onClick={() => setMensagemAberta(a => a === m.id ? null : m.id)} className="w-full text-left flex items-center justify-between gap-2 hover:bg-gray-50 rounded px-1 py-0.5">
-                      <span className="text-gray-700">{dataHora(m.created_at)} · {m.tipo === 'resumo_diario' ? 'resumo do dia' : 'envio manual'}</span>
+                      <span className="text-gray-700">{dataHora(m.created_at)} · {m.tipo === 'resumo_diario' ? 'resumo do dia' : m.tipo === 'alerta' ? '🔴 alerta' : 'envio manual'}</span>
                       <span className={m.status === 'enviado' ? 'text-emerald-600' : m.status === 'parcial' ? 'text-amber-600' : 'text-red-600'}>{m.status}</span>
                     </button>
                     {mensagemAberta === m.id && (

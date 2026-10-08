@@ -61,6 +61,10 @@ export type ConfigGetulio = {
   vigias_desligados: string[]
   /** Conversa pelo WhatsApp: responder perguntas dos destinatários. */
   responder_whatsapp: boolean
+  /** Urgente que acabou de aparecer vai na hora, sem esperar o resumo. */
+  alertas_imediatos?: boolean
+  /** Na segunda, o resumo abre com a semana que passou. */
+  resumo_semanal?: boolean
   ultima_varredura: string | null
   ultimo_resumo_dia: string | null
 }

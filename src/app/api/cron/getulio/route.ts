@@ -2,14 +2,17 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { diaISO } from '@/lib/datas'
 import { varrer } from '@/lib/getulio/varredura'
-import { enviarResumo } from '@/lib/getulio/resumo'
+import { enviarAlertas, enviarResumo } from '@/lib/getulio/resumo'
 import { minutosDoDiaSP, minutosDoHorario } from '@/lib/getulio/regras'
 import type { ConfigGetulio } from '@/lib/getulio/tipos'
 
 // Roda a cada 15 minutos (vercel.json). Para cada empresa com o Getúlio
 // ligado:
 //   • varre a cada hora — os sinais na Central ficam frescos;
-//   • no horário do resumo, varre de novo e envia o resumo do dia, uma vez.
+//   • depois de varrer, manda o ALERTA IMEDIATO do urgente que acabou de
+//     aparecer (ver selecionarAlertas — horário, limite diário, só novidade);
+//   • no horário do resumo, varre de novo e envia o resumo do dia, uma vez
+//     (na segunda, com a semana que passou).
 //
 // Resumo atrasado mais de 4h (Getúlio ligado à noite, cron fora do ar) não
 // sai: chegaria fora de hora. Fica para o dia seguinte.
@@ -40,8 +43,11 @@ export async function GET(req: Request) {
     try {
       if (varreduraVencida || horaDoResumo) r.varredura = await varrer(sb, cfg.empresa_id, cfg.vigias_desligados ?? [], agora)
       if (horaDoResumo) {
-        const envio = await enviarResumo(sb, cfg.empresa_id, cfg.destinatarios ?? [], 'resumo_diario', agora)
+        const envio = await enviarResumo(sb, cfg.empresa_id, cfg.destinatarios ?? [], 'resumo_diario', agora, { semanal: cfg.resumo_semanal !== false })
         r.resumo = { ok: envio.ok, enviados: envio.enviados, falhas: envio.falhas }
+      } else if (cfg.alertas_imediatos !== false && r.varredura) {
+        // Na hora do resumo o urgente já vai nele; fora dela, alerta.
+        r.alertas = await enviarAlertas(sb, cfg.empresa_id, cfg.destinatarios ?? [], agora)
       }
     } catch (e: any) {
       r.erro = e?.message ?? String(e)

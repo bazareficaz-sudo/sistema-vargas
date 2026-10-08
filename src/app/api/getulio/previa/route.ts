@@ -11,6 +11,6 @@ export async function POST() {
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
   const cfg = await lerConfig(sb, guarda.empresaId)
   const nome = cfg.destinatarios?.[0]?.nome ?? ''
-  const r = await montarResumo(createAdminClient(), guarda.empresaId, nome)
+  const r = await montarResumo(createAdminClient(), guarda.empresaId, nome, new Date(), { semanal: cfg.resumo_semanal !== false })
   return NextResponse.json({ ok: true, texto: r.texto, geradoPor: r.geradoPor, itens: r.itens.length, restantes: r.restantes })
 }
