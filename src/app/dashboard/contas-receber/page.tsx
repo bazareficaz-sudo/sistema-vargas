@@ -13,9 +13,6 @@ export default async function ContasReceberPage() {
   const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id ?? ''
 
-  const hoje = new Date().toISOString().split('T')[0]
-  const em30 = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
-
   const [contasRes, clientesRes, creditosRes] = await Promise.all([
     sb.from('contas_receber')
       .select('*')
@@ -44,21 +41,13 @@ export default async function ContasReceberPage() {
   const clientes = clientesRes.error  ? [] : (clientesRes.data  ?? [])
   const creditos = creditosRes.error  ? [] : (creditosRes.data  ?? [])
 
-  // Dashboard metrics
-  const contasArr = contas
-  const totalAberto = contasArr.filter(c => ['aberto', 'parcial'].includes(c.status)).reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
-  const totalVencido = contasArr.filter(c => c.status === 'vencido').reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
-  const totalHoje    = contasArr.filter(c => c.data_vencimento === hoje && ['aberto','parcial','vencido'].includes(c.status)).reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
-  const totalEm30    = contasArr.filter(c => c.data_vencimento <= em30 && ['aberto','parcial'].includes(c.status)).reduce((s, c) => s + (c.valor_aberto ?? 0), 0)
-
   return (
     <ContasReceberClient
       empresaId={empresaId}
       operador={user.email ?? ''}
-      contasIniciais={contasArr}
+      contasIniciais={contas}
       clientes={clientes}
       creditosDisponiveis={creditos}
-      metricas={{ totalAberto, totalVencido, totalHoje, totalEm30 }}
     />
   )
 }
