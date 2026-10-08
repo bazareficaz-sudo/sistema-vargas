@@ -38,13 +38,15 @@ function TextoWhatsapp({ texto }: { texto: string }) {
   )
 }
 
-export default function GetulioClient({ configInicial, sinaisIniciais, mensagens, whatsappPronto, recebimentoConectado, conversas }: {
+export default function GetulioClient({ configInicial, sinaisIniciais, mensagens, whatsappPronto, recebimentoConectado, conversas, enderecoRecebimento, ultimaMensagemRecebida }: {
   configInicial: ConfigGetulio & { existe: boolean }
   sinaisIniciais: SinalTela[]
   mensagens: MensagemTela[]
   whatsappPronto: boolean
   recebimentoConectado: boolean
   conversas: ConversaTela[]
+  enderecoRecebimento: string | null
+  ultimaMensagemRecebida: string | null
 }) {
   const router = useRouter()
   const [config, setConfig] = useState(configInicial)
@@ -53,6 +55,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
     configInicial.destinatarios?.length ? configInicial.destinatarios : [{ nome: '', numero: '' }])
   const [ocupado, setOcupado] = useState<'' | 'varrer' | 'previa' | 'enviar' | 'salvar' | 'conectar'>('')
   const [recebendo, setRecebendo] = useState(recebimentoConectado)
+  const [copiado, setCopiado] = useState(false)
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [previa, setPrevia] = useState<{ texto: string; geradoPor: string } | null>(null)
   const [mostrarDispensados, setMostrarDispensados] = useState(false)
@@ -331,18 +334,40 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
               Outros números seguem o atendimento normal.
             </p>
             <div className="flex items-center justify-between gap-2">
-              <span className={`text-xs ${recebendo ? 'text-emerald-700' : 'text-amber-700'}`}>
-                {recebendo ? '● Recebimento de mensagens conectado' : '○ O sistema ainda não recebe as mensagens do WhatsApp'}
+              <span className={`text-xs ${ultimaMensagemRecebida ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {ultimaMensagemRecebida
+                  ? `● Recebendo — última mensagem chegou em ${dataHora(ultimaMensagemRecebida)}`
+                  : recebendo
+                    ? '○ Endereço cadastrado, mas nenhuma mensagem chegou ainda'
+                    : '○ O sistema ainda não recebe as mensagens do WhatsApp'}
               </span>
-              {!recebendo && (
-                <button onClick={conectarRecebimento} disabled={!!ocupado || !whatsappPronto}
-                  className="text-xs px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 whitespace-nowrap">
-                  {ocupado === 'conectar' ? 'Conectando…' : 'Conectar'}
-                </button>
-              )}
+              <button onClick={conectarRecebimento} disabled={!!ocupado || !whatsappPronto}
+                className="text-xs px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 whitespace-nowrap">
+                {ocupado === 'conectar' ? 'Conectando…' : recebendo ? 'Cadastrar de novo' : 'Conectar'}
+              </button>
             </div>
+            {/* Plano B: a Z-API às vezes aceita o cadastro pela API e não grava
+                (medido em 07/10/2026 — o painel continuou com o endereço de um
+                sistema antigo). Colar à mão no painel resolve. */}
+            {enderecoRecebimento && (
+              <div>
+                <p className="text-[11px] text-gray-500 mb-1">
+                  Se nenhuma mensagem chegar, cole este endereço no painel da Z-API, em <strong>Webhooks → Ao receber</strong>, e salve:
+                </p>
+                <div className="flex gap-1.5">
+                  <input readOnly value={enderecoRecebimento} onFocus={e => e.currentTarget.select()}
+                    className="flex-1 min-w-0 border border-gray-200 bg-gray-50 rounded-lg px-2 py-1 text-[11px] text-gray-600 font-mono" />
+                  <button onClick={async () => {
+                      try { await navigator.clipboard.writeText(enderecoRecebimento); setCopiado(true); setTimeout(() => setCopiado(false), 2000) } catch { /* sem permissão: o campo já seleciona ao tocar */ }
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-lg border border-gray-300 hover:bg-gray-50 whitespace-nowrap">
+                    {copiado ? 'Copiado ✓' : 'Copiar'}
+                  </button>
+                </div>
+              </div>
+            )}
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={!!config.responder_whatsapp} disabled={!recebendo}
+              <input type="checkbox" checked={!!config.responder_whatsapp}
                 onChange={e => setConfig(c => ({ ...c, responder_whatsapp: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
               Responder perguntas <span className="text-[11px] text-gray-400">(depois clique em Salvar, acima)</span>
             </label>
