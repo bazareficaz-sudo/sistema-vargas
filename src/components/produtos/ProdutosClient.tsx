@@ -90,6 +90,8 @@ type Props = {
   tagFiltro: string
   entradaFiltro: string
   entradasCasadas?: { rotulo: string; origem: 'manual' | 'xml' }[]
+  /** Kits listados junto por usarem algum produto da entrada filtrada. */
+  kitsDaEntrada?: number
   tagsDisponiveis: string[]
   /**
    * A empresa tem loja online? Decide se a linha ganha o botão de publicar.
@@ -119,7 +121,7 @@ export default function ProdutosClient({
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
-  tagFiltro: tagInicial, entradaFiltro: entradaInicial, entradasCasadas = [], tagsDisponiveis, temLoja = false,
+  tagFiltro: tagInicial, entradaFiltro: entradaInicial, entradasCasadas = [], kitsDaEntrada = 0, tagsDisponiveis, temLoja = false,
   envioMensagem,
 }: Props) {
   const router = useRouter()
@@ -764,6 +766,11 @@ export default function ProdutosClient({
                 {entradasCasadas.length === 1
                   ? `Entrada ${entradasCasadas[0].rotulo}${entradasCasadas[0].origem === 'xml' ? ' (XML)' : ''}`
                   : `${entradasCasadas.length} entradas casaram: ${entradasCasadas.map(e => e.rotulo).join(', ')}. Digite o número completo para filtrar só uma.`}
+              </p>
+            )}
+            {entradaInicial && kitsDaEntrada > 0 && (
+              <p className="text-[10px] mt-0.5 text-purple-700 max-w-[220px]">
+                + {kitsDaEntrada} kit{kitsDaEntrada > 1 ? 's' : ''} que {kitsDaEntrada > 1 ? 'usam' : 'usa'} produtos desta entrada
               </p>
             )}
             {entradaInicial && entradasCasadas.length === 0 && (

@@ -24,6 +24,13 @@ export type FiltroEntrada = {
   de?: string
   /** Data de emissão — fim do intervalo (YYYY-MM-DD). */
   ate?: string
+  /**
+   * Inclui os KITS que têm algum produto da entrada como componente. Pedido
+   * para a tela de Produtos: custo de componente mudou na nota, o kit que o
+   * usa precisa ser revisto junto. Fica desligado nas telas de preço, onde
+   * listar o kit mudaria o que o recálculo em massa alcança.
+   */
+  incluirKits?: boolean
 }
 
 export type ResultadoFiltroEntrada = {
@@ -35,6 +42,8 @@ export type ResultadoFiltroEntrada = {
    * sem explicação.
    */
   entradasCasadas: EntradaCasada[]
+  /** Kits incluídos por usarem um produto da entrada (só com `incluirKits`). */
+  kitIds: string[]
 }
 
 /**
@@ -127,5 +136,20 @@ export async function produtosDaEntrada(
       .map((r: any) => r.produto_id).filter(Boolean) as string[],
   ))
 
-  return { produtoIds, entradasCasadas: achados }
+  // Kits que usam algum desses produtos. Em lotes: uma nota grande pode ter
+  // centenas de itens, e a lista de ids vai na URL da consulta.
+  const kitIds: string[] = []
+  if (filtro.incluirKits && produtoIds.length > 0) {
+    const jaListados = new Set(produtoIds)
+    const encontrados = new Set<string>()
+    for (let i = 0; i < produtoIds.length; i += 150) {
+      const { data } = await sb.from('kit_itens').select('kit_id').in('produto_id', produtoIds.slice(i, i + 150))
+      for (const r of (data ?? []) as { kit_id: string | null }[]) {
+        if (r.kit_id && !jaListados.has(r.kit_id)) encontrados.add(r.kit_id)
+      }
+    }
+    kitIds.push(...encontrados)
+  }
+
+  return { produtoIds: [...produtoIds, ...kitIds], entradasCasadas: achados, kitIds }
 }

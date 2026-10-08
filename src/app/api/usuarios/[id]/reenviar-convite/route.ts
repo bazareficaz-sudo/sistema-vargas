@@ -5,7 +5,8 @@ import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
 import { APP_URL } from '@/lib/appUrl'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
-// Gera um novo link de acesso para um usuário que ainda não definiu senha.
+// Gera um novo link de acesso: para quem ainda não definiu senha (convite) e
+// para quem esqueceu a senha (botão "Link de nova senha" em Usuários).
 //
 // Antes esta rota chamava inviteUserByEmail, que só funciona para e-mail que
 // ainda NÃO existe em auth.users. Como o convite original já criou a conta,
