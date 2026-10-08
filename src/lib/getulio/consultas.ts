@@ -2,6 +2,7 @@ import {
   dataISO, intervaloUTC, rotuloPeriodo, MAX_LINHAS,
   type Consulta, type ResultadoConsulta,
 } from '@/lib/ia/consultas/tipos'
+import { buscarProdutoInteligente, type ProdutoAchado } from '@/lib/busca/produtoInteligente'
 
 // CONSULTAS DO GETÚLIO — o que ele pode perguntar ao banco quando o dono
 // conversa pelo WhatsApp.
@@ -39,7 +40,49 @@ const dataComSemana = (iso: string) => {
 }
 const hoje = () => new Date(Date.now() - 3 * 3_600_000).toISOString().slice(0, 10)
 
+/**
+ * Os produtos de que o dono está falando, pela busca de balcão: os que
+ * batem com todos os termos; sem nenhum, os parecidos (faltou um termo).
+ */
+async function produtosDoTermo(sb: any, empresaId: string, termo: string, max = 10): Promise<{ produtos: ProdutoAchado[]; aproximado: boolean }> {
+  const r = await buscarProdutoInteligente(sb, empresaId, termo, 30)
+  if (r.exatos.length) return { produtos: r.exatos.slice(0, max), aproximado: false }
+  return { produtos: r.parecidos.slice(0, max), aproximado: r.parecidos.length > 0 }
+}
+
 export const CONSULTAS_GETULIO: Consulta[] = [
+  {
+    nome: 'buscar_produto',
+    descricao: 'Acha produtos pelo jeito que o dono fala, como no balcão: palavras em qualquer ordem, sem acento, plural, abreviações e equivalentes (mono = monopolar = unipolar = 1P; "32 amperes" = 32A). Devolve nome, SKU, marca, estoque atual e preço. Use SEMPRE primeiro em perguntas sobre produto.',
+    parametros: {
+      type: 'object',
+      properties: { termo: { type: 'string', description: 'As palavras do dono sobre o produto, do jeito que ele falou (ex.: "disjuntor 32a mono guepar").' } },
+      required: ['termo'],
+    },
+    async executar(sb, empresaId, args) {
+      const termo = String(args.termo ?? '').trim()
+      if (termo.length < 2) return erro('Informe o que procurar.')
+      const r = await buscarProdutoInteligente(sb, empresaId, termo, 30)
+      const linha = (p: ProdutoAchado, tipo: string) => ({
+        tipo, produto: p.nome, sku: p.sku, marca: p.marca, estoque: p.estoque,
+        preco: p.preco_venda != null ? r2(p.preco_venda) : null, ...(p.ativo ? {} : { inativo: true }),
+      })
+      const linhas = [
+        ...r.exatos.slice(0, 15).map(p => linha(p, 'bate com tudo')),
+        ...(r.exatos.length < 5 ? r.parecidos.slice(0, 8).map(p => linha(p, 'parecido (faltou um termo)')) : []),
+      ]
+      return {
+        linhas, periodo: 'saldo atual',
+        truncado: r.exatos.length > 15,
+        ressalvas: [
+          `Termos procurados: ${r.grupos.map(g => g[0]).join(' + ') || '—'}.`,
+          ...(r.exatos.length === 0 && r.parecidos.length ? ['Nenhum produto bate com TODOS os termos — os listados são os mais parecidos; apresente como opções.'] : []),
+          ...(linhas.length === 0 ? ['Nada encontrado. Isso é diferente de o produto existir e estar zerado — sugira outras palavras.'] : []),
+          'Estoque negativo significa venda sem entrada lançada; trate como zero disponível.',
+        ],
+      }
+    },
+  },
   {
     nome: 'vendas_por_canal',
     descricao: 'Faturamento e número de vendas/pedidos por canal (balcão/PDV e cada marketplace) num período, com o total geral. Use para "quanto vendi", "como foi a semana", comparações entre canais.',
@@ -71,14 +114,25 @@ export const CONSULTAS_GETULIO: Consulta[] = [
       if (!p) return erro(ERRO_PERIODO)
       const termo = String(args.termo ?? '').trim()
       if (termo.length < 2) return erro('Informe o SKU ou parte do nome do produto.')
-      const { data, error } = await sb.rpc('getulio_vendas_produto', { p_empresa: empresaId, p_termo: termo, p_inicio: p.inicio, p_fim: p.fim })
-      if (error) return erro(error.message)
-      const linhas = ((data ?? []) as any[]).map(l => ({ produto: l.produto, sku: l.sku, canal: l.canal, quantidade: Number(l.quantidade), faturamento: r2(l.faturamento) }))
+      const { produtos, aproximado } = await produtosDoTermo(sb, empresaId, termo, 8)
+      if (produtos.length === 0) return erro(`Nenhum produto encontrado com "${termo}". Tente outras palavras.`)
+      const linhas: Record<string, unknown>[] = []
+      for (const prod of produtos) {
+        if (!prod.sku) continue
+        const { data, error } = await sb.rpc('getulio_vendas_produto', { p_empresa: empresaId, p_termo: prod.sku, p_inicio: p.inicio, p_fim: p.fim })
+        if (error) return erro(error.message)
+        for (const l of (data ?? []) as any[]) {
+          if (l.sku !== prod.sku) continue
+          linhas.push({ produto: l.produto, sku: l.sku, canal: l.canal, quantidade: Number(l.quantidade), faturamento: r2(l.faturamento) })
+        }
+      }
       return {
         linhas: linhas.slice(0, MAX_LINHAS), periodo: rotuloPeriodo(p.de, p.ate), truncado: linhas.length > MAX_LINHAS,
-        ressalvas: linhas.length === 0
-          ? [`Nenhuma venda de produto com "${termo}" no período — pode ser que o produto não exista com esse nome; confira com estoque_de_um_produto.`]
-          : ['Cancelados não entram.'],
+        ressalvas: [
+          `Produtos considerados: ${produtos.map(x => `${x.nome} (SKU ${x.sku})`).join('; ')}.`,
+          ...(aproximado ? ['Nenhum produto bateu com todos os termos — estes são os mais parecidos.'] : []),
+          linhas.length === 0 ? 'Esses produtos não tiveram venda no período.' : 'Cancelados não entram.',
+        ],
       }
     },
   },
@@ -186,10 +240,8 @@ export const CONSULTAS_GETULIO: Consulta[] = [
     async executar(sb, empresaId, args) {
       const termo = String(args.termo ?? '').trim()
       if (termo.length < 2) return erro('Informe o SKU ou parte do nome do produto.')
-      let q = sb.from('produtos').select('id, nome, sku, estoque').eq('empresa_id', empresaId)
-      q = /^\d+$/.test(termo) ? q.eq('sku', termo) : q.ilike('nome', `%${termo}%`)
-      const { data: produtos } = await q.limit(10)
-      if (!produtos?.length) return erro(`Nenhum produto encontrado com "${termo}".`)
+      const { produtos } = await produtosDoTermo(sb, empresaId, termo, 10)
+      if (!produtos.length) return erro(`Nenhum produto encontrado com "${termo}". Tente outras palavras.`)
       const { data: anuncios } = await sb.from('marketplace_anuncios')
         .select('produto_id, titulo, status, status_externo, estoque_externo, preco_venda, marketplace_canais(nome)')
         .in('produto_id', produtos.map((p: any) => p.id)).limit(MAX_LINHAS)

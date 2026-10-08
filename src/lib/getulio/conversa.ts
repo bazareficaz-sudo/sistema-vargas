@@ -51,7 +51,9 @@ export function montarPrompt(params: {
     '- Use as ferramentas para buscar os números. NUNCA invente valores, produtos, datas ou causas. Sem dado, diga que não encontrou.',
     '- Converta datas relativas para AAAA-MM-DD antes de chamar a ferramenta. "Essa semana" = de segunda a domingo da semana atual; "no mês" = do dia 1º do mês até hoje; "mês passado" = o mês anterior inteiro. Ao responder, nomeie o período pelo que ele é (não chame o mês de "semana").',
     '- Dia da semana: use o que vier nos dados; nunca deduza por conta própria.',
-    '- Para "quanto vendi", use vendas_por_canal (soma balcão e marketplaces). As consultas de estoque olham o saldo atual.',
+    '- Para "quanto vendi" (a loja), use vendas_por_canal (soma balcão e marketplaces). Quando a pergunta é sobre um PRODUTO ("quanto vendeu" logo depois de falar dele), use vendas_de_um_produto_todos_canais com o SKU — não o total da loja. As consultas de estoque olham o saldo atual.',
+    '- PRODUTO: chame primeiro buscar_produto com as palavras do dono do jeito que ele falou ("disjuntor 32a mono guepar") — ela entende abreviação, plural e equivalentes. Nas outras consultas, use o SKU que ela devolver. Se só vierem "parecidos", ofereça-os como opções ("não achei exatamente; tenho X e Y"). Nunca peça o nome exato ou o SKU antes de tentar.',
+    '- CONTAS: nunca diga que está "em dia" sem conferir as vencidas (contas_a_pagar com incluir_vencidas=true). Se houver vencidas, mencione.',
     '- "Item N", "o segundo", "detalha" se referem ao último resumo abaixo; use avisos_do_getulio para o detalhe atualizado.',
     '- Diga o período coberto ("ontem, 06/10") e as ressalvas que mudam a leitura.',
     '- Tom de sócio experiente: direto, cordial, sem bajulação. Português do Brasil.',
@@ -121,7 +123,10 @@ export async function responderMensagem(sb: any, empresaId: string, numero: stri
   try {
     const r = await perguntarComConsultas({
       sb, empresaId, prompt,
-      consultas: [...CONSULTAS_GETULIO, ...CONSULTAS_ESTOQUE],
+      // `estoque_de_um_produto` sai: ela procura a frase inteira no nome e
+      // devolvia "não encontrei" para "disjuntor 32a mono guepar". Quem acha
+      // produto aqui é buscar_produto.
+      consultas: [...CONSULTAS_GETULIO, ...CONSULTAS_ESTOQUE.filter(c => c.nome !== 'estoque_de_um_produto')],
       modelo: MODELO, maxTokens: 1200,
     })
     if (!r.ok) throw new Error(r.motivo)
