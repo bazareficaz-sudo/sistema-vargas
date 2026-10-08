@@ -106,6 +106,21 @@ export async function proxy(request: NextRequest) {
     return NextResponse.rewrite(url, { request: { headers } })
   }
 
+  // ══ 1.5 LINK DE E-MAIL RECUSADO PELO SUPABASE ═══════════════════════════════
+  //
+  // Link de "esqueci minha senha" (ou convite) expirado ou já usado: o Supabase
+  // recusa e manda a pessoa para a URL do site com o erro na query
+  // (`?error=access_denied&error_code=otp_expired`). Sem isto ela caía na
+  // landing, sem nenhuma explicação, achando que o sistema não funciona.
+  // Leva para o login com a mensagem certa e o caminho para pedir outro link.
+  const erroAuth = request.nextUrl.searchParams.get('error_code')
+    ?? (request.nextUrl.searchParams.get('error_description') ? request.nextUrl.searchParams.get('error') : null)
+  if (erroAuth && pathname !== '/login') {
+    const destino = new URL('/login', request.url)
+    destino.searchParams.set('erro', erroAuth === 'otp_expired' ? 'link_expirado' : 'link_invalido')
+    return NextResponse.redirect(destino)
+  }
+
   // ══ 2. ERP ═════════════════════════════════════════════════════════════════
   //
   // SAÍDA ANTECIPADA. O matcher precisou ficar largo por causa da loja, mas o

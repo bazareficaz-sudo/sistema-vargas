@@ -165,9 +165,15 @@ export default function UsuariosClient({ usuarios, usuarioAtualId, limiteUsuario
                 <td className="px-4 py-2.5 text-gray-400 text-xs">{fmtData(u.created_at)}</td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                    {u.status === 'convite_pendente' && (
-                      <button onClick={() => gerarLinkAcesso(u.id)} className="text-xs px-2 py-1 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
-                        Gerar link de acesso
+                    {/* Também para quem já está ativo e esqueceu a senha: o link
+                        gerado aqui abre em qualquer aparelho e não depende do
+                        e-mail do Supabase, que provedores como Yahoo e Outlook
+                        às vezes "gastam" antes de a pessoa clicar. */}
+                    {(u.status === 'convite_pendente' || u.status === 'ativo') && (
+                      <button onClick={() => gerarLinkAcesso(u.id)}
+                        title={u.status === 'ativo' ? 'Gera um link para a pessoa criar uma senha nova — mande por WhatsApp' : undefined}
+                        className="text-xs px-2 py-1 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
+                        {u.status === 'ativo' ? 'Link de nova senha' : 'Gerar link de acesso'}
                       </button>
                     )}
                     {u.id !== usuarioAtualId && (

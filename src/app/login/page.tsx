@@ -37,6 +37,14 @@ function LoginForm() {
       setErro('Sua sessão do dia anterior expirou. Entre novamente.')
     } else if (erroParam === 'outra_aba') {
       setErro('Sua sessão foi encerrada em outra aba. Entre novamente.')
+    } else if (erroParam === 'link_expirado' || erroParam === 'link_invalido') {
+      // Link de senha recusado pelo Supabase. As causas reais, nesta ordem:
+      // passou de 1 hora, já foi clicado antes, ou o provedor de e-mail
+      // (Yahoo, Outlook/Hotmail) "abriu" o link sozinho para checar segurança
+      // e gastou o uso único dele.
+      setErro('Esse link de senha expirou ou já foi usado. Digite seu e-mail e clique em "Esqueci minha senha" '
+        + 'para receber um novo, e abra o link assim que chegar. Se continuar falhando, peça ao administrador '
+        + 'um link de acesso em Usuários.')
     }
   }, [searchParams])
 
