@@ -104,9 +104,12 @@ export default async function ProdutosPage({
   // Filtro por entrada de mercadoria — lógica compartilhada com a tela de
   // Gestão de Preços (número exato primeiro, e as duas origens: lançamento
   // manual e nota importada por XML).
-  const resultadoEntrada = await produtosDaEntrada(supabase, empresaId, { numero: entrada })
+  // Aqui os kits entram junto: o kit que usa um item da nota é revisado com
+  // ele (custo e preço do kit dependem dos componentes).
+  const resultadoEntrada = await produtosDaEntrada(supabase, empresaId, { numero: entrada, incluirKits: true })
   const idsDaEntrada = resultadoEntrada?.produtoIds ?? null
   const entradasCasadas = resultadoEntrada?.entradasCasadas ?? []
+  const kitsDaEntrada = resultadoEntrada?.kitIds.length ?? 0
 
   function aplicarFiltros(qb: any): any {
     let out = qb
@@ -315,6 +318,7 @@ export default async function ProdutosPage({
       tagFiltro={tag}
       entradaFiltro={entrada}
       entradasCasadas={entradasCasadas}
+      kitsDaEntrada={kitsDaEntrada}
       tagsDisponiveis={tagsDisponiveis}
       temLoja={temLoja}
     />
