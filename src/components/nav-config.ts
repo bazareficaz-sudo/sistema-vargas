@@ -184,6 +184,9 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/marketplaces', label: 'Marketplaces', icon: '🏪', modulo: 'marketplace' },
       { href: '/dashboard/marketplaces/anuncios', label: 'Anúncios', icon: '📢', modulo: 'marketplace' },
       { href: '/dashboard/mapa-anuncios', label: 'Mapa de Anúncios', icon: '🗺️', modulo: 'marketplace' },
+      // O que falta no cadastro para o produto virar anúncio — e onde a IA
+      // preenche peso, medidas e descrição em lote.
+      { href: '/dashboard/prontidao-anuncios', label: 'Prontidão p/ Anunciar', icon: '✅', modulo: 'marketplace' },
           { href: '/dashboard/marketplaces/fila', label: 'Fila de Atualização', icon: '🔄', modulo: 'marketplace' },
       { href: '/dashboard/anuncios-rascunhos', label: 'Anúncios Rascunhos', icon: '🧩', modulo: 'marketplace' },
       { href: '/dashboard/precificacao', label: 'Precificação', icon: '🎯', modulo: 'marketplace' },
