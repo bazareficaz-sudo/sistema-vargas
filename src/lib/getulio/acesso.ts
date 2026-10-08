@@ -22,6 +22,6 @@ export async function lerConfig(sb: any, empresaId: string): Promise<ConfigGetul
   const destinatarios: Destinatario[] = wpp?.numero_gestor ? [{ nome: '', numero: String(wpp.numero_gestor) }] : []
   return {
     empresa_id: empresaId, ativo: false, horario_resumo: '07:30', destinatarios,
-    vigias_desligados: [], ultima_varredura: null, ultimo_resumo_dia: null, existe: false,
+    vigias_desligados: [], responder_whatsapp: false, ultima_varredura: null, ultimo_resumo_dia: null, existe: false,
   }
 }

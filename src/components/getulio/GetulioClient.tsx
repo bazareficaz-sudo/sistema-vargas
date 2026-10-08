@@ -14,6 +14,7 @@ type SinalTela = {
   avisado_em: string | null; dispensado_em: string | null
 }
 type MensagemTela = { id: string; tipo: string; texto: string; gerado_por: string; status: string; erro: string | null; created_at: string }
+type ConversaTela = { id: string; numero: string; papel: 'dono' | 'getulio'; texto: string; consultas: string[]; erro: string | null; created_at: string }
 
 const GRAV: Record<Gravidade, { rotulo: string; icone: string; cartao: string; chip: string }> = {
   urgente: { rotulo: 'Urgente', icone: '🔴', cartao: 'border-red-200 bg-red-50/60', chip: 'bg-red-100 text-red-700' },
@@ -37,18 +38,21 @@ function TextoWhatsapp({ texto }: { texto: string }) {
   )
 }
 
-export default function GetulioClient({ configInicial, sinaisIniciais, mensagens, whatsappPronto }: {
+export default function GetulioClient({ configInicial, sinaisIniciais, mensagens, whatsappPronto, recebimentoConectado, conversas }: {
   configInicial: ConfigGetulio & { existe: boolean }
   sinaisIniciais: SinalTela[]
   mensagens: MensagemTela[]
   whatsappPronto: boolean
+  recebimentoConectado: boolean
+  conversas: ConversaTela[]
 }) {
   const router = useRouter()
   const [config, setConfig] = useState(configInicial)
   const [sinais, setSinais] = useState(sinaisIniciais)
   const [destinatarios, setDestinatarios] = useState<Destinatario[]>(
     configInicial.destinatarios?.length ? configInicial.destinatarios : [{ nome: '', numero: '' }])
-  const [ocupado, setOcupado] = useState<'' | 'varrer' | 'previa' | 'enviar' | 'salvar'>('')
+  const [ocupado, setOcupado] = useState<'' | 'varrer' | 'previa' | 'enviar' | 'salvar' | 'conectar'>('')
+  const [recebendo, setRecebendo] = useState(recebimentoConectado)
   const [aviso, setAviso] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [previa, setPrevia] = useState<{ texto: string; geradoPor: string } | null>(null)
   const [mostrarDispensados, setMostrarDispensados] = useState(false)
@@ -113,6 +117,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
         ativo, horario_resumo: config.horario_resumo,
         destinatarios: destinatarios.filter(x => x.numero.trim()),
         vigias_desligados: config.vigias_desligados ?? [],
+        responder_whatsapp: !!config.responder_whatsapp,
       })
       if (!d.ok) { setAviso({ tipo: 'erro', texto: d.erro ?? 'Falha ao salvar' }); return }
       setConfig(d.config)
@@ -127,6 +132,17 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
     setSinais(prev => prev.map(x => x.id === s.id
       ? { ...x, dispensado_em: acao === 'dispensar' ? new Date().toISOString() : null, avisado_em: acao === 'reativar' ? null : x.avisado_em }
       : x))
+  }
+
+  async function conectarRecebimento() {
+    if (!confirm('Isto cadastra o Sistema Vargas como o endereço que recebe as mensagens que chegam no WhatsApp da empresa (Z-API → "Ao receber").\n\nSe outro sistema ou robô de atendimento recebe as mensagens desse número hoje, ele deixa de receber.\n\nContinuar?')) return
+    setOcupado('conectar'); setAviso(null)
+    try {
+      const d = await chamar('/api/getulio/conectar-whatsapp')
+      if (!d.ok) { setAviso({ tipo: 'erro', texto: d.erro ?? 'Falha ao conectar' }); return }
+      setRecebendo(true)
+      setAviso({ tipo: 'ok', texto: 'Recebimento conectado. Ligue "Responder perguntas" e salve — depois mande uma pergunta para o número da empresa.' })
+    } finally { setOcupado('') }
   }
 
   const alternarVigia = (id: string) => setConfig(c => ({
@@ -304,6 +320,47 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
               className="w-full py-2 text-sm font-medium rounded-lg bg-gray-900 hover:bg-black text-white disabled:opacity-50">
               {ocupado === 'salvar' ? 'Salvando…' : 'Salvar'}
             </button>
+          </div>
+
+          {/* Conversa pelo WhatsApp */}
+          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+            <h2 className="text-sm font-semibold text-gray-900">Conversar pelo WhatsApp</h2>
+            <p className="text-[11px] text-gray-500 leading-snug">
+              Quem está em "Quem recebe" pode mandar perguntas para o número da empresa — "quanto vendi ontem?",
+              "detalha o item 2", "tem plug roscável?" — e o Getúlio responde com os números do sistema.
+              Outros números seguem o atendimento normal.
+            </p>
+            <div className="flex items-center justify-between gap-2">
+              <span className={`text-xs ${recebendo ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {recebendo ? '● Recebimento de mensagens conectado' : '○ O sistema ainda não recebe as mensagens do WhatsApp'}
+              </span>
+              {!recebendo && (
+                <button onClick={conectarRecebimento} disabled={!!ocupado || !whatsappPronto}
+                  className="text-xs px-2.5 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 whitespace-nowrap">
+                  {ocupado === 'conectar' ? 'Conectando…' : 'Conectar'}
+                </button>
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={!!config.responder_whatsapp} disabled={!recebendo}
+                onChange={e => setConfig(c => ({ ...c, responder_whatsapp: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
+              Responder perguntas <span className="text-[11px] text-gray-400">(depois clique em Salvar, acima)</span>
+            </label>
+            {conversas.length > 0 && (
+              <div className="bg-[#efeae2] rounded-lg p-2 space-y-1.5 max-h-80 overflow-y-auto">
+                {conversas.map(c => (
+                  <div key={c.id} className={`flex ${c.papel === 'dono' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 shadow-sm ${c.papel === 'dono' ? 'bg-[#d9fdd3]' : 'bg-white'}`}>
+                      <TextoWhatsapp texto={c.texto} />
+                      <p className="text-[10px] text-gray-400 text-right mt-0.5">
+                        {dataHora(c.created_at)}{c.consultas?.length ? ` · consultou ${c.consultas.length}x` : ''}
+                      </p>
+                      {c.erro && <p className="text-[10px] text-red-600">{c.erro}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Histórico */}

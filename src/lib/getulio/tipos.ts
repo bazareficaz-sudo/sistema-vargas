@@ -59,6 +59,8 @@ export type ConfigGetulio = {
   horario_resumo: string
   destinatarios: Destinatario[]
   vigias_desligados: string[]
+  /** Conversa pelo WhatsApp: responder perguntas dos destinatários. */
+  responder_whatsapp: boolean
   ultima_varredura: string | null
   ultimo_resumo_dia: string | null
 }

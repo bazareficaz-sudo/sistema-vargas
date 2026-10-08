@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     horario_resumo: horario,
     destinatarios,
     vigias_desligados: desligados,
+    responder_whatsapp: !!body.responder_whatsapp,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'empresa_id' })
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 500 })

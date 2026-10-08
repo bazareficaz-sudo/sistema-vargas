@@ -83,6 +83,28 @@ export async function zapiSendText(
   }
 }
 
+/**
+ * Define o endereço que a Z-API chama quando CHEGA uma mensagem no número
+ * ("Ao receber" no painel da Z-API). É uma configuração única da instância:
+ * se outro sistema estiver recebendo por ali, ele deixa de receber.
+ */
+export async function zapiDefinirWebhookRecebimento(
+  config: ZAPIConfig, url: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch(buildUrl(config, 'update-webhook-received'), {
+      method: 'PUT',
+      headers: headers(config),
+      body: JSON.stringify({ value: url }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data?.value === false) return { success: false, error: data?.error ?? data?.message ?? `HTTP ${res.status}` }
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e.message }
+  }
+}
+
 export async function zapiSendDocument(
   config: ZAPIConfig,
   phone: string,
