@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   agruparVaiFaltar, avaliarEstoqueParado, avaliarVaiFaltar, avaliarVendasCanal, corpoModelo, minutosDoDiaSP, minutosDoHorario,
   montarMensagem, normalizarErro, saudacao, selecionarParaResumo, traduzirMotivos, type SinalGuardado,
+  blocoSemanal, selecionarAlertas, textoAlerta,
 } from '../../src/lib/getulio/regras'
 import { assinar } from '../../src/lib/getulio/vigias'
 
@@ -183,5 +184,50 @@ describe('texto e relógio', () => {
     assert.match(msg, /1\. 🔴 \*Conta vencida\*/)
     assert.match(msg, /E mais 2 assunto/)
     assert.match(msg, /👉 https:\/\/x\/getulio$/)
+  })
+})
+
+describe('alertas imediatos', () => {
+  const agora = new Date('2026-10-08T13:00:00Z') // 10h em São Paulo
+  const s = (o: Partial<SinalGuardado>): SinalGuardado => ({
+    id: Math.random().toString(), vigia: 'zerado_a_venda', chave: 'k', gravidade: 'urgente', titulo: 't', detalhe: 'd',
+    valor: 0, link: null, detectado_em: '2026-10-01T00:00:00Z', novidade_em: '2026-10-08T12:30:00Z',
+    avisado_em: null, dispensado_em: null, ...o,
+  })
+
+  test('urgente de vigia imediato que acabou de virar novidade sai na hora', () => {
+    assert.equal(selecionarAlertas([s({})], agora, 0).length, 1)
+  })
+  test('passivo antigo não dispara alerta (fica para o resumo)', () => {
+    assert.equal(selecionarAlertas([s({ novidade_em: '2026-10-08T05:00:00Z' })], agora, 0).length, 0)
+  })
+  test('só urgente e só dos vigias de alerta; avisado ou dispensado não', () => {
+    assert.equal(selecionarAlertas([
+      s({ gravidade: 'atencao' }), s({ vigia: 'financeiro' }), s({ avisado_em: '2026-10-08T12:40:00Z' }), s({ dispensado_em: '2026-10-08T12:40:00Z' }),
+    ], agora, 0).length, 0)
+  })
+  test('madrugada não manda e o limite do dia é respeitado', () => {
+    assert.equal(selecionarAlertas([s({ novidade_em: '2026-10-08T04:30:00Z' })], new Date('2026-10-08T05:00:00Z'), 0).length, 0)
+    assert.equal(selecionarAlertas([s({}), s({})], agora, 3).length, 1)
+    assert.equal(selecionarAlertas([s({})], agora, 4).length, 0)
+  })
+  test('texto do alerta tem o assunto, o link e como parar', () => {
+    const t = textoAlerta(s({ titulo: 'Canal X recusando' }), 'https://x/y')
+    assert.match(t, /\*Canal X recusando\*/)
+    assert.match(t, /👉 https:\/\/x\/y/)
+    assert.match(t, /não me avise disso/)
+  })
+})
+
+describe('semana que passou', () => {
+  test('total e canais com variação contra a semana anterior', () => {
+    const b = blocoSemanal(
+      [{ canal: 'Loja física (PDV)', faturamento: 11000 }, { canal: 'ML Ouro', faturamento: 2900 }],
+      [{ canal: 'Loja física (PDV)', faturamento: 12500 }, { canal: 'ML Ouro', faturamento: 1700 }],
+      '29/09 a 05/10')
+    assert.match(b, /Semana passada \(29\/09 a 05\/10\)/)
+    assert.match(b, /▼2%/) // 13.900 contra 14.200
+    assert.match(b, /Loja física \(PDV\): R\$\s?11\.000 \(▼12%\)/)
+    assert.match(b, /ML Ouro: R\$\s?2\.900 \(▲71%\)/)
   })
 })

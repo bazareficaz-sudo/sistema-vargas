@@ -203,6 +203,8 @@ export type SinalGuardado = Sinal & {
   detectado_em: string
   avisado_em: string | null
   dispensado_em: string | null
+  /** Quando virou novidade (nasceu, reabriu, mudou ou piorou). */
+  novidade_em?: string | null
 }
 
 /** Urgente ainda aberto volta a ser lembrado depois deste tempo. */
@@ -252,4 +254,73 @@ export function corpoModelo(itens: SinalGuardado[]): string {
 export function montarMensagem(cabecalho: string, corpo: string, restantes: number, linkCentral: string): string {
   const mais = restantes > 0 ? `\n\nE mais ${restantes} assunto(s) na Central do Getúlio.` : ''
   return `${cabecalho}\n\n${corpo.trim()}${mais}\n\n👉 ${linkCentral}`
+}
+
+// ── Alerta imediato ─────────────────────────────────────────────────────
+//
+// O que não pode esperar o resumo do dia seguinte: canal recusando tudo,
+// produto zerado à venda, pedido com prazo vencido. Só o URGENTE desses três,
+// só o que virou novidade nas últimas 3 horas (ligar o Getúlio não dispara o
+// passivo inteiro de uma vez — isso é do resumo), fora da madrugada e no
+// máximo 4 por dia.
+
+export const VIGIAS_ALERTA_IMEDIATO = new Set(['integracoes', 'zerado_a_venda', 'pedidos_atrasados'])
+export const MAX_ALERTAS_DIA = 4
+export const JANELA_NOVIDADE_H = 3
+/** Das 7h às 21h, horário de Brasília. */
+export const HORARIO_ALERTA = { inicio: 7 * 60, fim: 21 * 60 }
+
+export function horarioDeAlerta(agora: Date): boolean {
+  const m = minutosDoDiaSP(agora)
+  return m >= HORARIO_ALERTA.inicio && m < HORARIO_ALERTA.fim
+}
+
+export function selecionarAlertas(sinais: SinalGuardado[], agora: Date, jaEnviadosHoje: number): SinalGuardado[] {
+  const vagas = Math.max(0, MAX_ALERTAS_DIA - jaEnviadosHoje)
+  if (vagas === 0 || !horarioDeAlerta(agora)) return []
+  const desde = agora.getTime() - JANELA_NOVIDADE_H * 3_600_000
+  return sinais
+    .filter(s => s.gravidade === 'urgente' && VIGIAS_ALERTA_IMEDIATO.has(s.vigia))
+    .filter(s => !s.avisado_em && !s.dispensado_em)
+    .filter(s => new Date(s.novidade_em ?? s.detectado_em).getTime() >= desde)
+    .sort((a, b) => (PRIORIDADE_VIGIA[a.vigia] ?? 9) - (PRIORIDADE_VIGIA[b.vigia] ?? 9))
+    .slice(0, vagas)
+}
+
+export function textoAlerta(s: SinalGuardado, link: string): string {
+  return `🔴 *Getúlio — isso não pode esperar*
+
+*${s.titulo}*
+${s.detalhe}
+
+👉 ${link}
+
+_Responda "não me avise disso" se não quiser mais este aviso._`
+}
+
+// ── Resumo semanal (segunda-feira) ──────────────────────────────────────
+
+export type LinhaSemana = { canal: string; faturamento: number }
+
+const variacaoTxt = (atual: number, anterior: number) => {
+  if (!(anterior > 0)) return atual > 0 ? ' (novo)' : ''
+  const v = Math.round((atual / anterior - 1) * 100)
+  return v === 0 ? ' (=)' : ` (${v > 0 ? '▲' : '▼'}${Math.abs(v)}%)`
+}
+
+/**
+ * Bloco da semana que acabou contra a anterior, por canal. Números exatos,
+ * sem IA — vai antes dos avisos no resumo de segunda.
+ */
+export function blocoSemanal(atual: LinhaSemana[], anterior: LinhaSemana[], rotulo: string): string {
+  const totalA = atual.reduce((s, l) => s + Number(l.faturamento), 0)
+  const totalB = anterior.reduce((s, l) => s + Number(l.faturamento), 0)
+  const porCanal = new Map<string, { a: number; b: number }>()
+  for (const l of atual) porCanal.set(l.canal, { a: Number(l.faturamento), b: porCanal.get(l.canal)?.b ?? 0 })
+  for (const l of anterior) porCanal.set(l.canal, { a: porCanal.get(l.canal)?.a ?? 0, b: Number(l.faturamento) })
+  const linhas = [...porCanal]
+    .filter(([, v]) => v.a > 0 || v.b > 0)
+    .sort((x, y) => y[1].a - x[1].a)
+    .map(([canal, v]) => `• ${canal}: ${fmtMoeda(v.a)}${variacaoTxt(v.a, v.b)}`)
+  return [`📊 *Semana passada (${rotulo}): ${fmtMoeda(totalA)}*${variacaoTxt(totalA, totalB)} contra a semana anterior`, ...linhas].join('\n')
 }

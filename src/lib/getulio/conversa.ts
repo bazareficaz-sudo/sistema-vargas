@@ -19,6 +19,7 @@ import { registrarConsumoIA } from '@/lib/ia/gateway'
 import { enviarWhatsappAutomacao } from '@/lib/automacoes/whatsapp-send'
 import { diaISO } from '@/lib/datas'
 import { CONSULTAS_GETULIO } from './consultas'
+import { ACOES_APRENDER } from './aprender'
 import { LINK_CENTRAL } from './resumo'
 import type { Destinatario } from './tipos'
 import { destinatarioDoNumero } from './numero'
@@ -61,10 +62,11 @@ export function montarPrompt(params: {
     '- No máximo 700 caracteres. Valores em reais no formato R$ 1.234,56.',
     '- RESPONDA AGORA, NESTA MENSAGEM. Você não consegue "voltar depois": nunca escreva "vou buscar", "deixa eu ver" ou "depois confirmo". Busque com as ferramentas e já responda com o resultado; se nenhuma ferramenta cobre a pergunta, diga isso claramente e o que você consegue responder.',
     '- Cruzamentos de anúncios (marca + canal + zerado/pausado/ativo) se fazem com anuncios_filtrados, numa chamada só. Se "zerado" for ambíguo, use "qualquer_zerado" e separe na resposta o que está zerado no anúncio do que está zerado no sistema.',
-    `- Você AINDA NÃO executa ações (pausar, mudar preço, pagar, enviar). Se pedirem, diga que por enquanto você só consulta e que isso se faz no sistema; ofereça a consulta que ajuda (ex.: listar os itens). NÃO descreva telas, menus, seções ou botões — você não os conhece. Link geral, se útil: ${LINK_CENTRAL}.`,
+    '- APRENDER: quando o dono disser "não me avise mais disso", "isso não interessa" ou mandar 👎 sobre um aviso, use parar_de_avisar com o número do item (se a última mensagem foi um alerta, item 1). Se ele rejeitar um TIPO inteiro ("não quero mais aviso de estoque negativo"), use desligar_tipo_de_aviso; para voltar, religar_tipo_de_aviso. Confirme em uma linha o que fez. 👍 sozinho é só um agradecimento: responda curto.',
+    `- Fora isso, você AINDA NÃO executa ações no negócio (pausar, mudar preço, pagar, enviar). Se pedirem, diga que por enquanto você só consulta e que isso se faz no sistema; ofereça a consulta que ajuda (ex.: listar os itens). NÃO descreva telas, menus, seções ou botões — você não os conhece. Link geral, se útil: ${LINK_CENTRAL}.`,
     '- Não cite empresas de tecnologia nem ferramentas internas.',
     '',
-    params.ultimoResumo ? `ÚLTIMO RESUMO QUE VOCÊ MANDOU:\n${params.ultimoResumo}\n` : '',
+    params.ultimoResumo ? `ÚLTIMA MENSAGEM QUE VOCÊ MANDOU (resumo ou alerta):\n${params.ultimoResumo}\n` : '',
     params.historico.length ? `CONVERSA RECENTE:\n${params.historico.map(h => `${h.papel === 'dono' ? 'Dono' : 'Getúlio'}: ${h.texto}`).join('\n')}\n` : '',
     `MENSAGEM AGORA: ${JSON.stringify(params.pergunta)}`,
     '',
@@ -128,7 +130,7 @@ export async function responderMensagem(sb: any, empresaId: string, numero: stri
       // `estoque_de_um_produto` sai: ela procura a frase inteira no nome e
       // devolvia "não encontrei" para "disjuntor 32a mono guepar". Quem acha
       // produto aqui é buscar_produto.
-      consultas: [...CONSULTAS_GETULIO, ...CONSULTAS_ESTOQUE.filter(c => c.nome !== 'estoque_de_um_produto')],
+      consultas: [...CONSULTAS_GETULIO, ...ACOES_APRENDER, ...CONSULTAS_ESTOQUE.filter(c => c.nome !== 'estoque_de_um_produto')],
       modelo: MODELO, maxTokens: 1200,
     })
     if (!r.ok) throw new Error(r.motivo)

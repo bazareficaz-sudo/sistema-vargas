@@ -40,7 +40,7 @@ export async function varrer(sb: any, empresaId: string, desligados: string[] = 
       const piorou = ORDEM_GRAVIDADE[s.gravidade] < ORDEM_GRAVIDADE[antes.gravidade as Gravidade]
       await sb.from('getulio_sinais').update({
         ...campos,
-        ...(mudou || piorou ? { avisado_em: null, dispensado_em: null } : {}),
+        ...(mudou || piorou ? { avisado_em: null, dispensado_em: null, novidade_em: agoraIso } : {}),
       }).eq('id', antes.id)
       if (mudou || piorou) novos++
       continue
@@ -48,7 +48,7 @@ export async function varrer(sb: any, empresaId: string, desligados: string[] = 
     // Novo, ou reaberto: o upsert pela chave cobre os dois.
     const { error } = await sb.from('getulio_sinais').upsert({
       empresa_id: empresaId, chave: s.chave, ...campos,
-      detectado_em: agoraIso, resolvido_em: null, avisado_em: null, dispensado_em: null,
+      detectado_em: agoraIso, novidade_em: agoraIso, resolvido_em: null, avisado_em: null, dispensado_em: null,
     }, { onConflict: 'empresa_id,chave' })
     if (!error) novos++
   }
