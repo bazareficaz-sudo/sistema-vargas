@@ -1036,12 +1036,24 @@ export default function EntradaXmlDetalheClient({
                     <td className="px-3 py-2 font-mono text-xs text-slate-400">{item.ean || '—'}</td>
                     <td className="px-3 py-2 text-right text-xs text-slate-500">{item.quantidade_xml} {item.unidade_xml}</td>
                     <td className="px-3 py-2">
-                      {item.produto_id ? (
-                        <div>
-                          <p className="text-slate-800 text-xs">{item.descricao_sistema || '(produto)'}</p>
-                          <p className="text-slate-400 text-xs">Fator: {item.fator_conversao}x → {item.quantidade_entrada} {item.unidade_sistema}</p>
-                        </div>
-                      ) : (
+                      {item.produto_id ? (() => {
+                        // `descricao_sistema` só é gravado no mapeamento manual —
+                        // o auto-mapeamento (por EAN / histórico do fornecedor)
+                        // não preenche, e a tela mostrava só "(produto)". O
+                        // nome e o código vêm do produto vinculado, carregado
+                        // direto do banco por `produto_id` (ver `produtosAtuais`).
+                        const vinculado = produtosAtuais[item.produto_id!]
+                        const nome = vinculado?.nome || item.descricao_sistema
+                        return (
+                          <div>
+                            <p className="text-slate-800 text-xs">
+                              {vinculado?.sku && <span className="font-mono text-slate-500">{vinculado.sku} · </span>}
+                              {nome || '(produto)'}
+                            </p>
+                            <p className="text-slate-400 text-xs">Fator: {item.fator_conversao}x → {item.quantidade_entrada} {item.unidade_sistema}</p>
+                          </div>
+                        )
+                      })() : (
                         <span className="text-slate-400 text-xs italic">Não mapeado</span>
                       )}
                     </td>
