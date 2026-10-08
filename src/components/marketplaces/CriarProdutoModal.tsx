@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
+import { gerarProximoSku } from '@/components/produtos/sku'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -46,6 +47,18 @@ export default function CriarProdutoModal({ anuncio, variacao, canal, empresaId,
     })
   }, [empresaId])
 
+  // O marketplace nem sempre tem SKU próprio (sku_canal/sku_variacao vêm
+  // vazios) — sem isto o produto nascia com sku: null, o "SKU zerado"
+  // reportado. Mesmo gerador sequencial do cadastro normal (ver sku.ts);
+  // só preenche se o campo começou vazio, nunca sobrescreve um SKU real
+  // que o marketplace de fato informou.
+  useEffect(() => {
+    if (form.sku.trim()) return
+    const sb = createClient()
+    gerarProximoSku(sb, empresaId).then(v => setForm(p => (p.sku.trim() ? p : { ...p, sku: v })))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaId])
+
   function f(k: string, v: any) { setForm(p => ({ ...p, [k]: v })) }
 
   function toggleImagem(url: string) {
@@ -73,7 +86,9 @@ export default function CriarProdutoModal({ anuncio, variacao, canal, empresaId,
 
     // Checagem final de SKU duplicado antes de gravar (segurança extra além
     // da checagem no blur — sem constraint única em produtos.sku no banco).
-    const sku = form.sku.trim() || null
+    // Rede de segurança: se por algum motivo chegou aqui vazio (ex: o
+    // usuário apagou o campo), gera um em vez de deixar nulo.
+    const sku = form.sku.trim() || await gerarProximoSku(sb, empresaId)
     if (sku) {
       const { data: existente } = await sb.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('sku', sku).maybeSingle()
       if (existente) {
