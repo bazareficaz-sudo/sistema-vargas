@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { PERIODOS, formatarDia, enderecoLimpo } from '@/lib/entregas/agenda'
 import BuscaCliente from '@/components/automacoes/BuscaCliente'
 import PendenciasFiscais from './PendenciasFiscais'
 import { abrirDanfe, type FormatoPapel } from '@/lib/fiscal/danfe'
@@ -48,6 +49,8 @@ export default function DetalheVendaModal({
     nfce_status: string | null; nfce_numero: string | null; nfce_chave: string | null; nfce_motivo_rejeicao: string | null
     nfce_url_pdf: string | null; operador_nome: string | null
     cliente_id: string | null; cliente_nome: string | null; cliente_cpf_cnpj: string | null
+    endereco_entrega_texto?: string | null; entrega_agendada_para?: string | null; entrega_periodo?: string | null
+    entrega_realizada_em?: string | null; entrega_realizada_por_nome?: string | null
   } | null>(null)
   const [emitindoNfce, setEmitindoNfce] = useState(false)
   const [pendenciasAbertas, setPendenciasAbertas] = useState(false)
@@ -82,7 +85,7 @@ export default function DetalheVendaModal({
       const sb = createClient()
       const [{ data: itensData }, { data: vendaData }] = await Promise.all([
         sb.from('venda_itens').select('*').eq('venda_id', venda.id),
-        sb.from('vendas').select('observacao, entrega_solicitada, valor_pago, troco, nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf, operador_nome, cliente_id, cliente_nome, cliente_cpf_cnpj').eq('id', venda.id).single(),
+        sb.from('vendas').select('observacao, entrega_solicitada, valor_pago, troco, nfce_status, nfce_numero, nfce_chave, nfce_motivo_rejeicao, nfce_url_pdf, operador_nome, cliente_id, cliente_nome, cliente_cpf_cnpj, endereco_entrega_texto, entrega_agendada_para, entrega_periodo, entrega_realizada_em, entrega_realizada_por_nome').eq('id', venda.id).single(),
       ])
       setItens(itensData ?? [])
       setDetalhe(vendaData as any)
@@ -462,7 +465,18 @@ export default function DetalheVendaModal({
                 </label>
               )}
               {!edicao && detalhe?.entrega_solicitada && (
-                <p className="text-xs text-blue-600 mt-1">🚚 Entrega solicitada</p>
+                <div className="text-xs text-blue-600 mt-1 space-y-0.5">
+                  <p>🚚 Entrega solicitada
+                    {detalhe.entrega_agendada_para && <> · agendada para {formatarDia(detalhe.entrega_agendada_para)}
+                      {detalhe.entrega_periodo && detalhe.entrega_periodo !== 'qualquer' && ` (${PERIODOS.find(p => p.v === detalhe.entrega_periodo)?.l.toLowerCase()})`}</>}
+                  </p>
+                  {detalhe.endereco_entrega_texto && <p className="text-gray-500">📍 {enderecoLimpo(detalhe.endereco_entrega_texto)}</p>}
+                  <p className={detalhe.entrega_realizada_em ? 'text-emerald-600' : 'text-amber-600'}>
+                    {detalhe.entrega_realizada_em
+                      ? `✅ Entregue em ${new Date(detalhe.entrega_realizada_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}${detalhe.entrega_realizada_por_nome ? ` · ${detalhe.entrega_realizada_por_nome}` : ''}`
+                      : '⏳ Entrega pendente — veja em Comercial › Entregas'}
+                  </p>
+                </div>
               )}
             </div>
 
