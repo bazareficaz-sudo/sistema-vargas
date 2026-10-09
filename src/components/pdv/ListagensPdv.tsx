@@ -6,10 +6,10 @@ import { createClient } from '@/lib/supabase/client'
 // Listagens de consulta rápida dentro do PDV web — pedidos (vendas) e
 // orçamentos — sem sair da tela de venda e sem perder o carrinho aberto.
 //
-// Só leitura. Converter orçamento em venda NÃO acontece aqui: a conversão tem
-// arbitragem própria no servidor (orcamentos.venda_id + trigger em vendas),
-// para que um orçamento nunca vire duas vendas. Copiar os itens para o
-// carrinho por fora dela reabriria exatamente esse buraco.
+// Só leitura. "Vender este orçamento" apenas leva os itens para o carrinho;
+// a baixa acontece ao concluir a venda, pela arbitragem do servidor
+// (orcamentos.venda_id + trigger em vendas), para que um orçamento nunca vire
+// duas vendas.
 //
 // Também não há totais somados no topo: o PDV não carrega as permissões de
 // "ver totais de vendas", e a soma do dia é justamente o número que o gestor
@@ -234,7 +234,11 @@ const STATUS_ORC: Record<string, { label: string; cor: string }> = {
 
 type FiltroOrc = 'pendentes' | 'todos'
 
-export function ListaOrcamentosPdv({ empresaId }: { empresaId: string }) {
+export function ListaOrcamentosPdv({ empresaId, onCarregar }: {
+  empresaId: string
+  /** Leva o orçamento para o carrinho (a baixa acontece ao concluir a venda). */
+  onCarregar?: (orcamentoId: string) => void
+}) {
   const sb = createClient()
   const [filtro, setFiltro] = useState<FiltroOrc>('pendentes')
   const [periodo, setPeriodo] = useState<Periodo>('30d')
@@ -321,6 +325,14 @@ export function ListaOrcamentosPdv({ empresaId }: { empresaId: string }) {
                   <ItensDetalhe itens={o.orcamento_itens ?? []} carregando={false} />
                   {o.observacao && <p className="px-3 pt-1 text-[11px] text-gray-500">Obs.: {o.observacao}</p>}
                   {o.clientes?.telefone && <p className="px-3 pt-1 text-[11px] text-gray-500">Telefone: {o.clientes.telefone}</p>}
+                  {onCarregar && (o.status === 'aberto' || o.status === 'aprovado') && (
+                    <div className="flex justify-end px-3 pt-2">
+                      <button type="button" onClick={() => onCarregar(o.id)}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium">
+                        🛒 Vender este orçamento
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

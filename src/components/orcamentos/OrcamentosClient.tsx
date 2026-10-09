@@ -482,7 +482,7 @@ export default function OrcamentosClient({
                 </>
               )}
               {selecionado.status === 'aprovado' && (
-                <button onClick={() => router.push('/pdv')}
+                <button onClick={() => router.push(`/pdv?orcamento=${selecionado.id}`)}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
                   Converter em venda (PDV)
                 </button>

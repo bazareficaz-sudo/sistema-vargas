@@ -12,6 +12,7 @@ import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
 import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produtos/similares'
 import CampoNumero from '@/components/pdv/CampoNumero'
 import { ListaPedidosPdv, ListaOrcamentosPdv } from '@/components/pdv/ListagensPdv'
+import { conversaoAceita, mensagemConversao, podeCarregarNoPdv } from '@/lib/orcamentos/conversaoPdv'
 import {
   promocaoValeNasFormas, gruposDePagamento, promocaoNoCarrinho,
   type ConfigPromocaoPagamento,
@@ -129,6 +130,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   // Listagens de consulta (F10 pedidos, F1 orçamentos) — abrem por cima da
   // venda sem mexer no carrinho.
   const [listagem, setListagem] = useState<'pedidos' | 'orcamentos' | null>(null)
+  // Orçamento carregado no carrinho. `vendaId` nasce AQUI, e não na hora de
+  // gravar: se a venda falhar depois da conversão, tentar de novo reusa o
+  // mesmo id e a RPC responde `ja_convertido` em vez de travar o orçamento.
+  const [orcamentoVinculado, setOrcamentoVinculado] = useState<{
+    id: string; numero: number; revisao: number | null; vendaId: string
+  } | null>(null)
   const [compreJunto, setCompreJunto] = useState<SugestaoCJ[]>([])
   const [dispensadas, setDispensadas] = useState<Set<string>>(new Set())
 
@@ -604,6 +611,81 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   }
 
   // ── Orçamento ─────────────────────────────────────────────────
+  /**
+   * Traz um orçamento para o carrinho: itens com o preço NEGOCIADO (preço
+   * manual — promoção ou tabela nova não mexem nele), desconto e cliente.
+   * A baixa acontece ao concluir, pela arbitragem do servidor.
+   */
+  async function carregarOrcamento(orcamentoId: string) {
+    if (itens.length > 0 && !confirm('Substituir os itens do carrinho pelos do orçamento?')) return
+    const { data: orc, error } = await sb.from('orcamentos')
+      .select('id, numero, status, revisao, cliente_id, cliente_nome, desconto, venda_id, orcamento_itens(produto_id, produto_nome, produto_sku, quantidade, preco_unitario, desconto)')
+      .eq('id', orcamentoId).eq('empresa_id', empresaId).maybeSingle()
+    if (error || !orc) { alert('Orçamento não encontrado nesta empresa.'); return }
+    if (!podeCarregarNoPdv(orc.status) || orc.venda_id) {
+      alert(`O orçamento #${orc.numero} está ${orc.status === 'cancelado' ? 'cancelado' : 'já convertido em venda'} e não pode ser vendido de novo.`)
+      return
+    }
+
+    const linhas = (orc.orcamento_itens ?? []) as {
+      produto_id: string | null; produto_nome: string; produto_sku: string | null
+      quantidade: number; preco_unitario: number; desconto: number | null
+    }[]
+    const ids = [...new Set(linhas.map(l => l.produto_id).filter(Boolean))] as string[]
+    const produtos = ids.length
+      ? await consultarProdutos(cols => sb.from('produtos').select(cols).in('id', ids))
+      : []
+    const porId = new Map(produtos.map(p => [p.id, p]))
+
+    const fora: string[] = []
+    const novos: ItemVenda[] = []
+    for (const l of linhas) {
+      const p = l.produto_id ? porId.get(l.produto_id) : undefined
+      if (!p) { fora.push(l.produto_nome); continue }
+      const q = Number(l.quantidade) || 0
+      const preco = Number(l.preco_unitario) || 0
+      const desc = Number(l.desconto) || 0
+      if (q <= 0) continue
+      novos.push({
+        id: uid(), produto_id: p.id, nome: l.produto_nome || p.nome, sku: l.produto_sku ?? p.sku,
+        quantidade: q, preco_unitario: preco, desconto: desc,
+        total: q * preco * (1 - desc / 100), estoque_disponivel: p.estoque, unidade: p.unidade,
+        tipo: 'venda', custo: p.preco_custo, em_promocao: false, preco_original: p.preco_venda,
+        produto: p, precoManual: true,
+      })
+    }
+    if (novos.length === 0) { alert(`O orçamento #${orc.numero} não tem itens que ainda existam no cadastro.`); return }
+
+    setItens(novos)
+    setDescontoGlobal(Number(orc.desconto) || 0)
+    const cli = orc.cliente_id ? clientes.find(c => c.id === orc.cliente_id) : null
+    setClienteSelecionado(cli ?? null)
+    if (!cli && orc.cliente_nome) setNomeNota(orc.cliente_nome)
+    setOrcamentoVinculado({
+      id: orc.id, numero: orc.numero,
+      revisao: Number.isInteger(orc.revisao) ? orc.revisao : null,
+      vendaId: crypto.randomUUID(),
+    })
+    if (fora.length > 0) {
+      alert(`Ficaram de fora ${fora.length} item(ns) que não estão mais no cadastro:\n• ${fora.join('\n• ')}`)
+    }
+    setTimeout(() => buscaRef.current?.focus(), 30)
+  }
+
+  // "Converter em venda (PDV)" na tela de Orçamentos abre /pdv?orcamento=<id>.
+  // Lido uma vez; o parâmetro sai da URL para um F5 não recarregar o orçamento
+  // por cima de uma venda nova.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('orcamento')
+    if (!id) return
+    const t = setTimeout(() => {
+      window.history.replaceState(null, '', window.location.pathname)
+      carregarOrcamento(id)
+    }, 0)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   async function salvarOrcamento() {
     if (itens.length === 0) return
     setSalvandoOrc(true)
@@ -677,6 +759,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     // atende a próxima, e herdar em silêncio credita comissão errada.
     setVendedor(null); setModalVendedor(false); setCodigoVendedor(''); setErroVendedor('')
     setCompreJunto([]); setDispensadas(new Set())
+    setOrcamentoVinculado(null)
     setFormas([{ tipo: 'dinheiro', valor: 0 }])
     buscaRef.current?.focus()
   }
@@ -808,7 +891,22 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       const formaPag = tipoOp === 'troca' ? 'troca' : isFiado ? 'fiado' : formas.length === 1 ? formas[0].tipo : 'multiplo'
       const operacaoFinal = tipoOp !== 'venda' ? tipoOp : hasDevolucao ? 'mista' : 'venda'
 
+      // ORÇAMENTO: a arbitragem vem ANTES da venda (o trigger do banco recusa
+      // venda com orcamento_id que ainda não foi entregue a ela).
+      if (orcamentoVinculado) {
+        const r = await fetch(`/api/orcamentos/${orcamentoVinculado.id}/converter`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ venda_id: orcamentoVinculado.vendaId, revisao_base: orcamentoVinculado.revisao }),
+        })
+        const conv = await r.json().catch(() => ({}))
+        if (!conversaoAceita(conv?.estado)) {
+          throw new Error(conv?.erro && !conv?.estado ? conv.erro : mensagemConversao(conv?.estado, orcamentoVinculado.numero))
+        }
+      }
+
       const { data: venda, error } = await sb.from('vendas').insert({
+        ...(orcamentoVinculado ? { id: orcamentoVinculado.vendaId, orcamento_id: orcamentoVinculado.id } : {}),
         empresa_id: empresaId,
         cliente_id: clienteSelecionado?.id ?? null,
         // Nome e documento também ficam gravados na própria venda. É o que
@@ -1270,6 +1368,15 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         <span className="text-gray-400 px-2">{operadorNome.split('@')[0]}</span>
         <button onClick={() => router.push('/dashboard')} className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded text-xs">← Painel</button>
       </div>
+
+      {/* Venda vinda de um orçamento */}
+      {orcamentoVinculado && (
+        <div className="bg-amber-100 text-amber-900 text-center py-1.5 text-xs font-semibold flex-shrink-0 flex items-center justify-center gap-3">
+          <span>📋 Venda do orçamento #{orcamentoVinculado.numero} — preços do orçamento. Ao concluir, o orçamento é baixado como convertido.</span>
+          <button onClick={() => { if (confirm('Desvincular o orçamento? Os itens continuam no carrinho e o orçamento continua em aberto.')) setOrcamentoVinculado(null) }}
+            className="underline font-normal hover:text-amber-700">desvincular</button>
+        </div>
+      )}
 
       {/* Banner modo devolução */}
       {modoDevol && (
@@ -2288,7 +2395,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       )}
       {listagem === 'orcamentos' && (
         <Modal titulo="Orçamentos" onClose={() => setListagem(null)} largura="max-w-4xl">
-          <ListaOrcamentosPdv empresaId={empresaId} />
+          <ListaOrcamentosPdv empresaId={empresaId}
+            onCarregar={id => { setListagem(null); carregarOrcamento(id) }} />
         </Modal>
       )}
 
