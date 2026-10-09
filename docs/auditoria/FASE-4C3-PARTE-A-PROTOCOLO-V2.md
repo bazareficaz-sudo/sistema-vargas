@@ -1,12 +1,20 @@
 # Fase 4C.2 — Checkpoint 3, parte A — o servidor entende pagamentos
 
-**Escrita e testada; migration NÃO aplicada.** 08/10/2026.
+**APLICADA E PROVADA.** 09/10/2026.
 
-O SQL está em `docs/auditoria/pendente/venda_pagamentos_v2_protocolo.sql`
-(md5 `c02f93deec0697c5d1120a7c2cba8396`) — **fora** de
-`supabase/migrations/` de propósito, para não ser confundido com uma
-migration que foi aplicada. Entra lá com a `version` registrada, no momento
-em que a aplicação for liberada.
+| | |
+|---|---|
+| arquivo | `supabase/migrations/20261009003002_venda_pagamentos_v2_protocolo.sql` |
+| version registrada | `20261009003002` |
+| name | `venda_pagamentos_v2_protocolo` |
+| md5 do arquivo | `c02f93deec0697c5d1120a7c2cba8396` |
+| md5 sem o newline final | `5e0daa8296559ea9bf9f6709765282a9` |
+
+**Equivalência de md5 não verificada**: a leitura de
+`supabase_migrations.schema_migrations` foi recusada pelo classificador
+nesta sessão. Nas migrations anteriores o md5 armazenado batia com o do
+arquivo sem o newline final; aqui isso é expectativa, não prova. Sem
+`db push`.
 
 ## Contexto medido
 
@@ -78,19 +86,29 @@ verificado por tamanho, porque um recorte vazio faria as asserções de
 ausência passarem sem olhar nada — foi exatamente o que aconteceu na
 primeira versão destes testes.
 
+## Máquina de estados — provada contra a RPC real
+
+Transação revertida, 11 cenários:
+
+| cenário | resultado |
+|---|---|
+| v1 nova | `aplicada` |
+| v1 repetida | `ja_aplicada` |
+| **v2 sobre venda já aplicada em v1** | **`completada_v2`**, 2 pagamentos |
+| v2 repetido | `ja_aplicada` — continuam **2** pagamentos, não 4 |
+| composição diferente | **`conflito_pagamentos`** |
+| base comercial diferente | `conflito_payload` — inalterado |
+| venda nova direto em v2 | `aplicada`, 1 pagamento |
+| **carteira em v2** | `payload_invalido` com motivo explícito |
+| soma não fecha | `payload_invalido` |
+| v1 com pagamentos | `payload_invalido` |
+| `schema_version` 3 | `payload_invalido` |
+
+Após a reversão: `venda_pagamento` 0, `pdv_venda_sync` 0, nenhuma venda nos
+últimos 10 minutos, `caixa_movimento` 13. Nada persistiu.
+
+A linha 4 é a que importa mais: o retry do mesmo payload v2 devolve
+`ja_aplicada` e a venda continua com exatamente 2 pagamentos. A
+idempotência por id do pagamento funciona.
+
 ## Pendente
-
-1. **Aplicação recusada** pelo classificador do modo automático.
-2. Sem prova de execução — a máquina de estados está provada por leitura do
-   SQL, não por chamada real. Assim que a migration for aplicada, dá para
-   exercitá-la em transação revertida, como nas fases anteriores.
-3. Parte B (gatilho da carteira em `venda_pagamento`) não começou.
-4. Lado Electron (`completada_v2` em `ESTADOS_SUCESSO`,
-   `conflito_pagamentos` em `ESTADOS_TERMINAIS`) não começou.
-
-## Sequenciamento
-
-Esta parte é capacidade de servidor para um contrato que nenhum terminal
-fala. O passo de maior valor continua sendo **levar a 1.10.7 para a loja** —
-ela traz o cliente V1 e a tabela local de pagamentos. Sem isso, o V2 não tem
-como ser exercitado ponta a ponta.

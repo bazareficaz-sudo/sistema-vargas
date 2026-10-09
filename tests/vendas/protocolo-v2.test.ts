@@ -10,12 +10,13 @@ import path from 'node:path'
 // de antes, e ganhar composição de pagamentos nunca transforma uma venda já
 // aplicada em conflito.
 //
-// A migration ainda NÃO foi aplicada — está em `docs/auditoria/pendente/`
-// justamente para não ser confundida com uma que foi.
+// Migration aplicada em 09/10/2026, version 20261009003002. A máquina de
+// estados foi exercitada contra a RPC real em transação revertida; estes
+// testes guardam o conteúdo do arquivo contra regressão.
 
 const raiz = path.resolve(__dirname, '..', '..')
 const SQL_BRUTO = fs.readFileSync(
-  path.join(raiz, 'docs/auditoria/pendente/venda_pagamentos_v2_protocolo.sql'), 'utf8')
+  path.join(raiz, 'supabase/migrations/20261009003002_venda_pagamentos_v2_protocolo.sql'), 'utf8')
 
 // Comentários explicam o defeito e a regra; asserção não pode casar com a
 // explicação, só com o código.
