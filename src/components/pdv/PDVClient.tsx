@@ -910,6 +910,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
    * `vendedor` só chega no próximo render, e esta função, chamada na mesma
    * volta, enxergaria nulo e pediria o código de novo.
    */
+  // Quando o pagamento abriu. A tecla que ABRIU o pagamento (o ENTER do
+  // código do vendedor, do cliente, o F9) não pode ser lida também como a
+  // tecla que CONCLUI: o atalho do pagamento é registrado durante o mesmo
+  // evento e, com o valor já preenchido pelo total, o ENTER do vendedor
+  // fechava a venda sem o caixa ver a tela de pagamento.
+  const pagAbertoEmRef = useRef(0)
+
   function abrirPagamento(vendedorEscolhido?: Vendedor) {
     if (itens.length === 0) return
     const vendedorAtual = vendedorEscolhido ?? vendedor
@@ -950,6 +957,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     // desconto, e o valor sugerido tem que ser o total JÁ reprecificado.
     aplicarFormas([{ tipo: 'dinheiro', valor: 0 }])
     setFormaIdx(0)
+    pagAbertoEmRef.current = performance.now()
     setModalPag(true)
     setTimeout(() => valorRefs.current[0]?.focus(), 80)
   }
@@ -1393,6 +1401,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   useEffect(() => {
     if (!modalPag) return
     function onKey(e: KeyboardEvent) {
+      if (e.timeStamp <= pagAbertoEmRef.current) return
       if (/^[1-6]$/.test(e.key)) {
         const idx = parseInt(e.key) - 1
         const forma = FORMAS[idx]; if (!forma) return
@@ -2024,7 +2033,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 ref={codigoVendedorRef}
                 value={codigoVendedor}
                 onChange={e => { setCodigoVendedor(e.target.value); setErroVendedor('') }}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirmarVendedor() } }}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); confirmarVendedor() } }}
                 placeholder="Digite o código e tecle ENTER"
                 autoFocus
                 className="mt-1 w-full border-2 border-blue-300 rounded-lg px-3 py-3 text-2xl font-bold text-center tracking-widest focus:outline-none focus:border-blue-500" />
