@@ -13,6 +13,7 @@ import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produt
 import CampoNumero from '@/components/pdv/CampoNumero'
 import { ListaPedidosPdv, ListaOrcamentosPdv } from '@/components/pdv/ListagensPdv'
 import { conversaoAceita, mensagemConversao, podeCarregarNoPdv } from '@/lib/orcamentos/conversaoPdv'
+import { normalizarTelefone, mesmoTelefone, telefoneBuscavel, formatarTelefone } from '@/lib/clientes/telefone'
 import {
   promocaoValeNasFormas, gruposDePagamento, promocaoNoCarrinho,
   type ConfigPromocaoPagamento,
@@ -52,7 +53,19 @@ type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
   limite_credito: number; saldo_credito: number; saldo_devedor: number
   bloqueado_fiado: boolean; permite_fiado: boolean
+  // Endereço do cadastro — usado na entrega quando o cliente ainda não tem
+  // endereço de entrega salvo.
+  logradouro?: string | null; numero?: string | null; bairro?: string | null
+  cidade?: string | null; referencia?: string | null
 }
+const COLS_CLIENTE_PDV = 'id, nome, cpf_cnpj, telefone, whatsapp, telefone_whatsapp, limite_credito, saldo_credito, saldo_devedor, bloqueado_fiado, permite_fiado, logradouro, numero, bairro, cidade, referencia'
+type PeriodoEntrega = 'qualquer' | 'manha' | 'tarde' | 'noite'
+const PERIODOS_ENTREGA: { v: PeriodoEntrega; l: string }[] = [
+  { v: 'qualquer', l: 'Qualquer horário' }, { v: 'manha', l: 'Manhã' },
+  { v: 'tarde', l: 'Tarde' }, { v: 'noite', l: 'Noite' },
+]
+const iguaisTexto = (a: string | null | undefined, b: string | null | undefined) =>
+  (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase()
 type FormaPag = { tipo: string; valor: number }
 type Vendedor = { id: string; codigo: string | null; nome: string }
 
@@ -170,6 +183,16 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [enderecosCliente, setEnderecosCliente] = useState<any[]>([])
   const [enderecoEntregaId, setEnderecoEntregaId] = useState<string | null>(null)
   const [contatosCliente, setContatosCliente] = useState<any[]>([])
+  // Entrega: telefone primeiro — ele acha o cliente (e o endereço salvo) ou
+  // vira cadastro novo. Agendamento opcional, gravado na venda.
+  const [entregaTelefone, setEntregaTelefone] = useState('')
+  const [entregaBusca, setEntregaBusca] = useState<'idle' | 'buscando' | 'achou' | 'varios' | 'novo'>('idle')
+  const [entregaAchados, setEntregaAchados] = useState<Cliente[]>([])
+  const [entregaNomeNovo, setEntregaNomeNovo] = useState('')
+  const [entregaData, setEntregaData] = useState('')
+  const [entregaPeriodo, setEntregaPeriodo] = useState<PeriodoEntrega>('qualquer')
+  const [salvandoEntrega, setSalvandoEntrega] = useState(false)
+  const [erroEntrega, setErroEntrega] = useState('')
 
   const [modalPag, setModalPag] = useState(false)
   // VENDEDOR DA VENDA. `vendas` já tem `vendedor_id`, `vendedor_nome` e
@@ -717,7 +740,122 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       [endEntrega.logradouro, endEntrega.numero].filter(Boolean).join(', '),
       endEntrega.bairro, endEntrega.cidade,
     ].filter(Boolean).join(' — ')
-    return [partes, endEntrega.obs && `Obs: ${endEntrega.obs}`].filter(Boolean).join(' | ') || null
+    const agenda = entregaData
+      ? `Agendado: ${entregaData.split('-').reverse().join('/')}${entregaPeriodo !== 'qualquer' ? ` (${PERIODOS_ENTREGA.find(x => x.v === entregaPeriodo)?.l.toLowerCase()})` : ''}`
+      : null
+    const tel = normalizarTelefone(entregaTelefone)
+    return [partes, endEntrega.obs && `Obs: ${endEntrega.obs}`, agenda, tel && `Tel: ${formatarTelefone(tel)}`]
+      .filter(Boolean).join(' | ') || null
+  }
+
+  // ── Entrega: telefone → cliente ──────────────────────────────
+  function abrirEntrega() {
+    setErroEntrega('')
+    // Cliente já escolhido (F5): o telefone dele vem preenchido.
+    if (clienteSelecionado && !entregaTelefone && clienteSelecionado.telefone) {
+      setEntregaTelefone(formatarTelefone(clienteSelecionado.telefone))
+      setEntregaBusca('achou')
+    }
+    setModalEntrega(true)
+  }
+
+  function usarClienteNaEntrega(c: Cliente) {
+    setClienteSelecionado(c)
+    setEntregaAchados([]); setEntregaBusca('achou'); setErroEntrega('')
+    // Sem endereço de entrega salvo, o do cadastro serve de ponto de partida.
+    // Se houver endereço padrão, o efeito que carrega os endereços o aplica.
+    if (c.logradouro) {
+      setEnderecoEntregaId(null)
+      setEndEntrega({
+        logradouro: c.logradouro ?? '', numero: c.numero ?? '',
+        bairro: c.bairro ?? '', cidade: c.cidade ?? '', obs: c.referencia ?? '',
+      })
+    }
+  }
+
+  async function buscarClientePorTelefone() {
+    const tel = normalizarTelefone(entregaTelefone)
+    if (!telefoneBuscavel(tel)) { setErroEntrega('Digite o telefone com DDD.'); return }
+    setErroEntrega(''); setEntregaBusca('buscando')
+    // O banco não compara "só os dígitos": filtra pelo final do número e a
+    // comparação de verdade acontece aqui, com o telefone normalizado.
+    const fim = tel.slice(-4)
+    const { data, error } = await sb.from('clientes').select(COLS_CLIENTE_PDV)
+      .eq('empresa_id', empresaId).eq('ativo', true).is('mesclado_em', null)
+      .or(`telefone.ilike.%${fim},whatsapp.ilike.%${fim},telefone_whatsapp.ilike.%${fim}`)
+      .limit(50)
+    if (error) { setEntregaBusca('idle'); setErroEntrega('Não foi possível buscar o cliente: ' + error.message); return }
+    const achados = ((data ?? []) as (Cliente & { whatsapp?: string | null; telefone_whatsapp?: string | null })[])
+      .filter(c => [c.telefone, c.whatsapp, c.telefone_whatsapp].some(t => mesmoTelefone(t, tel)))
+    if (achados.length === 1) { usarClienteNaEntrega(achados[0]); return }
+    if (achados.length > 1) { setEntregaAchados(achados); setEntregaBusca('varios'); return }
+    // Telefone sem cadastro. Se havia um cliente escolhido, ele não é o dono
+    // deste número — a entrega passa a ser de um cliente novo.
+    setClienteSelecionado(null)
+    setEntregaAchados([]); setEntregaBusca('novo')
+  }
+
+  /**
+   * Confirma a entrega e deixa tudo registrado para a próxima vez:
+   * cliente novo é cadastrado com telefone e endereço; endereço novo de
+   * cliente existente vira mais um endereço de entrega dele.
+   */
+  async function confirmarEntrega() {
+    setErroEntrega('')
+    const tel = normalizarTelefone(entregaTelefone)
+    if (tel.length < 10) { setErroEntrega('Informe o telefone do cliente com DDD.'); return }
+    if (!endEntrega.logradouro.trim()) { setErroEntrega('Informe o endereço da entrega.'); return }
+
+    setSalvandoEntrega(true)
+    try {
+      let cli = clienteSelecionado
+      if (!cli) {
+        const nome = entregaNomeNovo.trim()
+        if (!nome) { setErroEntrega('Telefone sem cadastro: informe o nome do cliente para cadastrar.'); return }
+        const { data, error } = await sb.from('clientes').insert({
+          empresa_id: empresaId, nome, telefone: tel, ativo: true,
+          logradouro: endEntrega.logradouro.trim() || null, numero: endEntrega.numero.trim() || null,
+          bairro: endEntrega.bairro.trim() || null, cidade: endEntrega.cidade.trim() || null,
+          referencia: endEntrega.obs.trim() || null,
+        }).select(COLS_CLIENTE_PDV).single()
+        if (error) {
+          // idx_clientes_nome_unico: nome igual na empresa, com outro telefone.
+          setErroEntrega(error.code === '23505'
+            ? `Já existe um cliente chamado "${nome}" com outro telefone. Busque pelo nome (F5) ou diferencie o nome (ex.: sobrenome).`
+            : 'Não foi possível cadastrar o cliente: ' + error.message)
+          return
+        }
+        cli = data as unknown as Cliente
+        setClienteSelecionado(cli)
+      } else if (!normalizarTelefone(cli.telefone)) {
+        // Cliente sem telefone no cadastro: aproveita o que foi informado.
+        // Falha aqui não impede a entrega.
+        await sb.from('clientes').update({ telefone: tel }).eq('id', cli.id)
+      }
+
+      // Endereço: o escolhido da lista, um igual já salvo, ou um novo.
+      if (!enderecoEntregaId) {
+        const igual = enderecosCliente.find(e =>
+          iguaisTexto(e.logradouro, endEntrega.logradouro) && iguaisTexto(e.numero, endEntrega.numero))
+        if (igual) {
+          setEnderecoEntregaId(igual.id)
+        } else {
+          const primeiro = enderecosCliente.length === 0
+          const { data: end } = await sb.from('cliente_enderecos_entrega').insert({
+            empresa_id: empresaId, cliente_id: cli.id,
+            apelido: primeiro ? 'Principal' : 'Entrega',
+            logradouro: endEntrega.logradouro.trim(), numero: endEntrega.numero.trim() || null,
+            bairro: endEntrega.bairro.trim() || null, cidade: endEntrega.cidade.trim() || null,
+            referencia: endEntrega.obs.trim() || null, padrao: primeiro, ativo: true,
+          }).select('id').single()
+          if (end?.id) setEnderecoEntregaId(end.id)
+        }
+      }
+
+      setEntrega(true); setModalEntrega(false)
+    } finally {
+      setSalvandoEntrega(false)
+    }
   }
 
   // Carrega endereços de entrega e pessoas autorizadas do cliente escolhido.
@@ -760,6 +898,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     setVendedor(null); setModalVendedor(false); setCodigoVendedor(''); setErroVendedor('')
     setCompreJunto([]); setDispensadas(new Set())
     setOrcamentoVinculado(null)
+    setEntregaTelefone(''); setEntregaBusca('idle'); setEntregaAchados([]); setEntregaNomeNovo('')
+    setEntregaData(''); setEntregaPeriodo('qualquer'); setErroEntrega('')
     setFormas([{ tipo: 'dinheiro', valor: 0 }])
     buscaRef.current?.focus()
   }
@@ -933,6 +1073,9 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         // mas a venda tem que continuar mostrando para onde foi naquele dia.
         endereco_entrega_id: entrega ? enderecoEntregaId : null,
         endereco_entrega_texto: entrega ? textoEntrega() : null,
+        entrega_agendada_para: entrega && entregaData ? entregaData : null,
+        entrega_periodo: entrega && entregaData ? entregaPeriodo : null,
+        entrega_telefone: entrega ? (normalizarTelefone(entregaTelefone) || null) : null,
         tipo_operacao: operacaoFinal,
         tem_devolucao: hasDevolucao,
         total_devolucoes: totalDevolucoes,
@@ -1226,7 +1369,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         case 'F5': e.preventDefault(); setModalCliente(true); break
         case 'F6': e.preventDefault(); setModoDevol(m => !m); break
         case 'F8': e.preventDefault(); if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } break
-        case 'F2': e.preventDefault(); setModalEntrega(true); break
+        case 'F2': e.preventDefault(); abrirEntrega(); break
         // F7 — NOVA VENDA. Confirma só quando há o que perder: pedir
         // confirmação com o carrinho vazio treinaria o balconista a apertar
         // "sim" sem ler, e é justamente na venda cheia que ele precisa ler.
@@ -1346,7 +1489,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         <BtnToolbar onClick={() => { setDescontoInput(String(descontoGlobal)); setModalDesc(true) }} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F3" label="Desc" icon="%" />
         <BtnToolbar onClick={() => setModalObs(true)} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F4" label="Obs" icon="💬" />
         <BtnToolbar onClick={() => { if (itens.length > 0) { setObsOrc(''); setValidadeOrc(''); setOrcSalvo(null); setModalOrc(true) } }} cor="bg-white hover:bg-gray-50 text-amber-700 border border-amber-300" atalho="F8" label="Orçamento" icon="📋" />
-        <BtnToolbar onClick={() => setModalEntrega(true)} cor={`bg-white hover:bg-gray-50 border border-gray-300 ${entrega ? 'text-orange-600 border-orange-300' : 'text-gray-700'}`} atalho="F2" label={entrega ? '🛵 Entrega' : 'Entregar'} />
+        <BtnToolbar onClick={abrirEntrega} cor={`bg-white hover:bg-gray-50 border border-gray-300 ${entrega ? 'text-orange-600 border-orange-300' : 'text-gray-700'}`} atalho="F2" label={entrega ? '🛵 Entrega' : 'Entregar'} />
         {/* Zerar e começar outra. O balconista precisa disso quando o cliente
             desiste no meio — sem ele, a saída era apagar item por item. */}
         <BtnToolbar
@@ -2227,6 +2370,46 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       {modalEntrega && (
         <Modal titulo="Dados de Entrega" onClose={() => setModalEntrega(false)} largura="max-w-md">
           <div className="space-y-3">
+            {/* 1. Telefone: acha o cliente ou abre o cadastro */}
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Telefone do cliente (com DDD)</label>
+              <div className="flex gap-2">
+                <input autoFocus value={entregaTelefone} inputMode="tel" placeholder="(21) 99999-9999"
+                  onChange={e => { setEntregaTelefone(e.target.value); if (entregaBusca !== 'idle') setEntregaBusca('idle') }}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); buscarClientePorTelefone() } }}
+                  onBlur={() => { if (entregaBusca === 'idle' && telefoneBuscavel(entregaTelefone)) buscarClientePorTelefone() }}
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+                <button type="button" onClick={buscarClientePorTelefone} disabled={entregaBusca === 'buscando'}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                  {entregaBusca === 'buscando' ? '...' : 'Buscar'}
+                </button>
+              </div>
+              {entregaBusca === 'achou' && clienteSelecionado && (
+                <p className="mt-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                  ✓ <b>{clienteSelecionado.nome}</b> — cliente cadastrado, puxado para a venda.
+                </p>
+              )}
+              {entregaBusca === 'varios' && (
+                <div className="mt-1.5 space-y-1">
+                  <p className="text-xs text-amber-700">Mais de um cliente com este telefone — escolha:</p>
+                  {entregaAchados.map(c => (
+                    <button key={c.id} type="button" onClick={() => usarClienteNaEntrega(c)}
+                      className="w-full text-left px-3 py-1.5 rounded-lg border border-gray-200 text-sm hover:bg-gray-50">
+                      {c.nome}
+                      {c.logradouro && <span className="block text-[11px] text-gray-500">{[c.logradouro, c.numero, c.bairro].filter(Boolean).join(', ')}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {entregaBusca === 'novo' && (
+                <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
+                  <p className="text-xs text-amber-800 mb-1.5">Telefone sem cadastro. O cliente será cadastrado com este telefone e o endereço abaixo.</p>
+                  <input value={entregaNomeNovo} onChange={e => setEntregaNomeNovo(e.target.value)} placeholder="Nome do cliente"
+                    className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-amber-500" />
+                </div>
+              )}
+            </div>
+
             {enderecosCliente.length > 0 && (
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Endereços de {clienteSelecionado?.nome}</label>
@@ -2260,7 +2443,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
             <div className="grid grid-cols-3 gap-2">
               <div className="col-span-2">
                 <label className="text-xs text-gray-500 mb-1 block">Logradouro</label>
-                <input autoFocus value={endEntrega.logradouro} onChange={e => setEndEntrega(p => ({ ...p, logradouro: e.target.value }))}
+                <input value={endEntrega.logradouro} onChange={e => setEndEntrega(p => ({ ...p, logradouro: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
               </div>
               <div>
@@ -2286,9 +2469,28 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
               <input value={endEntrega.obs} onChange={e => setEndEntrega(p => ({ ...p, obs: e.target.value }))}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
             </div>
-            <button onClick={() => { setEntrega(true); setModalEntrega(false) }}
-              className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-lg text-sm">
-              🛵 Confirmar entrega
+            {/* Agendamento (opcional) */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Entregar em (opcional)</label>
+                <input type="date" value={entregaData} min={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setEntregaData(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Período</label>
+                <select value={entregaPeriodo} onChange={e => setEntregaPeriodo(e.target.value as PeriodoEntrega)} disabled={!entregaData}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-400">
+                  {PERIODOS_ENTREGA.map(p => <option key={p.v} value={p.v}>{p.l}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {erroEntrega && <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">{erroEntrega}</p>}
+
+            <button onClick={confirmarEntrega} disabled={salvandoEntrega}
+              className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-medium rounded-lg text-sm disabled:opacity-60">
+              {salvandoEntrega ? 'Salvando...' : '🛵 Confirmar entrega'}
             </button>
             {entrega && (
               <button onClick={() => { setEntrega(false); setModalEntrega(false) }}

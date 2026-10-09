@@ -117,7 +117,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     const tela = telaDoPathname(pathname)
     return (
       <PlanProvider data={planData}>
-        <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId} configSessao={configSessao}>
+        <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId} configSessao={configSessao} loginEm={user.last_sign_in_at ?? null}>
           <div className="p-6 max-w-lg">
             <div className="bg-white border border-slate-200 rounded-2xl p-6">
               <span className="text-3xl block mb-2">🔒</span>
@@ -141,7 +141,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <PlanProvider data={planData}>
-      <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId} configSessao={configSessao}>{children}</DashboardShell>
+      <DashboardShell empresa={empresaNome} empresas={empresasDoOperador} empresaAtivaId={empresaId} configSessao={configSessao} loginEm={user.last_sign_in_at ?? null}>{children}</DashboardShell>
     </PlanProvider>
   )
 }
