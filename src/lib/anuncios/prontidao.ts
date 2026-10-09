@@ -48,6 +48,10 @@ export type ProdutoProntidao = {
   estoque: number; preco_venda: number | null; preco_custo: number | null
   peso_kg: number | null; comprimento_cm: number | null; largura_cm: number | null; altura_cm: number | null
   descricao_marketplace: string | null; fotos: number; plataformas: string[]
+  /** Fotos que o produto já tem nos próprios anúncios (copiáveis em lote). */
+  fotos_no_anuncio?: number
+  /** Produto da mesma família, com foto — sugestão que a pessoa aprova. */
+  irmao_id?: string | null; irmao_nome?: string | null; irmao_foto?: string | null
 }
 
 export function temRequisito(p: ProdutoProntidao, r: Requisito): boolean {

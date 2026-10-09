@@ -1,0 +1,13 @@
+-- PRONTIDÃO — FOTOS (aplicado em 08/10/2026). Substitui prontidao_produtos de
+-- supabase-prontidao-produtos.sql, acrescentando de onde tirar foto:
+--   fotos_no_anuncio  fotos que o produto já tem nos próprios anúncios
+--   irmao_*           produto da mesma família (3 primeiras palavras) com foto,
+--                     o de nome mais parecido (pg_trgm)
+-- e as funções que copiam: copiar_fotos_dos_anuncios (em lote, seguro) e
+-- copiar_fotos_irmao (um por vez, a pessoa aprova — o irmão pode ser de outra cor).
+-- O corpo completo está na migração `prontidao_fotos` do banco; resumo das
+-- regras aqui para quem for reaplicar:
+--   • só produto SEM nenhuma foto recebe foto;
+--   • do anúncio: o do ML primeiro, depois o com mais fotos; até 8; http→https;
+--   • do irmão: até 8, na ordem (principal primeiro);
+--   • as três funções conferem a empresa (empresa_do_meu_grupo / service_role).

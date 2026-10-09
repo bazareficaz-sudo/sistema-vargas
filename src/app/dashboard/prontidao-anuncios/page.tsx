@@ -24,6 +24,7 @@ export default async function ProntidaoAnunciosPage() {
     largura_cm: p.largura_cm != null ? Number(p.largura_cm) : null,
     altura_cm: p.altura_cm != null ? Number(p.altura_cm) : null,
     fotos: Number(p.fotos ?? 0),
+    fotos_no_anuncio: Number(p.fotos_no_anuncio ?? 0),
     plataformas: p.plataformas ?? [],
   }))
   return <ProntidaoClient produtosIniciais={produtos} />

@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   PLATAFORMAS, ROTULO_REQUISITO, avaliar, faltasGerais, temRequisito,
   type Plataforma, type ProdutoProntidao, type Requisito,
@@ -20,7 +21,11 @@ const LOTE_IA = 6
 const SIGLA: Record<Plataforma, string> = { mercadolivre: 'ML', shopee: 'SHP', tiktok: 'TT' }
 
 export default function ProntidaoClient({ produtosIniciais }: { produtosIniciais: ProdutoProntidao[] }) {
+  const router = useRouter()
   const [produtos, setProdutos] = useState(produtosIniciais)
+  // Depois de copiar fotos, o servidor manda a lista nova (router.refresh).
+  useEffect(() => { setProdutos(produtosIniciais) }, [produtosIniciais])
+  const [copiandoFotos, setCopiandoFotos] = useState(false)
   const [edicoes, setEdicoes] = useState<Record<string, Edicao>>({})
   // O laço da IA é assíncrono: ele precisa ler as edições do momento, não as
   // de quando começou.
@@ -181,6 +186,36 @@ export default function ProntidaoClient({ produtosIniciais }: { produtosIniciais
     }
   }
 
+  // Fotos que já existem nos anúncios: seguras, vão em lote para todos.
+  const comFotoNoAnuncio = produtos.filter(p => p.fotos === 0 && (p.fotos_no_anuncio ?? 0) > 0).length
+  // Foto do irmão: só os selecionados — a pessoa viu a miniatura.
+  const irmaosSelecionados = produtos.filter(p => selecionados.has(p.id) && p.fotos === 0 && p.irmao_id)
+
+  async function trazerFotosDosAnuncios() {
+    if (!confirm(`Copiar para o cadastro as fotos que ${comFotoNoAnuncio} produto(s) já têm nos próprios anúncios? Só produtos sem nenhuma foto são alterados.`)) return
+    setCopiandoFotos(true); setAviso(null)
+    try {
+      const d = await fetch('/api/produtos/prontidao/fotos-anuncios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(r => r.json())
+      setAviso(d.ok ? { tipo: 'ok', texto: `${d.fotos} foto(s) copiadas para ${d.produtos} produto(s).` } : { tipo: 'erro', texto: d.erro ?? 'Falha ao copiar' })
+      if (d.ok) router.refresh()
+    } finally { setCopiandoFotos(false) }
+  }
+
+  async function usarFotoDoIrmao(lista: ProdutoProntidao[]) {
+    if (lista.length === 0) return
+    setCopiandoFotos(true); setAviso(null)
+    try {
+      const d = await fetch('/api/produtos/prontidao/foto-irmao', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itens: lista.map(p => ({ destino: p.id, origem: p.irmao_id })) }),
+      }).then(r => r.json())
+      setAviso(d.produtos > 0
+        ? { tipo: d.falhas?.length ? 'erro' : 'ok', texto: `${d.fotos} foto(s) copiadas para ${d.produtos} produto(s).${d.falhas?.length ? ` ${d.falhas.length} falharam.` : ''}` }
+        : { tipo: 'erro', texto: d.erro ?? d.falhas?.[0] ?? 'Nenhuma foto copiada' })
+      if (d.produtos > 0) router.refresh()
+    } finally { setCopiandoFotos(false) }
+  }
+
   const marcarPagina = (marcar: boolean) => setSelecionados(s => {
     const n = new Set(s)
     for (const p of naPagina) marcar ? n.add(p.id) : n.delete(p.id)
@@ -257,6 +292,19 @@ export default function ProntidaoClient({ produtosIniciais }: { produtosIniciais
           {progressoIA ? `✨ Preenchendo… ${progressoIA.feito}/${progressoIA.total}` : '✨ Preencher com IA'}
         </button>
         <span className="text-[11px] text-gray-500">só os campos vazios: peso, medidas, descrição e marca</span>
+        {irmaosSelecionados.length > 0 && (
+          <button onClick={() => usarFotoDoIrmao(irmaosSelecionados)} disabled={copiandoFotos}
+            className="px-3 py-1.5 text-sm font-medium rounded-lg border border-sky-300 text-sky-700 bg-white hover:bg-sky-50 disabled:opacity-50">
+            🖼 Usar foto do irmão ({irmaosSelecionados.length})
+          </button>
+        )}
+        {comFotoNoAnuncio > 0 && (
+          <button onClick={trazerFotosDosAnuncios} disabled={copiandoFotos}
+            title="Copia para o cadastro as fotos que o produto já tem nos próprios anúncios"
+            className="px-3 py-1.5 text-sm font-medium rounded-lg border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-50">
+            {copiandoFotos ? 'Copiando…' : `📥 Trazer fotos dos anúncios (${comFotoNoAnuncio})`}
+          </button>
+        )}
         <button onClick={salvar} disabled={alterados.length === 0 || salvando}
           className="ml-auto px-3 py-1.5 text-sm font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50">
           {salvando ? 'Salvando…' : `💾 Salvar alterações (${alterados.length})`}
@@ -299,7 +347,22 @@ export default function ProntidaoClient({ produtosIniciais }: { produtosIniciais
                     <td className="px-2 py-2 text-center">
                       {p.fotos > 0
                         ? <span className={`text-xs ${p.fotos >= 3 ? 'text-gray-700' : 'text-amber-700'}`}>{p.fotos}</span>
-                        : <Link href={`/dashboard/produtos?editar=${p.id}`} className="text-xs text-red-600 hover:underline" title="Abrir o cadastro para pôr foto">📷 pôr</Link>}
+                        : (
+                          <div className="flex flex-col items-center gap-1">
+                            {(p.fotos_no_anuncio ?? 0) > 0 && (
+                              <span className="text-[10px] text-emerald-700 whitespace-nowrap" title="Use o botão 'Trazer fotos dos anúncios'">📥 {p.fotos_no_anuncio} no anúncio</span>
+                            )}
+                            {p.irmao_id && p.irmao_foto && (
+                              <div className="flex items-center gap-1" title={`Foto de: ${p.irmao_nome}`}>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={p.irmao_foto} alt="" className="w-9 h-9 rounded object-cover border border-gray-200" />
+                                <button onClick={() => usarFotoDoIrmao([p])} disabled={copiandoFotos}
+                                  className="text-[10px] text-sky-700 hover:underline disabled:opacity-50">usar</button>
+                              </div>
+                            )}
+                            <Link href={`/dashboard/produtos?editar=${p.id}`} className="text-[10px] text-red-600 hover:underline" title="Abrir o cadastro para pôr foto">📷 pôr</Link>
+                          </div>
+                        )}
                     </td>
                     <td className="px-2 py-2">{inputNum(original, 'peso_kg', 'kg', 'w-16')}</td>
                     <td className="px-2 py-2 whitespace-nowrap">
