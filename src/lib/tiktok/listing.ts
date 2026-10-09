@@ -29,9 +29,13 @@ async function contexto(sb: any, canalInicial: TiktokChannel): Promise<{ canal: 
 export type CategoriaTiktok = { id: string; nome: string; caminho: string; folha: boolean }
 
 /** Categoria sugerida pela TikTok para o título (com o caminho até ela). */
-export async function recomendarCategoria(sb: any, canal: TiktokChannel, titulo: string): Promise<CategoriaTiktok | null> {
+export async function recomendarCategoria(sb: any, canal: TiktokChannel, titulo: string, descricao?: string | null): Promise<CategoriaTiktok | null> {
   const { opts } = await contexto(sb, canal)
-  const resp = await tiktokPost('/product/202309/categories/recommend', { product_title: titulo.slice(0, 300) }, opts)
+  // Nome curto de cadastro ("Alicate Pressao 10 WJ1421") a TikTok recusa —
+  // "does not match any category". A descrição junto dá o contexto que falta.
+  const corpo: Record<string, string> = { product_title: titulo.slice(0, 300) }
+  if (descricao?.trim()) corpo.description = descricao.trim().slice(0, 2000)
+  const resp = await tiktokPost('/product/202309/categories/recommend', corpo, opts)
   const cats: any[] = resp?.data?.categories ?? []
   const folhaId = resp?.data?.leaf_category_id
   if (!folhaId || cats.length === 0) return null
@@ -40,8 +44,8 @@ export async function recomendarCategoria(sb: any, canal: TiktokChannel, titulo:
   return { id: String(folhaId), nome: folha?.name ?? '', caminho: ordenadas.map(c => c.name).join(' > '), folha: true }
 }
 
-/** Busca categorias-folha pelo nome, com o caminho completo de cada uma. */
-export async function buscarCategorias(sb: any, canal: TiktokChannel, termo: string): Promise<CategoriaTiktok[]> {
+/** Todas as categorias-folha disponíveis para a loja, com o caminho completo. */
+export async function listarCategoriasFolha(sb: any, canal: TiktokChannel): Promise<CategoriaTiktok[]> {
   const { opts } = await contexto(sb, canal)
   // A árvore inteira vem numa chamada; o caminho é montado pelos parent_id.
   const resp = await tiktokGet('/product/202309/categories', { locale: 'pt-BR' }, opts)
@@ -53,12 +57,18 @@ export async function buscarCategorias(sb: any, canal: TiktokChannel, termo: str
     for (let i = 0; atual && i < 8; i++) { nomes.unshift(atual.local_name ?? ''); atual = porId.get(String(atual.parent_id)) }
     return nomes.filter(Boolean).join(' > ')
   }
-  const t = termo.trim().toLowerCase()
   return todas
-    .filter(c => c.is_leaf && (!t || String(c.local_name ?? '').toLowerCase().includes(t)))
+    .filter(c => c.is_leaf)
     .filter(c => !Array.isArray(c.permission_statuses) || !c.permission_statuses.includes('UNAVAILABLE'))
-    .slice(0, 60)
     .map(c => ({ id: String(c.id), nome: c.local_name ?? '', caminho: caminho(c), folha: true }))
+}
+
+/** Busca categorias-folha pelo nome, com o caminho completo de cada uma. */
+export async function buscarCategorias(sb: any, canal: TiktokChannel, termo: string): Promise<CategoriaTiktok[]> {
+  const t = termo.trim().toLowerCase()
+  return (await listarCategoriasFolha(sb, canal))
+    .filter(c => !t || c.nome.toLowerCase().includes(t))
+    .slice(0, 60)
 }
 
 export type AtributoTiktok = {

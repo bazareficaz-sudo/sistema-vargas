@@ -305,6 +305,16 @@ export default function ProntidaoClient({ produtosIniciais }: { produtosIniciais
             {copiandoFotos ? 'Copiando…' : `📥 Trazer fotos dos anúncios (${comFotoNoAnuncio})`}
           </button>
         )}
+        {selecionados.size > 0 && (
+          <button onClick={() => {
+              if (alterados.length > 0 && !confirm('Há alterações não salvas na grade. Publicar mesmo assim? (o anúncio usa o cadastro salvo)')) return
+              router.push(`/dashboard/publicar-lote?canal=tiktok&ids=${[...selecionados].slice(0, 50).join(',')}`)
+            }}
+            title="Monta os anúncios dos selecionados para você revisar e publicar (até 50 por vez)"
+            className="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-900 hover:bg-black text-white">
+            🚀 Publicar na TikTok ({Math.min(selecionados.size, 50)})
+          </button>
+        )}
         <button onClick={salvar} disabled={alterados.length === 0 || salvando}
           className="ml-auto px-3 py-1.5 text-sm font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50">
           {salvando ? 'Salvando…' : `💾 Salvar alterações (${alterados.length})`}
