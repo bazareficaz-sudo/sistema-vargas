@@ -50,6 +50,8 @@ export const NAV: NavGroup[] = [
       // Centro de pedidos: reúne vendas do PDV e pedidos de marketplace numa
       // lista só. Fica ANTES de Vendas de propósito — é a visão completa.
       { href: '/dashboard/pedidos',                label: 'Pedidos',            icon: '📦',  modulo: 'vendas' },
+      // Agenda das entregas marcadas no PDV: do dia, atrasadas e sem data.
+      { href: '/dashboard/entregas',               label: 'Entregas',           icon: '🚚',  modulo: 'vendas' },
       { href: '/dashboard/vendas',                 label: 'Vendas',             icon: '💳',  modulo: 'vendas' },
       { href: '/dashboard/monitor-vendas',         label: 'Monitor de Vendas',  icon: '📡',  modulo: 'vendas' },
       { href: '/dashboard/orcamentos',             label: 'Orçamentos',         icon: '📋',  modulo: 'orcamentos' },
