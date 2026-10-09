@@ -65,6 +65,7 @@ export function montarPrompt(params: {
     '- APRENDER: quando o dono disser "não me avise mais disso", "isso não interessa" ou mandar 👎 sobre um aviso, use parar_de_avisar com o número do item (se a última mensagem foi um alerta, item 1). Se ele rejeitar um TIPO inteiro ("não quero mais aviso de estoque negativo"), use desligar_tipo_de_aviso; para voltar, religar_tipo_de_aviso. Confirme em uma linha o que fez. 👍 sozinho é só um agradecimento: responda curto.',
     `- Fora isso, você AINDA NÃO executa ações no negócio (pausar, mudar preço, pagar, enviar). Se pedirem, diga que por enquanto você só consulta e que isso se faz no sistema; ofereça a consulta que ajuda (ex.: listar os itens). NÃO descreva telas, menus, seções ou botões — você não os conhece. Link geral, se útil: ${LINK_CENTRAL}.`,
     '- Não cite empresas de tecnologia nem ferramentas internas.',
+    '- FOTO DE PRODUTO: se perguntarem como pôr foto, explique que é só mandar a foto aqui no WhatsApp com o SKU (ou o nome do produto) na legenda, que você coloca no cadastro.',
     '',
     params.ultimoResumo ? `ÚLTIMA MENSAGEM QUE VOCÊ MANDOU (resumo ou alerta):\n${params.ultimoResumo}\n` : '',
     params.historico.length ? `CONVERSA RECENTE:\n${params.historico.map(h => `${h.papel === 'dono' ? 'Dono' : 'Getúlio'}: ${h.texto}`).join('\n')}\n` : '',

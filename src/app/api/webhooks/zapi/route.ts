@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { chaveConfere } from '@/lib/getulio/webhook'
 import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
+import { receberFotoProduto } from '@/lib/getulio/foto'
 
 // Webhook da Z-API — recebe eventos de mensagens e status.
 //
@@ -60,6 +61,9 @@ export async function POST(request: NextRequest) {
 
       const phone = body.phone ?? body.from?.replace('@s.whatsapp.net', '')
       const text = body.text?.message ?? body.message?.text ?? ''
+      // Foto: a Z-API manda o link (temporário) e a legenda em `image`.
+      const imagemUrl: string | null = body.image?.imageUrl ?? null
+      const legenda: string = body.image?.caption ?? ''
 
       if (phone) {
         // Busca cliente pelo telefone
@@ -83,7 +87,7 @@ export async function POST(request: NextRequest) {
           cliente_nome: cliente?.nome ?? null,
           telefone: phone,
           tipo: 'recebida',
-          conteudo: text || '[mídia]',
+          conteudo: text || (imagemUrl ? `[foto]${legenda ? ` ${legenda}` : ''}` : '[mídia]'),
           status: 'recebida',
           enviado_em: new Date().toISOString(),
         })
@@ -91,9 +95,11 @@ export async function POST(request: NextRequest) {
         // GETÚLIO: só com a chave do endereço conferida (ver
         // lib/getulio/webhook.ts) e só para número cadastrado na Central. A
         // resposta roda depois do 200 — a Z-API não espera a IA pensar.
-        if (text && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {
+        if ((text || imagemUrl) && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {
           const dono = await getulioAtendeNumero(supabase, empresaId, String(phone))
-          if (dono) after(() => responderMensagem(supabase, empresaId, String(phone), dono, String(text)))
+          // Foto vai para o cadastro do produto da legenda; texto, para a conversa.
+          if (dono && imagemUrl) after(() => receberFotoProduto(supabase, empresaId, String(phone), imagemUrl, legenda))
+          else if (dono && text) after(() => responderMensagem(supabase, empresaId, String(phone), dono, String(text)))
         }
       }
       return NextResponse.json({ ok: true })

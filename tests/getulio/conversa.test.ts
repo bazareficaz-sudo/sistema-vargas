@@ -43,3 +43,19 @@ describe('canal falado → filtro', () => {
     assert.deepEqual(normalizarCanal(''), {})
   })
 })
+
+describe('foto pelo WhatsApp: SKU na legenda', () => {
+  test('aceita o SKU sozinho ou com "sku"/"#"', async () => {
+    const { skuDaLegenda } = await import('../../src/lib/getulio/foto')
+    assert.equal(skuDaLegenda('25233'), '25233')
+    assert.equal(skuDaLegenda(' SKU 25233 '), '25233')
+    assert.equal(skuDaLegenda('sku: 1887'), '1887')
+    assert.equal(skuDaLegenda('#1887'), '1887')
+  })
+  test('texto vira busca por nome, não SKU', async () => {
+    const { skuDaLegenda } = await import('../../src/lib/getulio/foto')
+    assert.equal(skuDaLegenda('disjuntor 32a guepar'), null)
+    assert.equal(skuDaLegenda('corrente 10 metros'), null)
+    assert.equal(skuDaLegenda(''), null)
+  })
+})
