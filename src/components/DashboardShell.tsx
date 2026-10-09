@@ -18,11 +18,12 @@ function readLayoutPreference(): LayoutMenu {
   return document.documentElement.dataset.layoutMenu === 'topbar' ? 'topbar' : 'sidebar'
 }
 
-export default function DashboardShell({ empresa, empresas = [], empresaAtivaId = '', configSessao, children }: {
+export default function DashboardShell({ empresa, empresas = [], empresaAtivaId = '', configSessao, loginEm = null, children }: {
   empresa: string
   empresas?: EmpresaDoUsuario[]
   empresaAtivaId?: string
   configSessao?: ConfigSessao
+  loginEm?: string | null
   children: React.ReactNode
 }) {
   const [layout, setLayout] = useState<LayoutMenu>(() => readLayoutPreference())
@@ -36,7 +37,7 @@ export default function DashboardShell({ empresa, empresas = [], empresaAtivaId 
   if (layout === 'topbar') {
     return (
       <div className="min-h-screen flex flex-col" style={{ background: '#ffffff' }} suppressHydrationWarning>
-        <SessaoVigia config={configSessao} />
+        <SessaoVigia config={configSessao} loginEm={loginEm} />
         <TopMenu empresa={empresa} empresas={empresas} empresaAtivaId={empresaAtivaId} />
         <main
           id="main-content"
@@ -53,7 +54,7 @@ export default function DashboardShell({ empresa, empresas = [], empresaAtivaId 
 
   return (
     <div className="min-h-screen flex" style={{ background: '#ffffff' }} suppressHydrationWarning>
-      <SessaoVigia config={configSessao} />
+      <SessaoVigia config={configSessao} loginEm={loginEm} />
       <Sidebar empresa={empresa} empresas={empresas} empresaAtivaId={empresaAtivaId} />
       {/* No celular o trilho do menu vira gaveta (ver Sidebar), então o
           conteúdo começa colado na borda e ganha espaço no topo pra barra
