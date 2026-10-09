@@ -22,9 +22,8 @@ import {
 export type { AtributoRascunho, RascunhoTiktok } from './loteTiktokRegras'
 export { categoriaPorPalavras, pendenciasDoRascunho, tituloLimpo, valorPeloNome } from './loteTiktokRegras'
 import type { TiktokChannel } from '@/lib/tiktok/types'
-import { criarResolvedor, COLUNAS_CANAL, COLUNAS_PRODUTO } from '@/lib/precificacao/contexto'
-import { buscarRegras, resolverRegra, type Regra } from '@/lib/precificacao/regras'
-import { precificarPorRegra } from '@/lib/precificacao/cenarios'
+import { COLUNAS_PRODUTO } from '@/lib/precificacao/contexto'
+import { criarPrecificadorCanal, type PrecificadorCanal } from './precoCanal'
 
 async function categoriaPelaPalavra(ctx: ContextoLote, titulo: string): Promise<CategoriaTiktok | null> {
   try {
@@ -39,20 +38,14 @@ export type ContextoLote = {
   sb: any
   empresaId: string
   canal: TiktokChannel
-  canalPreco: any | null
-  regras: Regra[]
-  resolvedor: ReturnType<typeof criarResolvedor>
+  precoDoCanal: PrecificadorCanal
   detalhesPorCategoria: Map<string, DetalhesCategoria>
   /** Árvore de categorias, lida uma vez por lote (plano B da categoria). */
   folhas?: CategoriaTiktok[]
 }
 
 export async function criarContextoLote(sb: any, empresaId: string, canal: TiktokChannel): Promise<ContextoLote> {
-  const [{ data: canalPreco }, regras] = await Promise.all([
-    sb.from('marketplace_canais').select(COLUNAS_CANAL).eq('id', canal.id).eq('empresa_id', empresaId).maybeSingle(),
-    buscarRegras(sb, empresaId),
-  ])
-  return { sb, empresaId, canal, canalPreco, regras, resolvedor: criarResolvedor(sb, empresaId), detalhesPorCategoria: new Map() }
+  return { sb, empresaId, canal, precoDoCanal: await criarPrecificadorCanal(sb, empresaId, canal.id), detalhesPorCategoria: new Map() }
 }
 
 async function detalhes(ctx: ContextoLote, categoryId: string): Promise<DetalhesCategoria> {
@@ -61,22 +54,6 @@ async function detalhes(ctx: ContextoLote, categoryId: string): Promise<Detalhes
   const d = await detalhesDaCategoria(ctx.sb, ctx.canal, categoryId)
   ctx.detalhesPorCategoria.set(categoryId, d)
   return d
-}
-
-/** Preço pela regra de Precificação do canal; sem ela, o do cadastro. */
-async function precoDoCanal(ctx: ContextoLote, produto: any): Promise<{ preco: number; origem: string }> {
-  const cadastro = Number(produto.preco_venda ?? 0)
-  if (!ctx.canalPreco) return { preco: cadastro, origem: 'preço do cadastro' }
-  try {
-    const regra = resolverRegra(ctx.regras, { id: produto.id, categoria: produto.categoria ?? null, marca: produto.marca ?? null }, ctx.canalPreco).vencedora
-    if (!regra) return { preco: cadastro, origem: 'preço do cadastro (sem regra de preço para este canal)' }
-    const c = await ctx.resolvedor.contexto({ canal: ctx.canalPreco, produto, anuncio: null })
-    if (!(c.economia.custo > 0)) return { preco: cadastro, origem: 'preço do cadastro (produto sem custo)' }
-    const preco = Number(precificarPorRegra(c.economia, regra).resultado.preco.toFixed(2))
-    return preco > 0 ? { preco, origem: `regra "${regra.nome}"` } : { preco: cadastro, origem: 'preço do cadastro' }
-  } catch {
-    return { preco: cadastro, origem: 'preço do cadastro (não deu para calcular a regra)' }
-  }
 }
 
 export async function prepararRascunho(ctx: ContextoLote, produtoId: string, categoriaForcada?: string | null): Promise<RascunhoTiktok> {
@@ -95,11 +72,11 @@ export async function prepararRascunho(ctx: ContextoLote, produtoId: string, cat
   else {
     try {
       const c = await recomendarCategoria(ctx.sb, ctx.canal, titulo, descricao)
-      if (c) categoria = { id: c.id, caminho: c.caminho }
+      if (c) categoria = { id: c.id, caminho: c.caminho, origem: 'sugerida pela TikTok' }
     } catch { /* a TikTok não achou pelo nome — tenta pela palavra principal */ }
     if (!categoria) {
       const c = await categoriaPelaPalavra(ctx, titulo)
-      if (c) categoria = { id: c.id, caminho: c.caminho, aproximada: true }
+      if (c) categoria = { id: c.id, caminho: c.caminho, aproximada: true, origem: 'achada pelas palavras do nome' }
     }
   }
 
@@ -123,7 +100,7 @@ export async function prepararRascunho(ctx: ContextoLote, produtoId: string, cat
     } catch { /* atributos indisponíveis: a publicação diz o que falta */ }
   }
 
-  const { preco, origem } = await precoDoCanal(ctx, produto)
+  const { preco, origem } = await ctx.precoDoCanal(produto)
   const rascunho: RascunhoTiktok = {
     produtoId, nome: produto.nome, sku: produto.sku ?? null, ean: produto.ean ?? null,
     foto: fotos[0] ?? null, fotos, titulo,

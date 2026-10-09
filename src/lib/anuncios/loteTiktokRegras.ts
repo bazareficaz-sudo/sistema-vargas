@@ -1,10 +1,19 @@
-// Regras PURAS da publicação em lote na TikTok — sem banco nem API, para a
-// tela (navegador) e os testes usarem sem puxar código de servidor.
+// Regras PURAS da publicação em lote (TikTok e Shopee) — sem banco nem API,
+// para a tela (navegador) e os testes usarem sem puxar código de servidor.
+// O rascunho tem o mesmo formato nas duas plataformas; o que muda vem nos
+// campos opcionais (limite de título, descrição mínima, canais de envio).
 
 import { formatarTituloAnuncio } from '@/lib/texto/titulo'
 import type { AtributoTiktok, CategoriaTiktok } from '@/lib/tiktok/listing'
 
-export type AtributoRascunho = AtributoTiktok & { valorId: string | null; valorTexto: string | null }
+export type AtributoRascunho = AtributoTiktok & {
+  valorId: string | null
+  valorTexto: string | null
+  /** Shopee: tipo de entrada (1 lista, 2 lista ou texto, 3 texto…). */
+  inputType?: number
+}
+
+export type PlataformaLote = 'tiktok' | 'shopee'
 
 export type RascunhoTiktok = {
   produtoId: string
@@ -22,12 +31,25 @@ export type RascunhoTiktok = {
   comprimento: number | null
   largura: number | null
   altura: number | null
-  categoria: { id: string; caminho: string; aproximada?: boolean } | null
+  /** `origem`: de onde a categoria veio, para a pessoa saber quanto confiar. */
+  categoria: { id: string; caminho: string; aproximada?: boolean; origem?: string } | null
   marca: { id: string; nome: string } | null
   atributos: AtributoRascunho[]
   medidasObrigatorias: boolean
   pendencias: string[]
+  plataforma?: PlataformaLote
+  /** Limite de caracteres do título na plataforma (TikTok 255, Shopee 120). */
+  tituloMax?: number
+  /** Descrição mínima exigida (Shopee recusa descrição curta). */
+  descricaoMinima?: number
+  /** Shopee: canais de envio habilitados no anúncio. */
+  logistica?: number[]
+  /** Shopee: ids do caminho da categoria — a escolha fica lembrada para a mesma categoria interna. */
+  categoriaIds?: string[]
 }
+
+/** Para a tela e o código que trata as duas plataformas igual. */
+export type RascunhoAnuncio = RascunhoTiktok
 
 export const norm = (t: string) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
@@ -44,7 +66,18 @@ export function valorPeloNome(nome: string, valores: { id: string; nome: string 
   return achados[0] ?? null
 }
 
-export function pendenciasDoRascunho(r: Pick<RascunhoTiktok, 'fotos' | 'categoria' | 'preco' | 'peso' | 'atributos' | 'titulo' | 'medidasObrigatorias' | 'comprimento' | 'largura' | 'altura'>): string[] {
+/**
+ * "Cabos Elétricos" (Shopee) é uma pergunta de conformidade — o produto É um
+ * cabo elétrico? Sim exige o registro do INMETRO. Para quem não é cabo nem
+ * fio, a resposta é Não.
+ */
+export function respostaCaboEletrico(nomeAtributo: string, nomeProduto: string, valores: { id: string; nome: string }[]): { id: string; nome: string } | null {
+  if (!/cabos? el[eé]tric/i.test(nomeAtributo)) return null
+  const ehCabo = /(^|[^a-z])(cabos?|fios?|cordao)([^a-z]|$)/.test(norm(nomeProduto))
+  return valores.find(v => norm(v.nome).trim() === (ehCabo ? 'sim' : 'nao')) ?? null
+}
+
+export function pendenciasDoRascunho(r: Pick<RascunhoTiktok, 'fotos' | 'categoria' | 'preco' | 'peso' | 'atributos' | 'titulo' | 'medidasObrigatorias' | 'comprimento' | 'largura' | 'altura'> & Partial<Pick<RascunhoTiktok, 'tituloMax' | 'descricaoMinima' | 'descricao' | 'plataforma' | 'logistica'>>): string[] {
   const p: string[] = []
   if (r.fotos.length === 0) p.push('sem foto')
   if (!r.categoria) p.push('sem categoria')
@@ -52,6 +85,9 @@ export function pendenciasDoRascunho(r: Pick<RascunhoTiktok, 'fotos' | 'categori
   if (!(Number(r.peso) > 0)) p.push('sem peso')
   if (r.medidasObrigatorias && !(Number(r.comprimento) > 0 && Number(r.largura) > 0 && Number(r.altura) > 0)) p.push('sem medidas (a categoria exige)')
   if (!r.titulo.trim()) p.push('sem título')
+  if (r.tituloMax && r.titulo.length > r.tituloMax) p.push(`título com mais de ${r.tituloMax} caracteres`)
+  if (r.descricaoMinima && String(r.descricao ?? '').trim().length < r.descricaoMinima) p.push(`descrição com menos de ${r.descricaoMinima} caracteres`)
+  if (r.plataforma === 'shopee' && !(r.logistica ?? []).length) p.push('nenhum canal de envio habilitado na loja')
   const faltando = r.atributos.filter(a => a.obrigatorio && !a.valorId && !String(a.valorTexto ?? '').trim())
   for (const a of faltando) p.push(`falta "${a.nome}"`)
   return p

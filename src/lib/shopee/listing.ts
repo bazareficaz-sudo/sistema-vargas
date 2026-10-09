@@ -43,6 +43,24 @@ async function buscarArvoreCompleta(ctx: CallCtx): Promise<CategoriaShopeeFlat[]
   }))
 }
 
+/**
+ * Categorias-folha cujo nome (ou o caminho) contém o termo, com o caminho
+ * completo — para trocar a categoria na publicação em lote.
+ */
+export async function buscarCategoriasFolhaPorNome(ctx: CallCtx, termo: string): Promise<{ id: string; caminho: string; ids: string[] }[]> {
+  const arvore = await buscarArvoreCompleta(ctx)
+  const t = normalizarPalavras(termo).join(' ')
+  if (!t) return []
+  return arvore
+    .filter(c => !c.has_children)
+    .map(c => {
+      const caminho = montarCaminho(arvore, c.category_id)
+      return { id: String(c.category_id), caminho: caminho.map(x => x.original_category_name).join(' > '), ids: caminho.map(x => String(x.category_id)) }
+    })
+    .filter(c => normalizarPalavras(c.caminho).join(' ').includes(t))
+    .slice(0, 60)
+}
+
 export async function getCategoryTree(ctx: CallCtx, parentCategoryId?: number): Promise<CategoriaShopee[]> {
   const arvore = await buscarArvoreCompleta(ctx)
   const pai = parentCategoryId ?? 0

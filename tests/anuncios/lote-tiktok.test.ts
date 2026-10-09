@@ -48,3 +48,30 @@ describe('categoria pelas palavras do nome (plano B)', () => {
     assert.ok(!tituloLimpo('**zennith Limpa Ar Condicionado 5L').startsWith('*'))
   })
 })
+
+describe('regras da Shopee no rascunho', () => {
+  const base = { fotos: ['x'], categoria: { id: 'c', caminho: '' }, preco: 10, peso: 0.1, atributos: [], titulo: 'T', medidasObrigatorias: false, comprimento: null, largura: null, altura: null }
+  test('título acima do limite, descrição curta e loja sem canal de envio viram pendência', () => {
+    const p = pendenciasDoRascunho({
+      ...base, titulo: 'x'.repeat(121), tituloMax: 120, descricao: 'curta', descricaoMinima: 60, plataforma: 'shopee', logistica: [],
+    })
+    assert.deepEqual(p, ['título com mais de 120 caracteres', 'descrição com menos de 60 caracteres', 'nenhum canal de envio habilitado na loja'])
+  })
+  test('dentro das regras, nada pendente', () => {
+    assert.deepEqual(pendenciasDoRascunho({
+      ...base, titulo: 'x'.repeat(120), tituloMax: 120, descricao: 'd'.repeat(60), descricaoMinima: 60, plataforma: 'shopee', logistica: [1],
+    }), [])
+  })
+  test('"Cabos Elétricos": Não para quem não é cabo, Sim para cabo/fio', async () => {
+    const { respostaCaboEletrico } = await import('../../src/lib/anuncios/loteTiktokRegras')
+    const simNao = [{ id: '10', nome: 'Sim' }, { id: '20', nome: 'Não' }]
+    assert.equal(respostaCaboEletrico('Cabos Elétricos', 'GUEPAR DISJUNTOR MONOPOLAR - 50A', simNao)?.id, '20')
+    assert.equal(respostaCaboEletrico('Cabos Elétricos', 'Cimento CP-3 25KG', simNao)?.id, '20')
+    assert.equal(respostaCaboEletrico('Cabos Elétricos', 'CABO FLEXIVEL 2,5MM 100M', simNao)?.id, '10')
+    assert.equal(respostaCaboEletrico('Cabos Elétricos', 'Fio paralelo 2x1,5', simNao)?.id, '10')
+    // "Cabo" dentro de outra palavra não conta.
+    assert.equal(respostaCaboEletrico('Cabos Elétricos', 'Acabamento tomada 10A', simNao)?.id, '20')
+    // Outros atributos não são decididos aqui.
+    assert.equal(respostaCaboEletrico('Voltagem', 'Cabo 2,5mm', simNao), null)
+  })
+})
