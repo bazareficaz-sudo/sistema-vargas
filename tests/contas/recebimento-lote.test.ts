@@ -123,3 +123,38 @@ describe('o que a RPC NAO faz', () => {
     assert.doesNotMatch(SQL, /UPDATE recebimentos\s+SET\s+lote_id/i)
   })
 })
+
+describe('o modal usa a RPC, e nao grava mais direto', () => {
+  const MODAL = fs.readFileSync(
+    path.join(raiz, 'src/components/contas-receber/ReceberEmMassaModal.tsx'), 'utf8')
+  const CODIGO = MODAL.replace(/\/\/[^\n]*/g, '')
+
+  test('chama receber_contas_em_lote_v1', () => {
+    assert.match(CODIGO, /sb\.rpc\('receber_contas_em_lote_v1'/)
+  })
+
+  test('NAO escreve recebimentos, contas_receber nem clientes direto', () => {
+    for (const t of ['recebimentos', 'contas_receber', 'clientes', 'creditos_cliente']) {
+      assert.doesNotMatch(CODIGO, new RegExp(`from\('${t}'\)`))
+    }
+  })
+
+  test('o lote_id é ESTAVEL entre tentativas', () => {
+    // Gerar um id novo a cada clique seria pior que nada: o reenvio viraria
+    // outro lote e gravaria tudo de novo. Em useRef, ele vive enquanto o
+    // modal estiver aberto.
+    assert.match(CODIGO, /const loteRef = useRef<string>\(crypto\.randomUUID\(\)\)/)
+    assert.match(CODIGO, /lote_id: loteRef\.current/)
+    assert.doesNotMatch(CODIGO, /lote_id:\s*crypto\.randomUUID\(\)/)
+  })
+
+  test('a trava sincrona contra clique duplo continua', () => {
+    assert.match(CODIGO, /if \(enviandoRef\.current\) return/)
+    assert.match(CODIGO, /enviandoRef\.current = false/)
+  })
+
+  test('estado diferente de aplicado vira erro na tela, nao sucesso', () => {
+    assert.match(CODIGO, /res\.estado !== 'aplicado'/)
+    assert.match(CODIGO, /setErro\(res\.motivo/)
+  })
+})

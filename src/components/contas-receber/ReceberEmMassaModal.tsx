@@ -79,70 +79,82 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
   // NovaEntradaClient.tsx.
   const enviandoRef = useRef(false)
 
+  // A IDENTIDADE DO LOTE, criada UMA vez por abertura do modal.
+  //
+  // É o que torna o reenvio seguro. Gerar um id novo a cada clique seria
+  // pior que nada: a tentativa seguinte viraria um lote diferente e
+  // gravaria tudo de novo — exatamente o defeito que esta mudanca corrige.
+  // O mesmo lote reenviado é reconhecido pelo indice unico no banco.
+  const loteRef = useRef<string>(crypto.randomUUID())
+
   async function confirmar() {
     if (rateio.totalPago <= 0) { setErro('O valor a receber ficou zerado.'); return }
     if (enviandoRef.current) return
     enviandoRef.current = true
     setSalvando(true); setErro('')
     const sb = createClient()
-    const agora = new Date().toISOString()
 
     try {
-      const atualizadas: Parameters<typeof onConcluido>[0] = []
+      // UMA chamada, UMA transacao. O laco anterior gravava conta a conta
+      // sem transacao: falha no meio deixava as primeiras escritas, o modal
+      // ficava aberto com a selecao intacta, e o reenvio gravava de novo.
+      // Medido em producao: 26 pares duplicados com essa assinatura.
+      //
+      // A RPC confere TODAS as contas antes de escrever qualquer uma, e
+      // recusa o lote inteiro se alguma ja estiver quitada ou cancelada —
+      // sinal de lista desatualizada, que pede releitura, nao recebimento
+      // por cima.
+      const { data: resposta, error } = await sb.rpc('receber_contas_em_lote_v1', {
+        p_payload: {
+          lote_id: loteRef.current,
+          contas: contas.flatMap(c => {
+            const r = porConta.get(c.id)
+            if (!r) return []
+            return [{
+              conta_id: c.id,
+              valor: r.valor,
+              juros: r.juros,
+              desconto: r.desconto,
+              multa: 0,
+              forma_pagamento: forma,
+              data_recebimento: data,
+              observacao: observacao || 'Recebimento em massa',
+              operador_nome: operador,
+            }]
+          }),
+        },
+      })
 
-      for (const c of contas) {
+      if (error) throw new Error(error.message)
+
+      const res = (resposta ?? {}) as { estado?: string; motivo?: string; conta_id?: string }
+      if (res.estado !== 'aplicado') {
+        setErro(res.motivo ?? `Nao foi possivel registrar o lote (${res.estado ?? 'erro'}).`)
+        return
+      }
+
+      // O estado final é deterministico: a RPC aplicou exatamente estes
+      // valores. `clientes.saldo_devedor` nao entra aqui — quem o mantem é
+      // `z_trg_sincronizar_saldo_devedor`, que dispara sozinho no UPDATE de
+      // `contas_receber`. Este bloco ja teve conta propria e competia com o
+      // trigger: se o saldo lido antes do laco estivesse defasado, ele
+      // sobrescrevia o valor correto. Foi o que divergiu o cadastro de pelo
+      // menos um cliente.
+      const atualizadas: Parameters<typeof onConcluido>[0] = contas.flatMap(c => {
         const r = porConta.get(c.id)
-        if (!r) continue
-
-        // O principal abatido é o que a conta tinha em aberto; juros e
-        // desconto entram como ajuste e não mexem no principal.
-        const principal = r.valor
-        const novoRecebido = c.valor_recebido + principal
-
-        await sb.from('recebimentos').insert({
-          empresa_id: empresaId,
-          conta_id: c.id,
-          cliente_id: c.cliente_id,
-          valor: principal,
-          desconto: r.desconto,
-          juros: r.juros,
-          multa: 0,
-          valor_liquido: r.valorPago,
-          forma_pagamento: forma,
-          data_recebimento: data,
-          observacao: observacao || 'Recebimento em massa',
-          operador_nome: operador,
-        })
-
-        await sb.from('contas_receber').update({
-          valor_recebido: novoRecebido,
-          juros: c.juros + r.juros,
-          desconto: c.desconto + r.desconto,
-          status: 'recebido',
-          updated_at: agora,
-        }).eq('id', c.id)
-
-        atualizadas.push({
+        if (!r) return []
+        const novoRecebido = Math.round((c.valor_recebido + r.valor) * 100) / 100
+        const novoAberto = Math.round((c.valor_original - novoRecebido) * 100) / 100
+        return [{
           id: c.id,
           valor_recebido: novoRecebido,
-          valor_aberto: 0,
+          valor_aberto: Math.max(0, novoAberto),
           juros: c.juros + r.juros,
           multa: c.multa,
           desconto: c.desconto + r.desconto,
-          status: 'recebido',
-        })
-      }
-
-      // Saldo devedor do cliente: o trigger `z_trg_sincronizar_saldo_devedor`
-      // (AFTER INSERT/UPDATE/DELETE em contas_receber) já recalcula
-      // clientes.saldo_devedor do zero — soma de valor_aberto — a cada
-      // `contas_receber.update()` do loop acima, e também carimba
-      // `data_ultimo_pagamento`. Não escrever aqui de novo: este bloco existiu
-      // com uma conta própria (`saldo_devedor - totalDevido`) e competia com
-      // o trigger — se o saldo lido antes do loop já estivesse defasado
-      // (outra aba, outro recebimento entre a leitura e a escrita), ele
-      // sobrescrevia o valor correto que o trigger acabara de gravar. Foi
-      // isso que divergiu o saldo do cadastro em pelo menos um cliente.
+          status: novoAberto <= 0.01 ? 'recebido' : 'parcial',
+        }]
+      })
 
       onConcluido(atualizadas)
     } catch (e: unknown) {
