@@ -29,11 +29,17 @@ export function ipDe(req: Request): string {
   return (xff?.split(',')[0] ?? req.headers.get('x-real-ip') ?? 'desconhecido').trim()
 }
 
-/** Registra a tentativa e diz se estourou o limite do IP. */
-export function ipEstourou(ip: string, agora = Date.now()): boolean {
-  const recentes = (porIp.get(ip) ?? []).filter(t => agora - t < JANELA_IP_MS)
+/**
+ * Registra a tentativa e diz se estourou o limite do IP. `balde` separa as
+ * contagens (pedido × consulta de frete), para uma não gastar a cota da outra.
+ */
+export function ipEstourou(
+  ip: string, balde = 'pedido', max = MAX_POR_IP, agora = Date.now(),
+): boolean {
+  const chave = `${balde}:${ip}`
+  const recentes = (porIp.get(chave) ?? []).filter(t => agora - t < JANELA_IP_MS)
   recentes.push(agora)
-  porIp.set(ip, recentes)
+  porIp.set(chave, recentes)
 
   // Varredura ocasional: sem ela o mapa cresce com cada IP que já passou.
   if (porIp.size > 2000) {
@@ -41,7 +47,7 @@ export function ipEstourou(ip: string, agora = Date.now()): boolean {
       if (v.every(t => agora - t >= JANELA_IP_MS)) porIp.delete(k)
     }
   }
-  return recentes.length > MAX_POR_IP
+  return recentes.length > max
 }
 
 async function contar(loja: Loja, desdeMs: number, telefone?: string): Promise<number> {

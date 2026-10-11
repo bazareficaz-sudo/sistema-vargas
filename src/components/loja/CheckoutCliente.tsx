@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useCarrinho } from './CarrinhoContexto'
 import { EstadoVazio, classesBotao, estiloPrimario, real } from './ds'
 import { PAGAMENTO_LABEL } from '@/lib/commerce/pedido'
+import type { ResultadoFrete } from '@/lib/commerce/frete/calculo'
 
 // Checkout — a tela que transforma a vitrine em loja.
 //
@@ -28,16 +29,21 @@ const CAMPOS_ENTREGA: Campo[] = [
   { nome: 'complemento', rotulo: 'Complemento', largura: 'meia', max: 100 },
   { nome: 'bairro', rotulo: 'Bairro', largura: 'meia', max: 100 },
   { nome: 'cidade', rotulo: 'Cidade', largura: 'meia', max: 100 },
+  { nome: 'uf', rotulo: 'UF', largura: 'meia', max: 2 },
 ]
 
+const soDigitos = (v: string) => v.replace(/\D/g, '')
+
 export default function CheckoutCliente({
-  entregaAtiva, retiradaAtiva, pagamentoFormas, enderecoLoja,
+  entregaAtiva, retiradaAtiva, pagamentoFormas, enderecoLoja, freteAtivo,
 }: {
   entregaAtiva: boolean
   retiradaAtiva: boolean
   pagamentoFormas: string[]
   /** Para onde o cliente vai, quando escolhe retirar. */
   enderecoLoja: string | null
+  /** A loja calcula frete? Falso mantém o fluxo antigo: valor combinado. */
+  freteAtivo: boolean
 }) {
   const router = useRouter()
   const { itens, quantidadeTotal, carregado, limpar } = useCarrinho()
@@ -49,8 +55,90 @@ export default function CheckoutCliente({
   const [erro, setErro] = useState<string | null>(null)
   const [recusados, setRecusados] = useState<{ nome: string; disponivel: number }[]>([])
 
-  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
-  const total = itens.reduce((s, i) => s + i.precoVisto * i.quantidade, 0)
+  // ── Frete ────────────────────────────────────────────────
+  // A cotação guarda a CHAVE do endereço/carrinho para o qual foi feita. O que
+  // a tela mostra é derivado: cotação de outro CEP ou de outro carrinho não
+  // aparece, sem precisar zerar estado dentro do efeito.
+  const [cotacao, setCotacao] = useState<
+    { chave: string; resultado: ResultadoFrete | null; erro: string | null } | null
+  >(null)
+  const [servico, setServico] = useState<string | null>(null)
+  const autopreenchidos = useRef<Set<string>>(new Set())
+
+  // Campo digitado pelo cliente deixa de ser "do CEP": uma nova consulta não o sobrescreve.
+  const set = (k: string, v: string) => {
+    autopreenchidos.current.delete(k)
+    setForm(f => ({ ...f, [k]: v }))
+  }
+
+  const calculaFrete = freteAtivo && modo === 'entrega'
+  const cep8 = soDigitos(form.cep ?? '')
+  const chaveItens = itens.map(i => `${i.produtoId}:${i.quantidade}`).join(',')
+
+  const chaveAtual = [cep8, form.bairro ?? '', form.cidade ?? '', form.uf ?? '', chaveItens].join('|')
+  const cotacaoAtual = cotacao?.chave === chaveAtual ? cotacao : null
+  const frete = calculaFrete && cep8.length === 8 ? cotacaoAtual?.resultado ?? null : null
+  const erroFrete = calculaFrete && cep8.length === 8 ? cotacaoAtual?.erro ?? null : null
+  const cotando = calculaFrete && cep8.length === 8 && !cotacaoAtual
+
+  useEffect(() => {
+    if (!calculaFrete || cep8.length !== 8 || cotacao?.chave === chaveAtual) return
+    const chave = chaveAtual
+
+    const ctrl = new AbortController()
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/loja/frete', {
+          method: 'POST', signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cep: cep8, bairro: form.bairro, cidade: form.cidade, uf: form.uf,
+            itens: itens.map(i => ({ produtoId: i.produtoId, quantidade: i.quantidade })),
+          }),
+        })
+        const d = await r.json()
+        if (!r.ok || !d.ativo) {
+          setCotacao({ chave, resultado: null, erro: d.erro ?? 'Não foi possível calcular a entrega agora.' })
+          return
+        }
+
+        // Preenche só o que está vazio ou veio de uma consulta anterior.
+        const e = d.endereco as { logradouro: string; bairro: string; cidade: string; uf: string }
+        const novo = { ...form }
+        for (const k of ['logradouro', 'bairro', 'cidade', 'uf'] as const) {
+          if (e[k] && (!form[k]?.trim() || autopreenchidos.current.has(k))) {
+            novo[k] = e[k]; autopreenchidos.current.add(k)
+          }
+        }
+        setForm(novo)
+        // A cotação é gravada com a chave que INCLUI o que acabou de ser
+        // preenchido, para o efeito não consultar de novo por causa do
+        // próprio preenchimento.
+        const chaveFinal = [cep8, novo.bairro ?? '', novo.cidade ?? '', novo.uf ?? '', chaveItens].join('|')
+        const res = d.resultado as ResultadoFrete
+        setCotacao({ chave: chaveFinal, resultado: res, erro: null })
+        setServico(s => res.status === 'opcoes'
+          ? (res.opcoes.some(o => o.servico === s) ? s : res.opcoes[0].servico)
+          : null)
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          setCotacao({ chave, resultado: null, erro: 'Não foi possível calcular a entrega agora.' })
+        }
+      }
+    }, 400)
+
+    return () => { clearTimeout(t); ctrl.abort() }
+    // `form` inteiro fica fora das dependências de propósito: só CEP, bairro,
+    // cidade e UF disparam nova cotação, não o nome nem a observação.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calculaFrete, cep8, chaveAtual, cotacao?.chave])
+
+  const opcaoEscolhida = frete?.status === 'opcoes'
+    ? frete.opcoes.find(o => o.servico === servico) ?? frete.opcoes[0]
+    : null
+  const valorFrete = opcaoEscolhida?.valor ?? 0
+  const subtotal = itens.reduce((s, i) => s + i.precoVisto * i.quantidade, 0)
+  const total = subtotal + valorFrete
 
   async function enviar() {
     setEnviando(true); setErro(null); setRecusados([])
@@ -65,11 +153,21 @@ export default function CheckoutCliente({
           pagamento,
           observacao: form.observacao,
           site: form.site,
+          frete: calculaFrete && opcaoEscolhida
+            ? { servico: opcaoEscolhida.servico, valor: opcaoEscolhida.valor }
+            : undefined,
         }),
       })
       const dados = await r.json()
       if (!r.ok) {
         setErro(dados.erro ?? 'Não foi possível concluir o pedido.')
+        // O valor da entrega mudou entre a cotação e o Confirmar: mostra o
+        // novo e deixa o cliente decidir, em vez de cobrar outro valor.
+        if (dados.frete) {
+          const res = dados.frete as ResultadoFrete
+          setCotacao({ chave: chaveAtual, resultado: res, erro: null })
+          setServico(res.status === 'opcoes' ? res.opcoes[0].servico : null)
+        }
         if (Array.isArray(dados.itens)) setRecusados(dados.itens)
         return
       }
@@ -98,9 +196,13 @@ export default function CheckoutCliente({
 
   const faltaEndereco = modo === 'entrega'
     && ['logradouro', 'numero', 'bairro', 'cidade'].some(k => !form[k]?.trim())
+  // Com frete calculado, o pedido só sai com a entrega resolvida: opção
+  // escolhida, ou "a combinar". Entrega indisponível ou ainda cotando barra.
+  const freteResolvido = !calculaFrete
+    || (cep8.length === 8 && !cotando && !!frete && frete.status !== 'indisponivel')
   const podeEnviar = !!form.nome?.trim()
     && (form.telefone ?? '').replace(/\D/g, '').length >= 10
-    && !faltaEndereco && !enviando
+    && !faltaEndereco && freteResolvido && !enviando
 
   return (
     <div className="loja-container grid gap-6 py-6 lg:grid-cols-[1fr_20rem]">
@@ -132,7 +234,7 @@ export default function CheckoutCliente({
           </Secao>
         )}
 
-        {modo === 'entrega' ? (
+        {modo === 'entrega' && (
           <Secao titulo="Endereço de entrega">
             <div className="grid gap-3 sm:grid-cols-2">
               {CAMPOS_ENTREGA.map(c => (
@@ -141,11 +243,68 @@ export default function CheckoutCliente({
                   obrigatorio={['logradouro', 'numero', 'bairro', 'cidade'].includes(c.nome)} />
               ))}
             </div>
-            <p className="mt-2 text-xs text-[var(--tinta-media)]">
-              O valor da entrega é combinado pela loja no WhatsApp — ele não entra neste total.
-            </p>
+            {!freteAtivo && (
+              <p className="mt-2 text-xs text-[var(--tinta-media)]">
+                O valor da entrega é combinado pela loja no WhatsApp — ele não entra neste total.
+              </p>
+            )}
           </Secao>
-        ) : (
+        )}
+
+        {modo === 'entrega' && freteAtivo && (
+          <Secao titulo="Valor da entrega">
+            {cep8.length !== 8 ? (
+              <p className="text-sm text-[var(--tinta-media)]">Informe o CEP acima para calcular a entrega.</p>
+            ) : cotando ? (
+              <p className="text-sm text-[var(--tinta-media)]" aria-live="polite">Calculando a entrega…</p>
+            ) : erroFrete ? (
+              <p className="text-sm text-[var(--alerta)]" role="alert">{erroFrete}</p>
+            ) : frete?.status === 'opcoes' ? (
+              <div className="space-y-2" role="radiogroup" aria-label="Opções de entrega">
+                {frete.opcoes.map(o => (
+                  <label key={o.servico}
+                    className={`flex cursor-pointer items-center justify-between gap-3 rounded-[10px] border p-3 text-sm ${
+                      opcaoEscolhida?.servico === o.servico
+                        ? 'border-[var(--loja-primaria)] bg-[var(--fundo-suave)]'
+                        : 'border-[var(--borda)]'}`}>
+                    <span className="flex items-center gap-2">
+                      <input type="radio" name="servico" checked={opcaoEscolhida?.servico === o.servico}
+                        onChange={() => setServico(o.servico)} />
+                      <span>
+                        <span className="font-medium text-[var(--tinta-forte)]">{o.servico}</span>
+                        {o.prazo && <span className="block text-xs text-[var(--tinta-media)]">{o.prazo}</span>}
+                      </span>
+                    </span>
+                    <span className="font-semibold">
+                      {o.valor > 0 ? real(o.valor) : <span style={{ color: 'var(--sucesso)' }}>Grátis</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            ) : frete?.status === 'combinar' ? (
+              <p className="text-sm text-[var(--tinta-media)]">
+                {frete.motivo} A loja chama no WhatsApp para combinar o valor — ele não entra neste total.
+              </p>
+            ) : frete?.status === 'indisponivel' ? (
+              <div role="alert">
+                <p className="text-sm font-medium text-[var(--alerta)]">{frete.motivo}</p>
+                {frete.itensSomenteRetirada && (
+                  <ul className="mt-1 list-disc pl-4 text-xs text-[var(--tinta-media)]">
+                    {frete.itensSomenteRetirada.map(n => <li key={n}>{n}</li>)}
+                  </ul>
+                )}
+                {retiradaAtiva && (
+                  <button onClick={() => setModo('retirada')}
+                    className="mt-2 text-sm font-semibold underline">
+                    Retirar na loja
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </Secao>
+        )}
+
+        {modo === 'retirada' && (
           <Secao titulo="Retirada na loja">
             <p className="text-sm text-[var(--tinta-media)]">
               {enderecoLoja ?? 'A loja informa o endereço de retirada no contato.'}
@@ -198,7 +357,17 @@ export default function CheckoutCliente({
               </li>
             ))}
           </ul>
-          <div className="mt-3 flex justify-between border-t border-[var(--borda)] pt-3">
+          {calculaFrete && (
+            <div className="mt-3 flex justify-between border-t border-[var(--borda)] pt-3 text-sm text-[var(--tinta-media)]">
+              <span>Entrega</span>
+              <span>
+                {opcaoEscolhida
+                  ? (opcaoEscolhida.valor > 0 ? real(opcaoEscolhida.valor) : 'Grátis')
+                  : frete?.status === 'combinar' ? 'A combinar' : '—'}
+              </span>
+            </div>
+          )}
+          <div className={`${calculaFrete ? 'mt-2' : 'mt-3 border-t border-[var(--borda)] pt-3'} flex justify-between`}>
             <span className="font-semibold">Total</span>
             <span className="text-lg font-bold">{real(total)}</span>
           </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { lojaAtual } from '@/lib/commerce/loja'
-import { criarPedido, mensagemDeErro } from '@/lib/commerce/pedido'
+import { aplicarFrete, criarPedido, mensagemDeErro, type FreteAplicado } from '@/lib/commerce/pedido'
+import { calcularParaCarrinho, escolherOpcao } from '@/lib/commerce/frete/servico'
 import { notificarPedido } from '@/lib/commerce/notificar'
 import { ipDe, ipEstourou, limiteDoBancoEstourou } from '@/lib/commerce/limite'
 
@@ -79,6 +80,46 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── Frete ──────────────────────────────────────────────────
+  //
+  // Recalculado AQUI, com preço e peso do servidor. O valor que o cliente viu
+  // só serve de conferência: se o servidor chega a outro número, o pedido NÃO
+  // é criado e o cliente vê o valor novo antes de confirmar — frete nunca
+  // muda em silêncio. Retirada na loja não tem frete.
+  let frete: FreteAplicado | null = null
+  if (modo === 'entrega') {
+    const vistoBruto = (corpo.frete ?? {}) as Record<string, unknown>
+    const calculo = await calcularParaCarrinho(loja, itens, {
+      cep: txt(e.cep, 12), bairro: txt(e.bairro, 100), cidade: txt(e.cidade, 100), uf: txt(e.uf, 2),
+    })
+
+    if (calculo) {
+      const r = calculo.resultado
+      if (txt(e.cep, 12).replace(/\D/g, '').length !== 8) {
+        return NextResponse.json({ erro: 'Informe o CEP para calcular a entrega.' }, { status: 400 })
+      }
+      if (r.status === 'indisponivel') {
+        return NextResponse.json({ erro: r.motivo }, { status: 400 })
+      }
+      if (r.status === 'combinar') {
+        frete = { status: 'combinar', valor: 0, distanciaKm: calculo.distanciaKm }
+      } else {
+        const opcao = escolherOpcao(r, txt(vistoBruto.servico, 80))
+        const visto = Number(vistoBruto.valor)
+        if (!opcao || !Number.isFinite(visto) || Math.abs(opcao.valor - visto) > 0.005) {
+          return NextResponse.json(
+            { erro: 'O valor da entrega mudou. Confira e confirme de novo.', frete: r },
+            { status: 409 },
+          )
+        }
+        frete = {
+          status: 'calculado', valor: opcao.valor, servico: opcao.servico,
+          regraId: opcao.regraId, distanciaKm: calculo.distanciaKm,
+        }
+      }
+    }
+  }
+
   const resultado = await criarPedido(
     loja,
     itens,
@@ -107,11 +148,17 @@ export async function POST(req: Request) {
   // erros: o pedido já está gravado e o estoque reservado, então uma Z-API
   // fora do ar não pode virar venda perdida. Aguardado, e não disparado ao
   // vento, porque em serverless o trabalho após a resposta é cortado.
+  // O frete entra ANTES do aviso, para a mensagem da loja já trazer o total
+  // certo.
+  const total = frete
+    ? await aplicarFrete(resultado.pedidoId, resultado.total, frete)
+    : resultado.total
+
   await notificarPedido(loja, resultado.numero)
 
   return NextResponse.json({
     ok: true,
     numero: resultado.numero,
-    total: resultado.total,
+    total,
   })
 }

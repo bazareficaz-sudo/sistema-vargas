@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { lojaObrigatoria } from '@/lib/commerce/loja'
 import CheckoutCliente from '@/components/loja/CheckoutCliente'
+import { carregarFrete } from '@/lib/commerce/frete/servico'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,8 +23,13 @@ export default async function PaginaCheckout() {
     ? [loja.cidade, loja.uf].filter(Boolean).join(' / ') || null
     : null
 
+  // Frete calculado só quando a loja ligou e configurou. Qualquer falha ao
+  // carregar (inclusive a migração ainda não ter rodado) cai no fluxo antigo.
+  const freteAtivo = loja.entregaAtiva && (await carregarFrete(loja.id)) !== null
+
   return (
     <CheckoutCliente
+      freteAtivo={freteAtivo}
       entregaAtiva={loja.entregaAtiva}
       retiradaAtiva={loja.retiradaAtiva}
       pagamentoFormas={loja.pagamentoFormas}
