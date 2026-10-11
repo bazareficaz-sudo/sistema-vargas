@@ -4,12 +4,14 @@ import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
 import { refreshAccessTokenIfNeeded as refreshShopee } from '@/lib/shopee/client'
 import { refreshAccessTokenIfNeeded as refreshML } from '@/lib/mercadolivre/client'
 import { pushPrecoEstoque } from '@/lib/shopee/write'
-import { atualizarPrecoEstoque } from '@/lib/mercadolivre/write'
+import { atualizarPrecoEstoque, atualizarVariacoes as atualizarVariacoesML } from '@/lib/mercadolivre/write'
 import { atualizarPrecoEstoque as atualizarPrecoTiktok } from '@/lib/tiktok/write'
 import { montarCanal as montarCanalTiktok } from '@/lib/tiktok/canal'
 import { resolverPrecoEfetivo } from '@/lib/precificacao/precos'
 import { criarResolvedor } from '@/lib/precificacao/contexto'
-import { COLUNAS_VARIACAO_PRECO, anuncioDaVariacao, type VariacaoPreco } from '@/lib/precificacao/variacoes'
+import {
+  COLUNAS_VARIACAO_PRECO, PLATAFORMAS_PRECO_POR_VARIACAO, anuncioDaVariacao, precoUnicoNasVariacoes, type VariacaoPreco,
+} from '@/lib/precificacao/variacoes'
 
 // Aplica o recálculo APENAS nos itens que o usuário aprovou na prévia.
 //
@@ -138,6 +140,17 @@ export async function POST(req: Request) {
           .eq('id', a.id).eq('empresa_id', guarda.empresaId)
     if (error) { resultados.push({ anuncioId: a.id, variacaoId: variacao?.id ?? null, ok: false, erro: error.message, enviado: false }); continue }
 
+    // ML com variações: o preço é um só e vale para todas — grava em cada
+    // uma, e o envio abaixo manda para todas.
+    const canalDaLinha = canalPorId.get(a.canal_id)
+    let variacoesML: { model_id: string | null }[] = []
+    if (!variacao && canalDaLinha && precoUnicoNasVariacoes(canalDaLinha.plataforma, a.tem_variacao)) {
+      const { data: vs } = await sb.from('marketplace_anuncio_variacoes')
+        .update({ preco, updated_at: new Date().toISOString() })
+        .eq('anuncio_id', a.id).select('model_id')
+      variacoesML = vs ?? []
+    }
+
     let enviado = false
     let erroEnvio: string | null = null
 
@@ -146,8 +159,8 @@ export async function POST(req: Request) {
       try {
         if (!canalRow?.access_token) throw new Error('Canal sem conexão ativa')
 
-        if (variacao && canalRow.plataforma !== 'tiktok') {
-          // Preço por variação só existe onde o envio por SKU foi feito.
+        if (variacao && !PLATAFORMAS_PRECO_POR_VARIACAO.has(canalRow.plataforma)) {
+          // Preço por variação só existe onde o envio por variação foi feito.
           throw new Error(`Preço por variação ainda não é enviado para ${canalRow.plataforma} — o preço foi salvo só no sistema`)
         }
 
@@ -159,11 +172,12 @@ export async function POST(req: Request) {
             }))
           }
           const canal = canalPronto.get(a.canal_id)
-          // Anúncio com variação: a Shopee cobra preço por variação, e este
-          // recálculo trabalha no preço do anúncio. Não invento uma
-          // distribuição entre as variações — deixo explícito.
-          if (a.tem_variacao) throw new Error('Anúncio com variações — ajuste o preço de cada variação pela tela do anúncio')
-          const r = await pushPrecoEstoque({ sb, canal }, Number(a.id_externo), [{ preco }])
+          // Linha de variação vai para o model_id dela. Linha de anúncio com
+          // variações só aparece se elas ainda não foram sincronizadas — um
+          // preço só não diz qual variação recebe.
+          if (variacao && !variacao.model_id) throw new Error('Variação sem o id do modelo na Shopee — sincronize o anúncio')
+          if (!variacao && a.tem_variacao) throw new Error('Anúncio com variações ainda não sincronizadas — sincronize o anúncio para precificar cada variação')
+          const r = await pushPrecoEstoque({ sb, canal }, Number(a.id_externo), [{ modelId: variacao?.model_id ?? undefined, preco }])
           if (!r.precoOk) throw new Error(r.erroPreco ?? 'A Shopee recusou o preço')
           enviado = true
         } else if (canalRow.plataforma === 'mercadolivre') {
@@ -174,7 +188,12 @@ export async function POST(req: Request) {
             }))
           }
           const canal = canalPronto.get(a.canal_id)
-          const r = await atualizarPrecoEstoque(sb, canal, String(a.id_externo), { preco })
+          // Com variações, o preço vai em cada uma (o ML exige o mesmo em todas).
+          const ids = variacoesML.map(v => v.model_id).filter((id): id is string => !!id)
+          if (a.tem_variacao && ids.length === 0) throw new Error('Anúncio com variações ainda não sincronizadas — sincronize o anúncio')
+          const r = ids.length > 0
+            ? await atualizarVariacoesML(sb, canal, String(a.id_externo), ids.map(variationId => ({ variationId, preco })))
+            : await atualizarPrecoEstoque(sb, canal, String(a.id_externo), { preco })
           if (!r.ok) throw new Error(r.erro ?? 'O Mercado Livre recusou o preço')
           enviado = true
         } else if (canalRow.plataforma === 'tiktok') {

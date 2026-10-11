@@ -171,7 +171,8 @@ export type PrecoResolvido = PrecoAnuncio & {
  * vai nos avisos em vez de sumir.
  */
 export function resolverPrecoEfetivo(entrada: {
-  anuncio: AnuncioComPreco & { id?: string }
+  /** `variacao_model_id`: linha de variação — a campanha vale pelo item dela. */
+  anuncio: AnuncioComPreco & { id?: string; variacao_model_id?: string | null }
   campanhas?: CampanhaDoAnuncio[]
   agora?: Date
 }): PrecoResolvido {
@@ -188,7 +189,7 @@ export function resolverPrecoEfetivo(entrada: {
     if (!vigencia.vigente) continue
     if (!anuncioId) continue
 
-    const { item, aviso } = itemDoAnuncio(c.itens, anuncioId)
+    const { item, aviso } = itemDoAnuncio(c.itens, anuncioId, entrada.anuncio.variacao_model_id ?? null)
     if (aviso) avisos.push(aviso)
     if (!item?.precoCampanha) continue
 

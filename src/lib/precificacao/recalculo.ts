@@ -12,7 +12,8 @@ import type { OrigemPrecoEfetivo, CampanhaVigenteResumo } from './precos'
 import type { SaudePreco } from './tipos'
 import { selosDoAnuncio, type SeloCampanha } from '@/lib/marketplace/seloCampanha'
 import {
-  COLUNAS_VARIACAO_PRECO, anuncioDaVariacao, chaveDoItem, nomeDaVariacao, precificaPorVariacao, type VariacaoPreco,
+  COLUNAS_VARIACAO_PRECO, anuncioDaVariacao, chaveDoItem, nomeDaVariacao, precificaPorVariacao, precoUnicoNasVariacoes, produtoDoPrecoUnico,
+  type VariacaoPreco,
 } from './variacoes'
 
 // O cliente do Supabase é `any` em todo o repositório: tipá-lo exigiria os
@@ -264,8 +265,10 @@ export async function varrerRecalculo(
       // PREÇO POR VARIAÇÃO: nas plataformas em que ele existe, o anúncio com
       // variações vira uma unidade por variação, cada uma com o produto (e o
       // custo) dela. Uma consulta por lote, não por anúncio.
+      // No ML (preço único), as variações só dizem qual produto define o custo.
       const idsComVariacao = lote
-        .filter((a: { tem_variacao?: boolean | null }) => precificaPorVariacao(canal.plataforma, a.tem_variacao))
+        .filter((a: { tem_variacao?: boolean | null }) =>
+          precificaPorVariacao(canal.plataforma, a.tem_variacao) || precoUnicoNasVariacoes(canal.plataforma, a.tem_variacao))
         .map((a: { id: string }) => a.id)
       const variacoesPorAnuncio = new Map<string, (VariacaoPreco & { produtos: unknown })[]>()
       if (idsComVariacao.length > 0) {
@@ -280,9 +283,17 @@ export async function varrerRecalculo(
         }
       }
 
-      type Unidade = { a: typeof lote[number]; p: unknown; variacao: VariacaoPreco | null }
+      type Unidade = { a: typeof lote[number]; p: unknown; variacao: VariacaoPreco | null; aviso?: string | null }
       const unidades: Unidade[] = []
       for (const a of lote) {
+        if (precoUnicoNasVariacoes(canal.plataforma, a.tem_variacao)) {
+          const { produto, aviso } = await produtoDoPrecoUnico(
+            variacoesPorAnuncio.get(a.id) ?? [], a.produtos as ProdutoPrecificacao | null,
+            async p => (await resolvedor.custo(p)).custo,
+          )
+          unidades.push({ a, p: produto, variacao: null, aviso })
+          continue
+        }
         if (!precificaPorVariacao(canal.plataforma, a.tem_variacao)) {
           unidades.push({ a, p: a.produtos, variacao: null })
           continue
@@ -297,7 +308,7 @@ export async function varrerRecalculo(
         }
       }
 
-      for (const { a, p: produtoDaUnidade, variacao } of unidades) {
+      for (const { a, p: produtoDaUnidade, variacao, aviso: avisoDaUnidade } of unidades) {
         resumo.totalAnuncios++
         const p = produtoDaUnidade as ProdutoPrecificacao & { estoque?: number | null } | null
         if (!p) { resumo.semProduto++; continue }
@@ -389,7 +400,7 @@ export async function varrerRecalculo(
             selosCampanha: selosDoAnuncio(ctx.campanhas, a.id, resolvedor.agora),
             oportunidades: estrategia.oportunidades,
             recomendacoes: [],
-            avisos: [...ctx.avisos, ...novo.resultado.avisos],
+            avisos: [...(avisoDaUnidade ? [avisoDaUnidade] : []), ...ctx.avisos, ...novo.resultado.avisos],
           })
 
           contextoDoItem.set(chave, {

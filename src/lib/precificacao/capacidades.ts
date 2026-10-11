@@ -70,7 +70,7 @@ const CAPACIDADES: Record<string, Omit<CapacidadesCanal, 'plataforma'>> = {
     },
     variacoes: {
       estado: 'suportado',
-      motivo: 'A Shopee cobra preço por variação (model_id), e o sistema reconhece isso — inclusive recusando aplicar preço de anúncio em item com variações de preços diferentes.',
+      motivo: 'A Shopee cobra preço por variação (model_id): o recálculo precifica cada variação pelo custo do produto dela e envia para o model_id.',
       evidencia: 'lib/precificacao/campanhas.ts — itemDoAnuncio',
     },
     subsidioCampanha: {
@@ -89,7 +89,7 @@ const CAPACIDADES: Record<string, Omit<CapacidadesCanal, 'plataforma'>> = {
     precoQuantidadeEscrita: NAO_VERIFICADO_ML,
     variacoes: {
       estado: 'suportado',
-      motivo: 'O sistema lê e edita variações de anúncio do ML.',
+      motivo: 'O sistema lê e edita variações de anúncio do ML. No anúncio clássico o preço é o mesmo em todas as variações (regra do ML): o recálculo usa o produto de maior custo e envia o preço para todas.',
       evidencia: 'lib/marketplace/EditarAnuncioModal e marketplace_anuncio_variacoes',
     },
     subsidioCampanha: NAO_VERIFICADO_ML,

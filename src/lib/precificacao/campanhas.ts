@@ -215,9 +215,9 @@ export function proximidadeDoFim(
  * O item da campanha que vale para este anúncio.
  *
  * Anúncio com variação tem um item por `model_id`, e cada variação pode ter
- * preço diferente. Este módulo trabalha no preço DO ANÚNCIO, então escolher
- * uma variação seria inventar: devolve nulo e avisa, do mesmo jeito que o
- * `aplicar` do recálculo recusa anúncio Shopee com variação.
+ * preço diferente. Com `modelId` (linha de variação da precificação), vale o
+ * item DESTA variação — ou um item do anúncio inteiro, sem model_id. Sem
+ * `modelId`, escolher uma variação seria inventar: devolve nulo e avisa.
  */
 /**
  * O item desta campanha que MANDA NO PREÇO deste anúncio.
@@ -229,9 +229,11 @@ export function proximidadeDoFim(
 export function itemDoAnuncio(
   itens: ItemCampanha[],
   anuncioId: string,
+  modelId?: string | null,
 ): { item: ItemCampanha | null; aviso: string | null } {
   const doAnuncio = itens.filter(i =>
-    i.anuncioId === anuncioId && i.precoCampanha != null && i.status === 'participando')
+    i.anuncioId === anuncioId && i.precoCampanha != null && i.status === 'participando'
+    && (!modelId || !i.modelId || String(i.modelId) === String(modelId)))
   if (doAnuncio.length === 0) return { item: null, aviso: null }
   if (doAnuncio.length === 1) return { item: doAnuncio[0], aviso: null }
 

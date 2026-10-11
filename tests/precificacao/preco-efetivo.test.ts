@@ -130,6 +130,17 @@ describe('item da campanha para o anúncio', () => {
   test('item de outro anúncio é ignorado', () => {
     assert.equal(itemDoAnuncio([item({ anuncioId: 'outro' })], ANUNCIO_ID).item, null)
   })
+
+  test('linha de VARIAÇÃO pega o item dela, mesmo com preços diferentes entre variações', () => {
+    const itens = [item({ modelId: 'm1', precoCampanha: 59.90 }), item({ modelId: 'm2', precoCampanha: 49.90 })]
+    const r = itemDoAnuncio(itens, ANUNCIO_ID, 'm2')
+    assert.equal(r.item?.precoCampanha, 49.90)
+    assert.equal(r.aviso, null)
+    // Variação fora da campanha: sem item.
+    assert.equal(itemDoAnuncio(itens, ANUNCIO_ID, 'm3').item, null)
+    // Item do anúncio inteiro (sem model_id) vale para qualquer variação.
+    assert.equal(itemDoAnuncio([item({ modelId: null })], ANUNCIO_ID, 'm1').item?.precoCampanha, 59.90)
+  })
 })
 
 describe('preço efetivo — precedência', () => {

@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { criarResolvedor, descreverOrigem, COLUNAS_ANUNCIO, COLUNAS_CANAL, COLUNAS_PRODUTO } from '@/lib/precificacao/contexto'
 import { avaliarPreco, precificarPorObjetivo } from '@/lib/precificacao/cenarios'
-import { COLUNAS_VARIACAO_PRECO, anuncioDaVariacao } from '@/lib/precificacao/variacoes'
+import { COLUNAS_VARIACAO_PRECO, anuncioDaVariacao, precoUnicoNasVariacoes, produtoDoPrecoUnico } from '@/lib/precificacao/variacoes'
 
 // Recalcula UM anúncio da prévia com uma margem diferente da que a regra
 // manda — ou avalia um preço que o operador informou.
@@ -57,7 +57,6 @@ export async function POST(req: Request) {
     p = (v as any).produtos
     if (!p) return NextResponse.json({ ok: false, erro: 'Variação sem produto vinculado' }, { status: 400 })
   }
-  if (!p) return NextResponse.json({ ok: false, erro: 'Anúncio sem produto vinculado' }, { status: 400 })
 
   // O canal é buscado pela empresa da sessão, não só pelo id que veio do
   // anúncio: uma linha a menos por onde uma empresa poderia ler a
@@ -67,6 +66,14 @@ export async function POST(req: Request) {
   if (!canal) return NextResponse.json({ ok: false, erro: 'Canal não encontrado' }, { status: 404 })
 
   const resolvedor = criarResolvedor(sb, guarda.empresaId)
+  // ML com variações: preço único, calculado pelo produto de maior custo —
+  // o mesmo que a varredura usou para esta linha.
+  if (!variacaoId && precoUnicoNasVariacoes((canal as any).plataforma, anuncio.tem_variacao)) {
+    const { data: vars } = await sb.from('marketplace_anuncio_variacoes')
+      .select(`${COLUNAS_VARIACAO_PRECO}, produtos(${COLUNAS_PRODUTO})`).eq('anuncio_id', anuncioId)
+    p = (await produtoDoPrecoUnico(vars ?? [], p, async x => (await resolvedor.custo(x)).custo)).produto
+  }
+  if (!p) return NextResponse.json({ ok: false, erro: 'Anúncio sem produto vinculado' }, { status: 400 })
   const ctx = await resolvedor.contexto({ canal, produto: p, anuncio })
   if (!(ctx.economia.custo > 0)) {
     return NextResponse.json({ ok: false, erro: 'Produto sem custo cadastrado' }, { status: 400 })
