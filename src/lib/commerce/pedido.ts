@@ -144,11 +144,65 @@ export async function criarPedido(
   }
 }
 
+export type FreteAplicado = {
+  /** 'calculado' tem valor de verdade (pode ser 0, se grátis); 'combinar' fica para a loja. */
+  status: 'calculado' | 'combinar'
+  valor: number
+  servico?: string
+  regraId?: string
+  distanciaKm?: number | null
+}
+
+/**
+ * Grava o frete no pedido recém-criado.
+ *
+ * `loja_criar_pedido` nasce com `valor_frete = 0` e é a fonte do total dos
+ * produtos; aqui só se soma o frete já calculado pelo servidor. Não é atômico
+ * com a criação, e a falha é aceitável de propósito: o pedido e a reserva já
+ * existem, então perder o frete só significa que a loja combina o valor — que
+ * era o comportamento antes do frete existir. Devolve o total final.
+ */
+export async function aplicarFrete(
+  pedidoId: string, totalProdutos: number, frete: FreteAplicado,
+): Promise<number> {
+  const total = Math.round((totalProdutos + frete.valor) * 100) / 100
+  try {
+    const { data: atual } = await db()
+      .from('marketplace_pedidos').select('dados_brutos').eq('id', pedidoId).maybeSingle()
+
+    const { error } = await db()
+      .from('marketplace_pedidos')
+      .update({
+        valor_frete: frete.valor,
+        valor_total: total,
+        dados_brutos: {
+          ...((atual?.dados_brutos as Record<string, unknown>) ?? {}),
+          frete_status: frete.status,
+          frete_servico: frete.servico ?? null,
+          frete_regra_id: frete.regraId ?? null,
+          frete_distancia_km: frete.distanciaKm ?? null,
+        },
+      })
+      .eq('id', pedidoId)
+    if (error) throw new Error(error.message)
+    return total
+  } catch (e) {
+    console.error('[loja] aplicar frete falhou', {
+      pedidoId, erro: e instanceof Error ? e.message : String(e),
+    })
+    return totalProdutos
+  }
+}
+
 /** A linha crua de `marketplace_pedidos`, antes de virar o que a tela usa. */
 type LinhaPedido = {
   numero_pedido: string
   cliente_nome: string | null
   valor_total: number | string | null
+  valor_produtos: number | string | null
+  valor_frete: number | string | null
+  frete_status: string | null
+  frete_servico: string | null
   status_externo: string | null
   data_pedido: string | null
   observacoes: string | null
@@ -173,7 +227,7 @@ type LinhaPedido = {
 export async function buscarPedido(loja: Loja, numero: string) {
   const { data } = await db()
     .from('marketplace_pedidos')
-    .select('numero_pedido, cliente_nome, valor_total, status, status_externo, data_pedido, observacoes, entrega_cidade, entrega_estado, marketplace_pedido_itens(nome_produto, quantidade, preco_unitario, subtotal)')
+    .select('numero_pedido, cliente_nome, valor_total, valor_produtos, valor_frete, frete_status:dados_brutos->>frete_status, frete_servico:dados_brutos->>frete_servico, status, status_externo, data_pedido, observacoes, entrega_cidade, entrega_estado, marketplace_pedido_itens(nome_produto, quantidade, preco_unitario, subtotal)')
     .eq('canal_id', loja.canalId)
     .eq('numero_pedido', numero)
     .maybeSingle()
@@ -184,6 +238,12 @@ export async function buscarPedido(loja: Loja, numero: string) {
     numero: String(d.numero_pedido),
     clienteNome: String(d.cliente_nome ?? ''),
     total: Number(d.valor_total ?? 0),
+    valorProdutos: Number(d.valor_produtos ?? d.valor_total ?? 0),
+    valorFrete: Number(d.valor_frete ?? 0),
+    /** `null` = pedido sem frete calculado (loja sem frete, ou retirada). */
+    freteStatus: (d.frete_status === 'calculado' || d.frete_status === 'combinar'
+      ? d.frete_status : null) as 'calculado' | 'combinar' | null,
+    freteServico: d.frete_servico,
     modo: (d.status_externo === 'retirada' ? 'retirada' : 'entrega') as 'entrega' | 'retirada',
     dataPedido: d.data_pedido as string | null,
     observacoes: d.observacoes as string | null,

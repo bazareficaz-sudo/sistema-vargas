@@ -31,6 +31,7 @@ export default async function PaginaPedido({ params }: { params: Promise<{ numer
   if (!pedido) notFound()
 
   const primeiroNome = pedido.clienteNome.split(' ')[0] || ''
+  const freteCalculado = pedido.modo === 'entrega' && pedido.freteStatus === 'calculado'
 
   return (
     <div className="loja-container max-w-2xl py-10">
@@ -55,8 +56,20 @@ export default async function PaginaPedido({ params }: { params: Promise<{ numer
           ))}
         </ul>
 
-        <div className="mt-3 flex justify-between border-t border-[var(--borda)] pt-3">
-          <span className="font-semibold">Total dos produtos</span>
+        {freteCalculado && (
+          <div className="mt-3 space-y-1 border-t border-[var(--borda)] pt-3 text-sm">
+            <div className="flex justify-between text-[var(--tinta-media)]">
+              <span>Produtos</span><span>{real(pedido.valorProdutos)}</span>
+            </div>
+            <div className="flex justify-between text-[var(--tinta-media)]">
+              <span>Entrega{pedido.freteServico ? ` — ${pedido.freteServico}` : ''}</span>
+              <span>{pedido.valorFrete > 0 ? real(pedido.valorFrete) : 'Grátis'}</span>
+            </div>
+          </div>
+        )}
+
+        <div className={`${freteCalculado ? 'mt-2' : 'mt-3 border-t border-[var(--borda)] pt-3'} flex justify-between`}>
+          <span className="font-semibold">{freteCalculado ? 'Total' : 'Total dos produtos'}</span>
           <span className="text-lg font-bold">{real(pedido.total)}</span>
         </div>
 
@@ -69,7 +82,9 @@ export default async function PaginaPedido({ params }: { params: Promise<{ numer
             <li>
               {pedido.modo === 'retirada'
                 ? 'Você combina o horário e retira na loja.'
-                : 'Vocês combinam o valor e o prazo da entrega — o frete não está incluído no total acima.'}
+                : freteCalculado
+                  ? 'A loja confirma o prazo da entrega com você.'
+                  : 'Vocês combinam o valor e o prazo da entrega — o frete não está incluído no total acima.'}
             </li>
             <li>O pagamento é feito na {pedido.modo === 'retirada' ? 'retirada' : 'entrega'}.</li>
           </ol>

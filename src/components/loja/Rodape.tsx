@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { Loja } from '@/lib/commerce/tipos'
 import type { Categoria } from '@/lib/commerce/tipos'
+import { paginasDaLoja } from '@/lib/commerce/paginas'
 
 // Rodapé. Server component: nada aqui muda depois de renderizado.
 //
@@ -22,7 +23,7 @@ export default function Rodape({ loja, categorias }: { loja: Loja; categorias: C
   return (
     <footer className="mt-16 border-t border-[var(--borda)] bg-[var(--fundo-suave)]">
       <div className="loja-container py-10">
-        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <h3 className="text-base font-bold text-[var(--tinta-forte)]">{loja.nome}</h3>
             {loja.descricao && (
@@ -49,6 +50,19 @@ export default function Rodape({ loja, categorias }: { loja: Loja; categorias: C
               </ul>
             </nav>
           )}
+
+          <nav aria-label="Institucional">
+            <h3 className="text-sm font-semibold text-[var(--tinta-forte)]">Institucional</h3>
+            <ul className="mt-3 space-y-2">
+              {paginasDaLoja(loja).map(p => (
+                <li key={p.slug}>
+                  <Link href={`/p/${p.slug}`} className="text-sm text-[var(--tinta-media)] hover:text-[var(--tinta-forte)]">
+                    {p.rotulo}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
 
           {temContato && (
             <div>

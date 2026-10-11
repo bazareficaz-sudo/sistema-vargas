@@ -2,6 +2,7 @@ import type { MetadataRoute } from 'next'
 import { headers } from 'next/headers'
 import { lojaAtual } from '@/lib/commerce/loja'
 import { db } from '@/lib/commerce/db'
+import { paginasDaLoja } from '@/lib/commerce/paginas'
 
 // Sitemap por loja.
 //
@@ -36,6 +37,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     { url: base, lastModified: new Date(), changeFrequency: 'daily', priority: 1 },
+    ...paginasDaLoja(loja).map(p => ({
+      url: `${base}/p/${p.slug}`,
+      changeFrequency: 'yearly' as const,
+      priority: 0.3,
+    })),
     ...((categorias ?? []) as any[]).map(c => ({
       url: `${base}/c/${c.slug}`,
       lastModified: c.updated_at ? new Date(c.updated_at) : undefined,
