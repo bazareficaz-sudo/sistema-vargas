@@ -184,6 +184,83 @@ export async function relacionados(loja: Loja, p: ProdutoDetalhe, limite = 8): P
   return r.produtos.filter(x => x.produtoId !== p.produtoId).slice(0, limite)
 }
 
+/**
+ * IDs de quem costuma sair junto com o produto, na ordem da função do banco
+ * (fixados pelo gestor primeiro, depois os que mais saíram juntos).
+ *
+ * É a MESMA `compre_junto_sugestoes` que o PDV usa para lembrar o vendedor —
+ * inclusive os ajustes de "fixar" e "ocultar" feitos no cadastro do produto.
+ * Duas contas diferentes para o balcão e para a vitrine seriam duas respostas
+ * para a mesma pergunta.
+ *
+ * Cacheado por uma hora: o histórico de vendas muda devagar, e a função varre
+ * um ano de vendas. O erro NÃO entra no cache (por isso lança aqui e quem
+ * chama captura): uma falha de segundos não pode virar uma hora sem sugestão.
+ */
+function lerParesCompreJunto(lojaId: string, produtoId: string): Promise<string[]> {
+  return unstable_cache(
+    async () => {
+      const { data, error } = await db().rpc('compre_junto_sugestoes', {
+        p_produto_ids: [produtoId],
+        // Pede bem mais do que a página mostra: a função não conhece a
+        // vitrine, e boa parte do que ela devolve não está publicada ou está
+        // sem estoque. Com o limite curto, sobraria quase nada depois do filtro.
+        p_limite: 30,
+      })
+      if (error) throw new Error(error.message)
+      return ((data ?? []) as { produto_id: string }[]).map(l => l.produto_id)
+    },
+    ['loja-compre-junto', lojaId, produtoId],
+    { revalidate: 3600, tags: [`loja:${lojaId}`] },
+  )()
+}
+
+/**
+ * "Compre junto": o que os clientes levaram na mesma venda deste produto.
+ *
+ * Só volta o que o cliente PODE comprar agora nesta loja: publicado, e com
+ * saldo (a menos que a loja venda sem estoque). A função do banco devolve o
+ * histórico de vendas da empresa inteira, e oferecer um item que não está na
+ * vitrine ou acabou é pior que não oferecer nada.
+ *
+ * O número de vendas em que o par apareceu NÃO sai daqui: é dado do negócio, e
+ * a vitrine não precisa dele — a ordem já o carrega.
+ */
+export async function compreJunto(loja: Loja, p: ProdutoDetalhe, limite = 3): Promise<ProdutoCard[]> {
+  let ids: string[]
+  try {
+    ids = (await lerParesCompreJunto(loja.id, p.produtoId)).filter(id => id !== p.produtoId)
+  } catch (e) {
+    // A sugestão é enfeite: falhar aqui nunca pode derrubar a página do produto.
+    console.error('[commerce] compre junto falhou', e instanceof Error ? e.message : e)
+    return []
+  }
+  if (ids.length === 0) return []
+
+  // A consulta à view é o que filtra por loja e por publicação: o id vem de
+  // um histórico que é da EMPRESA, e só o que está publicado AQUI passa.
+  const { data } = await db()
+    .from('loja_vitrine_produtos')
+    .select('*')
+    .eq('loja_id', loja.id)
+    .eq('status', 'publicado')
+    .in('produto_id', ids)
+
+  const porId = new Map<string, ProdutoCard>()
+  for (const l of (data ?? []) as Record<string, any>[]) {
+    porId.set(l.produto_id, paraCard(limpar(l)))
+  }
+
+  const publicados = ids.filter(id => porId.has(id))
+  if (publicados.length === 0) return []
+
+  const disp = await disponibilidadeAoVivo(loja, publicados)
+  return publicados
+    .filter(id => loja.permitirVendaSemEstoque || (disp.get(id) ?? 0) > 0)
+    .slice(0, limite)
+    .map(id => porId.get(id)!)
+}
+
 // ─── Categorias ──────────────────────────────────────────────────────────────
 
 async function lerCategorias(lojaId: string): Promise<Categoria[]> {

@@ -2,8 +2,9 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { lojaObrigatoria } from '@/lib/commerce/loja'
-import { produtoPorSlug, relacionados } from '@/lib/commerce/catalogo'
+import { compreJunto, produtoPorSlug, relacionados } from '@/lib/commerce/catalogo'
 import CardProduto from '@/components/loja/CardProduto'
+import CompreJunto from '@/components/loja/CompreJunto'
 import ComprarProduto from '@/components/loja/ComprarProduto'
 import CompartilharProduto from '@/components/loja/CompartilharProduto'
 import Galeria from '@/components/loja/Galeria'
@@ -53,8 +54,16 @@ export default async function PaginaProduto({ params }: Props) {
   const p = await produtoPorSlug(loja, slug)
   if (!p) notFound()
 
-  const similares = await relacionados(loja, p, 10)
   const disponivel = p.disponivelAgora
+  const podeComprar = disponivel > 0 || loja.permitirVendaSemEstoque
+
+  // Em paralelo: nenhuma depende da outra. "Compre junto" só é consultado se o
+  // próprio produto pode ser comprado — oferecer o acessório de algo que
+  // acabou leva o cliente a um carrinho que não fecha.
+  const [similares, junto] = await Promise.all([
+    relacionados(loja, p, 10),
+    podeComprar ? compreJunto(loja, p, 3) : Promise.resolve([]),
+  ])
 
   // Dados estruturados: é o que faz preço e disponibilidade aparecerem no
   // resultado do Google. Só declara o que é verdade — `availability` sai do
@@ -152,6 +161,21 @@ export default async function PaginaProduto({ params }: Props) {
             )}
           </div>
         </div>
+
+        {junto.length > 0 && (
+          <CompreJunto
+            principal={{
+              produtoId: p.produtoId, slug: p.slug, nome: p.nome,
+              marca: p.marca, imagemUrl: p.imagemUrl, preco: p.preco,
+            }}
+            // Só o que a oferta usa: o card inteiro (estoque, descrição...)
+            // iria no HTML da página sem ninguém ler.
+            sugestoes={junto.map(s => ({
+              produtoId: s.produtoId, slug: s.slug, nome: s.nome,
+              marca: s.marca, imagemUrl: s.imagemUrl, preco: s.preco,
+            }))}
+          />
+        )}
 
         {(p.descricaoCompleta || p.caracteristicas.length > 0 ||
           Object.keys(p.especificacoes).length > 0 || p.aplicacoes) && (

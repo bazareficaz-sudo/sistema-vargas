@@ -57,8 +57,11 @@ export const estiloPrimario = { background: 'var(--loja-primaria)' }
  * inicial e o nome, na paleta da loja, que fica discreto ao lado de uma foto
  * de verdade em vez de parecer defeito.
  */
-export function ImagemProduto({ url, alt, prioridade = false, className = '' }: {
-  url: string | null; alt: string; prioridade?: boolean; className?: string
+export function ImagemProduto({ url, alt, prioridade = false, compacto = false, className = '' }: {
+  url: string | null; alt: string; prioridade?: boolean
+  /** Miniatura (até ~64px): o vazio vira só a inicial, sem o texto, que não cabe. */
+  compacto?: boolean
+  className?: string
 }) {
   if (url) {
     return (
@@ -76,6 +79,22 @@ export function ImagemProduto({ url, alt, prioridade = false, className = '' }: 
   }
 
   const inicial = (alt.trim()[0] ?? '?').toUpperCase()
+  if (compacto) {
+    return (
+      <div
+        className={`relative flex items-center justify-center overflow-hidden ${className}`}
+        style={{ background: 'linear-gradient(160deg, var(--fundo-suave), #eef2f7)' }}
+        role="presentation"
+      >
+        <span
+          className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white/95"
+          style={{ background: 'var(--loja-primaria)', opacity: 0.85 }}
+        >
+          {inicial}
+        </span>
+      </div>
+    )
+  }
   return (
     <div
       className={`relative flex flex-col items-center justify-center gap-1.5 overflow-hidden px-3 text-center ${className}`}
