@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { useCarrinho } from './CarrinhoContexto'
 import { real } from './ds'
+import { MenuDesktop, MenuMobile } from './MenuCategorias'
 import type { Categoria } from '@/lib/commerce/tipos'
 
 // Cabeçalho da vitrine. Mobile first de verdade:
@@ -153,40 +154,16 @@ export default function Cabecalho({ loja, categorias }: {
         {/* Busca em linha própria no celular. */}
         <div className="pb-3 lg:hidden">{campoBusca}</div>
 
-        {/* Categorias no desktop: uma faixa, com rolagem se não couber. */}
-        <nav aria-label="Categorias" className="hidden gap-5 overflow-x-auto pb-2.5 lg:flex">
-          {categorias.slice(0, 9).map(c => (
-            <Link
-              key={c.id}
-              href={`/c/${c.slug}`}
-              className="whitespace-nowrap text-[0.8125rem] font-medium text-[var(--tinta-media)] hover:text-[var(--tinta-forte)]"
-            >
-              {c.nome}
-            </Link>
-          ))}
-          {categorias.length > 9 && (
-            <Link href="/c" className="whitespace-nowrap text-[0.8125rem] font-semibold" style={{ color: 'var(--loja-primaria)' }}>
-              Todas
-            </Link>
-          )}
-        </nav>
+        {/* Categorias no desktop: faixa com painel de subcategorias. Sem
+            rolagem horizontal — `overflow-x` cortaria o painel suspenso; o
+            que não cabe fica em "Todas as categorias". */}
+        <MenuDesktop categorias={categorias} />
       </div>
 
       {/* Gaveta do celular */}
       {menu && (
         <div className="border-t border-[var(--borda)] bg-white lg:hidden">
-          <nav aria-label="Categorias" className="loja-container max-h-[65vh] overflow-y-auto py-2">
-            {categorias.map(c => (
-              <Link
-                key={c.id}
-                href={`/c/${c.slug}`}
-                onClick={() => setMenu(false)}
-                className="block border-b border-[var(--borda)] py-3 text-[0.9375rem] text-[var(--tinta-forte)] last:border-0"
-              >
-                {c.nome}
-              </Link>
-            ))}
-          </nav>
+          <MenuMobile categorias={categorias} aoNavegar={() => setMenu(false)} />
         </div>
       )}
     </header>
