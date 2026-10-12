@@ -49,6 +49,25 @@ const CAMPOS_SNAPSHOT = [
   'preco_promocional', 'promocao_ativa', 'promocao_inicio', 'promocao_fim',
 ].join(', ')
 
+/**
+ * O que só sai quando o terminal PEDE, com `?campos=v2`.
+ *
+ * `grupo_similar` junta o mesmo item de marcas diferentes, e o PDV desktop
+ * usa o rótulo para oferecer as outras marcas antes de lançar. Um terminal
+ * antigo que o recebesse apenas o descartaria — inofensivo. O contrário não
+ * é: no dia em que a flag `produtos` for ligada para um terminal que JÁ usa
+ * o grupo, a coluna sumiria do payload e os similares parariam de aparecer
+ * sem erro nenhum, sem log, sem nada a investigar.
+ *
+ * Por isso quem declara o que sabe ler é o terminal, e não o servidor que
+ * adivinha pela versão.
+ */
+const CAMPOS_V2 = 'grupo_similar'
+
+function camposDoPedido(campos: string | null): string {
+  return campos === 'v2' ? `${CAMPOS_SNAPSHOT}, ${CAMPOS_V2}` : CAMPOS_SNAPSHOT
+}
+
 const PAGINA = 500
 
 // ── SNAPSHOT ─────────────────────────────────────────────────────────────
@@ -63,12 +82,13 @@ export async function GET(req: Request) {
   const url = new URL(req.url)
   const desde = url.searchParams.get('desde')
   const pagina = Math.max(0, Number(url.searchParams.get('pagina') ?? 0) || 0)
+  const campos = camposDoPedido(url.searchParams.get('campos'))
 
   return leituraProtegida(req, {
     flagDaOperacao: 'produtos',
     ler: async (ctx) => {
       const sb = createAdminClient()
-      let q = sb.from('produtos').select(CAMPOS_SNAPSHOT)
+      let q = sb.from('produtos').select(campos)
         .eq('empresa_id', ctx.empresa_id)
         .order('nome').order('id')
         .range(pagina * PAGINA, pagina * PAGINA + PAGINA - 1)
