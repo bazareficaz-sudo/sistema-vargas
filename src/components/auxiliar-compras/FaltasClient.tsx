@@ -41,7 +41,24 @@ type Falta = {
   estoqueAtual: number | null
   custo: number
   categoria: string | null
+  fornecedor: string | null
+  noPedido: string | null
 }
+
+/** Produto abaixo do estoque mínimo. Não é registro: calculado na hora. */
+type Automatico = {
+  produtoId: string
+  nome: string
+  sku: string | null
+  estoque: number
+  minimo: number
+  sugestao: number
+  custo: number
+  fornecedor: string | null
+  noPedido: string | null
+}
+
+type Origem = '' | 'vendedor' | 'automatico' | 'com_estoque'
 
 type Grupo = {
   chave: string
@@ -58,6 +75,9 @@ type Grupo = {
   prazoMaisProximo: string | null
   estoqueAtual: number | null
   custo: number
+  fornecedor: string | null
+  noPedido: string | null
+  automatico: Automatico | null
 }
 
 const dataCurta = (v: string) =>
@@ -78,8 +98,9 @@ function whatsapp(telefone: string, produto: string) {
   return `https://wa.me/${num.length > 11 ? num : '55' + num}?text=${msg}`
 }
 
-export default function FaltasClient({ faltas, erro, limite }: {
+export default function FaltasClient({ faltas, automaticos, erro, limite }: {
   faltas: Falta[]
+  automaticos: Automatico[]
   erro: string | null
   limite: number
 }) {
@@ -87,11 +108,14 @@ export default function FaltasClient({ faltas, erro, limite }: {
   const [visao, setVisao] = useState<'produto' | 'solicitacao'>('produto')
   const [filtroTipo, setFiltroTipo] = useState<'' | 'falta' | 'encomenda'>('')
   const [filtroStatus, setFiltroStatus] = useState<string>('abertos')
+  const [filtroOrigem, setFiltroOrigem] = useState<Origem>('')
   const [busca, setBusca] = useState('')
   const [expandido, setExpandido] = useState<Set<string>>(new Set())
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [ocupado, setOcupado] = useState(false)
   const [aviso, setAviso] = useState('')
+
+  const autoPorProduto = useMemo(() => new Map(automaticos.map(a => [a.produtoId, a])), [automaticos])
 
   const filtradas = useMemo(() => faltas.filter(f => {
     if (filtroTipo && f.tipo !== filtroTipo) return false
@@ -99,11 +123,13 @@ export default function FaltasClient({ faltas, erro, limite }: {
     if (filtroStatus !== 'abertos' && filtroStatus !== '' && f.status !== filtroStatus) return false
     if (busca) {
       const t = busca.toLowerCase()
-      const alvo = `${f.produto_nome} ${f.produto_sku ?? ''} ${f.cliente_nome ?? ''} ${f.observacao ?? ''}`.toLowerCase()
+      const alvo = `${f.produto_nome} ${f.produto_sku ?? ''} ${f.cliente_nome ?? ''} ${f.observacao ?? ''} ${f.fornecedor ?? ''}`.toLowerCase()
       if (!alvo.includes(t)) return false
     }
+    if (filtroOrigem === 'automatico' && !(f.produto_id && autoPorProduto.has(f.produto_id))) return false
+    if (filtroOrigem === 'com_estoque' && !((f.estoqueAtual ?? 0) > 0)) return false
     return true
-  }), [faltas, filtroTipo, filtroStatus, busca])
+  }), [faltas, filtroTipo, filtroStatus, busca, filtroOrigem, autoPorProduto])
 
   const grupos = useMemo<Grupo[]>(() => {
     const mapa = new Map<string, Grupo>()
@@ -120,6 +146,8 @@ export default function FaltasClient({ faltas, erro, limite }: {
           primeira: f.created_at, ultima: f.created_at,
           temEncomenda: false, prazoMaisProximo: null,
           estoqueAtual: f.estoqueAtual, custo: f.custo,
+          fornecedor: f.fornecedor, noPedido: f.noPedido,
+          automatico: f.produto_id ? (autoPorProduto.get(f.produto_id) ?? null) : null,
         }
         mapa.set(chave, g)
       }
@@ -133,20 +161,43 @@ export default function FaltasClient({ faltas, erro, limite }: {
         g.prazoMaisProximo = f.prazo_desejado
       }
     }
+    // Abaixo do mínimo sem nenhuma falta anotada: linha só "Automático".
+    // Não tem status nem cliente, então só entra nas visões em que caberia
+    // uma falta pendente.
+    const autoCabe = filtroTipo !== 'encomenda' && ['abertos', '', 'pendente'].includes(filtroStatus)
+    if (autoCabe) {
+      const t = busca.toLowerCase()
+      for (const a of automaticos) {
+        if (mapa.has(a.produtoId)) continue
+        if (t && !`${a.nome} ${a.sku ?? ''} ${a.fornecedor ?? ''}`.toLowerCase().includes(t)) continue
+        mapa.set(a.produtoId, {
+          chave: a.produtoId, nome: a.nome, sku: a.sku, produtoId: a.produtoId,
+          itens: [], solicitacoes: 0, clientes: 0, quantidade: 0,
+          primeira: '', ultima: '', temEncomenda: false, prazoMaisProximo: null,
+          estoqueAtual: a.estoque, custo: a.custo,
+          fornecedor: a.fornecedor, noPedido: a.noPedido, automatico: a,
+        })
+      }
+    }
     for (const g of mapa.values()) {
       const pessoas = new Set(
         g.itens.map(i => (i.cliente_nome || i.cliente_telefone || '').trim().toLowerCase()).filter(Boolean)
       )
       g.clientes = pessoas.size
     }
-    // Encomenda na frente — tem gente esperando. Depois, o que foi mais
-    // pedido; empate desempata pelo pedido mais recente.
-    return [...mapa.values()].sort((a, b) => {
-      if (a.temEncomenda !== b.temEncomenda) return a.temEncomenda ? -1 : 1
-      if (b.solicitacoes !== a.solicitacoes) return b.solicitacoes - a.solicitacoes
-      return b.ultima.localeCompare(a.ultima)
-    })
-  }, [filtradas])
+    // Encomenda na frente — tem gente esperando. Depois, o que o balcão mais
+    // pediu; por último o que só está abaixo do mínimo.
+    return [...mapa.values()]
+      .filter(g => filtroOrigem === '' || filtroOrigem === 'com_estoque'
+        || (filtroOrigem === 'vendedor' ? g.itens.length > 0 : g.automatico !== null))
+      .filter(g => filtroOrigem !== 'com_estoque' || g.itens.length > 0)
+      .sort((a, b) => {
+        if (a.temEncomenda !== b.temEncomenda) return a.temEncomenda ? -1 : 1
+        if (b.solicitacoes !== a.solicitacoes) return b.solicitacoes - a.solicitacoes
+        if (a.itens.length === 0 && b.itens.length === 0) return a.nome.localeCompare(b.nome, 'pt-BR')
+        return b.ultima.localeCompare(a.ultima)
+      })
+  }, [filtradas, automaticos, autoPorProduto, filtroTipo, filtroStatus, filtroOrigem, busca])
 
   const kpi = useMemo(() => {
     const abertas = faltas.filter(f => ABERTOS.includes(f.status))
@@ -156,8 +207,16 @@ export default function FaltasClient({ faltas, erro, limite }: {
       produtos: new Set(abertas.map(f => f.produto_id ?? f.produto_nome.toLowerCase())).size,
       chegaram: faltas.filter(f => f.status === 'recebido').length,
       semCadastro: abertas.filter(f => !f.produto_id).length,
+      abaixoMinimo: automaticos.length,
     }
-  }, [faltas])
+  }, [faltas, automaticos])
+
+  // As abertas (exceto "Chegou") de produto que já tem estoque: candidatas a
+  // fechar. Não fecham sozinhas porque há falta anotada com estoque baixo
+  // mas positivo — quem decide é o comprador.
+  const idsComEstoque = useMemo(() => faltas
+    .filter(f => ABERTOS.includes(f.status) && f.status !== 'recebido' && (f.estoqueAtual ?? 0) > 0)
+    .map(f => f.id), [faltas])
 
   function alternarExpandido(chave: string) {
     setExpandido(prev => {
@@ -188,7 +247,7 @@ export default function FaltasClient({ faltas, erro, limite }: {
       setSelecionados(new Set())
       setAviso(
         status === 'recebido'
-          ? `${d.alteradas} marcada(s) como "chegou". O balcão vê isso na próxima sincronização e pode avisar o cliente.`
+          ? `${d.alteradas} marcada(s) como "chegou". As com cliente aparecem no balcão para avisar; as sem cliente já foram fechadas.`
           : `${d.alteradas} solicitação(ões) atualizada(s).`
       )
       router.refresh()
@@ -220,13 +279,27 @@ export default function FaltasClient({ faltas, erro, limite }: {
       )}
 
       {/* ── Indicadores ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
         <Cartao valor={kpi.encomendas} label="Encomendas abertas" destaque={kpi.encomendas > 0} />
         <Cartao valor={kpi.faltas} label="Faltas abertas" />
         <Cartao valor={kpi.produtos} label="Produtos diferentes" />
         <Cartao valor={kpi.chegaram} label="Chegaram — avisar cliente" destaque={kpi.chegaram > 0} />
+        <Cartao valor={kpi.abaixoMinimo} label="Abaixo do mínimo (automático)" />
         <Cartao valor={kpi.semCadastro} label="Sem produto no cadastro" />
       </div>
+
+      {idsComEstoque.length > 0 && filtroOrigem !== 'com_estoque' && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm text-amber-800">
+          <span>
+            <strong>{idsComEstoque.length}</strong> falta(s) aberta(s) de produtos que <strong>já têm estoque</strong>.
+            Daqui em diante a nota de entrada fecha sozinha; estas são de antes.
+          </span>
+          <button onClick={() => setFiltroOrigem('com_estoque')}
+            className="ml-auto px-3 py-1 rounded-md bg-amber-600 text-white text-xs font-medium hover:bg-amber-700">
+            Conferir
+          </button>
+        </div>
+      )}
 
       {/* ── Filtros ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -248,6 +321,14 @@ export default function FaltasClient({ faltas, erro, limite }: {
           <option value="falta">Só faltas</option>
         </select>
 
+        <select value={filtroOrigem} onChange={e => setFiltroOrigem(e.target.value as Origem)}
+          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
+          <option value="">Vendedor e automático</option>
+          <option value="vendedor">👤 Anotadas pelo vendedor</option>
+          <option value="automatico">🤖 Abaixo do mínimo</option>
+          <option value="com_estoque">📦 Já têm estoque</option>
+        </select>
+
         <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}
           className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
           <option value="abertos">Em aberto</option>
@@ -257,7 +338,7 @@ export default function FaltasClient({ faltas, erro, limite }: {
         </select>
 
         <input value={busca} onChange={e => setBusca(e.target.value)}
-          placeholder="Buscar produto, cliente ou observação..."
+          placeholder="Buscar produto, fornecedor, cliente ou observação..."
           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs flex-1 min-w-[200px]" />
 
         <span className="text-xs text-slate-400">
@@ -270,6 +351,17 @@ export default function FaltasClient({ faltas, erro, limite }: {
       {aviso && (
         <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
           {aviso}
+        </div>
+      )}
+
+      {filtroOrigem === 'com_estoque' && idsComEstoque.length > 0 && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm text-emerald-800">
+          <span>Confira a lista. As que já foram repostas podem ser fechadas de uma vez (ou selecione só algumas).</span>
+          <button disabled={ocupado}
+            onClick={() => { if (confirm(`Marcar ${idsComEstoque.length} falta(s) como Atendido?`)) mudarStatus(idsComEstoque, 'atendido') }}
+            className="ml-auto px-3 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
+            Fechar todas ({idsComEstoque.length})
+          </button>
         </div>
       )}
 
@@ -297,10 +389,10 @@ export default function FaltasClient({ faltas, erro, limite }: {
       )}
 
       {/* ── Lista ───────────────────────────────────────────────── */}
-      {filtradas.length === 0 ? (
+      {(visao === 'produto' ? grupos.length === 0 : filtradas.length === 0) ? (
         <div className="rounded-xl border border-slate-200 bg-white px-6 py-12 text-center">
           <p className="text-slate-500 text-sm">Nenhuma solicitação com esses filtros.</p>
-          {faltas.length === 0 && (
+          {faltas.length === 0 && automaticos.length === 0 && (
             <p className="text-slate-400 text-xs mt-2">
               As faltas são anotadas pelo vendedor no PDV do balcão, na busca de produto.
             </p>
@@ -424,18 +516,31 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
   const g = grupo
   const ids = g.itens.map(i => i.id)
   const todosSelecionados = ids.every(i => selecionados.has(i))
-  const diasPrimeira = diasDesde(g.primeira)
+  const diasPrimeira = g.primeira ? diasDesde(g.primeira) : 0
+  const temSolicitacoes = ids.length > 0
 
   return (
     <div className={`rounded-xl border bg-white overflow-hidden ${g.temEncomenda ? 'border-orange-200' : 'border-slate-200'}`}>
       <div className="flex items-start gap-3 px-4 py-3">
-        <input type="checkbox" className="mt-1" checked={todosSelecionados}
-          onChange={() => onSelecionar(ids)} />
+        <input type="checkbox" className="mt-1" checked={temSolicitacoes && todosSelecionados}
+          disabled={!temSolicitacoes} onChange={() => onSelecionar(ids)}
+          title={temSolicitacoes ? undefined : 'Linha automática: monte o pedido em Pedido ao Fornecedor › Faltas'} />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-slate-800">{g.nome}</span>
             {g.temEncomenda && <EtiquetaTipo tipo="encomenda" />}
+            {g.itens.length > 0 && (
+              <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" title="Anotada pelo vendedor no balcão">
+                👤 Vendedor
+              </span>
+            )}
+            {g.automatico && (
+              <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700"
+                title="Estoque abaixo do mínimo cadastrado. Some sozinho quando o estoque volta.">
+                🤖 Automático
+              </span>
+            )}
             {g.sku && <span className="text-[11px] text-slate-400">{g.sku}</span>}
             {!g.produtoId && (
               <span className="text-[11px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
@@ -444,6 +549,7 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
             )}
           </div>
 
+          {g.itens.length > 0 && (
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-slate-600">
             <span><strong className="text-slate-800">{g.solicitacoes}</strong> solicitaç{g.solicitacoes === 1 ? 'ão' : 'ões'}</span>
             {g.clientes > 0 && <span><strong className="text-slate-800">{g.clientes}</strong> cliente{g.clientes !== 1 ? 's' : ''} identificado{g.clientes !== 1 ? 's' : ''}</span>}
@@ -453,6 +559,14 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
               {diasPrimeira > 0 && ` · há ${diasPrimeira} dia${diasPrimeira !== 1 ? 's' : ''}`}
             </span>
           </div>
+          )}
+
+          {g.automatico && (
+            <div className="mt-1.5 text-[12px] text-purple-700">
+              Abaixo do mínimo: estoque {g.automatico.estoque} · mínimo {g.automatico.minimo} ·
+              sugestão <strong>{g.automatico.sugestao} un</strong>
+            </div>
+          )}
 
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
             <span className="text-slate-600">
@@ -460,8 +574,14 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
             </span>
             {g.custo > 0 && (
               <span className="text-slate-500">
-                custo {brl(g.custo)} · reposição estimada {brl(g.custo * g.quantidade)}
+                custo {brl(g.custo)} · reposição estimada {brl(g.custo * Math.max(g.quantidade, g.automatico?.sugestao ?? 0))}
               </span>
+            )}
+            <span className={g.fornecedor ? 'text-slate-600' : 'text-slate-400'}>
+              🏭 {g.fornecedor ?? 'sem fornecedor'}
+            </span>
+            {g.noPedido && (
+              <span className="text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded font-medium">no pedido #{g.noPedido}</span>
             )}
             {g.prazoMaisProximo && (
               <span className="text-orange-700 font-medium">
@@ -471,6 +591,7 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
           </div>
         </div>
 
+        {temSolicitacoes && (
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <div className="flex gap-1">
             {(['em_analise', 'em_compra', 'recebido'] as const).map(s => (
@@ -485,6 +606,7 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
             {aberto ? 'ocultar' : 'ver as solicitações'}
           </button>
         </div>
+        )}
       </div>
 
       {aberto && (

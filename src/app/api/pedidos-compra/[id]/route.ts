@@ -72,6 +72,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }).eq('id', id).eq('empresa_id', empresaId)
 
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
+  await liberarFaltas(sb, empresaId, id)
   return NextResponse.json({ ok: true, status: 'cancelado' })
 }
 
@@ -98,5 +99,16 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { error } = await sb.from('pedidos_compra').delete().eq('id', id).eq('empresa_id', empresaId)
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
+  await liberarFaltas(sb, empresaId, id)
   return NextResponse.json({ ok: true })
+}
+
+// Pedido que não vai mais acontecer devolve as faltas ligadas a ele para a
+// lista ("Pendente"); senão elas ficariam "Pedido" esperando mercadoria que
+// não vem. Ver vincularFaltas em ../salvar/route.ts.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function liberarFaltas(sb: any, empresaId: string, pedidoId: string) {
+  const { error } = await sb.from('faltas').update({ status: 'pendente', pedido_compra_id: null })
+    .eq('empresa_id', empresaId).eq('pedido_compra_id', pedidoId).in('status', ['em_compra', 'pedido'])
+  if (error) console.error('[pedidos-compra] liberar faltas falhou', error.message)
 }

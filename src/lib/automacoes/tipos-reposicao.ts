@@ -24,65 +24,6 @@ export async function executarReposicaoMinimo(sb: any, a: any): Promise<Resultad
   return r.ok ? { status: 'ok' } : { status: 'erro', erro: r.erro }
 }
 
-// Cria um pedido de compra em RASCUNHO com os produtos abaixo do mínimo —
-// nunca envia nada pro fornecedor sozinho. O rascunho fica em Compras >
-// Pedido ao Fornecedor esperando revisão humana (escolher fornecedor,
-// ajustar quantidades, confirmar) antes de virar um pedido de verdade.
-//
-// Desde que o Auxiliar de Compras passou a gerar pedido pela mesma via
-// (origem='auxiliar'), os dois caminhos disputam os mesmos produtos sem
-// se falar. Este é o único ponto de todas as automações de reposição que
-// de fato grava um `pedidos_compra` — as outras três só mandam alerta por
-// WhatsApp. Por isso a correção mora só aqui: produto que já tem pedido
-// em aberto (de qualquer origem) sai da lista antes de criar outro, e o
-// que for criado carrega `origem='automacao'` para não se confundir com o
-// que o comprador montou à mão.
-export async function executarPedidoAutomatico(sb: any, a: any): Promise<ResultadoExecucao> {
-  const baixos0 = await produtosAbaixoMinimo(sb, a)
-  if (baixos0.length === 0) return { status: 'sem_acao' }
-
-  const { data: itensEmAberto } = await sb.from('pedidos_compra_itens')
-    .select('produto_id, pedidos_compra!inner(empresa_id, status)')
-    .eq('pedidos_compra.empresa_id', a.empresa_id)
-    .not('pedidos_compra.status', 'in', '("cancelado","recebido")')
-  const jaPedido = new Set((itensEmAberto ?? []).map((i: any) => i.produto_id))
-
-  const baixos = baixos0.filter((p: any) => !jaPedido.has(p.id))
-  if (baixos.length === 0) return { status: 'sem_acao' }
-
-  const itens = baixos.map((p: any) => {
-    const sugestao = Math.max(1, Math.ceil(Number(p.estoque_minimo ?? 0) - Number(p.estoque ?? 0)) || 1)
-    return {
-      produto_id: p.id,
-      quantidade: sugestao,
-      custo_unitario: Number(p.preco_custo ?? 0),
-      total: sugestao * Number(p.preco_custo ?? 0),
-    }
-  })
-  const subtotal = itens.reduce((s: number, i: any) => s + i.total, 0)
-
-  const { data: pedido, error: erroPedido } = await sb.from('pedidos_compra').insert({
-    empresa_id: a.empresa_id,
-    status: 'rascunho',
-    origem: 'automacao',
-    observacoes: `Gerado automaticamente pela automação "${a.nome}" — revise fornecedor e quantidades antes de enviar.`,
-    subtotal,
-    total: subtotal,
-  }).select('id, numero').single()
-
-  if (erroPedido) return { status: 'erro', erro: erroPedido.message }
-
-  await sb.from('pedidos_compra_itens').insert(itens.map((i: any) => ({ ...i, pedido_id: pedido.id })))
-
-  if (a.numero_destino) {
-    const linhas = baixos.slice(0, 30).map((p: any) => `• ${p.nome} — sugestão ${itens.find((i: any) => i.produto_id === p.id)?.quantidade}un`)
-    const mensagem = `🔄 Rascunho de pedido de compra criado (nº ${pedido.numero}) — ${baixos.length} produto(s)\n\n${linhas.join('\n')}\n\nRevise fornecedor e quantidades em Compras antes de enviar.`
-    await enviarWhatsappAutomacao(sb, a.empresa_id, a.numero_destino, mensagem, { tipo: a.tipo })
-  }
-
-  return { status: 'ok' }
-}
-
 export async function executarCurvaAbc(sb: any, a: any): Promise<ResultadoExecucao> {
   const produtoIds = (a.produtos ?? []).map((p: any) => p.produto_id)
   let query = sb.from('produtos').select('id, nome, estoque').eq('empresa_id', a.empresa_id).eq('ativo', true)

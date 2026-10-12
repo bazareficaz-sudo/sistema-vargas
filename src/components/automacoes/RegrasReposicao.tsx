@@ -7,12 +7,17 @@ import BuscaProdutosMulti from './BuscaProdutosMulti'
 
 const TIPOS = [
   { id: 'reposicao_minimo', icone: '📉', label: 'Alerta de estoque mínimo' },
-  { id: 'reposicao_pedido_automatico', icone: '📝', label: 'Pedido de compra automático (rascunho)' },
+  // Descontinuado em 12/10/2026: criava um rascunho sem fornecedor por dia.
+  // Os itens abaixo do mínimo agora aparecem na lista de faltas, com o
+  // fornecedor, e o pedido é montado a partir dela. Fica aqui só para a
+  // regra antiga continuar com nome na lista; não aparece para criar.
+  { id: 'reposicao_pedido_automatico', icone: '📝', label: 'Pedido de compra automático (descontinuado)' },
   { id: 'reposicao_curva_abc', icone: '📈', label: 'Reposição por giro (Curva ABC)' },
   { id: 'reposicao_produto_parado', icone: '📦', label: 'Produtos parados' },
 ] as const
 
 type TipoReposicao = typeof TIPOS[number]['id']
+const TIPOS_NOVOS = TIPOS.filter(t => t.id !== 'reposicao_pedido_automatico')
 
 const FORM_VAZIO = {
   tipo: 'reposicao_minimo' as TipoReposicao,
@@ -36,7 +41,7 @@ function resumoRegra(a: Automacao) {
     case 'reposicao_minimo':
       return `${escopo} · ${Number(a.limite_estoque) > 0 ? `limite ${a.limite_estoque}` : 'usa o mínimo cadastrado'}${a.numero_destino ? ` · pra ${a.numero_destino}` : ''}`
     case 'reposicao_pedido_automatico':
-      return `Cria rascunho de pedido de compra · ${escopo}${a.numero_destino ? ` · avisa ${a.numero_destino}` : ''}`
+      return 'Descontinuado — os itens abaixo do mínimo aparecem em Faltas e Encomendas'
     case 'reposicao_curva_abc':
       return `Cobertura alvo: ${a.dias_alerta} dias · ${escopo} · pra ${a.numero_destino}`
     case 'reposicao_produto_parado':
@@ -245,7 +250,7 @@ export default function RegrasReposicao({ empresaId, automacoes, onChange }: {
                 <div>
                   <p className="text-xs font-semibold text-gray-700 mb-2">Tipo</p>
                   <div className="grid grid-cols-1 gap-1.5">
-                    {TIPOS.map(t => (
+                    {TIPOS_NOVOS.map(t => (
                       <label key={t.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm cursor-pointer ${form.tipo === t.id ? 'border-amber-500 bg-amber-50' : 'border-gray-200 hover:bg-gray-50'}`}>
                         <input type="radio" name="tipoRepo" checked={form.tipo === t.id} onChange={() => f('tipo', t.id)} className="accent-amber-600" />
                         <span>{t.icone}</span>
@@ -258,7 +263,8 @@ export default function RegrasReposicao({ empresaId, automacoes, onChange }: {
 
               {form.tipo === 'reposicao_pedido_automatico' && (
                 <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
-                  📝 Cria um <strong>rascunho</strong> em Compras → Pedido ao Fornecedor — nunca envia nada pro fornecedor sozinho. Você revisa e confirma manualmente.
+                  📝 Esta regra foi descontinuada e não cria mais rascunhos. Os produtos abaixo do mínimo aparecem em
+                  Compras → Faltas e Encomendas (etiqueta Automático), e o pedido é montado a partir de lá.
                 </div>
               )}
 

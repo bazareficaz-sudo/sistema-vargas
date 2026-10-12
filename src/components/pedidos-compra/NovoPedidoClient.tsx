@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import PainelFaltasPedido from './PainelFaltasPedido'
+import type { LinhaCompra } from '@/lib/faltas/listaCompra'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,7 +154,7 @@ export default function NovoPedidoClient({ fornecedores, empresa, empresaId, use
 
   // UI
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [histTab, setHistTab] = useState<'produtos' | 'historico'>('produtos')
+  const [histTab, setHistTab] = useState<'produtos' | 'historico' | 'faltas'>('produtos')
 
   // Envio por WhatsApp (Z-API) e impressão
   const [waAberto, setWaAberto] = useState(false)
@@ -337,6 +339,21 @@ export default function NovoPedidoClient({ fornecedores, empresa, empresaId, use
     })
     setModalProduto(null)
     setTimeout(() => buscaRef.current?.focus(), 60)
+  }
+
+  // Itens vindos da aba Faltas. A falta em si não muda aqui: ao salvar, a
+  // rota liga as faltas abertas destes produtos ao pedido.
+  function adicionarDasFaltas(novos: { linha: LinhaCompra; quantidade: number }[]) {
+    setItens(prev => {
+      const jaTem = new Set(prev.map(i => i.produto_id))
+      const extras = novos.filter(n => !jaTem.has(n.linha.produtoId)).map(({ linha: l, quantidade }) => ({
+        produto_id: l.produtoId, nome: l.nome, sku: l.sku ?? '', unidade: l.unidade ?? 'UN',
+        quantidade, custo_unitario: l.custo, desconto: 0, total: quantidade * l.custo,
+        ultimoCusto: l.custo, custoMedio: 0, preco_venda: l.precoVenda,
+        observacao: l.temEncomenda ? 'Encomenda de cliente' : '',
+      }))
+      return [...prev, ...extras]
+    })
   }
 
   function removerItem(produto_id: string) {
@@ -696,9 +713,18 @@ export default function NovoPedidoClient({ fornecedores, empresa, empresaId, use
               className={`py-2.5 text-xs font-semibold border-b-2 transition-colors ${histTab === 'historico' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               Histórico do fornecedor
             </button>
+            <button onClick={() => setHistTab('faltas')}
+              className={`py-2.5 text-xs font-semibold border-b-2 transition-colors ${histTab === 'faltas' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+              Faltas
+            </button>
           </div>
 
-          {histTab === 'historico' ? (
+          {histTab === 'faltas' ? (
+            <div className="flex-1 min-h-0 bg-white">
+              <PainelFaltasPedido fornecedorId={fornecedorId} nomeFornecedor={nomeFornecedor}
+                noCarrinho={new Set(itens.map(i => i.produto_id))} onAdicionar={adicionarDasFaltas} />
+            </div>
+          ) : histTab === 'historico' ? (
             !fornecedorId ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
                 <span className="text-5xl mb-3">📜</span>

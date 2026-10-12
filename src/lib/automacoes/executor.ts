@@ -6,7 +6,7 @@ import {
 import { executarMargemBaixa, executarProdutoParado, executarInadimplencia, executarMetaVendas } from './tipos-alertas'
 import { executarEmissaoPorProduto, executarEmissaoPorFormaPagamento, executarEmissaoPorCliente } from './tipos-fiscal'
 import { executarEmissaoNfeMarketplace } from './tipos-nfe-marketplace'
-import { executarReposicaoMinimo, executarPedidoAutomatico, executarCurvaAbc, executarProdutoParadoReposicao } from './tipos-reposicao'
+import { executarReposicaoMinimo, executarCurvaAbc, executarProdutoParadoReposicao } from './tipos-reposicao'
 import { avisarFalhaSeConfigurado } from './alertaFalha'
 
 const HANDLERS: Record<string, (sb: any, a: any) => Promise<ResultadoExecucao>> = {
@@ -22,7 +22,9 @@ const HANDLERS: Record<string, (sb: any, a: any) => Promise<ResultadoExecucao>> 
   whatsapp_conta_receber: executarContaReceber,
   whatsapp_conta_pagar: executarContaPagar,
   reposicao_minimo: executarReposicaoMinimo,
-  reposicao_pedido_automatico: executarPedidoAutomatico,
+  // Descontinuado: os itens abaixo do mínimo aparecem na lista de faltas.
+  // Uma regra antiga que ainda esteja ativa não cria mais nada.
+  reposicao_pedido_automatico: async () => ({ status: 'sem_acao' }),
   reposicao_curva_abc: executarCurvaAbc,
   reposicao_produto_parado: executarProdutoParadoReposicao,
   alerta_margem_baixa: executarMargemBaixa,
