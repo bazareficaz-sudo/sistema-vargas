@@ -43,6 +43,10 @@ type Falta = {
   categoria: string | null
   fornecedor: string | null
   noPedido: string | null
+  chegou_em?: string | null
+  aviso_whatsapp_em?: string | null
+  aviso_whatsapp_erro?: string | null
+  aviso_whatsapp_tentativas?: number | null
 }
 
 /** Produto abaixo do estoque mínimo. Não é registro: calculado na hora. */
@@ -247,7 +251,7 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
       setSelecionados(new Set())
       setAviso(
         status === 'recebido'
-          ? `${d.alteradas} marcada(s) como "chegou". As com cliente aparecem no balcão para avisar; as sem cliente já foram fechadas.`
+          ? `${d.alteradas} marcada(s) como "chegou". As com telefone recebem o aviso por WhatsApp (se a automação estiver ligada); as sem cliente já foram fechadas.`
           : `${d.alteradas} solicitação(ões) atualizada(s).`
       )
       router.refresh()
@@ -455,7 +459,7 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
                   <td className="px-3 py-2 text-right font-medium">{f.quantidade_solicitada}</td>
                   <td className="px-3 py-2 text-right"><Estoque valor={f.estoqueAtual} /></td>
                   <td className="px-3 py-2 text-[11px] text-slate-500">{f.usuario_nome ?? '—'}</td>
-                  <td className="px-3 py-2"><EtiquetaStatus status={f.status} /></td>
+                  <td className="px-3 py-2"><EtiquetaStatus status={f.status} /><AvisoWhatsapp f={f} /></td>
                   <td className="px-3 py-2 text-[11px] text-slate-500">{dataHora(f.created_at)}</td>
                 </tr>
               ))}
@@ -495,6 +499,29 @@ function EtiquetaStatus({ status }: { status: string }) {
       {s.label}
     </span>
   )
+}
+
+/**
+ * Resultado do aviso automático por WhatsApp (automação "Avisar cliente
+ * quando a falta chegar"). Sem nada aqui numa falta "Chegou", o aviso ainda
+ * não saiu — ou a regra está desligada, ou não há telefone: o vendedor avisa.
+ */
+function AvisoWhatsapp({ f }: { f: Falta }) {
+  if (f.aviso_whatsapp_em) {
+    return (
+      <span className="block text-[11px] text-emerald-700" title="Aviso automático enviado ao cliente">
+        📲 avisado {dataHora(f.aviso_whatsapp_em)}
+      </span>
+    )
+  }
+  if (f.aviso_whatsapp_erro && f.status === 'recebido') {
+    return (
+      <span className="block text-[11px] text-red-600" title={f.aviso_whatsapp_erro}>
+        ⚠ aviso não enviado{(f.aviso_whatsapp_tentativas ?? 0) >= 3 ? ' — avise pelo balcão' : ', tentando de novo'}
+      </span>
+    )
+  }
+  return null
 }
 
 /** Estoque atual do produto pedido — sem isso a linha não vira decisão. */
@@ -629,6 +656,7 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
               )}
               {f.observacao && <span className="text-slate-500 italic">{f.observacao}</span>}
               <span className="text-slate-400">{f.usuario_nome ?? 'vendedor não identificado'}</span>
+              <AvisoWhatsapp f={f} />
               <span className="ml-auto"><EtiquetaStatus status={f.status} /></span>
             </div>
           ))}

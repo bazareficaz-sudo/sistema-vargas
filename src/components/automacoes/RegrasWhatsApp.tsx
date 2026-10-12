@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { Automacao, Canal, ProdutoRef } from './AutomacoesClient'
 import BuscaProdutosMulti from './BuscaProdutosMulti'
 import BuscaCliente from './BuscaCliente'
+import { MENSAGEM_PADRAO_AVISO, montarAvisoChegada } from '@/lib/faltas/avisoChegada'
 
 const TIPOS = [
   { id: 'whatsapp_relatorio_diario', icone: '📊', label: 'Relatório diário' },
@@ -14,6 +15,7 @@ const TIPOS = [
   { id: 'whatsapp_estoque_baixo', icone: '📉', label: 'Alerta de estoque baixo' },
   { id: 'whatsapp_conta_receber', icone: '💰', label: 'Contas a receber vencendo' },
   { id: 'whatsapp_conta_pagar', icone: '💳', label: 'Contas a pagar vencendo' },
+  { id: 'whatsapp_aviso_falta_chegou', icone: '📲', label: 'Avisar cliente quando a falta chegar' },
 ] as const
 
 type TipoWpp = typeof TIPOS[number]['id']
@@ -39,6 +41,7 @@ const FORM_VAZIO = {
   cliente_id: null as string | null,
   cliente_nome: '',
   marketplace_canal_id: '',
+  mensagem_modelo: MENSAGEM_PADRAO_AVISO,
   ativa: true,
 }
 
@@ -64,6 +67,8 @@ function resumoRegra(a: Automacao) {
       return `${a.dias_alerta} dia(s) de antecedência · pra ${a.numero_destino}`
     case 'whatsapp_conta_pagar':
       return `${a.dias_alerta} dia(s) de antecedência · pra ${a.numero_destino}`
+    case 'whatsapp_aviso_falta_chegou':
+      return 'Avisa o cliente da falta/encomenda (com telefone) quando o produto volta ao estoque'
     default:
       return ''
   }
@@ -102,6 +107,7 @@ export default function RegrasWhatsApp({ empresaId, canais, automacoes, onChange
       cliente_id: a.cliente_id,
       cliente_nome: a.cliente_nome ?? '',
       marketplace_canal_id: a.marketplace_canal_id ?? '',
+      mensagem_modelo: a.mensagem_modelo || MENSAGEM_PADRAO_AVISO,
       ativa: a.ativa,
     })
     setErro('')
@@ -117,12 +123,14 @@ export default function RegrasWhatsApp({ empresaId, canais, automacoes, onChange
       case 'whatsapp_estoque_baixo': return 'Alerta de estoque baixo'
       case 'whatsapp_conta_receber': return `Lembrete de contas a receber (${form.dias_alerta}d)`
       case 'whatsapp_conta_pagar': return `Lembrete de contas a pagar (${form.dias_alerta}d)`
+      case 'whatsapp_aviso_falta_chegou': return 'Avisar cliente quando a falta chegar'
       default: return 'Nova automação'
     }
   }
 
   function precisaDestino() {
-    return form.tipo !== 'whatsapp_pedido_cliente'
+    // Estes dois mandam para o CLIENTE, não para um número da loja.
+    return form.tipo !== 'whatsapp_pedido_cliente' && form.tipo !== 'whatsapp_aviso_falta_chegou'
   }
 
   function validar(): string {
@@ -132,6 +140,7 @@ export default function RegrasWhatsApp({ empresaId, canais, automacoes, onChange
     if (form.tipo === 'whatsapp_alerta_produto' && form.produtos.length === 0) return 'Selecione pelo menos 1 produto.'
     if (form.tipo === 'whatsapp_alerta_pedido_marketplace' && !form.marketplace_canal_id) return 'Selecione o canal do marketplace.'
     if ((form.tipo === 'whatsapp_conta_receber' || form.tipo === 'whatsapp_conta_pagar') && (!form.dias_alerta || parseInt(form.dias_alerta) < 0)) return 'Informe os dias de antecedência.'
+    if (form.tipo === 'whatsapp_aviso_falta_chegou' && !form.mensagem_modelo.includes('{produto}')) return 'A mensagem precisa ter {produto}, senão o cliente não sabe o que chegou.'
     return ''
   }
 
@@ -156,6 +165,7 @@ export default function RegrasWhatsApp({ empresaId, canais, automacoes, onChange
       cliente_id: form.tipo === 'whatsapp_pedido_cliente' ? form.cliente_id : null,
       cliente_nome: form.tipo === 'whatsapp_pedido_cliente' ? form.cliente_nome : null,
       marketplace_canal_id: form.tipo === 'whatsapp_alerta_pedido_marketplace' ? (form.marketplace_canal_id || null) : null,
+      mensagem_modelo: form.tipo === 'whatsapp_aviso_falta_chegou' ? form.mensagem_modelo.trim() : null,
       updated_at: new Date().toISOString(),
     }
 
@@ -307,6 +317,25 @@ export default function RegrasWhatsApp({ empresaId, canais, automacoes, onChange
                   <input type="number" value={form.dias_alerta} onChange={e => f('dias_alerta', e.target.value)}
                     placeholder="Ex: 3"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+                </div>
+              )}
+
+              {form.tipo === 'whatsapp_aviso_falta_chegou' && (
+                <div className="space-y-2">
+                  <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-800">
+                    📲 Quando uma falta ou encomenda <strong>com telefone do cliente</strong> vira &quot;Chegou&quot; — nota de entrada,
+                    ajuste de estoque, inventário ou marcação manual — o cliente recebe esta mensagem pelo WhatsApp da loja.
+                    Uma vez por falta; só as que chegarem depois de a regra existir.
+                  </div>
+                  <label className="block text-xs font-medium text-gray-600">Mensagem</label>
+                  <textarea value={form.mensagem_modelo} onChange={e => f('mensagem_modelo', e.target.value)} rows={3}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-green-500" />
+                  <p className="text-[10px] text-gray-400">
+                    Marcadores: <code>{'{nome}'}</code> primeiro nome do cliente · <code>{'{produto}'}</code> · <code>{'{loja}'}</code>
+                  </p>
+                  <p className="text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                    <span className="font-medium">Exemplo:</span> {montarAvisoChegada(form.mensagem_modelo, { nome: 'Maria', produto: 'TRENA EMBORRACHADA 5 METROS', loja: 'sua loja' })}
+                  </p>
                 </div>
               )}
 

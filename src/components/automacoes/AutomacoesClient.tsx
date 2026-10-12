@@ -32,6 +32,8 @@ export type Automacao = {
   tipo_relatorio: string | null
   dias_alerta: number | null
   limite_estoque: number | null
+  /** Modelo de mensagem com marcadores — hoje só o aviso de falta que chegou. */
+  mensagem_modelo?: string | null
   ultima_execucao: string | null
   total_execucoes: number
   ultimo_status: string | null
