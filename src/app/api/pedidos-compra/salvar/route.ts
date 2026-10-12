@@ -57,5 +57,43 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  await vincularFaltas(supabase, pedidoData.empresa_id, id, pedidoData.status,
+    (itens ?? []).map((i: Record<string, unknown>) => String(i.produto_id ?? '')).filter(Boolean))
+
   return NextResponse.json({ id })
+}
+
+// FALTAS ↔ PEDIDO.
+//
+// As faltas abertas dos produtos deste pedido passam a apontar para ele:
+// "Na lista" enquanto o pedido não saiu (rascunho, cotação, aprovação) e
+// "Pedido" depois de enviado. Produto que saiu do pedido — ou pedido
+// cancelado — devolve a falta para "Pendente", para ela voltar à lista.
+// Quem fecha a falta é a entrada da mercadoria (trigger no banco), não isto.
+//
+// Falha aqui não desfaz o pedido salvo: o vínculo é conveniência, o pedido
+// é o que importa.
+const ANTES_DE_ENVIAR = ['rascunho', 'em_cotacao', 'aguardando_aprovacao']
+const FALTA_A_COMPRAR = ['pendente', 'em_analise', 'em_compra', 'pedido', 'notificado', 'comprado']
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function vincularFaltas(sb: any, empresaId: string, pedidoId: string, status: string, produtoIds: string[]) {
+  if (!empresaId || !pedidoId) return
+  try {
+    const cancelado = status === 'cancelado'
+    let liberar = sb.from('faltas').update({ status: 'pendente', pedido_compra_id: null })
+      .eq('empresa_id', empresaId).eq('pedido_compra_id', pedidoId).in('status', ['em_compra', 'pedido'])
+    if (!cancelado && produtoIds.length > 0) liberar = liberar.not('produto_id', 'in', `(${produtoIds.join(',')})`)
+    await liberar
+
+    if (cancelado || produtoIds.length === 0 || !['enviado', ...ANTES_DE_ENVIAR].includes(status)) return
+    await sb.from('faltas')
+      .update({ status: ANTES_DE_ENVIAR.includes(status) ? 'em_compra' : 'pedido', pedido_compra_id: pedidoId })
+      .eq('empresa_id', empresaId)
+      .in('produto_id', produtoIds)
+      .in('status', FALTA_A_COMPRAR)
+      .or(`pedido_compra_id.is.null,pedido_compra_id.eq.${pedidoId}`)
+  } catch (e) {
+    console.error('[pedidos-compra/salvar] vínculo com faltas falhou', e)
+  }
 }
