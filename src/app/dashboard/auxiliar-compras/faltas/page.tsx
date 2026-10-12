@@ -22,7 +22,7 @@ export default async function FaltasPage() {
   const empresaId = perfil?.empresa_id ?? ''
 
   const { data: faltas, error } = await sb.from('faltas')
-    .select('id, produto_id, produto_nome, produto_sku, cliente_nome, cliente_telefone, quantidade_solicitada, quantidade_atendida, observacao, status, tipo, origem, usuario_nome, prazo_desejado, preco_negociado, created_at, updated_at')
+    .select('id, produto_id, produto_nome, produto_sku, cliente_nome, cliente_telefone, quantidade_solicitada, quantidade_atendida, observacao, status, tipo, origem, usuario_nome, prazo_desejado, preco_negociado, created_at, updated_at, chegou_em, aviso_whatsapp_em, aviso_whatsapp_erro, aviso_whatsapp_tentativas')
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: false })
     .limit(LIMITE)
