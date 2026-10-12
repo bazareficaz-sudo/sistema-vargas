@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useCarrinho } from './CarrinhoContexto'
 import { EstadoVazio, ImagemProduto, classesBotao, estiloPrimario, real } from './ds'
 import type { ItemCarrinhoConferido } from '@/lib/commerce/tipos'
+import CotacaoFreteCarrinho from './CotacaoFreteCarrinho'
 
 // Carrinho.
 //
@@ -25,11 +26,13 @@ type Conferido = {
 }
 
 export default function CarrinhoCliente({
-  permiteSemEstoque, entregaAtiva, retiradaAtiva, whatsapp, nomeLoja,
+  permiteSemEstoque, entregaAtiva, retiradaAtiva, freteAtivo, whatsapp, nomeLoja,
 }: {
   permiteSemEstoque: boolean
   entregaAtiva: boolean
   retiradaAtiva: boolean
+  /** A loja calcula frete por CEP? Falso mantém o aviso de frete combinado. */
+  freteAtivo: boolean
   whatsapp: string | null
   nomeLoja: string
 }) {
@@ -189,9 +192,18 @@ export default function CarrinhoCliente({
             <span className="text-[var(--tinta-media)]">Subtotal</span>
             <span className="text-2xl font-bold tracking-tight">{real(subtotal)}</span>
           </div>
-          <p className="mt-1 text-xs text-[var(--tinta-fraca)]">
-            O frete é combinado pela loja — ele não entra neste total.
-          </p>
+          {freteAtivo ? (
+            <CotacaoFreteCarrinho
+              subtotal={subtotal}
+              itens={lista
+                .filter(i => !i.indisponivel && i.quantidade > 0)
+                .map(i => ({ produtoId: i.produto.produtoId, quantidade: i.quantidade }))}
+            />
+          ) : (
+            <p className="mt-1 text-xs text-[var(--tinta-fraca)]">
+              O frete é combinado pela loja — ele não entra neste total.
+            </p>
+          )}
 
           {/* O checkout existe (Fase 3), e é ele o caminho principal: o
               pedido nasce no ERP, com estoque reservado, em vez de virar uma
