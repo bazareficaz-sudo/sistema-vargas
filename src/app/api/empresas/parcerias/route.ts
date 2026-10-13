@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
+import { empresaAtivaDaGuarda } from '@/lib/auth/empresaAtiva'
 
 export async function GET() {
   const sb = await createClient()
   const guarda = await exigirPermissao(sb, 'gerenciar_configuracoes')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
+  const empresaAtiva = await empresaAtivaDaGuarda(sb, guarda)
   if (!guarda.tenantId) return NextResponse.json({ ok: true, parcerias: [] })
 
   const { data: parcerias } = await sb.from('empresa_parcerias')
     .select('id, empresa_id_a, empresa_id_b, status, created_at')
-    .or(`empresa_id_a.eq.${guarda.empresaId},empresa_id_b.eq.${guarda.empresaId}`)
+    .or(`empresa_id_a.eq.${empresaAtiva},empresa_id_b.eq.${empresaAtiva}`)
     .order('created_at', { ascending: false })
 
   const idsEmpresas = [...new Set((parcerias ?? []).flatMap(p => [p.empresa_id_a, p.empresa_id_b]))]
@@ -20,7 +22,7 @@ export async function GET() {
   const nomePorId = new Map((empresas ?? []).map((e: any) => [e.id, e.nome_fantasia ?? e.nome]))
 
   const lista = (parcerias ?? []).map(p => {
-    const parceiraId = p.empresa_id_a === guarda.empresaId ? p.empresa_id_b : p.empresa_id_a
+    const parceiraId = p.empresa_id_a === empresaAtiva ? p.empresa_id_b : p.empresa_id_a
     return {
       id: p.id, status: p.status, createdAt: p.created_at,
       empresaParceiraId: parceiraId, empresaParceiraNome: nomePorId.get(parceiraId) ?? '—',
@@ -34,12 +36,13 @@ export async function POST(req: Request) {
   const sb = await createClient()
   const guarda = await exigirPermissao(sb, 'gerenciar_configuracoes')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
+  const empresaAtiva = await empresaAtivaDaGuarda(sb, guarda)
   if (!guarda.tenantId) return NextResponse.json({ ok: false, erro: 'Empresa sem grupo (tenant) identificado' }, { status: 400 })
 
   const body = await req.json()
   const empresaParceiraId = String(body?.empresaParceiraId ?? '')
   if (!empresaParceiraId) return NextResponse.json({ ok: false, erro: 'empresaParceiraId ausente' }, { status: 400 })
-  if (empresaParceiraId === guarda.empresaId) return NextResponse.json({ ok: false, erro: 'Não é possível criar parceria com a própria empresa' }, { status: 400 })
+  if (empresaParceiraId === empresaAtiva) return NextResponse.json({ ok: false, erro: 'Não é possível criar parceria com a própria empresa' }, { status: 400 })
 
   // Nunca cruza tenant — a empresa parceira precisa pertencer ao mesmo
   // grupo/dono de quem está criando a parceria.
@@ -51,18 +54,18 @@ export async function POST(req: Request) {
   // Evita duplicidade nas duas ordens (A,B) e (B,A).
   const { data: existente } = await sb.from('empresa_parcerias')
     .select('id')
-    .or(`and(empresa_id_a.eq.${guarda.empresaId},empresa_id_b.eq.${empresaParceiraId}),and(empresa_id_a.eq.${empresaParceiraId},empresa_id_b.eq.${guarda.empresaId})`)
+    .or(`and(empresa_id_a.eq.${empresaAtiva},empresa_id_b.eq.${empresaParceiraId}),and(empresa_id_a.eq.${empresaParceiraId},empresa_id_b.eq.${empresaAtiva})`)
     .maybeSingle()
   if (existente) return NextResponse.json({ ok: false, erro: 'Já existe uma parceria entre essas empresas' }, { status: 400 })
 
   const { data: nova, error } = await sb.from('empresa_parcerias').insert({
-    tenant_id: guarda.tenantId, empresa_id_a: guarda.empresaId, empresa_id_b: empresaParceiraId,
+    tenant_id: guarda.tenantId, empresa_id_a: empresaAtiva, empresa_id_b: empresaParceiraId,
     status: 'ativa', criado_por: guarda.userId,
   }).select('id').single()
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
 
   await registrarAuditoria(sb, {
-    empresaId: guarda.empresaId, usuarioId: guarda.userId,
+    empresaId: empresaAtiva, usuarioId: guarda.userId,
     acao: 'parceria_criada', tabela: 'empresa_parcerias', valorNovo: { empresaParceiraId },
   })
 

@@ -6,8 +6,9 @@ import { clonarProdutosParaEmpresa } from '@/lib/produtos/clonarParaEmpresa'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-// Duplica produtos da empresa ativa (origem) para a empresa parceira
-// (destino) — pra que a empresa destino tenha catálogo PRÓPRIO e consiga
+// Duplica produtos entre as empresas da parceria — por padrão da empresa
+// ativa (origem) para a parceira (destino); com `direcao: 'trazer'`, da
+// parceira para a empresa ativa. Pra que a empresa destino tenha catálogo PRÓPRIO e consiga
 // vender, receber XML e transferir estoque por conta dela, não emprestando
 // o cadastro da outra.
 //
@@ -25,6 +26,8 @@ type Corpo = {
   subcategoria?: string
   tag?: string
   busca?: string
+  /** 'enviar' (padrão): da empresa ativa para a parceira. 'trazer': da parceira para a ativa. */
+  direcao?: 'enviar' | 'trazer'
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -37,26 +40,29 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
   const perfil = await perfilDaSessao(sb, user.id, 'empresa_id, nome')
-  const empresaOrigemId = perfil?.empresa_id
-  if (!empresaOrigemId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
+  const empresaAtivaId = perfil?.empresa_id
+  if (!empresaAtivaId) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 400 })
 
   const { data: parceria } = await sb.from('empresa_parcerias')
     .select('id, empresa_id_a, empresa_id_b, status').eq('id', parceriaId).maybeSingle()
   if (!parceria || parceria.status !== 'ativa') {
     return NextResponse.json({ ok: false, erro: 'Parceria não encontrada ou inativa.' }, { status: 404 })
   }
-  const origemEhLadoA = parceria.empresa_id_a === empresaOrigemId
-  const origemEhLadoB = parceria.empresa_id_b === empresaOrigemId
-  if (!origemEhLadoA && !origemEhLadoB) {
+  const ativaEhLadoA = parceria.empresa_id_a === empresaAtivaId
+  if (!ativaEhLadoA && parceria.empresa_id_b !== empresaAtivaId) {
     return NextResponse.json({ ok: false, erro: 'Esta parceria não é da sua empresa.' }, { status: 403 })
   }
-  const empresaDestinoId = origemEhLadoA ? parceria.empresa_id_b : parceria.empresa_id_a
+  const empresaParceiraId = ativaEhLadoA ? parceria.empresa_id_b : parceria.empresa_id_a
+  const trazer = body.direcao === 'trazer'
+  const empresaOrigemId = trazer ? empresaParceiraId : empresaAtivaId
+  const empresaDestinoId = trazer ? empresaAtivaId : empresaParceiraId
+  const origemEhLadoA = parceria.empresa_id_a === empresaOrigemId
 
   // Mesmo portão da Transferência de Estoque: só empresa que o usuário
-  // logado realmente acessa.
+  // logado realmente acessa — as DUAS, já que a origem pode ser a parceira.
   const permitidas = await empresasDoUsuario(sb, user.id)
-  if (!permitidas.some(e => e.id === empresaDestinoId)) {
-    return NextResponse.json({ ok: false, erro: 'Você não tem acesso à empresa de destino.' }, { status: 403 })
+  if (!permitidas.some(e => e.id === empresaDestinoId) || !permitidas.some(e => e.id === empresaOrigemId)) {
+    return NextResponse.json({ ok: false, erro: 'Você não tem acesso às duas empresas da parceria.' }, { status: 403 })
   }
 
   // Paginado de propósito: acima de 1000 vínculos (catálogos grandes passam

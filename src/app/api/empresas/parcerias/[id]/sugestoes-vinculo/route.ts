@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { normalizarChave, similaridadeTexto } from '@/lib/texto/similaridade'
+import { empresaAtivaDaGuarda } from '@/lib/auth/empresaAtiva'
 
 const LIMIAR_ALTA_CONFIANCA = 50
 
@@ -41,9 +42,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const sb = await createClient()
   const guarda = await exigirPermissao(sb, 'gerenciar_configuracoes')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
+  const empresaAtiva = await empresaAtivaDaGuarda(sb, guarda)
 
   const { data: parceria } = await sb.from('empresa_parcerias').select('id, empresa_id_a, empresa_id_b, status').eq('id', parceriaId).maybeSingle()
-  if (!parceria || (parceria.empresa_id_a !== guarda.empresaId && parceria.empresa_id_b !== guarda.empresaId)) {
+  if (!parceria || (parceria.empresa_id_a !== empresaAtiva && parceria.empresa_id_b !== empresaAtiva)) {
     return NextResponse.json({ ok: false, erro: 'Parceria não encontrada' }, { status: 404 })
   }
   if (parceria.status !== 'ativa') return NextResponse.json({ ok: false, erro: 'Parceria não está ativa' }, { status: 400 })

@@ -113,3 +113,15 @@ export async function empresaAtivaId(sb: any, userId: string): Promise<string | 
   const perfil = await perfilDaSessao(sb, userId)
   return perfil?.empresa_id ?? null
 }
+
+/**
+ * Empresa ativa de quem já passou pelo `exigirPermissao`.
+ *
+ * `exigirPermissao` devolve a empresa do CADASTRO do usuário (profiles), não
+ * a escolhida no seletor. Numa tela de empresa do grupo isso troca os lados:
+ * logado na Ouro e Prata, a tela de Parcerias mostrava a própria Ouro e Prata
+ * como parceira. Quem precisa da empresa em que o usuário ESTÁ usa isto.
+ */
+export async function empresaAtivaDaGuarda(sb: Parameters<typeof empresaAtivaId>[0], guarda: { userId: string; empresaId: string }): Promise<string> {
+  return (await empresaAtivaId(sb, guarda.userId)) ?? guarda.empresaId
+}

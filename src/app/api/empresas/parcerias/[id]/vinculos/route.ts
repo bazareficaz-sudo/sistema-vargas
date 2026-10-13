@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
+import { empresaAtivaDaGuarda } from '@/lib/auth/empresaAtiva'
 
 type ParItem = { produtoIdA: string; produtoIdB: string; metodo?: 'manual' | 'automatico_sku' | 'automatico_ean' }
 
@@ -9,9 +10,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const sb = await createClient()
   const guarda = await exigirPermissao(sb, 'gerenciar_configuracoes')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
+  const empresaAtiva = await empresaAtivaDaGuarda(sb, guarda)
 
   const { data: parceria } = await sb.from('empresa_parcerias').select('id, empresa_id_a, empresa_id_b, status').eq('id', parceriaId).maybeSingle()
-  if (!parceria || (parceria.empresa_id_a !== guarda.empresaId && parceria.empresa_id_b !== guarda.empresaId)) {
+  if (!parceria || (parceria.empresa_id_a !== empresaAtiva && parceria.empresa_id_b !== empresaAtiva)) {
     return NextResponse.json({ ok: false, erro: 'Parceria não encontrada' }, { status: 404 })
   }
   if (parceria.status !== 'ativa') return NextResponse.json({ ok: false, erro: 'Parceria não está ativa' }, { status: 400 })
@@ -43,7 +45,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   if (aplicados > 0) {
     await registrarAuditoria(sb, {
-      empresaId: guarda.empresaId, usuarioId: guarda.userId,
+      empresaId: empresaAtiva, usuarioId: guarda.userId,
       acao: 'produtos_vinculados', tabela: 'produto_vinculos', valorNovo: { parceriaId, quantidade: aplicados },
     })
   }

@@ -13,13 +13,15 @@ import DuplicarCatalogoClient from './DuplicarCatalogoClient'
 
 type Categoria = { id: string; nome: string; pai_id: string | null }
 
-export default function ParceriaDetalheTabsClient({ parceriaId, empresaId, empresaParceiraId, empresaParceiraNome, minhaEmpresaEhA, categorias, sincronizarPrecoInicial }: {
+export default function ParceriaDetalheTabsClient({ parceriaId, empresaId, empresaParceiraId, empresaParceiraNome, minhaEmpresaEhA, categorias, categoriasParceira, minhaEmpresaNome, sincronizarPrecoInicial }: {
   parceriaId: string
   empresaId: string
   empresaParceiraId: string
   empresaParceiraNome: string
   minhaEmpresaEhA: boolean
   categorias: Categoria[]
+  categoriasParceira: Categoria[]
+  minhaEmpresaNome: string
   sincronizarPrecoInicial: boolean
 }) {
   const [aba, setAba] = useState<'vincular' | 'duplicar'>('vincular')
@@ -77,7 +79,9 @@ export default function ParceriaDetalheTabsClient({ parceriaId, empresaId, empre
         />
       ) : (
         <DuplicarCatalogoClient
-          parceriaId={parceriaId} empresaId={empresaId} empresaParceiraNome={empresaParceiraNome} categorias={categorias}
+          parceriaId={parceriaId} empresaId={empresaId} empresaParceiraId={empresaParceiraId}
+          empresaParceiraNome={empresaParceiraNome} minhaEmpresaNome={minhaEmpresaNome}
+          categorias={categorias} categoriasParceira={categoriasParceira}
         />
       )}
     </div>
