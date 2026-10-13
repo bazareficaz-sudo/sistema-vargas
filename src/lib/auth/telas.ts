@@ -6,7 +6,7 @@
 // ninguém perceber.
 
 import { allItems, type NavItem } from '@/components/nav-config'
-import { telasBloqueadas, type Excecoes } from './permissoes'
+import { telasBloqueadas, type Excecoes } from './permissoesBase'
 
 export type TelaDoMenu = NavItem & { group: string }
 
