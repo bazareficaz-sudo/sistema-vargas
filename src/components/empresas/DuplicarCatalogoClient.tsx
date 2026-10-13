@@ -3,9 +3,14 @@
 import { useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
-// Duplica produtos da empresa ativa para a empresa parceira — pra que ela
+// Duplica produtos entre as duas empresas da parceria — pra que cada uma
 // tenha catálogo PRÓPRIO (vender, receber XML, transferir estoque) em vez
 // de depender do cadastro da outra.
+//
+// Duas direções: TRAZER da parceira para a empresa em que se está (o caso
+// comum: "o que tem lá e falta aqui") ou ENVIAR daqui para a parceira.
+// Antes só existia enviar, e quem estava logado na empresa que precisava
+// dos produtos não tinha como puxá-los.
 //
 // O que fica de fora do produto clonado, de propósito, e por quê, está
 // documentado em src/lib/produtos/clonarParaEmpresa.ts — aqui a tela só
@@ -16,12 +21,23 @@ type ProdutoBusca = { id: string; nome: string; sku: string | null; categoria: s
 
 type ResultadoLote = { clonados: number; jaExistiam: number; falhas: number; erros: { produtoId: string; erro: string }[]; restantes: number; concluido: boolean }
 
-export default function DuplicarCatalogoClient({ parceriaId, empresaId, empresaParceiraNome, categorias }: {
+export default function DuplicarCatalogoClient({
+  parceriaId, empresaId, empresaParceiraId, empresaParceiraNome, minhaEmpresaNome, categorias: categoriasMinhas, categoriasParceira,
+}: {
   parceriaId: string
   empresaId: string
+  empresaParceiraId: string
   empresaParceiraNome: string
+  minhaEmpresaNome: string
   categorias: Categoria[]
+  categoriasParceira: Categoria[]
 }) {
+  const [direcao, setDirecao] = useState<'trazer' | 'enviar'>('trazer')
+  const origemId = direcao === 'trazer' ? empresaParceiraId : empresaId
+  const origemNome = direcao === 'trazer' ? empresaParceiraNome : minhaEmpresaNome
+  const destinoNome = direcao === 'trazer' ? minhaEmpresaNome : empresaParceiraNome
+  const categorias = direcao === 'trazer' ? categoriasParceira : categoriasMinhas
+
   const [categoriaFiltro, setCategoriaFiltro] = useState('')
   const [subcategoriaFiltro, setSubcategoriaFiltro] = useState('')
   const [tagFiltro, setTagFiltro] = useState('')
@@ -40,7 +56,7 @@ export default function DuplicarCatalogoClient({ parceriaId, empresaId, empresaP
   async function contarElegiveis() {
     setContando(true); setElegiveis(null)
     const sb = createClient()
-    let q = sb.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).eq('ativo', true).neq('tipo', 'kit')
+    let q = sb.from('produtos').select('id', { count: 'exact', head: true }).eq('empresa_id', origemId).eq('ativo', true).neq('tipo', 'kit')
     if (categoriaFiltro) q = q.eq('categoria', categoriaFiltro)
     if (subcategoriaFiltro) q = q.eq('subcategoria', subcategoriaFiltro)
     if (tagFiltro.trim()) q = q.contains('tags', [tagFiltro.trim()])
@@ -65,7 +81,7 @@ export default function DuplicarCatalogoClient({ parceriaId, empresaId, empresaP
     timerBusca.current = setTimeout(async () => {
       const sb = createClient()
       const { data } = await sb.from('produtos')
-        .select('id, nome, sku, categoria').eq('empresa_id', empresaId).eq('ativo', true).neq('tipo', 'kit')
+        .select('id, nome, sku, categoria').eq('empresa_id', origemId).eq('ativo', true).neq('tipo', 'kit')
         .or(`nome.ilike.%${termo.trim()}%,sku.ilike.%${termo.trim()}%`).limit(30)
       setResultadosManual(data ?? [])
       setBuscandoManual(false)
@@ -86,7 +102,7 @@ export default function DuplicarCatalogoClient({ parceriaId, empresaId, empresaP
 
   async function chamarLote(corpo: Record<string, unknown>): Promise<ResultadoLote> {
     const resp = await fetch(`/api/empresas/parcerias/${parceriaId}/clonar-produtos`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...corpo, direcao }),
     })
     const d = await resp.json()
     if (!d.ok) throw new Error(d.erro ?? 'Falha ao duplicar.')
@@ -131,14 +147,38 @@ export default function DuplicarCatalogoClient({ parceriaId, empresaId, empresaP
     }
   }
 
+  function trocarDirecao(d: 'trazer' | 'enviar') {
+    if (d === direcao) return
+    setDirecao(d)
+    // Filtros e seleção são da empresa de ORIGEM; trocou a direção, trocou a origem.
+    setCategoriaFiltro(''); setSubcategoriaFiltro(''); setElegiveis(null)
+    setSelecionados(new Map()); setResultadosManual([]); setBuscaManual('')
+    setProgresso(null); setErroGeral('')
+  }
+
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6 pb-28">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Duplicar catálogo — {empresaParceiraNome}</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Cria o produto na {empresaParceiraNome}, já vinculado ao seu. Estoque nasce zerado — quem põe estoque lá é a
-          Transferência de Estoque ou uma entrada de verdade. Campos fiscais de regime (CSOSN/CST, PIS/COFINS) são
-          recalculados para o regime tributário da {empresaParceiraNome}, nunca copiados do seu.
+        <h1 className="text-xl font-semibold text-gray-900">Duplicar catálogo</h1>
+        <div className="mt-3 inline-flex rounded-lg border border-slate-200 overflow-hidden">
+          <button onClick={() => trocarDirecao('trazer')} disabled={rodando}
+            className={`px-3 py-2 text-xs font-medium ${direcao === 'trazer' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+            ⬇ Trazer da {empresaParceiraNome} para a {minhaEmpresaNome}
+          </button>
+          <button onClick={() => trocarDirecao('enviar')} disabled={rodando}
+            className={`px-3 py-2 text-xs font-medium ${direcao === 'enviar' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+            ⬆ Enviar da {minhaEmpresaNome} para a {empresaParceiraNome}
+          </button>
+        </div>
+        <p className="text-sm text-gray-500 mt-3">
+          Cria na <strong>{destinoNome}</strong> os produtos da <strong>{origemNome}</strong> que ainda não existem lá, já
+          vinculados. Os que já estão vinculados são pulados. Estoque nasce zerado — quem põe estoque é a Transferência de
+          Estoque ou uma entrada de verdade. Campos fiscais de regime (CSOSN/CST, PIS/COFINS) são recalculados para o regime
+          tributário da {destinoNome}, nunca copiados.
+        </p>
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+          Antes de duplicar, vincule na aba <strong>Vincular produtos existentes</strong> os produtos que já existem nas
+          duas empresas — senão eles são criados de novo e ficam em dobro.
         </p>
       </div>
 

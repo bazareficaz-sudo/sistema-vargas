@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
+import { empresaAtivaDaGuarda } from '@/lib/auth/empresaAtiva'
 import ParceriasClient from '@/components/empresas/ParceriasClient'
 
 export const dynamic = 'force-dynamic'
@@ -20,13 +21,16 @@ export default async function ParceriasPage() {
     )
   }
 
+  // A empresa em que o usuário ESTÁ (seletor), não a do cadastro.
+  const empresaAtiva = await empresaAtivaDaGuarda(sb, guarda)
+
   const { data: empresasDoTenant } = guarda.tenantId
-    ? await sb.from('empresas').select('id, nome, nome_fantasia').eq('tenant_id', guarda.tenantId).neq('id', guarda.empresaId).order('nome')
+    ? await sb.from('empresas').select('id, nome, nome_fantasia').eq('tenant_id', guarda.tenantId).neq('id', empresaAtiva).order('nome')
     : { data: [] as any[] }
 
   return (
     <ParceriasClient
-      empresaId={guarda.empresaId}
+      empresaId={empresaAtiva}
       empresasDisponiveis={(empresasDoTenant ?? []).map((e: any) => ({ id: e.id, nome: e.nome_fantasia ?? e.nome }))}
     />
   )

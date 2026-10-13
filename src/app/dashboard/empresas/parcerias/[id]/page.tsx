@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
+import { empresaAtivaDaGuarda } from '@/lib/auth/empresaAtiva'
 import ParceriaDetalheTabsClient from '@/components/empresas/ParceriaDetalheTabsClient'
 
 export const dynamic = 'force-dynamic'
@@ -21,8 +22,12 @@ export default async function ParceriaDetalhePage({ params }: { params: Promise<
     )
   }
 
+  // A empresa em que o usuário ESTÁ (seletor), não a do cadastro — senão,
+  // logado na outra empresa do grupo, os lados da parceria saem trocados.
+  const empresaAtiva = await empresaAtivaDaGuarda(sb, guarda)
+
   const { data: parceria } = await sb.from('empresa_parcerias').select('id, empresa_id_a, empresa_id_b, status, sincronizar_preco').eq('id', id).maybeSingle()
-  if (!parceria || (parceria.empresa_id_a !== guarda.empresaId && parceria.empresa_id_b !== guarda.empresaId)) {
+  if (!parceria || (parceria.empresa_id_a !== empresaAtiva && parceria.empresa_id_b !== empresaAtiva)) {
     return (
       <div className="p-8">
         <div className="max-w-md mx-auto text-center bg-white border border-gray-200 rounded-xl p-8">
@@ -33,22 +38,30 @@ export default async function ParceriaDetalhePage({ params }: { params: Promise<
     )
   }
 
-  const empresaParceiraId = parceria.empresa_id_a === guarda.empresaId ? parceria.empresa_id_b : parceria.empresa_id_a
-  const { data: empresaParceira } = await sb.from('empresas').select('nome, nome_fantasia').eq('id', empresaParceiraId).maybeSingle()
+  const empresaParceiraId = parceria.empresa_id_a === empresaAtiva ? parceria.empresa_id_b : parceria.empresa_id_a
+  const [{ data: empresaParceira }, { data: minhaEmpresa }] = await Promise.all([
+    sb.from('empresas').select('nome, nome_fantasia').eq('id', empresaParceiraId).maybeSingle(),
+    sb.from('empresas').select('nome, nome_fantasia').eq('id', empresaAtiva).maybeSingle(),
+  ])
 
-  // Categorias da PRÓPRIA empresa — usadas só como filtro na aba "Duplicar
-  // catálogo", pra restringir quais produtos entram na leva de clonagem.
-  const { data: categorias } = await sb.from('categorias')
-    .select('id, nome, pai_id').eq('empresa_id', guarda.empresaId).eq('ativo', true).order('nome')
+  // Categorias das DUAS empresas — filtro da aba "Duplicar catálogo". O lado
+  // que vale é o de ORIGEM, que depende da direção escolhida na tela
+  // (enviar para a parceira ou trazer dela).
+  const [{ data: categorias }, { data: categoriasParceira }] = await Promise.all([
+    sb.from('categorias').select('id, nome, pai_id').eq('empresa_id', empresaAtiva).eq('ativo', true).order('nome'),
+    sb.from('categorias').select('id, nome, pai_id').eq('empresa_id', empresaParceiraId).eq('ativo', true).order('nome'),
+  ])
 
   return (
     <ParceriaDetalheTabsClient
       parceriaId={id}
-      empresaId={guarda.empresaId}
+      empresaId={empresaAtiva}
       empresaParceiraId={empresaParceiraId}
       empresaParceiraNome={empresaParceira?.nome_fantasia ?? empresaParceira?.nome ?? 'Empresa parceira'}
-      minhaEmpresaEhA={parceria.empresa_id_a === guarda.empresaId}
+      minhaEmpresaEhA={parceria.empresa_id_a === empresaAtiva}
       categorias={categorias ?? []}
+      categoriasParceira={categoriasParceira ?? []}
+      minhaEmpresaNome={minhaEmpresa?.nome_fantasia ?? minhaEmpresa?.nome ?? 'Sua empresa'}
       sincronizarPrecoInicial={parceria.sincronizar_preco ?? false}
     />
   )

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao, registrarAuditoria } from '@/lib/auth/permissoes'
+import { empresaAtivaDaGuarda } from '@/lib/auth/empresaAtiva'
 
 async function buscarParceriaDoUsuario(sb: any, parceriaId: string, empresaId: string) {
   const { data } = await sb.from('empresa_parcerias').select('id, empresa_id_a, empresa_id_b, status')
@@ -15,8 +16,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const sb = await createClient()
   const guarda = await exigirPermissao(sb, 'gerenciar_configuracoes')
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
+  const empresaAtiva = await empresaAtivaDaGuarda(sb, guarda)
 
-  const parceria = await buscarParceriaDoUsuario(sb, id, guarda.empresaId)
+  const parceria = await buscarParceriaDoUsuario(sb, id, empresaAtiva)
   if (!parceria) return NextResponse.json({ ok: false, erro: 'Parceria não encontrada' }, { status: 404 })
 
   const body = await req.json()
@@ -27,7 +29,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (error) return NextResponse.json({ ok: false, erro: error.message }, { status: 400 })
 
   await registrarAuditoria(sb, {
-    empresaId: guarda.empresaId, usuarioId: guarda.userId,
+    empresaId: empresaAtiva, usuarioId: guarda.userId,
     acao: status === 'ativa' ? 'parceria_ativada' : 'parceria_desativada', tabela: 'empresa_parcerias',
     valorAnterior: { status: parceria.status }, valorNovo: { status },
   })
