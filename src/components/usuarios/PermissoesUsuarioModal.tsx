@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { GRUPOS_PERMISSAO, PAPEIS, codigoDaTela, ehPermissaoDeTela, type PermissaoCodigo } from '@/lib/auth/permissoes'
+import { GRUPOS_PERMISSAO, PAPEIS, codigoDaTela, ehPermissaoDeTela, type PermissaoCodigo } from '@/lib/auth/permissoesBase'
 import { telasPorGrupo } from '@/lib/auth/telas'
 
 // Calculado uma vez: a lista de telas é estática (vem do menu).
