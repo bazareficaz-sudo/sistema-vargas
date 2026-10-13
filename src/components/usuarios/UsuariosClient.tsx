@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import PermissoesUsuarioModal from './PermissoesUsuarioModal'
-import { PAPEIS, type Papel } from '@/lib/auth/permissoes'
+import { PAPEIS, type Papel } from '@/lib/auth/permissoesBase'
 
 type Usuario = {
   id: string

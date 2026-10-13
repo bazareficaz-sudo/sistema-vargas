@@ -3,7 +3,7 @@
 import { createContext, useContext } from 'react'
 import type { PlanData, PlanLimits } from '@/lib/plans/types'
 import { DEFAULT_LIMITS } from '@/lib/plans/types'
-import { temPermissao, type Papel, type PermissaoCodigo } from '@/lib/auth/permissoes'
+import { temPermissao, type Papel, type PermissaoCodigo } from '@/lib/auth/permissoesBase'
 
 const DEFAULT_PLAN: PlanData = {
   planId: '',

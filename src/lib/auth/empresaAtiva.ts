@@ -68,6 +68,22 @@ async function empresaEscolhida(): Promise<string | null> {
 }
 
 /**
+ * Empresa ativa a partir da empresa do cadastro: a escolhida no seletor, se
+ * o usuário tem vínculo ativo com ela; senão, a do cadastro. É a mesma
+ * decisão do perfilDaSessao, para quem já leu o profile (exigirPermissao).
+ */
+export async function resolverEmpresaAtiva(sb: Parameters<typeof perfilDaSessao>[0], userId: string, doCadastro: string): Promise<string> {
+  const escolhida = await empresaEscolhida()
+  if (!escolhida || escolhida === doCadastro) return doCadastro
+  const { data: vinculo } = await sb
+    .from('usuario_empresas')
+    .select('empresa_id')
+    .eq('user_id', userId).eq('empresa_id', escolhida).eq('ativo', true)
+    .maybeSingle()
+  return vinculo ? escolhida : doCadastro
+}
+
+/**
  * Lê o perfil da sessão com a empresa ativa já resolvida.
  *
  * `campos` aceita a mesma lista que o `select` original de cada tela (ex.:
@@ -117,11 +133,10 @@ export async function empresaAtivaId(sb: any, userId: string): Promise<string | 
 /**
  * Empresa ativa de quem já passou pelo `exigirPermissao`.
  *
- * `exigirPermissao` devolve a empresa do CADASTRO do usuário (profiles), não
- * a escolhida no seletor. Numa tela de empresa do grupo isso troca os lados:
- * logado na Ouro e Prata, a tela de Parcerias mostrava a própria Ouro e Prata
- * como parceira. Quem precisa da empresa em que o usuário ESTÁ usa isto.
+ * Desde que o próprio `exigirPermissao` passou a resolver a empresa ativa
+ * (seletor), `guarda.empresaId` já é ela — isto ficou só para as telas de
+ * Parcerias, que o usavam antes da correção geral, não pagarem consulta a mais.
  */
-export async function empresaAtivaDaGuarda(sb: Parameters<typeof empresaAtivaId>[0], guarda: { userId: string; empresaId: string }): Promise<string> {
-  return (await empresaAtivaId(sb, guarda.userId)) ?? guarda.empresaId
+export async function empresaAtivaDaGuarda(_sb: unknown, guarda: { userId: string; empresaId: string }): Promise<string> {
+  return guarda.empresaId
 }

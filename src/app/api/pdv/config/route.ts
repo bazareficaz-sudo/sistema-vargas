@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
+import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { FORMAS_PAGAMENTO_VALIDAS } from '@/lib/pdv/formasPagamento'
 
 // Configuração do PDV por empresa. Leitura para qualquer sessão da empresa
@@ -12,7 +13,9 @@ export async function GET() {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const { data: profile } = await sb.from('profiles').select('empresa_id').eq('id', user.id).single()
+  // Empresa ativa (seletor), não a do cadastro — é a configuração do PDV
+  // da loja em que o usuário está vendendo.
+  const profile = await perfilDaSessao(sb, user.id)
   if (!profile?.empresa_id) return NextResponse.json({ ok: false, erro: 'Empresa não identificada' }, { status: 403 })
 
   const { data } = await sb
