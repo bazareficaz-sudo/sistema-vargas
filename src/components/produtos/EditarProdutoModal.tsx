@@ -991,8 +991,8 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       <div className="relative w-full h-full sm:h-auto max-w-none sm:max-w-4xl max-h-none sm:max-h-[92vh] bg-white sm:rounded-2xl overflow-y-auto shadow-2xl flex flex-col">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <div className="flex items-start gap-3">
+        <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-4 border-b border-gray-200">
+          <div className="flex items-start gap-3 min-w-0">
             {/* Thumb principal */}
             {imagens[0] ? (
               <img src={imagens[0].url} alt={form.nome}
@@ -1020,16 +1020,16 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         </div>
 
         {/* Abas */}
-        <div className="flex flex-wrap gap-x-5 gap-y-1 border-b border-gray-200 px-6">
+        <div className="flex sm:flex-wrap gap-x-5 gap-y-1 border-b border-gray-200 px-4 sm:px-6 overflow-x-auto [scrollbar-width:none] shrink-0">
           {abas.filter(a => a.show !== false).map(a => (
             <button key={a.key} onClick={() => setAba(a.key)}
-              className={`py-3 px-1 text-sm transition-colors whitespace-nowrap ${aba === a.key ? abaAtiva : abaInativa}`}>
+              className={`py-3 px-1 text-sm transition-colors whitespace-nowrap shrink-0 ${aba === a.key ? abaAtiva : abaInativa}`}>
               {a.label}
             </button>
           ))}
         </div>
 
-        <div className="flex-1 px-6 py-5">
+        <div className="flex-1 px-4 sm:px-6 py-5">
 
           {/* ── ABA GERAL ── */}
           {aba === 'geral' && (
@@ -1159,7 +1159,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
               </div>
 
               {/* Categoria → Subcategoria + Marca */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Categoria</label>
                   <select value={form.categoria ?? ''}
@@ -1184,7 +1184,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   <div className="flex gap-1.5">
                     <select value={form.subcategoria ?? ''} onChange={e => campo('subcategoria', e.target.value || null)}
                       disabled={!form.categoria}
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400">
+                      className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400">
                       <option value="">{form.categoria ? '— Sem subcategoria —' : 'Escolha a categoria antes'}</option>
                       {subcategoriasDaCategoria.map(c => <option key={c.id} value={c.nome}>{c.nome}</option>)}
                       {/* A subcategoria gravada pode não existir mais na tabela
@@ -1346,13 +1346,13 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
 
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                 <label className="block text-xs font-medium text-blue-700 mb-3">Markup (%)</label>
-                <div className="flex items-center gap-3">
-                  <input type="number" step="0.01"
+                <div className="flex flex-wrap items-center gap-3">
+                  <input type="number" step="0.01" inputMode="decimal"
                     value={form.markup ?? markupCalculado.toFixed(2)}
                     onChange={e => aplicarMarkup(parseFloat(e.target.value) || 0)}
                     className="w-32 border border-blue-300 rounded-lg px-3 py-2 text-sm text-gray-900 font-mono focus:outline-none focus:border-blue-500 bg-white" />
                   <span className="text-blue-600 text-sm font-medium">%</span>
-                  <div className="flex gap-2 ml-2">
+                  <div className="flex gap-2 sm:ml-2 max-sm:w-full max-sm:[&>button]:flex-1">
                     {[20, 30, 50, 100].map(mk => (
                       <button key={mk} onClick={() => aplicarMarkup(mk)}
                         className="px-3 py-1.5 text-xs border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors bg-white">
@@ -2159,21 +2159,22 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center">
-          <div className="text-xs text-gray-400">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-200 flex justify-between items-center gap-2 sticky bottom-0 bg-white">
+          <div className="text-xs text-gray-400 max-sm:hidden">
             {form.tipo === 'kit' && `${kitItens.length} produto(s) no kit`}
             {aba === 'imagens' && imagens.length > 0 && `${imagens.length} imagem(ns)`}
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => setImprimindoEtiqueta(true)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-              🏷 Imprimir Etiqueta
+          <div className="flex gap-2 max-sm:w-full">
+            <button onClick={() => setImprimindoEtiqueta(true)} title="Imprimir etiqueta"
+              className="px-3 sm:px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors whitespace-nowrap">
+              🏷<span className="max-sm:hidden"> Imprimir Etiqueta</span>
             </button>
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
               Cancelar
             </button>
             <button onClick={salvar} disabled={salvando || (!podeEditarProdutos && !podeEditarPrecos)}
               title={!podeEditarProdutos && !podeEditarPrecos ? 'Você não tem permissão para editar produtos' : undefined}
-              className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors font-medium">
+              className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors font-medium whitespace-nowrap max-sm:flex-1">
               {salvando ? 'Salvando...' : 'Salvar alterações'}
             </button>
           </div>
