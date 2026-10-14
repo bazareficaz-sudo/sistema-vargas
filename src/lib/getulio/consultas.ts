@@ -4,7 +4,7 @@ import {
 } from '@/lib/ia/consultas/tipos'
 import { buscarProdutoInteligente, type ProdutoAchado } from '@/lib/busca/produtoInteligente'
 
-// CONSULTAS DO GETÚLIO — o que ele pode perguntar ao banco quando o dono
+// CONSULTAS DO BETINA — o que ele pode perguntar ao banco quando o dono
 // conversa pelo WhatsApp.
 //
 // Mesmas regras do catálogo de lib/ia/consultas: catálogo fechado,
@@ -225,7 +225,7 @@ export const CONSULTAS_GETULIO: Consulta[] = [
   },
   {
     nome: 'avisos_do_getulio',
-    descricao: 'Os assuntos que o Getúlio está acompanhando agora (os mesmos do resumo diário e da Central), com detalhe completo. Use para "detalha o item 2", "o que tem de urgente", "e os anúncios travados?".',
+    descricao: 'Os assuntos que a Betina está acompanhando agora (os mesmos do resumo diário e da Central), com detalhe completo. Use para "detalha o item 2", "o que tem de urgente", "e os anúncios travados?".',
     parametros: { type: 'object', properties: {} },
     async executar(sb, empresaId) {
       const { data } = await sb.from('getulio_sinais')

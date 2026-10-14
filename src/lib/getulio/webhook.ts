@@ -4,7 +4,7 @@ import { urlDoApp } from '@/lib/appUrl'
 // A Z-API não assina o webhook: qualquer um que soubesse o id da instância
 // poderia fingir uma mensagem do dono. Por isso o endereço que o sistema
 // cadastra na Z-API leva uma chave (`?k=`) derivada do id da instância com um
-// segredo do servidor — e o Getúlio só conversa quando ela confere.
+// segredo do servidor — e a Betina só conversa quando ela confere.
 //
 // O resto do webhook (status de entrega, conexão) não depende da chave e
 // continua funcionando como antes.

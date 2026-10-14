@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-// Central do Getúlio › "Chegou na loja": o boletim de mercadoria nova e
+// Central da Betina › "Chegou na loja": o boletim de mercadoria nova e
 // reposta que vai para o grupo dos vendedores logo depois de cada nota.
 
 type Config = {
@@ -115,7 +115,7 @@ export default function ChegadasCard({ whatsappPronto }: { whatsappPronto: boole
       </div>
       <p className="text-[11px] text-gray-500 leading-snug">
         Logo depois de cada nota lançada (manual ou XML) e de cada transferência recebida de outra empresa do grupo,
-        o Getúlio avisa no grupo dos vendedores o que chegou:
+        a Betina avisa no grupo dos vendedores o que chegou:
         novidades com preço e endereço, o que voltou ao estoque (e quantos clientes esperavam) e a reposição.
         O PDV mostra a mesma lista em &quot;Chegou hoje&quot;.
       </p>

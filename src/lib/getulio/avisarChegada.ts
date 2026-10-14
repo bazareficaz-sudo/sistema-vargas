@@ -3,7 +3,7 @@
 //
 // Não espera nem trata resposta de propósito — o boletim nunca pode travar
 // nem derrubar a finalização da nota. Se esta chamada não chegar (aba
-// fechada, rede caiu), o cron do Getúlio manda o boletim em até 15 min.
+// fechada, rede caiu), o cron da Betina manda o boletim em até 15 min.
 export function avisarChegada(referenciaTipo: 'entrada' | 'entrada_xml', referenciaId: string): void {
   try {
     fetch('/api/getulio/chegadas/disparar', {

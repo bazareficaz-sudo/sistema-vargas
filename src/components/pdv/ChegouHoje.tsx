@@ -6,7 +6,7 @@ import { promocaoVigente } from '@/lib/produtos/promocao'
 import type { ItemChegada } from '@/lib/getulio/chegadasRegras'
 
 // PDV › "Chegou hoje": o que entrou nas notas de hoje, para o vendedor que
-// não viu o grupo. Mesma lista do boletim do Getúlio (getulio_chegadas) —
+// não viu o grupo. Mesma lista do boletim da Betina (getulio_chegadas) —
 // novidades e o que voltou ao estoque em destaque, reposição recolhida.
 // Clicar em "Adicionar" põe o produto no carrinho.
 

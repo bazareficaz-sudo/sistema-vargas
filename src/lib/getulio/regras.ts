@@ -1,7 +1,7 @@
-// Regras do Getúlio que não dependem de banco — os limiares de "fora do
+// Regras da Betina que não dependem de banco — os limiares de "fora do
 // normal", a escolha do que entra no resumo e o texto de reserva. Ficam
 // aqui, puras, para serem testadas: um limiar mal escolhido não quebra
-// nada, só transforma o Getúlio em spam ou em silêncio.
+// nada, só transforma a Betina em spam ou em silêncio.
 
 import { ORDEM_GRAVIDADE, PRIORIDADE_VIGIA, type Gravidade, type Sinal } from './tipos'
 
@@ -235,7 +235,7 @@ export function saudacao(agora: Date, nome: string): string {
   const h = Math.floor(minutosDoDiaSP(agora) / 60)
   const periodo = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'
   const emoji = h < 12 ? '☀️' : h < 18 ? '🌤️' : '🌙'
-  return `${emoji} *${periodo}${nome ? `, ${nome}` : ''}. Getúlio aqui.*`
+  return `${emoji} *${periodo}${nome ? `, ${nome}` : ''}. Betina aqui.*`
 }
 
 export const SEM_NOVIDADE = 'Passei por tudo e não achei nada fora do normal. Bom trabalho! 👊'
@@ -252,7 +252,7 @@ export function corpoModelo(itens: SinalGuardado[]): string {
 
 /** Saudação + corpo + rodapé com o que ficou de fora e o link da Central. */
 export function montarMensagem(cabecalho: string, corpo: string, restantes: number, linkCentral: string): string {
-  const mais = restantes > 0 ? `\n\nE mais ${restantes} assunto(s) na Central do Getúlio.` : ''
+  const mais = restantes > 0 ? `\n\nE mais ${restantes} assunto(s) na Central da Betina.` : ''
   return `${cabecalho}\n\n${corpo.trim()}${mais}\n\n👉 ${linkCentral}`
 }
 
@@ -260,7 +260,7 @@ export function montarMensagem(cabecalho: string, corpo: string, restantes: numb
 //
 // O que não pode esperar o resumo do dia seguinte: canal recusando tudo,
 // produto zerado à venda, pedido com prazo vencido. Só o URGENTE desses três,
-// só o que virou novidade nas últimas 3 horas (ligar o Getúlio não dispara o
+// só o que virou novidade nas últimas 3 horas (ligar a Betina não dispara o
 // passivo inteiro de uma vez — isso é do resumo), fora da madrugada e no
 // máximo 4 por dia.
 
@@ -288,7 +288,7 @@ export function selecionarAlertas(sinais: SinalGuardado[], agora: Date, jaEnviad
 }
 
 export function textoAlerta(s: SinalGuardado, link: string): string {
-  return `🔴 *Getúlio — isso não pode esperar*
+  return `🔴 *Betina — isso não pode esperar*
 
 *${s.titulo}*
 ${s.detalhe}

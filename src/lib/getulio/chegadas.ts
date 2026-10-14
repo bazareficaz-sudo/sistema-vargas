@@ -5,7 +5,7 @@
 //     assim que termina — é o "logo após cada nota"; a remessa recebida de
 //     outra empresa do grupo (transferência) dispara pela própria rota de
 //     transferência, para a empresa que RECEBEU;
-//   · o cron do Getúlio (a cada 15 min) procura nota recente sem boletim —
+//   · o cron da Betina (a cada 15 min) procura nota recente sem boletim —
 //     rede de segurança para a nota lançada por outro caminho ou para o
 //     disparo que não chegou (aba fechada no meio).
 // A UNIQUE de getulio_chegadas faz o resto: quem gravar primeiro envia; o

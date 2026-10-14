@@ -336,7 +336,7 @@ export default function PublicarLoteClient({ plataforma, canais, produtos }: {
         })}
       </div>
       {publicados > 0 && (
-        <p className="text-sm text-gray-600">Os anúncios publicados aparecem em Anúncios da loja {cfg.nome}. Se algum for reprovado, o Getúlio avisa com o motivo.</p>
+        <p className="text-sm text-gray-600">Os anúncios publicados aparecem em Anúncios da loja {cfg.nome}. Se algum for reprovado, a Betina avisa com o motivo.</p>
       )}
     </div>
   )

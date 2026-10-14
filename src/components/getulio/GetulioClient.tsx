@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import ChegadasCard from './ChegadasCard'
 import { VIGIAS, ORDEM_GRAVIDADE, PRIORIDADE_VIGIA, type ConfigGetulio, type Destinatario, type Gravidade } from '@/lib/getulio/tipos'
 
-// CENTRAL DO GETÚLIO — o que ele está vendo agora, o que já mandou e como
+// CENTRAL DO BETINA — o que ele está vendo agora, o que já mandou e como
 // ele trabalha (para quem, a que horas, o que vigiar).
 
 type SinalTela = {
@@ -128,7 +128,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
       if (!d.ok) { setAviso({ tipo: 'erro', texto: d.erro ?? 'Falha ao salvar' }); return }
       setConfig(d.config)
       setDestinatarios(d.config.destinatarios?.length ? d.config.destinatarios : [{ nome: '', numero: '' }])
-      setAviso({ tipo: 'ok', texto: d.config.ativo ? `Getúlio ligado. Resumo todo dia às ${d.config.horario_resumo}.` : 'Configuração salva. O Getúlio está desligado.' })
+      setAviso({ tipo: 'ok', texto: d.config.ativo ? `Betina ligada. Resumo todo dia às ${d.config.horario_resumo}.` : 'Configuração salva. A Betina está desligada.' })
     } finally { setOcupado('') }
   }
 
@@ -165,11 +165,11 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-100 to-amber-200 border border-amber-300 flex items-center justify-center text-3xl shadow-sm">🧔🏻</div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Getúlio</h1>
+            <h1 className="text-xl font-bold text-gray-900">Betina</h1>
             <p className="text-sm text-gray-500">Olha o negócio todo dia e te chama no WhatsApp quando algo merece atenção.</p>
             <p className="text-xs mt-1">
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${config.ativo ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
-                {config.ativo ? `● Ligado · resumo às ${config.horario_resumo}` : '○ Desligado'}
+                {config.ativo ? `● Ligada · resumo às ${config.horario_resumo}` : '○ Desligada'}
               </span>
               <span className="text-gray-400 ml-2">última olhada: {dataHora(config.ultima_varredura)}</span>
             </p>
@@ -194,7 +194,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
 
       {!whatsappPronto && (
         <div className="text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3">
-          O WhatsApp da empresa não está configurado — o Getúlio vê tudo aqui na Central, mas não consegue mandar mensagem.{' '}
+          O WhatsApp da empresa não está configurado — a Betina vê tudo aqui na Central, mas não consegue mandar mensagem.{' '}
           <Link href="/dashboard/integracoes/whatsapp" className="underline font-medium">Configurar o WhatsApp</Link>
         </div>
       )}
@@ -208,7 +208,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
       {previa && (
         <div className="rounded-2xl border border-gray-200 bg-[#efeae2] p-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-medium text-gray-600">Prévia — é assim que chegaria agora {previa.geradoPor === 'ia' ? '(escrito pelo Getúlio)' : '(modelo padrão)'}</p>
+            <p className="text-xs font-medium text-gray-600">Prévia — é assim que chegaria agora {previa.geradoPor === 'ia' ? '(escrito pela Betina)' : '(modelo padrão)'}</p>
             <button onClick={() => setPrevia(null)} className="text-gray-500 hover:text-gray-700 text-sm">✕</button>
           </div>
           <div className="max-w-xl bg-white rounded-xl rounded-tl-none shadow-sm px-3.5 py-2.5">
@@ -233,7 +233,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
             <div className="rounded-xl border border-gray-200 bg-white px-5 py-10 text-center text-sm text-gray-500">
               {config.ultima_varredura
                 ? 'Nada fora do normal agora. 👊'
-                : 'O Getúlio ainda não olhou o negócio. Clique em "Olhar agora".'}
+                : 'A Betina ainda não olhou o negócio. Clique em "Olhar agora".'}
             </div>
           ) : visiveis.map(s => (
             <div key={s.id} className={`rounded-xl border bg-white px-4 py-3 ${s.dispensado_em ? 'opacity-60' : ''}`}>
@@ -272,10 +272,10 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
         <div className="space-y-4">
           <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">Como o Getúlio trabalha</h2>
+              <h2 className="text-sm font-semibold text-gray-900">Como a Betina trabalha</h2>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" checked={config.ativo} onChange={e => setConfig(c => ({ ...c, ativo: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
-                Ligado
+                Ligada
               </label>
             </div>
 
@@ -283,7 +283,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
               <label className="block text-xs font-medium text-gray-500 mb-1">Resumo diário às</label>
               <input type="time" value={config.horario_resumo} onChange={e => setConfig(c => ({ ...c, horario_resumo: e.target.value }))}
                 className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
-              <p className="text-[11px] text-gray-400 mt-1">Ele olha o negócio a cada hora; a mensagem sai uma vez por dia, neste horário.</p>
+              <p className="text-[11px] text-gray-400 mt-1">Ela olha o negócio a cada hora; a mensagem sai uma vez por dia, neste horário.</p>
               <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
                 <input type="checkbox" checked={config.resumo_semanal !== false}
                   onChange={e => setConfig(c => ({ ...c, resumo_semanal: e.target.checked }))} className="w-4 h-4 mt-0.5 accent-emerald-600" />
@@ -348,7 +348,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
             <h2 className="text-sm font-semibold text-gray-900">Conversar pelo WhatsApp</h2>
             <p className="text-[11px] text-gray-500 leading-snug">
               Quem está em "Quem recebe" pode mandar perguntas para o número da empresa — "quanto vendi ontem?",
-              "detalha o item 2", "tem plug roscável?" — e o Getúlio responde com os números do sistema.
+              "detalha o item 2", "tem plug roscável?" — e a Betina responde com os números do sistema.
               Outros números seguem o atendimento normal.
             </p>
             <div className="flex items-center justify-between gap-2">
@@ -408,7 +408,7 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
 
           {/* Histórico */}
           <div className="rounded-xl border border-gray-200 bg-white p-4">
-            <h2 className="text-sm font-semibold text-gray-900 mb-2">O que ele já mandou</h2>
+            <h2 className="text-sm font-semibold text-gray-900 mb-2">O que ela já mandou</h2>
             {mensagens.length === 0 ? (
               <p className="text-xs text-gray-400">Nenhuma mensagem ainda.</p>
             ) : (

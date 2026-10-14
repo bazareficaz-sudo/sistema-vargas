@@ -7,7 +7,7 @@ import { minutosDoDiaSP, minutosDoHorario } from '@/lib/getulio/regras'
 import type { ConfigGetulio } from '@/lib/getulio/tipos'
 import { processarPendentes, type ConfigChegadas } from '@/lib/getulio/chegadas'
 
-// Roda a cada 15 minutos (vercel.json). Para cada empresa com o Getúlio
+// Roda a cada 15 minutos (vercel.json). Para cada empresa com a Betina
 // ligado:
 //   • varre a cada hora — os sinais na Central ficam frescos;
 //   • depois de varrer, manda o ALERTA IMEDIATO do urgente que acabou de
@@ -15,7 +15,7 @@ import { processarPendentes, type ConfigChegadas } from '@/lib/getulio/chegadas'
 //   • no horário do resumo, varre de novo e envia o resumo do dia, uma vez
 //     (na segunda, com a semana que passou).
 //
-// Resumo atrasado mais de 4h (Getúlio ligado à noite, cron fora do ar) não
+// Resumo atrasado mais de 4h (Betina ligada à noite, cron fora do ar) não
 // sai: chegaria fora de hora. Fica para o dia seguinte.
 export const maxDuration = 300
 

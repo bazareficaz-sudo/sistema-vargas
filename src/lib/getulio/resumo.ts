@@ -1,4 +1,4 @@
-// A VOZ do Getúlio: escolhe o que entra no resumo, escreve e entrega.
+// A VOZ da Betina: escolhe o que entra no resumo, escreve e entrega.
 //
 // A IA escreve o CORPO a partir dos sinais já calculados — ela ordena,
 // junta e dá o tom, mas não calcula nem inventa: os números vêm prontos dos
@@ -16,7 +16,7 @@ import {
 } from './regras'
 import type { Destinatario } from './tipos'
 
-export const LINK_CENTRAL = urlDoApp('/dashboard/getulio')
+export const LINK_CENTRAL = urlDoApp('/dashboard/betina')
 
 async function sinaisAbertos(sb: any, empresaId: string): Promise<SinalGuardado[]> {
   const { data } = await sb.from('getulio_sinais')
@@ -31,8 +31,8 @@ export async function corpoPelaIA(itens: SinalGuardado[]): Promise<string | null
     n: i + 1, gravidade: s.gravidade, emoji: ICONE[s.gravidade], titulo: s.titulo, detalhe: s.detalhe,
   }))
   const prompt = [
-    'Você é o Getúlio, o assistente de gestão de uma loja de ferragens e utilidades que vende no balcão (PDV) e em marketplaces (Mercado Livre, Shopee, TikTok Shop, loja online).',
-    'Escreva o CORPO de uma mensagem de WhatsApp para o dono, em português do Brasil, no tom de um sócio experiente: direto, respeitoso, prático, sem bajulação e sem alarmismo.',
+    'Você é a Betina, a assistente de gestão de uma loja de ferragens e utilidades que vende no balcão (PDV) e em marketplaces (Mercado Livre, Shopee, TikTok Shop, loja online).',
+    'Escreva o CORPO de uma mensagem de WhatsApp para o dono, em português do Brasil, no tom de uma sócia experiente: direto, respeitoso, prático, sem bajulação e sem alarmismo.',
     '',
     'Regras:',
     '- Use SOMENTE os fatos e números abaixo. Não invente causas, números, nomes nem datas. Pode sugerir o que conferir.',
@@ -124,7 +124,7 @@ async function entregar(
   tipo: 'resumo_diario' | 'envio_manual' | 'alerta', geradoPor: string, sinais: string[], agora: Date,
 ): Promise<{ ok: boolean; enviados: number; falhas: { numero: string; erro: string }[]; texto: string }> {
   const validos = destinatarios.filter(d => String(d.numero ?? '').replace(/\D/g, '').length >= 10)
-  if (validos.length === 0) return { ok: false, enviados: 0, falhas: [{ numero: '', erro: 'Nenhum número de WhatsApp cadastrado para o Getúlio' }], texto: '' }
+  if (validos.length === 0) return { ok: false, enviados: 0, falhas: [{ numero: '', erro: 'Nenhum número de WhatsApp cadastrado para a Betina' }], texto: '' }
 
   const falhas: { numero: string; erro: string }[] = []
   let enviados = 0
@@ -151,7 +151,7 @@ async function entregar(
 
 /**
  * Monta e envia o resumo. Dia sem novidade também envia, em uma linha:
- * silêncio por dias seguidos pareceria que o Getúlio parou de trabalhar.
+ * silêncio por dias seguidos pareceria que a Betina parou de trabalhar.
  * Na segunda-feira (com `semanal`), abre com a semana que passou.
  */
 export async function enviarResumo(

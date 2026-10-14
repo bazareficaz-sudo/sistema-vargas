@@ -1,7 +1,7 @@
 // FOTO DE PRODUTO PELO WHATSAPP.
 //
 // No balcão, com o celular: tira a foto, manda para o número da empresa com
-// o SKU (ou o nome) na legenda, e o Getúlio põe no cadastro. Medido em
+// o SKU (ou o nome) na legenda, e a Betina põe no cadastro. Medido em
 // 08/10/2026: 667 produtos com estoque sem foto, ~500 sem foto em lugar
 // nenhum — só fotografando, e abrir o sistema para cada um não acontece.
 //

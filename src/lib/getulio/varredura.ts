@@ -1,4 +1,4 @@
-// A MEMÓRIA do Getúlio: guarda o que os vigias acharam e decide o que é
+// A MEMÓRIA da Betina: guarda o que os vigias acharam e decide o que é
 // novidade.
 //
 //   achado de novo, mesma assinatura  → só atualiza (não avisa de novo)

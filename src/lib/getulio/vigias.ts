@@ -1,8 +1,8 @@
-// Os VIGIAS do Getúlio: cada um olha uma parte do negócio e devolve os
+// Os VIGIAS da Betina: cada um olha uma parte do negócio e devolve os
 // sinais que achou. Sem IA — consultas e contas exatas.
 //
 // Sinal AGRUPADO (ex.: "16 pedidos atrasados") leva uma `assinatura` em
-// `dados`: enquanto ela não muda, o Getúlio não repete o aviso; entrou item
+// `dados`: enquanto ela não muda, a Betina não repete o aviso; entrou item
 // novo no grupo, a assinatura muda e o aviso volta (ver varredura.ts).
 
 import { diaISO } from '@/lib/datas'
