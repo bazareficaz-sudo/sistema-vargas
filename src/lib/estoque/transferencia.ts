@@ -123,9 +123,12 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
   resultados: ResultadoItemTransferencia[]
   transferidos: number
   falhas: number
+  /** Identifica a remessa inteira — o boletim "Chegou na loja" avisa uma vez por lote. */
+  loteId: string
 }> {
   const mesmaEmpresa = p.empresaOrigemId === p.empresaDestinoId
   const resultados: ResultadoItemTransferencia[] = []
+  const loteId = crypto.randomUUID()
 
   const produtoDestinoIds = p.itens
     .map(i => mesmaEmpresa ? i.produtoId : p.produtoDestinoPorOrigem?.[i.produtoId])
@@ -185,6 +188,7 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
       percentual: item.percentual ?? null,
       entrada_id: p.entradaId ?? null,
       entrada_origem: p.entradaOrigem ?? null,
+      lote_id: loteId,
       observacao: p.observacao ?? null,
       usuario: p.usuario ?? null,
     }).select('id').single()
@@ -243,5 +247,6 @@ export async function executarTransferencia(sb: any, p: ParametrosTransferencia)
     resultados,
     transferidos: resultados.filter(r => r.ok).length,
     falhas: resultados.filter(r => !r.ok).length,
+    loteId,
   }
 }

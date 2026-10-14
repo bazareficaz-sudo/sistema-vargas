@@ -21,7 +21,8 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
   const tipo = String(body.referencia_tipo ?? '') as ReferenciaNota
   const id = String(body.referencia_id ?? '')
-  if (!REFERENCIAS_NOTA.includes(tipo) || !/^[0-9a-f-]{36}$/i.test(id)) {
+  // Só nota de entrada: a remessa por transferência dispara pela própria rota de transferência.
+  if (!(REFERENCIAS_NOTA as readonly string[]).includes(tipo) || !/^[0-9a-f-]{36}$/i.test(id)) {
     return NextResponse.json({ ok: false, erro: 'Nota inválida' }, { status: 400 })
   }
 
