@@ -383,39 +383,39 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
   const totalDepositos = porDeposito.reduce((s, d) => s + d.quantidade, 0)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto flex flex-col">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0 sticky top-0 bg-white z-10">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Estoque Detalhado</h2>
-            <p className="text-xs text-gray-400">{produto.nome} {produto.sku && `· SKU ${produto.sku}`}</p>
+      <div className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-3xl max-h-[94vh] sm:max-h-[90vh] overflow-y-auto overflow-x-hidden flex flex-col">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 flex items-start justify-between gap-3 flex-shrink-0 sticky top-0 bg-white z-10">
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900">Estoque Detalhado</h2>
+            <p className="text-xs text-gray-500 sm:text-gray-400 line-clamp-2 break-words">{produto.nome} {produto.sku && `· SKU ${produto.sku}`}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+          <button onClick={onClose} aria-label="Fechar" className="shrink-0 -mr-2 -mt-1 w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-600 text-xl">✕</button>
         </div>
 
-        <div className="px-6 py-4 bg-blue-50 border-b border-blue-100 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-blue-900 font-medium">Estoque atual</span>
-            <div className="flex items-center gap-3">
-              <span className="text-xl font-bold text-blue-700">{estoqueAtual} {produto.unidade}</span>
-              {!modoAjuste && (
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => abrirAjuste('adicionar')} title="Adicionar estoque"
-                    className="text-xs px-2.5 py-1 border border-green-300 text-green-700 rounded-lg hover:bg-green-100 transition-colors">
-                    + Adicionar
-                  </button>
-                  <button onClick={() => abrirAjuste('subtrair')} title="Subtrair estoque"
-                    className="text-xs px-2.5 py-1 border border-red-300 text-red-700 rounded-lg hover:bg-red-100 transition-colors">
-                    − Subtrair
-                  </button>
-                  <button onClick={() => abrirAjuste('contagem')} title="Definir a quantidade exata (contagem física)"
-                    className="text-xs px-2.5 py-1 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors">
-                    ⚙ Contagem
-                  </button>
-                </div>
-              )}
+        <div className="px-4 sm:px-6 py-4 bg-blue-50 border-b border-blue-100 flex-shrink-0">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-baseline justify-between sm:block gap-3">
+              <span className="text-sm text-blue-900 font-medium sm:block">Estoque atual</span>
+              <span className="text-2xl sm:text-xl font-bold text-blue-700 whitespace-nowrap">{estoqueAtual} <span className="text-base sm:text-sm font-semibold">{produto.unidade}</span></span>
             </div>
+            {!modoAjuste && (
+              <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 sm:gap-1.5">
+                <button onClick={() => abrirAjuste('adicionar')} title="Adicionar estoque"
+                  className="text-sm sm:text-xs px-2 sm:px-2.5 py-2.5 sm:py-1 border border-green-300 bg-white sm:bg-transparent text-green-700 rounded-lg hover:bg-green-100 transition-colors whitespace-nowrap">
+                  + Adicionar
+                </button>
+                <button onClick={() => abrirAjuste('subtrair')} title="Subtrair estoque"
+                  className="text-sm sm:text-xs px-2 sm:px-2.5 py-2.5 sm:py-1 border border-red-300 bg-white sm:bg-transparent text-red-700 rounded-lg hover:bg-red-100 transition-colors whitespace-nowrap">
+                  − Subtrair
+                </button>
+                <button onClick={() => abrirAjuste('contagem')} title="Definir a quantidade exata (contagem física)"
+                  className="text-sm sm:text-xs px-2 sm:px-2.5 py-2.5 sm:py-1 border border-blue-300 bg-white sm:bg-transparent text-blue-700 rounded-lg hover:bg-blue-100 transition-colors whitespace-nowrap">
+                  ⚙ Contagem
+                </button>
+              </div>
+            )}
           </div>
 
           {modoAjuste && (
@@ -425,8 +425,8 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                   <label className="block text-[11px] text-gray-500 mb-1">
                     {modoAjuste === 'contagem' ? 'Nova quantidade' : modoAjuste === 'adicionar' ? 'Quantidade a adicionar' : 'Quantidade a subtrair'}
                   </label>
-                  <input type="number" step="0.001" autoFocus value={novaQtd} onChange={e => setNovaQtd(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500" />
+                  <input type="number" step="0.001" inputMode="decimal" autoFocus value={novaQtd} onChange={e => setNovaQtd(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-2.5 py-2 sm:py-1.5 text-base sm:text-sm font-mono focus:outline-none focus:border-blue-500" />
                 </div>
                 {novaQtd !== '' && Number.isFinite(parseFloat(novaQtd)) && (
                   <div className="flex items-end pb-1.5">
@@ -448,39 +448,39 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                 <label className="block text-[11px] text-gray-500 mb-1">Motivo do ajuste *</label>
                 <input value={motivoAjuste} onChange={e => setMotivoAjuste(e.target.value)}
                   placeholder="Ex: contagem física, avaria, correção de erro..."
-                  className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-500" />
+                  className="w-full border border-gray-300 rounded-lg px-2.5 py-2 sm:py-1.5 text-base sm:text-sm focus:outline-none focus:border-blue-500" />
               </div>
               {erroAjuste && <p className="text-xs text-red-600">{erroAjuste}</p>}
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setModoAjuste(null)} className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs rounded-lg hover:bg-gray-50">
+              <div className="flex justify-end gap-2 max-sm:[&>button]:flex-1">
+                <button onClick={() => setModoAjuste(null)} className="px-3 py-2.5 sm:py-1.5 border border-gray-300 text-gray-600 text-sm sm:text-xs rounded-lg hover:bg-gray-50">
                   Cancelar
                 </button>
                 <button onClick={salvarAjuste} disabled={salvandoAjuste}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                  className="px-3 py-2.5 sm:py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm sm:text-xs font-medium rounded-lg transition-colors">
                   {salvandoAjuste ? 'Salvando...' : 'Registrar ajuste'}
                 </button>
               </div>
             </div>
           )}
 
-          <div className="mt-3 flex items-center justify-between border-t border-blue-100 pt-3">
-            <span className="text-xs text-blue-900">Estoque mínimo</span>
+          <div className="mt-3 flex items-center justify-between gap-2 border-t border-blue-100 pt-3">
+            <span className="text-xs text-blue-900 shrink-0">Estoque mínimo</span>
             {editandoMinimo ? (
-              <div className="flex items-center gap-1.5">
-                <input type="number" step="0.001" autoFocus value={minimoForm} onChange={e => setMinimoForm(e.target.value)}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <input type="number" step="0.001" inputMode="decimal" autoFocus value={minimoForm} onChange={e => setMinimoForm(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') salvarEstoqueMinimo(); if (e.key === 'Escape') setEditandoMinimo(false) }}
-                  className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-xs font-mono focus:outline-none focus:border-blue-500" />
+                  className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 sm:py-1 text-base sm:text-xs font-mono focus:outline-none focus:border-blue-500" />
                 <button onClick={salvarEstoqueMinimo} disabled={salvandoMinimo}
-                  className="px-2 py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
+                  className="px-2.5 sm:px-2 py-2 sm:py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg">
                   {salvandoMinimo ? '...' : 'Salvar'}
                 </button>
-                <button onClick={() => setEditandoMinimo(false)} className="px-2 py-1 border border-gray-300 text-gray-500 text-xs rounded-lg hover:bg-gray-50">
-                  Cancelar
+                <button onClick={() => setEditandoMinimo(false)} aria-label="Cancelar" className="px-2.5 sm:px-2 py-2 sm:py-1 border border-gray-300 text-gray-500 text-xs rounded-lg hover:bg-gray-50">
+                  <span className="sm:hidden">✕</span><span className="hidden sm:inline">Cancelar</span>
                 </button>
               </div>
             ) : (
               <button onClick={() => { setMinimoForm(String(estoqueMinimo)); setErroMinimo(''); setEditandoMinimo(true) }}
-                className="text-xs font-medium text-blue-700 hover:underline">
+                className="text-xs font-medium text-blue-700 hover:underline py-1.5 sm:py-0">
                 {estoqueMinimo} {produto.unidade} <span className="text-blue-400">✎ editar</span>
               </button>
             )}
@@ -489,9 +489,9 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
         </div>
 
         {carregando ? (
-          <div className="px-6 py-10 text-center text-gray-400 text-sm">Carregando...</div>
+          <div className="px-4 sm:px-6 py-10 text-center text-gray-400 text-sm">Carregando...</div>
         ) : (
-          <div className="px-6 py-5 space-y-6">
+          <div className="px-4 sm:px-6 py-5 space-y-6">
             {porDeposito.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Estoque por depósito</p>
@@ -500,22 +500,26 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-200">
                         <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">Depósito</th>
-                        <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">Localização</th>
+                        <th className="hidden sm:table-cell text-left px-3 py-2 font-medium text-gray-500 text-xs">Localização</th>
                         <th className="text-right px-3 py-2 font-medium text-gray-500 text-xs">Qtd.</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {porDeposito.map(d => (
                         <tr key={d.deposito_id}>
-                          <td className="px-3 py-2 text-gray-800">{d.nome}</td>
-                          <td className="px-3 py-2 text-gray-400 text-xs">{d.localizacao || '—'}</td>
+                          <td className="px-3 py-2 text-gray-800">
+                            {d.nome}
+                            {d.localizacao && <span className="sm:hidden block text-[11px] text-gray-400">📍 {d.localizacao}</span>}
+                          </td>
+                          <td className="hidden sm:table-cell px-3 py-2 text-gray-400 text-xs">{d.localizacao || '—'}</td>
                           <td className={`px-3 py-2 text-right font-medium ${d.quantidade <= d.estoque_minimo ? 'text-red-600' : 'text-gray-800'}`}>{d.quantidade}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-gray-200 bg-gray-50">
-                        <td className="px-3 py-2 font-medium text-gray-600" colSpan={2}>Total nos depósitos</td>
+                        <td className="px-3 py-2 font-medium text-gray-600 sm:hidden">Total nos depósitos</td>
+                        <td className="px-3 py-2 font-medium text-gray-600 hidden sm:table-cell" colSpan={2}>Total nos depósitos</td>
                         <td className="px-3 py-2 text-right font-semibold text-gray-900">{totalDepositos}</td>
                       </tr>
                     </tfoot>
@@ -566,10 +570,10 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
 
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Movimentação do produto (vendas, entradas, devoluções)</p>
-              <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+              <div className="flex items-center gap-1.5 mb-3 max-sm:overflow-x-auto max-sm:-mx-4 max-sm:px-4 max-sm:[scrollbar-width:none] sm:flex-wrap">
                 {FILTROS.map(f => (
                   <button key={f.key} onClick={() => setFiltro(f.key)}
-                    className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${filtro === f.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+                    className={`shrink-0 whitespace-nowrap px-3 sm:px-2.5 py-1.5 sm:py-1 text-xs rounded-lg border transition-colors ${filtro === f.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
                     {f.label}
                   </button>
                 ))}
@@ -578,7 +582,44 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
               {movimentosFiltrados.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-8">Nenhuma movimentação encontrada.</p>
               ) : (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <>
+                {/* Celular: um cartão por movimento — tipo e quantidade em
+                    cima, data e detalhe embaixo, valores à direita. */}
+                <div className="md:hidden border border-gray-200 rounded-lg divide-y divide-gray-100 overflow-hidden">
+                  {movimentosFiltrados.map(m => {
+                    const info = TIPO_MOV[m.tipo]
+                    return (
+                      <div key={m.id} className="px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${info.cor}`}>{info.label}</span>
+                          <span className={`text-sm font-semibold whitespace-nowrap ${info.cor.split(' ')[0]}`}>{info.sinal} {m.quantidade}</span>
+                        </div>
+                        <div className="mt-1 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-[11px] text-gray-400">{fmtDT(m.data)}</p>
+                            {m.detalhe && <p className="text-xs text-gray-700 break-words">{m.detalhe}</p>}
+                          </div>
+                          {(m.valorTotal != null || m.valorUnitario != null) && (
+                            <div className="shrink-0 text-right">
+                              {m.valorTotal != null && <p className="text-xs font-medium text-gray-700">{fmtMoeda(m.valorTotal)}</p>}
+                              {m.valorUnitario != null && <p className="text-[11px] text-gray-400">{fmtMoeda(m.valorUnitario)} un.</p>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {(resumoValores.saidas !== 0 || resumoValores.entradas !== 0) && (
+                    <div className="px-3 py-2 bg-gray-50 text-xs">
+                      <p className="text-gray-500">Total no que está sendo exibido</p>
+                      <div className="flex flex-wrap justify-end gap-x-3">
+                        {resumoValores.entradas !== 0 && <span className="text-blue-600 font-medium">Comprado {fmtMoeda(resumoValores.entradas)}</span>}
+                        {resumoValores.saidas !== 0 && <span className="text-green-700 font-medium">Vendido {fmtMoeda(resumoValores.saidas)}</span>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="hidden md:block border border-gray-200 rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-200">
@@ -597,10 +638,10 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                           <tr key={m.id}>
                             <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtDT(m.data)}</td>
                             <td className="px-3 py-2">
-                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${info.cor}`}>{info.label}</span>
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ${info.cor}`}>{info.label}</span>
                             </td>
                             <td className="px-3 py-2 text-gray-700 text-xs">{m.detalhe}</td>
-                            <td className={`px-3 py-2 text-right font-medium ${info.cor.split(' ')[0]}`}>{info.sinal} {m.quantidade}</td>
+                            <td className={`px-3 py-2 text-right font-medium whitespace-nowrap ${info.cor.split(' ')[0]}`}>{info.sinal} {m.quantidade}</td>
                             <td className="px-3 py-2 text-right text-xs text-gray-600 whitespace-nowrap">
                               {m.valorUnitario != null ? fmtMoeda(m.valorUnitario) : <span className="text-gray-300">—</span>}
                             </td>
@@ -635,12 +676,13 @@ export default function EstoqueDetalhadoModal({ produto, empresaId, onClose, onA
                     )}
                   </table>
                 </div>
+                </>
               )}
             </div>
           </div>
         )}
 
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center flex-shrink-0">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-gray-200 flex justify-between items-center gap-3 flex-shrink-0 sticky bottom-0 bg-white">
           <a href={`/dashboard/movimentacoes-estoque?modo=produto&produto=${produto.id}`}
             className="text-sm text-blue-600 hover:underline">Ver extrato completo →</a>
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">Fechar</button>
