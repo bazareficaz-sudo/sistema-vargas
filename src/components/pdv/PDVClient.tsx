@@ -11,6 +11,7 @@ import { promocaoVigente, precoPorQuantidade, type ProdutoComFaixas } from '@/li
 import { FORMAS_PAGAMENTO } from '@/lib/pdv/formasPagamento'
 import { filtroNomeOuMarca, contarNomesRepetidos, chaveNome } from '@/lib/produtos/similares'
 import CampoNumero from '@/components/pdv/CampoNumero'
+import ChegouHoje from '@/components/pdv/ChegouHoje'
 import { ListaPedidosPdv, ListaOrcamentosPdv } from '@/components/pdv/ListagensPdv'
 import { conversaoAceita, mensagemConversao, podeCarregarNoPdv } from '@/lib/orcamentos/conversaoPdv'
 import { normalizarTelefone, mesmoTelefone, telefoneBuscavel, formatarTelefone } from '@/lib/clientes/telefone'
@@ -531,6 +532,16 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   }
 
   function adicionarProdutoE(p: Produto, qtd?: number) { confirmarAdicao(p, qtd) }
+
+  // Vindo do "Chegou hoje": só o id do produto — busca com as mesmas colunas
+  // da busca normal para o item entrar no carrinho igual a qualquer outro.
+  async function adicionarPorId(produtoId: string) {
+    const data = await consultarProdutos(cols => sb.from('produtos').select(cols)
+      .eq('empresa_id', empresaEstoqueId).eq('ativo', true).eq('id', produtoId).limit(1))
+    if (data.length > 0) adicionarProdutoE(data[0])
+    else alert('Produto não encontrado ou inativo.')
+    buscaRef.current?.focus()
+  }
 
   /**
    * Escolha feita NA LISTA DA BUSCA (Enter/Tab ou clique).
@@ -1516,6 +1527,8 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         <div className="w-px h-5 bg-gray-300 mx-1" />
         <BtnToolbar onClick={() => setListagem('pedidos')} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F10" label="Pedidos" icon="🧾" />
         <BtnToolbar onClick={() => setListagem('orcamentos')} cor="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300" atalho="F1" label="Orçamentos" icon="🗂️" />
+        <div className="w-px h-5 bg-gray-300 mx-1" />
+        <ChegouHoje sb={sb} empresaId={empresaEstoqueId} onAdicionar={adicionarPorId} />
         <div className="flex-1" />
         <span className="text-gray-400 px-2">{operadorNome.split('@')[0]}</span>
         <button onClick={() => router.push('/dashboard')} className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded text-xs">← Painel</button>

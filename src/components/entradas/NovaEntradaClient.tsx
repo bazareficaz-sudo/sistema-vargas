@@ -21,6 +21,7 @@ import {
   markupDoPreco, precoDoMarkup, type PoliticaPreco,
 } from '@/lib/entradas/politicaPreco'
 import { paraNumeroBr, formatarNumeroBr, paraEdicaoBr } from '@/lib/entradas/numeroBr'
+import { avisarChegada } from '@/lib/getulio/avisarChegada'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -1055,6 +1056,9 @@ export default function NovaEntradaClient({
         valor: p.valor, vencimento: p.vencimento, parcela: p.numero,
         total_parcelas: parcelasFinais.length, forma_pagamento: formaPag, status: 'pendente',
       })))
+
+      // Boletim "Chegou na loja" para o grupo dos vendedores e o PDV.
+      avisarChegada('entrada', entrada.id)
 
       // Antes de sair, oferece imprimir etiquetas dos produtos recebidos
       // (quantidade sugerida = quantidade da própria entrada).

@@ -5,6 +5,7 @@ import { varrer } from '@/lib/getulio/varredura'
 import { enviarAlertas, enviarResumo } from '@/lib/getulio/resumo'
 import { minutosDoDiaSP, minutosDoHorario } from '@/lib/getulio/regras'
 import type { ConfigGetulio } from '@/lib/getulio/tipos'
+import { processarPendentes, type ConfigChegadas } from '@/lib/getulio/chegadas'
 
 // Roda a cada 15 minutos (vercel.json). Para cada empresa com o Getúlio
 // ligado:
@@ -54,5 +55,19 @@ export async function GET(req: Request) {
     }
     resultados.push(r)
   }
-  return NextResponse.json({ ok: true, empresas: resultados.length, resultados })
+
+  // Boletim "Chegou na loja": independe do resumo do dono estar ligado. A
+  // tela da nota já dispara na hora; aqui é a rede de segurança (nota sem
+  // boletim, envio que falhou).
+  const { data: chegadas } = await sb.from('getulio_chegadas_config').select('*').eq('ativo', true)
+  const boletins: Record<string, unknown>[] = []
+  for (const cfg of (chegadas ?? []) as ConfigChegadas[]) {
+    try {
+      boletins.push({ empresa: cfg.empresa_id, ...(await processarPendentes(sb, cfg, agora)) })
+    } catch (e) {
+      boletins.push({ empresa: cfg.empresa_id, erro: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  return NextResponse.json({ ok: true, empresas: resultados.length, resultados, boletins })
 }

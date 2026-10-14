@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import ChegadasCard from './ChegadasCard'
 import { VIGIAS, ORDEM_GRAVIDADE, PRIORIDADE_VIGIA, type ConfigGetulio, type Destinatario, type Gravidade } from '@/lib/getulio/tipos'
 
 // CENTRAL DO GETÚLIO — o que ele está vendo agora, o que já mandou e como
@@ -338,6 +339,9 @@ export default function GetulioClient({ configInicial, sinaisIniciais, mensagens
               {ocupado === 'salvar' ? 'Salvando…' : 'Salvar'}
             </button>
           </div>
+
+          {/* Boletim para os vendedores */}
+          <ChegadasCard whatsappPronto={whatsappPronto} />
 
           {/* Conversa pelo WhatsApp */}
           <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
