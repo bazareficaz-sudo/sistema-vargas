@@ -913,13 +913,13 @@ export default function EntradaXmlDetalheClient({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <button onClick={() => router.push('/dashboard/entradas-xml')} className="text-slate-400 hover:text-slate-700">← Voltar</button>
-        <div className="flex-1">
-          <h1 className="text-slate-900 text-lg font-bold">NF-e {entrada.numero}/{entrada.serie} — {entrada.nome_fornecedor}</h1>
+        <div className="flex-1 basis-full sm:basis-0 order-first sm:order-none min-w-0">
+          <h1 className="text-slate-900 text-lg font-bold break-words">NF-e {entrada.numero}/{entrada.serie} — {entrada.nome_fornecedor}</h1>
           <p className="text-slate-500 text-sm">{fmtCnpj(entrada.cnpj_fornecedor ?? '')} • Emissão: {fmtDt(entrada.data_emissao ?? '')} • {fmt(entrada.valor_total)}</p>
         </div>
-        <span className={`text-xs px-3 py-1 rounded-full ${
+        <span className={`ml-auto sm:ml-0 text-xs px-3 py-1 rounded-full ${
           isFinalizada ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
           isCancelada  ? 'bg-red-50 text-red-600 border border-red-100' :
           'bg-amber-50 text-amber-600 border border-amber-100'
@@ -937,10 +937,10 @@ export default function EntradaXmlDetalheClient({
       </div>
 
       {/* Abas */}
-      <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+      <div className="flex gap-1 border-b border-slate-200 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
         {abasVisiveis.map(a => (
           <button key={a.id} onClick={() => setAba(a.id)}
-            className={`px-4 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors ${
+            className={`px-3 sm:px-4 py-2.5 text-sm whitespace-nowrap shrink-0 border-b-2 transition-colors ${
               aba === a.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}>{a.label}</button>
         ))}
@@ -948,7 +948,7 @@ export default function EntradaXmlDetalheClient({
 
       {/* ── ABA DADOS ─────────────────────────────────────────────── */}
       {aba === 'dados' && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white border border-slate-100 rounded-2xl p-4 space-y-3 shadow-sm">
             <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-wide">Identificação</h3>
             <Row label="Chave de Acesso" value={<span className="font-mono text-xs text-slate-500 break-all">{entrada.chave_acesso}</span>} />
@@ -965,9 +965,9 @@ export default function EntradaXmlDetalheClient({
             <Row label="IE" value={entrada.ie_fornecedor} />
             <Row label="UF" value={entrada.uf_fornecedor} />
           </div>
-          <div className="bg-white border border-slate-100 rounded-2xl p-4 space-y-3 col-span-2 shadow-sm">
+          <div className="bg-white border border-slate-100 rounded-2xl p-4 space-y-3 md:col-span-2 shadow-sm">
             <h3 className="text-slate-500 text-xs uppercase font-semibold tracking-wide">Totais</h3>
-            <div className="grid grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
               <Metric label="Produtos" value={fmt(entrada.valor_produtos)} />
               <Metric label="Frete" value={fmt(entrada.valor_frete)} />
               <Metric label="IPI" value={fmt(entrada.valor_ipi)} />
@@ -977,11 +977,11 @@ export default function EntradaXmlDetalheClient({
             </div>
           </div>
           {/* Itens resumo */}
-          <div className="col-span-2 bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+          <div className="md:col-span-2 bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
             <div className="px-4 py-3 border-b border-slate-100">
               <h3 className="text-slate-800 text-sm font-medium">Itens ({itens.length})</h3>
             </div>
-            <table className="w-full text-xs">
+            <table className="w-full text-xs tabela-celular">
               <thead><tr className="text-slate-500 border-b border-slate-100 bg-slate-50">
                 <th className="px-3 py-2 text-left">#</th>
                 <th className="px-3 py-2 text-left">Cód. Forn.</th>
@@ -994,13 +994,13 @@ export default function EntradaXmlDetalheClient({
               <tbody className="divide-y divide-slate-50">
                 {itens.map(item => (
                   <tr key={item.id} className="text-slate-500">
-                    <td className="px-3 py-1.5">{item.num_item}</td>
-                    <td className="px-3 py-1.5 font-mono">{item.codigo_fornecedor}</td>
-                    <td className="px-3 py-1.5 font-mono">{item.ean || '—'}</td>
-                    <td className="px-3 py-1.5 max-w-[200px] truncate text-slate-700">{item.descricao_xml}</td>
-                    <td className="px-3 py-1.5 text-right">{item.quantidade_xml} {item.unidade_xml}</td>
-                    <td className="px-3 py-1.5 text-right">{fmt(item.valor_unitario_xml)}</td>
-                    <td className="px-3 py-1.5 text-right text-slate-800 font-semibold">{fmt(item.valor_produto)}</td>
+                    <td className="px-3 py-1.5 tc-ocultar">{item.num_item}</td>
+                    <td data-label="Cód. forn." className="px-3 py-1.5 font-mono">{item.codigo_fornecedor}</td>
+                    <td data-label="EAN" className="px-3 py-1.5 font-mono">{item.ean || '—'}</td>
+                    <td className="px-3 py-1.5 max-w-[200px] truncate text-slate-700 tc-titulo"><span className="md:hidden">{item.num_item}. </span>{item.descricao_xml}</td>
+                    <td data-label="Qtd" className="px-3 py-1.5 text-right">{item.quantidade_xml} {item.unidade_xml}</td>
+                    <td data-label="Vl. unit." className="px-3 py-1.5 text-right">{fmt(item.valor_unitario_xml)}</td>
+                    <td data-label="Total" className="px-3 py-1.5 text-right text-slate-800 font-semibold">{fmt(item.valor_produto)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1012,8 +1012,8 @@ export default function EntradaXmlDetalheClient({
       {/* ── ABA MAPEAMENTO ────────────────────────────────────────── */}
       {aba === 'mapeamento' && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex gap-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
               <span className="text-emerald-600">{mapeados} mapeados</span>
               <span className="text-red-500">{naoMapeados} pendentes</span>
               <span className="text-slate-500">{itens.filter(i => i.status_mapeamento === 'ignorado').length} ignorados</span>
@@ -1021,7 +1021,7 @@ export default function EntradaXmlDetalheClient({
             {todosMapeados && <span className="text-green-400 text-sm">✓ Todos os itens mapeados!</span>}
           </div>
           <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm tabela-celular">
               <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                 <th className="px-3 py-2 text-left">Item XML</th>
                 <th className="px-3 py-2 text-left">EAN</th>
@@ -1033,13 +1033,13 @@ export default function EntradaXmlDetalheClient({
               <tbody className="divide-y divide-slate-50">
                 {itens.map(item => (
                   <tr key={item.id} className={`${item.status_mapeamento === 'nao_mapeado' ? 'bg-red-50' : ''}`}>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 tc-titulo">
                       <p className="text-slate-700 text-xs font-medium">{item.descricao_xml}</p>
                       <p className="text-slate-400 text-xs">Cód: {item.codigo_fornecedor}</p>
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-400">{item.ean || '—'}</td>
-                    <td className="px-3 py-2 text-right text-xs text-slate-500">{item.quantidade_xml} {item.unidade_xml}</td>
-                    <td className="px-3 py-2">
+                    <td data-label="EAN" className="px-3 py-2 font-mono text-xs text-slate-400">{item.ean || '—'}</td>
+                    <td data-label="Qtd" className="px-3 py-2 text-right text-xs text-slate-500">{item.quantidade_xml} {item.unidade_xml}</td>
+                    <td data-label="No sistema" className="px-3 py-2">
                       {item.produto_id ? (
                         <div>
                           <p className="text-slate-800 text-xs">{item.descricao_sistema || '(produto)'}</p>
@@ -1049,7 +1049,7 @@ export default function EntradaXmlDetalheClient({
                         <span className="text-slate-400 text-xs italic">Não mapeado</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-center">
+                    <td data-label="Status" className="px-3 py-2 text-center">
                       <span className={`text-xs ${MAP_STATUS_COR[item.status_mapeamento] ?? 'text-slate-500'}`}>
                         {item.status_mapeamento === 'nao_mapeado' ? '⚠ Pendente' :
                          item.status_mapeamento === 'auto' ? '🤖 Auto' :
@@ -1057,9 +1057,9 @@ export default function EntradaXmlDetalheClient({
                          item.status_mapeamento === 'novo_produto' ? '✨ Novo produto' : '— Ignorado'}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-3 py-2 text-center max-md:!pt-2">
                       {!readonly && item.status_mapeamento !== 'ignorado' && (
-                        <div className="flex gap-1 justify-center flex-wrap">
+                        <div className="flex gap-1 justify-center flex-wrap max-md:w-full max-md:grid max-md:grid-cols-3 max-md:[&>button]:py-2">
                           <button onClick={() => abrirMapModal(item)}
                             className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg">
                             {item.produto_id ? 'Alterar' : 'Mapear'}
@@ -1097,7 +1097,7 @@ export default function EntradaXmlDetalheClient({
             Confira as quantidades recebidas fisicamente e corrija caso haja divergências.
           </div>
           <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm tabela-celular">
               <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                 <th className="px-3 py-2 text-left">Produto</th>
                 <th className="px-3 py-2 text-right">Qtd NF-e</th>
@@ -1112,26 +1112,27 @@ export default function EntradaXmlDetalheClient({
                   const dif = qtd - esp
                   return (
                     <tr key={item.id} className={Math.abs(dif) > 0.001 ? 'bg-red-50' : ''}>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 tc-titulo">
                         <p className="text-slate-700 text-xs">{item.descricao_sistema || item.descricao_xml}</p>
                         <p className="text-slate-400 text-xs">{item.unidade_sistema || item.unidade_xml}</p>
                       </td>
-                      <td className="px-3 py-2 text-right text-slate-500 text-xs">{esp}</td>
-                      <td className="px-3 py-2 text-right">
+                      <td data-label="Qtd na NF-e" className="px-3 py-2 text-right text-slate-500 text-xs">{esp}</td>
+                      <td data-label="Qtd conferida" className="px-3 py-2 text-right">
                         {readonly ? (
                           <span className="text-slate-700 text-xs">{item.qtd_conferida ?? esp}</span>
                         ) : (
                           <input type="number" step="0.001" value={qtd}
                             onChange={e => setConfQtd(p => ({ ...p, [item.id]: parseFloat(e.target.value) || 0 }))}
-                            className="w-20 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                            inputMode="decimal"
+                            className="w-20 max-md:w-28 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                         )}
                       </td>
-                      <td className="px-3 py-2 text-center text-xs">
+                      <td data-label="Diferença" className="px-3 py-2 text-center text-xs">
                         <span className={Math.abs(dif) > 0.001 ? 'text-red-500' : 'text-emerald-600'}>
                           {dif > 0 ? `+${dif.toFixed(2)}` : dif < 0 ? dif.toFixed(2) : '—'}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-center text-xs">
+                      <td className="px-3 py-2 text-center text-xs tc-ocultar">
                         {Math.abs(dif) < 0.001 ? <span className="text-emerald-600">✓</span> : <span className="text-red-500">✕</span>}
                       </td>
                     </tr>
@@ -1165,7 +1166,7 @@ export default function EntradaXmlDetalheClient({
           ) : (
             <>
               <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm tabela-celular">
                   <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                     <th className="px-3 py-2 text-left">Produto</th>
                     <th className="px-3 py-2 text-right">Estoque hoje</th>
@@ -1185,28 +1186,34 @@ export default function EntradaXmlDetalheClient({
                       const abaixoDoMinimo = minimo > 0 && fica < minimo
                       return (
                         <tr key={item.id} className={atual < 0 ? 'bg-red-50' : ''}>
-                          <td className="px-3 py-2">
+                          <td className="px-3 py-2 tc-titulo">
                             <p className="text-slate-700 text-xs">{item.descricao_sistema || item.descricao_xml}</p>
                             <p className="text-slate-400 text-xs">{info?.unidade ?? item.unidade_sistema ?? item.unidade_xml}</p>
                           </td>
-                          <td className={`px-3 py-2 text-right text-xs font-medium ${atual < 0 ? 'text-red-600' : 'text-slate-600'}`}>
-                            {atual}
-                            {atual < 0 && <span className="block text-[10px] font-normal">negativo</span>}
+                          <td data-label="Estoque hoje" className={`px-3 py-2 text-right text-xs font-medium ${atual < 0 ? 'text-red-600' : 'text-slate-600'}`}>
+                            <div>
+                              {atual}
+                              {atual < 0 && <span className="block text-[10px] font-normal">negativo</span>}
+                            </div>
                           </td>
-                          <td className="px-3 py-2 text-right text-xs text-emerald-600">+{qtd}</td>
-                          <td className="px-3 py-2 text-right text-xs font-bold text-slate-800">
-                            {fica}
-                            {vaiZerar && atual !== 0 && (
-                              <span className="block text-[10px] font-normal text-orange-600">
-                                em vez de {atual + qtd}
-                              </span>
-                            )}
+                          <td data-label="Entra" className="px-3 py-2 text-right text-xs text-emerald-600">+{qtd}</td>
+                          <td data-label="Fica" className="px-3 py-2 text-right text-xs font-bold text-slate-800">
+                            <div>
+                              {fica}
+                              {vaiZerar && atual !== 0 && (
+                                <span className="block text-[10px] font-normal text-orange-600">
+                                  em vez de {atual + qtd}
+                                </span>
+                              )}
+                            </div>
                           </td>
-                          <td className={`px-3 py-2 text-right text-xs ${abaixoDoMinimo ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                            {minimo > 0 ? minimo : '—'}
-                            {abaixoDoMinimo && <span className="block text-[10px]">continua abaixo</span>}
+                          <td data-label="Mínimo" className={`px-3 py-2 text-right text-xs ${abaixoDoMinimo ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+                            <div>
+                              {minimo > 0 ? minimo : '—'}
+                              {abaixoDoMinimo && <span className="block text-[10px]">continua abaixo</span>}
+                            </div>
                           </td>
-                          <td className="px-3 py-2 text-center">
+                          <td data-label="Zerar antes" className="px-3 py-2 text-center">
                             <input type="checkbox" disabled={readonly}
                               checked={vaiZerar}
                               onChange={e => setZerar(p => ({ ...p, [item.id]: e.target.checked }))}
@@ -1249,7 +1256,7 @@ export default function EntradaXmlDetalheClient({
       {/* ── ABA CUSTOS ────────────────────────────────────────────── */}
       {aba === 'custos' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-white border border-slate-100 rounded-2xl p-4 space-y-3 shadow-sm">
               <h3 className="text-slate-800 text-sm font-medium">Composição do Custo</h3>
               <label className="flex items-center gap-2 text-sm text-slate-600">
@@ -1272,7 +1279,7 @@ export default function EntradaXmlDetalheClient({
             </div>
           </div>
           <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs tabela-celular">
               <thead><tr className="text-slate-500 border-b border-slate-100 bg-slate-50">
                 <th className="px-3 py-2 text-left">Produto</th>
                 <th className="px-3 py-2 text-right">Vl. Prod.</th>
@@ -1286,12 +1293,12 @@ export default function EntradaXmlDetalheClient({
                   const custo = custoComAdic(item)
                   return (
                     <tr key={item.id} className="text-slate-500">
-                      <td className="px-3 py-2 text-slate-700 max-w-[180px] truncate">{item.descricao_sistema || item.descricao_xml}</td>
-                      <td className="px-3 py-2 text-right">{fmt(item.valor_produto)}</td>
-                      <td className="px-3 py-2 text-right">{fmt(item.ipi || 0)}</td>
-                      <td className="px-3 py-2 text-right">{fmt((item.icms_st || 0) + (item.fcp_st || 0))}</td>
-                      <td className="px-3 py-2 text-right">{fmt((item.frete_item || 0) + (item.seguro_item || 0) + (item.outras_desp_item || 0))}</td>
-                      <td className="px-3 py-2 text-right font-semibold text-emerald-600">{fmt(custo)}</td>
+                      <td className="px-3 py-2 text-slate-700 max-w-[180px] truncate tc-titulo">{item.descricao_sistema || item.descricao_xml}</td>
+                      <td data-label="Vl. produto" className="px-3 py-2 text-right">{fmt(item.valor_produto)}</td>
+                      <td data-label="IPI" className="px-3 py-2 text-right">{fmt(item.ipi || 0)}</td>
+                      <td data-label="ST + FCP" className="px-3 py-2 text-right">{fmt((item.icms_st || 0) + (item.fcp_st || 0))}</td>
+                      <td data-label="Frete e outros" className="px-3 py-2 text-right">{fmt((item.frete_item || 0) + (item.seguro_item || 0) + (item.outras_desp_item || 0))}</td>
+                      <td data-label="Custo unitário" className="px-3 py-2 text-right font-semibold text-emerald-600">{fmt(custo)}</td>
                     </tr>
                   )
                 })}
@@ -1312,8 +1319,8 @@ export default function EntradaXmlDetalheClient({
       {/* ── ABA REVISÃO PREÇOS ────────────────────────────────────── */}
       {aba === 'precos' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex-wrap">
-            <div className="flex bg-slate-100 rounded-xl p-1">
+          <div className="flex items-center gap-3 bg-white border border-slate-100 rounded-2xl p-3 sm:p-4 shadow-sm flex-wrap">
+            <div className="flex bg-slate-100 rounded-xl p-1 max-sm:w-full max-sm:[&>button]:flex-1">
               <button onClick={() => setModoPreco('margem')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${modoPreco === 'margem' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
                 Manter margem
@@ -1340,15 +1347,15 @@ export default function EntradaXmlDetalheClient({
           {/* ── Barra de promoção ─────────────────────────────────────
               O preço promocional é por produto, mas a janela de datas vale
               para o lote inteiro — foi assim que o gestor pediu. */}
-          <div className="bg-white border border-orange-100 rounded-2xl p-4 shadow-sm space-y-3">
-            <div className="flex items-center gap-2">
+          <div className="bg-white border border-orange-100 rounded-2xl p-3 sm:p-4 shadow-sm space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-orange-600 text-sm font-medium">🔖 Promoção</span>
               <span className="text-slate-400 text-xs">
                 Opcional — produto com o campo &quot;Preço Promo&quot; vazio simplesmente não entra.
               </span>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex bg-slate-100 rounded-xl p-1">
+              <div className="flex bg-slate-100 rounded-xl p-1 max-sm:w-full max-sm:[&>button]:flex-1">
                 <button onClick={() => setModoPromo('markup')} disabled={readonly}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${modoPromo === 'markup' ? 'bg-white shadow text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
                   Markup sobre o custo
@@ -1398,7 +1405,7 @@ export default function EntradaXmlDetalheClient({
           </div>
 
           <div className="bg-white border border-slate-100 rounded-2xl overflow-x-auto shadow-sm">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm md:min-w-[900px] tabela-celular">
               <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                 <th className="px-3 py-2 text-left">Produto</th>
                 <th className="px-3 py-2 text-right">Custo Novo</th>
@@ -1442,8 +1449,8 @@ export default function EntradaXmlDetalheClient({
 
                   return (
                     <tr key={item.id}
-                      className={destacarLinha ? 'bg-red-50 text-slate-700' : 'text-slate-700'}>
-                      <td className="px-3 py-2 text-xs max-w-[200px] truncate">
+                      className={`max-md:border-b max-md:border-slate-100 ${destacarLinha ? 'bg-red-50 text-slate-700' : 'text-slate-700'}`}>
+                      <td className="px-3 py-2 text-xs max-w-[200px] truncate tc-titulo">
                         {destacarLinha && (
                           <span className="mr-1" title={`Custo subiu ${varCustoPct.toFixed(1)}% — acima do limite de ${alertaCustoPct}% configurado`}>⚠️</span>
                         )}
@@ -1451,7 +1458,7 @@ export default function EntradaXmlDetalheClient({
                       </td>
 
                       {/* Custo novo + seta de variação */}
-                      <td className="px-3 py-2 text-right text-xs">
+                      <td data-label="Custo novo" className="px-3 py-2 text-right text-xs">
                         <div className="flex items-center justify-end gap-1.5">
                           <span className={destacarLinha ? 'text-red-700 font-semibold' : 'text-slate-500'}>{fmt(custo)}</span>
                           {!temCustoAnterior ? (
@@ -1472,8 +1479,8 @@ export default function EntradaXmlDetalheClient({
                         </div>
                       </td>
 
-                      <td className="px-3 py-2 text-right text-xs text-slate-500">{fmt(precoAtual)}</td>
-                      <td className="px-3 py-2 text-right text-xs">
+                      <td data-label="Preço atual" className="px-3 py-2 text-right text-xs text-slate-500">{fmt(precoAtual)}</td>
+                      <td data-label="Margem atual" className="px-3 py-2 text-right text-xs">
                         {margemAtual === null ? (
                           <span className="text-slate-400">—</span>
                         ) : (
@@ -1482,14 +1489,15 @@ export default function EntradaXmlDetalheClient({
                       </td>
 
                       {/* Novo preço + seta de sentido da mudança */}
-                      <td className="px-3 py-2 text-right">
+                      <td data-label="Novo preço" className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           {readonly ? (
                             <span className="text-sm">{fmt(novoPr)}</span>
                           ) : (
                             <input type="number" step="0.01" value={novoPr}
                               onChange={e => setPrecosNovos(p => ({ ...p, [item.id]: +e.target.value }))}
-                              className="w-24 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                              inputMode="decimal"
+                              className="w-24 max-md:w-28 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                           )}
                           {!precoMudou ? (
                             <span className="text-slate-400 text-xs" title="Preço de venda mantido">=</span>
@@ -1503,7 +1511,7 @@ export default function EntradaXmlDetalheClient({
                         </div>
                       </td>
 
-                      <td className="px-3 py-2 text-right">
+                      <td data-label="Nova margem (%)" className="px-3 py-2 text-right">
                         {readonly ? (
                           <span className={`text-xs ${novaMargem > 0 ? 'text-emerald-600' : 'text-red-500'}`}>{novaMargem.toFixed(1)}%</span>
                         ) : (
@@ -1522,12 +1530,13 @@ export default function EntradaXmlDetalheClient({
                               const { [item.id]: _remove, ...rest } = p
                               return rest
                             })}
-                            className="w-20 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                            inputMode="decimal"
+                            className="w-20 max-md:w-28 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                         )}
                       </td>
 
                       {/* ── Promoção: markup e preço, um recalcula o outro ── */}
-                      <td className="px-3 py-2 text-right bg-orange-50/40">
+                      <td data-label="Markup promo (%)" className="px-3 py-2 text-right bg-orange-50/40 max-md:bg-transparent">
                         {readonly ? (
                           <span className="text-xs text-slate-500">{promo > 0 ? `${markupPromo.toFixed(1)}%` : '—'}</span>
                         ) : (
@@ -1549,10 +1558,11 @@ export default function EntradaXmlDetalheClient({
                               const { [item.id]: _remove, ...rest } = p
                               return rest
                             })}
-                            className="w-20 bg-white border border-orange-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                            inputMode="decimal"
+                            className="w-20 max-md:w-28 bg-white border border-orange-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right bg-orange-50/40">
+                      <td data-label="Preço promo" className="px-3 py-2 text-right bg-orange-50/40 max-md:bg-transparent">
                         <div className="flex items-center justify-end gap-1">
                           {readonly ? (
                             <span className="text-xs text-slate-500">{promo > 0 ? fmt(promo) : '—'}</span>
@@ -1568,7 +1578,8 @@ export default function EntradaXmlDetalheClient({
                                   setPrecosPromo(p => ({ ...p, [item.id]: v }))
                                 }
                               }}
-                              className="w-24 bg-white border border-orange-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
+                              inputMode="decimal"
+                              className="w-24 max-md:w-28 bg-white border border-orange-200 text-slate-800 rounded-lg px-2 py-1 text-xs text-right" />
                           )}
                           {promoAbaixoDoCusto && (
                             <span className="text-red-600 text-xs" title={`Abaixo do custo novo (${fmt(custo)}) — venda no prejuízo`}>⚠</span>
@@ -1617,8 +1628,8 @@ export default function EntradaXmlDetalheClient({
           {candidatosFiscais.length === 0 ? (
             <p className="text-slate-400 text-center py-8 text-sm">Nenhuma diferença encontrada entre o XML e o cadastro dos produtos mapeados.</p>
           ) : (
-            <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-              <table className="w-full text-sm">
+            <div className="bg-white border border-slate-100 rounded-2xl overflow-x-auto shadow-sm">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                   <th className="px-3 py-2 text-center">
                     <input type="checkbox" disabled={readonly}
@@ -1701,7 +1712,7 @@ export default function EntradaXmlDetalheClient({
             </div>
           )}
           {!readonly && candidatosFiscais.length > 0 && (
-            <div className="flex justify-end items-center gap-3">
+            <div className="flex flex-wrap justify-end items-center gap-3">
               <span className="text-xs text-slate-500">
                 {marcadosFiscais} de {totalDiffsFiscais} campo(s) marcado(s)
               </span>
@@ -1796,7 +1807,7 @@ export default function EntradaXmlDetalheClient({
               </div>
               <div className="flex justify-end">
                 <button onClick={finalizar} disabled={finalizando || !todosMapeados}
-                  className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg font-semibold disabled:opacity-50">
+                  className="w-full sm:w-auto px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-lg font-semibold disabled:opacity-50">
                   {finalizando ? 'Finalizando...' : '✅ Finalizar Entrada de Mercadoria'}
                 </button>
               </div>
@@ -1834,7 +1845,7 @@ export default function EntradaXmlDetalheClient({
               const percentualGeral = totalComprado > 0 ? (totalVendido / totalComprado) * 100 : null
               return (
                 <>
-                  <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-center gap-6">
+                  <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex flex-wrap items-center gap-x-6 gap-y-2">
                     <div>
                       <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Taxa de acerto geral</p>
                       <p className={`text-2xl font-bold ${
@@ -1848,7 +1859,7 @@ export default function EntradaXmlDetalheClient({
                   </div>
 
                   <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm tabela-celular">
                       <thead><tr className="text-slate-500 text-xs border-b border-slate-100 bg-slate-50">
                         <th className="px-3 py-2 text-left">Produto</th>
                         <th className="px-3 py-2 text-right">Comprado</th>
@@ -1858,10 +1869,10 @@ export default function EntradaXmlDetalheClient({
                       <tbody className="divide-y divide-slate-50">
                         {taxaAcerto.map(item => (
                           <tr key={item.produtoId}>
-                            <td className="px-3 py-2 text-slate-700 text-xs">{item.nome}</td>
-                            <td className="px-3 py-2 text-right text-xs text-slate-600">{item.quantidadeComprada}</td>
-                            <td className="px-3 py-2 text-right text-xs text-slate-600">{item.quantidadeVendida}</td>
-                            <td className="px-3 py-2 text-right">
+                            <td className="px-3 py-2 text-slate-700 text-xs tc-titulo">{item.nome}</td>
+                            <td data-label="Comprado" className="px-3 py-2 text-right text-xs text-slate-600">{item.quantidadeComprada}</td>
+                            <td data-label="Vendido" className="px-3 py-2 text-right text-xs text-slate-600">{item.quantidadeVendida}</td>
+                            <td data-label="Taxa de acerto" className="px-3 py-2 text-right">
                               {item.percentual == null ? (
                                 <span className="text-xs text-slate-300">—</span>
                               ) : (
@@ -1886,10 +1897,10 @@ export default function EntradaXmlDetalheClient({
 
       {/* ── MODAL MAPEAMENTO ──────────────────────────────────────── */}
       {mapModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl shadow-xl flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <div>
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-xl flex flex-col max-h-[92vh] sm:max-h-[85vh]">
+            <div className="flex items-start justify-between gap-3 px-4 sm:px-5 py-4 border-b border-slate-100">
+              <div className="min-w-0">
                 <h2 className="text-slate-900 font-semibold">Mapear Item</h2>
                 <p className="text-slate-500 text-xs mt-0.5">{mapModal.descricao_xml} — Cód: {mapModal.codigo_fornecedor}</p>
               </div>
@@ -1905,8 +1916,8 @@ export default function EntradaXmlDetalheClient({
                     <input value={novoProd.nome} onChange={e => setNovoProd(p => ({ ...p, nome: e.target.value }))}
                       className="w-full mt-0.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm" />
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="col-span-2 sm:col-span-1">
                       <label className="text-slate-400 text-xs">EAN</label>
                       <input value={novoProd.ean} onChange={e => setNovoProd(p => ({ ...p, ean: e.target.value }))}
                         className="w-full mt-0.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1.5 text-sm font-mono" />
@@ -1922,8 +1933,8 @@ export default function EntradaXmlDetalheClient({
                         className="w-full mt-0.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1.5 text-sm font-mono" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="col-span-2 sm:col-span-1">
                       <label className="text-slate-400 text-xs">Unidade</label>
                       <select value={novoProd.unidade} onChange={e => setNovoProd(p => ({ ...p, unidade: e.target.value }))}
                         className="w-full mt-0.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2 py-1.5 text-sm">
@@ -1943,7 +1954,7 @@ export default function EntradaXmlDetalheClient({
                   </div>
                   <p className="text-xs text-slate-400">Código do fornecedor: <span className="font-mono text-slate-600">{mapModal.codigo_fornecedor || '—'}</span> (gravado no cadastro do produto)</p>
                 </div>
-                <div className="px-5 py-3 border-t border-slate-100 flex justify-between">
+                <div className="px-4 sm:px-5 py-3 border-t border-slate-100 flex justify-between gap-2">
                   <button onClick={() => setCriandoProduto(false)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-sm hover:bg-slate-200">← Voltar</button>
                   <button onClick={criarProdutoEMapear} disabled={salvandoNovoProduto}
                     className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm disabled:opacity-50">
@@ -1999,11 +2010,11 @@ export default function EntradaXmlDetalheClient({
                             ref={el => { linhaRefs.current[i] = el }}
                             className={`text-slate-700 cursor-pointer ${destacado ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
                             onClick={() => selecionarProduto(p)}>
-                            <td className="px-4 py-2.5">
+                            <td className="px-3 sm:px-4 py-2.5">
                               <p className="text-slate-800 text-xs font-medium">{p.nome}{p.marca && <span className="text-blue-600 font-normal"> — {p.marca}</span>}</p>
                               <p className="text-slate-400 text-xs">SKU: {p.sku} • EAN: {p.ean || '—'}</p>
                             </td>
-                            <td className="px-4 py-2.5 text-center text-xs text-slate-500">{p.unidade}</td>
+                            <td className="px-4 py-2.5 text-center text-xs text-slate-500 max-sm:hidden">{p.unidade}</td>
                             <td className="px-4 py-2.5 text-right text-xs">
                               <p className="text-slate-500">Custo: {fmt(p.preco_custo)}</p>
                               <p className="text-slate-800 font-medium">Venda: {fmt(p.preco_venda)}</p>

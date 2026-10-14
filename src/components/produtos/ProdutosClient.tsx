@@ -100,6 +100,18 @@ type Props = {
   temLoja?: boolean
 }
 
+/** Selo de situação da linha — o mesmo na tabela e no cartão do celular. */
+function situacaoDoProduto(p: Produto): { texto: string; cls: string } {
+  const estoque = p.estoque ?? 0
+  if (!p.ativo) return { texto: 'Inativo', cls: 'border-gray-200 bg-gray-100 text-gray-600' }
+  if (estoque < 0) return { texto: 'Estoque negativo', cls: 'border-red-200 bg-red-50 text-red-700' }
+  if (estoque === 0) return { texto: 'Sem estoque', cls: 'border-amber-200 bg-amber-50 text-amber-700' }
+  if (!p.preco_venda || !p.categoria) return { texto: 'Cadastro incompleto', cls: 'border-violet-200 bg-violet-50 text-violet-700' }
+  return { texto: 'Ativo', cls: 'border-blue-200 bg-blue-50 text-blue-700' }
+}
+
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
 function calcMarkup(produto: Produto): number | null {
   if (!(produto.preco_custo > 0) || !(produto.preco_venda > 0)) return null
   return ((produto.preco_venda - produto.preco_custo) / produto.preco_custo) * 100
@@ -531,7 +543,7 @@ export default function ProdutosClient({
           e "Novo produto" espremiam o título até quebrar a palavra. */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4 mb-5">
         <h1 className="text-gray-950 text-2xl font-semibold tracking-tight">Produtos</h1>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap max-sm:[&>button]:flex-1">
           <button onClick={() => setImportandoUrl(true)} className={botao('secundario')}>
             ↓ Importar
           </button>
@@ -551,7 +563,7 @@ export default function ProdutosClient({
           que não hierarquiza nada e polui tudo. Aqui a cor só marca o que é
           destrutivo. */}
       {selecionados.size > 0 && (
-        <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 bg-white border border-blue-300 rounded-xl px-4 py-3 mb-4 shadow-lg shadow-blue-100/60">
+        <div className="sticky top-2 max-md:fixed max-md:top-auto max-md:bottom-2 max-md:inset-x-2 max-md:mb-0 z-30 flex flex-wrap items-center gap-2 bg-white border border-blue-300 rounded-xl px-3 sm:px-4 py-3 mb-4 shadow-lg shadow-blue-100/60 max-md:max-h-[45vh] max-md:overflow-y-auto">
           <span className="text-sm font-medium text-blue-900 mr-1">
             {selecionados.size} {selecionados.size === 1 ? 'produto selecionado' : 'produtos selecionados'}
           </span>
@@ -800,12 +812,12 @@ export default function ProdutosClient({
       </div>
 
       {/* Abas */}
-      <div className="flex items-end gap-5 overflow-x-auto border-b border-gray-200 mt-5 mb-0">
+      <div className="flex items-end gap-5 overflow-x-auto border-b border-gray-200 mt-5 mb-0 [scrollbar-width:none]">
         {ABAS.map(a => (
           <button
             key={a.key}
             onClick={() => { setAba(a.key); navegar({ aba: a.key, pagina: '1' }) }}
-            className={`pb-3 text-sm flex items-center gap-1.5 border-b-2 transition-colors ${
+            className={`pb-3 text-sm flex items-center gap-1.5 border-b-2 whitespace-nowrap shrink-0 transition-colors ${
               aba === a.key
                 ? 'border-blue-600 text-blue-600 font-medium'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -819,13 +831,15 @@ export default function ProdutosClient({
         ))}
       </div>
 
-      <div className="flex flex-col gap-3 border-x border-gray-200 bg-gray-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-gray-500">
+      <div className="flex flex-col gap-3 border-x border-gray-200 bg-gray-50/70 px-3 sm:px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-gray-500 flex flex-wrap items-center gap-x-1">
+          <input type="checkbox" aria-label="Selecionar todos desta página" className="md:hidden h-4 w-4 mr-2 accent-blue-600"
+            checked={selecionados.size === produtos.length && produtos.length > 0} onChange={e => toggleAll(e.target.checked)} />
           <strong className="font-semibold text-gray-900">{total.toLocaleString('pt-BR')} produtos</strong>
           <span> · {produtos.filter(p => (p.estoque ?? 0) <= 0).length} sem estoque nesta página</span>
           <span> · {produtos.filter(p => !p.preco_venda || !p.categoria).length} cadastros incompletos</span>
         </p>
-        <div className="flex items-center gap-2" aria-label="Modo de visualização">
+        <div className="hidden md:flex items-center gap-2" aria-label="Modo de visualização">
           <button type="button" className="rounded-lg border border-blue-400 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">☷ Tabela</button>
           <button type="button" disabled title="Visualização em cards será disponibilizada em breve" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-400">▦ Cards</button>
           <button type="button" disabled title="Personalização de colunas será disponibilizada em breve" className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-400">▥ Colunas</button>
@@ -837,7 +851,93 @@ export default function ProdutosClient({
           com rolagem própria ela empurra a PÁGINA para o lado, e aí o menu e
           o cabeçalho saem de vista junto. Com ele, só a tabela desliza.
           `min-w` evita que as colunas se esmaguem uma sobre a outra. */}
-      <div className="border border-gray-200 rounded-b-xl bg-white overflow-x-auto">
+      <div className="border border-gray-200 rounded-b-xl bg-white">
+        {/* Celular: um cartão por produto. A tabela precisa de 920px — no
+            celular ela rolava de lado e escondia preço, estoque e ações. */}
+        <ul className="md:hidden divide-y divide-gray-100">
+          {produtos.map(p => {
+            const markup = calcMarkup(p)
+            const estoque = p.estoque ?? 0
+            const situacao = situacaoDoProduto(p)
+            const naLoja = anunciosMap?.[p.id]?.loja
+            const publicado = naLoja?.estado === 'publicado'
+            return (
+              <li key={p.id} className={`px-3 py-3 ${selecionados.has(p.id) ? 'bg-blue-50/60' : ''}`}>
+                <div className="flex items-start gap-3">
+                  <input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleOne(p.id)} className="mt-3 h-4 w-4 shrink-0 accent-blue-600" aria-label={`Selecionar ${p.nome}`} />
+                  <button type="button" onClick={() => abrirProduto(p)} className="shrink-0" aria-label={`Abrir ${p.nome}`}>
+                    {imagensMap[p.id]
+                      ? <img src={imagensMap[p.id]} alt="" className="h-12 w-12 rounded-xl border border-gray-200 object-cover" />
+                      : <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gray-100 text-gray-400">▧</div>}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <button type="button" onClick={() => abrirProduto(p)} className="block text-left text-sm font-medium leading-snug text-gray-900 break-words">
+                      {p.nome}
+                    </button>
+                    <p className="mt-0.5 text-[11px] text-gray-400 break-words">
+                      {[p.sku ? `SKU ${p.sku}` : null, p.categoria, p.marca].filter(Boolean).join(' · ') || 'Sem classificação'}
+                    </p>
+                    <div className="mt-2 flex items-end justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`text-base font-semibold ${p.preco_venda > 0 ? 'text-gray-900' : 'text-violet-700'}`}>
+                          {p.promocao_ativa && p.preco_promocional ? brl(Number(p.preco_promocional)) : p.preco_venda > 0 ? brl(p.preco_venda) : 'Sem preço'}
+                          {p.promocao_ativa && p.preco_promocional && p.preco_venda > 0 && (
+                            <span className="ml-1.5 text-xs font-normal text-gray-400 line-through">{brl(p.preco_venda)}</span>
+                          )}
+                        </p>
+                        <p className="text-[11px] text-gray-400">
+                          Custo {p.preco_custo > 0 ? brl(p.preco_custo) : '—'}
+                          {markup !== null && <> · <span className={markup > 0 ? 'text-emerald-600' : 'text-red-600'}>{markup.toFixed(0)}%</span></>}
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => setVendoEstoque(p)} className="shrink-0 text-right">
+                        <span className={`block text-sm font-semibold ${estoque < 0 ? 'text-red-600' : estoque === 0 ? 'text-amber-700' : 'text-gray-900'}`}>
+                          {estoque.toLocaleString('pt-BR')} {p.unidade.toLowerCase()}
+                        </span>
+                        {enderecosMap[p.id] && <span className="block text-[11px] text-gray-400">📍 {enderecosMap[p.id]}</span>}
+                      </button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${situacao.cls}`}>{situacao.texto}</span>
+                      {p.promocao_ativa && <span className="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600">Promoção</span>}
+                      {!p.disponivel_pdv && <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Oculto no PDV</span>}
+                      {(p.tags ?? []).map(t => <span key={t} className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700">{t}</span>)}
+                      <SeloCanais contagem={anunciosMap?.[p.id]}
+                        onAbrir={() => { setAbaModal('anuncios'); abrirProduto(p) }}
+                        produto={{ nome: p.nome, sku: p.sku, preco: p.preco_venda > 0 ? brl(p.preco_venda) : null }}
+                        envio={envioMensagem}
+                        onZapi={(msg) => { setZapiMensagem(msg); setZapiErro('') }} />
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <button onClick={() => abrirProduto(p)}
+                        className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-700 shadow-sm">
+                        ✎ Editar
+                      </button>
+                      {p.tipo !== 'kit' && (
+                        <button onClick={() => setDuplicando(p)} title="Duplicar produto"
+                          className="inline-flex h-9 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-500">⧉</button>
+                      )}
+                      {p.tipo !== 'kit' && (
+                        <button onClick={() => setCriandoKit(p)} title="Criar kit a partir deste produto"
+                          className="inline-flex h-9 w-10 items-center justify-center rounded-lg border border-gray-200 text-gray-500">📦</button>
+                      )}
+                      {temLoja && (
+                        <button onClick={() => acaoLoja(p, publicado ? 'atualizar' : 'publicar')} disabled={publicandoLoja === p.id}
+                          title={publicado ? 'Atualizar na Loja Online' : naLoja ? 'Publicar na Loja Online (está pausado)' : 'Publicar na Loja Online'}
+                          className={`inline-flex h-9 w-10 items-center justify-center rounded-lg border text-sm disabled:opacity-40 ${publicado ? 'border-indigo-200 bg-indigo-50 text-indigo-600' : 'border-gray-200 text-gray-500'}`}>
+                          {publicandoLoja === p.id ? '⏳' : publicado ? '↻' : '🛒'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+          {produtos.length === 0 && <li className="py-12 text-center text-sm text-gray-400">Nenhum produto encontrado.</li>}
+        </ul>
+
+        <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm min-w-[920px]">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/80">
@@ -853,15 +953,7 @@ export default function ProdutosClient({
             {produtos.map(p => {
               const markup = calcMarkup(p)
               const estoque = p.estoque ?? 0
-              const situacao = !p.ativo
-                ? { texto: 'Inativo', cls: 'border-gray-200 bg-gray-100 text-gray-600' }
-                : estoque < 0
-                  ? { texto: 'Estoque negativo', cls: 'border-red-200 bg-red-50 text-red-700' }
-                  : estoque === 0
-                    ? { texto: 'Sem estoque', cls: 'border-amber-200 bg-amber-50 text-amber-700' }
-                    : !p.preco_venda || !p.categoria
-                      ? { texto: 'Cadastro incompleto', cls: 'border-violet-200 bg-violet-50 text-violet-700' }
-                      : { texto: 'Ativo', cls: 'border-blue-200 bg-blue-50 text-blue-700' }
+              const situacao = situacaoDoProduto(p)
               return (
               <tr key={p.id} className={`group transition-colors hover:bg-blue-50/30 ${selecionados.has(p.id) ? 'bg-blue-50/60' : ''}`}>
                 <td className="px-4 py-4"><input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleOne(p.id)} className="h-4 w-4 accent-blue-600" /></td>
@@ -953,6 +1045,7 @@ export default function ProdutosClient({
             )}
           </tbody>
         </table>
+        </div>
 
         {/* Paginação */}
         {totalPaginas > 1 && (
@@ -960,7 +1053,7 @@ export default function ProdutosClient({
             <p className="text-xs text-gray-500">
               Mostrando {((pagina - 1) * 50) + 1}–{Math.min(pagina * 50, total)} de {total.toLocaleString('pt-BR')} produtos
             </p>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 max-sm:justify-between">
               <button disabled={pagina <= 1} onClick={() => navegar({ pagina: String(pagina - 1) })}
                 className={botao('secundario', 'sm')}>
                 Anterior

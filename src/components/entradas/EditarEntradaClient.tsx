@@ -440,9 +440,9 @@ export default function EditarEntradaClient({
       </div>
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-5">
         <div>
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap">
             <h1 className="text-gray-900 text-xl font-semibold">
               {entrada.numero_entrada
                 ? <span className="font-mono bg-blue-50 text-blue-700 border border-blue-100 px-2 py-0.5 rounded text-lg">{entrada.numero_entrada}</span>
@@ -469,8 +469,8 @@ export default function EditarEntradaClient({
             {entrada.fornecedores?.razao_social} · {new Date(entrada.created_at).toLocaleDateString('pt-BR')}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
+        <div className="flex items-center justify-between sm:justify-end gap-3">
+          <div className="sm:text-right">
             <p className="text-xs text-gray-400">Total da nota</p>
             <p className="text-xl font-bold text-gray-900">{fmt(Number(entrada.valor_total))}</p>
           </div>
@@ -488,7 +488,7 @@ export default function EditarEntradaClient({
       {ok  && <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-lg mb-4">✓ {ok}</div>}
 
       {/* Abas */}
-      <div className="flex gap-1 mb-5 bg-gray-100 p-1 rounded-xl w-fit flex-wrap">
+      <div className="grid grid-cols-2 sm:flex gap-1 mb-5 bg-gray-100 p-1 rounded-xl sm:w-fit sm:flex-wrap">
         {([
           ['cabecalho', 'Dados da NF'],
           ['itens', `Itens (${itens.length})`],
@@ -496,7 +496,7 @@ export default function EditarEntradaClient({
           ['contas', `Contas a Pagar (${contas.length})`],
         ] as [Aba, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setAba(key)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${aba === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-2 sm:px-4 py-2 text-[13px] sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${aba === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
             {key === 'revisao' && statusRevisao === 'pendente' && entrada.status === 'confirmada' && revisaoItens.length > 0 && (
               <span className="ml-1.5 w-2 h-2 bg-orange-400 rounded-full inline-block"></span>
@@ -507,7 +507,7 @@ export default function EditarEntradaClient({
 
       {/* ── ABA: Cabeçalho ── */}
       {aba === 'cabecalho' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 space-y-5">
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Fornecedor</label>
             <div className="relative">
@@ -541,12 +541,12 @@ export default function EditarEntradaClient({
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
             <F label="Nº da NF" value={numeroNf} onChange={setNumeroNf} disabled={cancelada} />
             <F label="Série" value={serie} onChange={setSerie} disabled={cancelada} />
             <F label="Data de emissão" value={dataEmissao} onChange={setDataEmissao} type="date" disabled={cancelada} />
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <F label="Frete (R$)" value={valorFrete} onChange={setValorFrete} disabled={cancelada} />
             <F label="Desconto (R$)" value={valorDesconto} onChange={setValorDesconto} disabled={cancelada} />
             <F label="Outros (R$)" value={valorOutros} onChange={setValorOutros} disabled={cancelada} />
@@ -584,7 +584,7 @@ export default function EditarEntradaClient({
           {!cancelada && (
             <div className="flex justify-end">
               <button onClick={salvarCabecalho} disabled={salvando}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                className="w-full sm:w-auto px-5 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
                 {salvando ? 'Salvando...' : 'Salvar dados da NF'}
               </button>
             </div>
@@ -595,7 +595,7 @@ export default function EditarEntradaClient({
       {/* ── ABA: Itens ── */}
       {aba === 'itens' && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm tabela-celular">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Produto</th>
@@ -614,37 +614,37 @@ export default function EditarEntradaClient({
                 <tr key={item.id} className="group hover:bg-gray-50">
                   {editandoItem === item.id ? (
                     <>
-                      <td className="px-4 py-3">
+                      <td className="tc-titulo px-4 py-3">
                         <p className="font-medium text-gray-900">{item.nome_produto}</p>
                         {item.sku && <p className="text-xs text-gray-400 font-mono">{item.sku}</p>}
                       </td>
-                      <td className="px-4 py-2">
+                      <td data-label="Qtd" className="px-4 py-2">
                         <input type="number" value={itemForm.quantidade}
                           onChange={e => setItemForm(p => ({ ...p, quantidade: parseFloat(e.target.value) || 0 }))}
                           className="w-full border border-blue-400 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none" />
                       </td>
-                      <td className="px-4 py-3 text-right text-xs text-gray-400">
+                      <td data-label="Custo ant." className="px-4 py-3 text-right text-xs text-gray-400">
                         {item.preco_custo_anterior > 0 ? fmt(item.preco_custo_anterior) : '—'}
                       </td>
-                      <td className="px-4 py-2">
+                      <td data-label="Custo novo" className="px-4 py-2">
                         <input type="number" step="0.01" value={itemForm.preco_custo_novo}
                           onChange={e => setItemForm(p => ({ ...p, preco_custo_novo: parseFloat(e.target.value) || 0 }))}
                           className="w-full border border-blue-400 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none" />
                       </td>
-                      <td className="px-4 py-2">
+                      <td data-label="Markup %" className="px-4 py-2">
                         <input type="number" step="0.01" value={itemForm.markup}
                           onChange={e => setItemForm(p => ({ ...p, markup: parseFloat(e.target.value) || 0 }))}
                           className="w-full border border-blue-400 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none" />
                       </td>
-                      <td className="px-4 py-2">
+                      <td data-label="Preço venda" className="px-4 py-2">
                         <input type="number" step="0.01" value={itemForm.preco_venda_novo}
                           onChange={e => setItemForm(p => ({ ...p, preco_venda_novo: parseFloat(e.target.value) || 0 }))}
                           className="w-full border border-blue-400 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none" />
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-500 text-xs">
+                      <td data-label="Subtotal" className="px-4 py-3 text-right text-gray-500 text-xs">
                         {fmt((Number(itemForm.preco_custo_novo) || 0) * (Number(itemForm.quantidade) || 0))}
                       </td>
-                      <td className="px-4 py-3"></td>
+                      <td className="tc-ocultar px-4 py-3"></td>
                       <td className="px-4 py-2">
                         <div className="flex gap-2 justify-end">
                           <button onClick={() => salvarItem(item)} disabled={salvando}
@@ -660,27 +660,29 @@ export default function EditarEntradaClient({
                     </>
                   ) : (
                     <>
-                      <td className="px-4 py-3">
+                      <td className="tc-titulo px-4 py-3">
                         <p className="font-medium text-gray-900">{item.nome_produto}</p>
                         {item.sku && <p className="text-xs text-gray-400 font-mono">{item.sku}</p>}
                         {!item.produto_id && <span className="text-xs text-orange-500">Manual</span>}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-gray-700">{item.quantidade}</td>
-                      <td className="px-4 py-3 text-right text-xs text-gray-400">
+                      <td data-label="Qtd" className="px-4 py-3 text-right font-mono text-gray-700">{item.quantidade}</td>
+                      <td data-label="Custo ant." className="px-4 py-3 text-right text-xs text-gray-400">
                         {item.preco_custo_anterior > 0 ? fmt(item.preco_custo_anterior) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-900">
-                        {fmt(custoDaNota(item))}
-                        {rateioUnit(item) !== 0 && (
-                          <span className="block text-[10px] font-normal text-gray-400">
-                            aquisição {fmt(Number(item.preco_custo_novo))}
-                          </span>
-                        )}
+                      <td data-label="Custo da nota" className="px-4 py-3 text-right text-gray-900">
+                        <div>
+                          {fmt(custoDaNota(item))}
+                          {rateioUnit(item) !== 0 && (
+                            <span className="block text-[10px] font-normal text-gray-400">
+                              aquisição {fmt(Number(item.preco_custo_novo))}
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-500 text-xs">{Number(item.markup).toFixed(1)}%</td>
-                      <td className="px-4 py-3 text-right text-gray-900">{fmt(Number(item.preco_venda_novo))}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(Number(item.subtotal))}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td data-label="Markup" className="px-4 py-3 text-right text-gray-500 text-xs">{Number(item.markup).toFixed(1)}%</td>
+                      <td data-label="Preço venda" className="px-4 py-3 text-right text-gray-900">{fmt(Number(item.preco_venda_novo))}</td>
+                      <td data-label="Subtotal" className="px-4 py-3 text-right font-semibold text-gray-900">{fmt(Number(item.subtotal))}</td>
+                      <td data-label="Vendido" className="px-4 py-3 text-right">
                         {(() => {
                           const acerto = item.produto_id ? taxaAcertoPorProduto?.[item.produto_id] : undefined
                           if (!acerto || acerto.percentual == null) return <span className="text-gray-300 text-xs">—</span>
@@ -695,7 +697,7 @@ export default function EditarEntradaClient({
                       </td>
                       {!cancelada && (
                         <td className="px-4 py-3">
-                          <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity max-md:opacity-100 max-md:w-full max-md:pt-1 max-md:gap-4">
                             <button onClick={() => abrirEdicaoItem(item)}
                               className="text-xs text-blue-600 hover:text-blue-800 font-medium">Editar</button>
                             <button onClick={() => removerItem(item)}
@@ -757,7 +759,7 @@ export default function EditarEntradaClient({
                     Arredondar .99
                   </button>
                 </div>
-                <div className="ml-auto flex gap-2">
+                <div className="sm:ml-auto flex flex-wrap gap-2 max-sm:w-full max-sm:[&>button]:flex-1">
                   {statusRevisao !== 'dispensado' && (
                     <button onClick={dispensarRevisao}
                       className="px-4 py-2 border border-gray-300 text-gray-500 text-sm rounded-lg hover:bg-gray-50">
@@ -773,7 +775,7 @@ export default function EditarEntradaClient({
 
               {/* Tabela de revisão */}
               <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm tabela-celular">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
                       <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Produto</th>
@@ -796,45 +798,49 @@ export default function EditarEntradaClient({
                       const custoSubiu = varCusto > 0.1
                       return (
                         <tr key={r.id} className={`group ${r.revisado ? 'bg-emerald-50/40' : prejuizo ? 'bg-red-50/40' : ''}`}>
-                          <td className="px-4 py-3">
+                          <td className="tc-titulo px-4 py-3">
                             <p className="font-medium text-gray-900 text-sm">{r.nome}</p>
                             {r.sku && <p className="text-xs text-gray-400 font-mono">{r.sku}</p>}
                           </td>
-                          <td className="px-3 py-3 text-right text-xs text-gray-400">
+                          <td data-label="Custo ant." className="px-3 py-3 text-right text-xs text-gray-400">
                             {r.custo_anterior > 0 ? fmt(r.custo_anterior) : '—'}
                           </td>
-                          <td className="px-3 py-3 text-right font-medium text-gray-900">
+                          <td data-label="Custo novo" className="px-3 py-3 text-right font-medium text-gray-900">
                             {fmt(r.custo_novo)}
                           </td>
-                          <td className="px-3 py-3 text-right">
+                          <td data-label="Variação" className="px-3 py-3 text-right">
                             {r.custo_anterior > 0 ? (
                               <span className={`text-xs font-semibold ${custoSubiu ? 'text-red-600' : custoCaiu ? 'text-emerald-600' : 'text-gray-400'}`}>
                                 {pct(varCusto)}
                               </span>
                             ) : <span className="text-gray-300 text-xs">—</span>}
                           </td>
-                          <td className="px-3 py-3 text-right text-gray-500 text-xs">{fmt(r.preco_atual)}</td>
-                          <td className="px-3 py-2">
+                          <td data-label="Preço atual" className="px-3 py-3 text-right text-gray-500 text-xs">{fmt(r.preco_atual)}</td>
+                          <td data-label="Markup %" className="px-3 py-2">
                             <input type="number" step="0.1" value={r.markup}
                               disabled={r.revisado}
                               onChange={e => atualizarRevisaoItem(r.id, 'markup', parseFloat(e.target.value) || 0)}
-                              className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:border-blue-400 disabled:bg-gray-50 disabled:text-gray-300" />
+                              inputMode="decimal"
+                              className="w-full max-md:w-32 border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:border-blue-400 disabled:bg-gray-50 disabled:text-gray-300" />
                           </td>
-                          <td className="px-3 py-2">
+                          <td data-label="Novo preço" className="px-3 py-2">
                             <input type="number" step="0.01" value={r.novo_preco}
                               disabled={r.revisado}
                               onChange={e => atualizarRevisaoItem(r.id, 'novo_preco', parseFloat(e.target.value) || 0)}
-                              className={`w-full border rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:border-blue-400 font-semibold disabled:bg-gray-50 disabled:text-gray-300 ${prejuizo && !r.revisado ? 'border-red-300 text-red-700 bg-red-50' : 'border-gray-200'}`} />
+                              inputMode="decimal"
+                              className={`w-full max-md:w-32 border rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:border-blue-400 font-semibold disabled:bg-gray-50 disabled:text-gray-300 ${prejuizo && !r.revisado ? 'border-red-300 text-red-700 bg-red-50' : 'border-gray-200'}`} />
                           </td>
-                          <td className="px-3 py-3 text-right">
-                            <span className={`text-xs font-semibold ${margemNova < 0 ? 'text-red-600' : margemNova < 15 ? 'text-orange-500' : 'text-emerald-600'}`}>
-                              {margemNova.toFixed(1)}%
-                            </span>
-                            {prejuizo && !r.revisado && (
-                              <p className="text-[10px] text-red-500">⚠ Prejuízo</p>
-                            )}
+                          <td data-label="Margem" className="px-3 py-3 text-right">
+                            <div>
+                              <span className={`text-xs font-semibold ${margemNova < 0 ? 'text-red-600' : margemNova < 15 ? 'text-orange-500' : 'text-emerald-600'}`}>
+                                {margemNova.toFixed(1)}%
+                              </span>
+                              {prejuizo && !r.revisado && (
+                                <p className="text-[10px] text-red-500">⚠ Prejuízo</p>
+                              )}
+                            </div>
                           </td>
-                          <td className="px-3 py-3 text-center">
+                          <td data-label="Status" className="px-3 py-3 text-center">
                             {r.revisado
                               ? <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">✓ Aplicado</span>
                               : <span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">Pendente</span>
@@ -853,7 +859,7 @@ export default function EditarEntradaClient({
                   <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
                     <h3 className="text-sm font-semibold text-gray-700">Histórico de alterações de preço</h3>
                   </div>
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm tabela-celular">
                     <thead>
                       <tr className="border-b border-gray-100">
                         <th className="text-left px-4 py-2 text-xs text-gray-500">Produto</th>
@@ -869,18 +875,18 @@ export default function EditarEntradaClient({
                     <tbody className="divide-y divide-gray-50">
                       {historicoPrecos.map(h => (
                         <tr key={h.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 text-gray-800 font-medium text-xs">{h.produto_nome ?? '—'}</td>
-                          <td className="px-4 py-2 text-right text-xs text-gray-400">{h.custo_anterior != null ? fmt(h.custo_anterior) : '—'}</td>
-                          <td className="px-4 py-2 text-right text-xs text-gray-700">{h.custo_novo != null ? fmt(h.custo_novo) : '—'}</td>
-                          <td className="px-4 py-2 text-right text-xs text-gray-400">{h.preco_venda_anterior != null ? fmt(h.preco_venda_anterior) : '—'}</td>
-                          <td className="px-4 py-2 text-right text-xs font-semibold text-gray-900">{h.preco_venda_novo != null ? fmt(h.preco_venda_novo) : '—'}</td>
-                          <td className="px-4 py-2 text-right text-xs">
+                          <td className="tc-titulo px-4 py-2 text-gray-800 font-medium text-xs">{h.produto_nome ?? '—'}</td>
+                          <td data-label="Custo ant." className="px-4 py-2 text-right text-xs text-gray-400">{h.custo_anterior != null ? fmt(h.custo_anterior) : '—'}</td>
+                          <td data-label="Custo novo" className="px-4 py-2 text-right text-xs text-gray-700">{h.custo_novo != null ? fmt(h.custo_novo) : '—'}</td>
+                          <td data-label="Preço ant." className="px-4 py-2 text-right text-xs text-gray-400">{h.preco_venda_anterior != null ? fmt(h.preco_venda_anterior) : '—'}</td>
+                          <td data-label="Preço novo" className="px-4 py-2 text-right text-xs font-semibold text-gray-900">{h.preco_venda_novo != null ? fmt(h.preco_venda_novo) : '—'}</td>
+                          <td data-label="Margem nova" className="px-4 py-2 text-right text-xs">
                             <span className={`font-semibold ${(h.margem_nova ?? 0) < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                               {h.margem_nova != null ? h.margem_nova.toFixed(1) + '%' : '—'}
                             </span>
                           </td>
-                          <td className="px-4 py-2 text-xs text-gray-400">{h.usuario_nome ?? '—'}</td>
-                          <td className="px-4 py-2 text-xs text-gray-400">{new Date(h.created_at).toLocaleString('pt-BR')}</td>
+                          <td data-label="Usuário" className="px-4 py-2 text-xs text-gray-400">{h.usuario_nome ?? '—'}</td>
+                          <td data-label="Data" className="px-4 py-2 text-xs text-gray-400">{new Date(h.created_at).toLocaleString('pt-BR')}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -896,22 +902,22 @@ export default function EditarEntradaClient({
       {aba === 'contas' && (
         <div className="space-y-4">
           {/* Resumo financeiro */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
             {[
               { label: 'Total da nota', value: fmt(Number(entrada.valor_total)), cls: 'text-gray-900' },
               { label: 'Total em contas', value: fmt(totalContas), cls: totalContas > 0 ? 'text-blue-700' : 'text-gray-400' },
               { label: 'Total pago', value: fmt(totalPago), cls: totalPago > 0 ? 'text-emerald-600' : 'text-gray-400' },
               { label: 'Em aberto', value: fmt(totalContas - totalPago), cls: (totalContas - totalPago) > 0 ? 'text-orange-600' : 'text-gray-400' },
             ].map(s => (
-              <div key={s.label} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+              <div key={s.label} className="bg-white border border-gray-200 rounded-xl px-3 sm:px-4 py-3">
                 <p className="text-xs text-gray-500 mb-1">{s.label}</p>
-                <p className={`text-lg font-bold ${s.cls}`}>{s.value}</p>
+                <p className={`text-base sm:text-lg font-bold ${s.cls}`}>{s.value}</p>
               </div>
             ))}
           </div>
 
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm tabela-celular">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Descrição</th>
@@ -928,14 +934,14 @@ export default function EditarEntradaClient({
                   <tr key={c.id} className="group hover:bg-gray-50">
                     {editandoConta === c.id ? (
                       <>
-                        <td className="px-4 py-3 text-xs text-gray-600">{c.descricao}</td>
-                        <td className="px-4 py-3 text-center text-xs text-gray-500">{c.parcela}/{c.total_parcelas}</td>
-                        <td className="px-4 py-2">
+                        <td className="tc-titulo px-4 py-3 text-xs text-gray-600">{c.descricao}</td>
+                        <td data-label="Parcela" className="px-4 py-3 text-center text-xs text-gray-500">{c.parcela}/{c.total_parcelas}</td>
+                        <td data-label="Vencimento" className="px-4 py-2">
                           <input type="date" value={contaForm.vencimento}
                             onChange={e => setContaForm(p => ({ ...p, vencimento: e.target.value }))}
                             className="w-full border border-blue-400 rounded-lg px-2 py-1.5 text-xs focus:outline-none" />
                         </td>
-                        <td className="px-4 py-2">
+                        <td data-label="Forma pgto" className="px-4 py-2">
                           <select value={contaForm.forma_pagamento}
                             onChange={e => setContaForm(p => ({ ...p, forma_pagamento: e.target.value }))}
                             className="w-full border border-blue-400 rounded-lg px-2 py-1.5 text-xs focus:outline-none">
@@ -944,12 +950,12 @@ export default function EditarEntradaClient({
                             ))}
                           </select>
                         </td>
-                        <td className="px-4 py-2">
+                        <td data-label="Valor" className="px-4 py-2">
                           <input type="number" step="0.01" value={contaForm.valor}
                             onChange={e => setContaForm(p => ({ ...p, valor: parseFloat(e.target.value) || 0 }))}
                             className="w-full border border-blue-400 rounded-lg px-2 py-1.5 text-xs text-right focus:outline-none" />
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td data-label="Status" className="px-4 py-3 text-center">
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                             c.status === 'pago' ? 'bg-green-100 text-green-700' :
                             c.status === 'vencido' ? 'bg-red-100 text-red-600' :
@@ -969,14 +975,14 @@ export default function EditarEntradaClient({
                       </>
                     ) : (
                       <>
-                        <td className="px-4 py-3 text-xs text-gray-600 max-w-xs truncate">{c.descricao}</td>
-                        <td className="px-4 py-3 text-center text-xs text-gray-500">{c.parcela}/{c.total_parcelas}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">
+                        <td className="tc-titulo px-4 py-3 text-xs text-gray-600 max-w-xs truncate">{c.descricao}</td>
+                        <td data-label="Parcela" className="px-4 py-3 text-center text-xs text-gray-500">{c.parcela}/{c.total_parcelas}</td>
+                        <td data-label="Vencimento" className="px-4 py-3 text-sm text-gray-700">
                           {new Date(c.vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}
                         </td>
-                        <td className="px-4 py-3 text-xs text-gray-500 capitalize">{c.forma_pagamento}</td>
-                        <td className="px-4 py-3 text-right font-medium text-gray-900">{fmt(Number(c.valor))}</td>
-                        <td className="px-4 py-3 text-center">
+                        <td data-label="Forma pgto" className="px-4 py-3 text-xs text-gray-500 capitalize">{c.forma_pagamento}</td>
+                        <td data-label="Valor" className="px-4 py-3 text-right font-medium text-gray-900">{fmt(Number(c.valor))}</td>
+                        <td data-label="Status" className="px-4 py-3 text-center">
                           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                             c.status === 'pago' ? 'bg-green-100 text-green-700' :
                             c.status === 'vencido' ? 'bg-red-100 text-red-600' :
@@ -987,7 +993,7 @@ export default function EditarEntradaClient({
                           <td className="px-4 py-3 text-center">
                             {c.status !== 'pago' && c.status !== 'cancelado' && (
                               <button onClick={() => abrirEdicaoConta(c)}
-                                className="text-xs text-blue-600 hover:text-blue-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                                className="text-xs text-blue-600 hover:text-blue-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity max-md:opacity-100 max-md:border max-md:border-blue-200 max-md:rounded-lg max-md:px-3 max-md:py-1.5">
                                 Editar
                               </button>
                             )}

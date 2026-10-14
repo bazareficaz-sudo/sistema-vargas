@@ -510,30 +510,30 @@ export default function EntradasXmlClient({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <h1 className="text-slate-900 text-xl font-bold">Entrada por XML / NF-e</h1>
           <p className="text-slate-500 text-sm">{entradasFiltradas.length} registro(s)</p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 sm:flex gap-2 [&>*]:justify-center">
           <Link href="/dashboard/empresas"
             title="Token, ambiente e certificado ficam na configuração da empresa"
             className="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm rounded-xl border border-slate-200 shadow-sm flex items-center">
             ⚙ Dados fiscais
           </Link>
           <button onClick={() => { setModalSefaz(true); consultarSefaz() }}
-            className="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm rounded-xl">
+            className="flex px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm rounded-xl">
             🔍 Consultar SEFAZ
           </button>
           <button onClick={() => { setModalImportar(true); setArquivos([]); setResultados([]) }}
-            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-xl">
+            className="col-span-2 sm:col-span-1 order-first sm:order-none flex px-3 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-xl">
             + Importar XML
           </button>
         </div>
       </div>
 
       {/* Métricas */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 [&>div]:p-3 sm:[&>div]:p-4 [&_p.text-lg]:text-base sm:[&_p.text-lg]:text-lg [&_p.text-lg]:break-words">
         <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
           <p className="text-slate-500 text-xs">Total importadas</p>
           <p className="text-slate-800 text-lg font-bold mt-1">{entradas.length}</p>
@@ -553,7 +553,7 @@ export default function EntradasXmlClient({
       </div>
 
       {/* Indicadores: compras mês atual vs. mês passado */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 [&>div]:p-3 sm:[&>div]:p-4 [&_p.text-lg]:text-base sm:[&_p.text-lg]:text-lg [&_p.text-lg]:break-words">
         <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
           <p className="text-slate-500 text-xs">Compras este mês</p>
           <p className="text-slate-800 text-lg font-bold mt-1">{fmt(indicadores.totalAtual)}</p>
@@ -579,16 +579,53 @@ export default function EntradasXmlClient({
       <div className="flex gap-2 flex-wrap">
         <input value={busca} onChange={e => setBusca(e.target.value)}
           placeholder="Buscar fornecedor, nº NF-e ou chave..."
-          className="bg-white border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm w-72 focus:outline-none focus:border-blue-400 placeholder-slate-400 shadow-sm" />
+          className="bg-white border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm w-full sm:w-72 focus:outline-none focus:border-blue-400 placeholder-slate-400 shadow-sm" />
         <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}
-          className="bg-white border border-slate-200 text-slate-700 rounded-xl px-3 py-2 text-sm shadow-sm">
+          className="bg-white border border-slate-200 text-slate-700 rounded-xl px-3 py-2 text-sm shadow-sm w-full sm:w-auto">
           <option value="todos">Todos os status</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </div>
 
+      {/* Celular: cartão por nota (a tabela de 7 colunas não cabe) */}
+      <div className="md:hidden space-y-2">
+        {entradasFiltradas.length === 0 && (
+          <p className="text-center py-10 text-sm text-slate-400">Nenhuma NF-e encontrada. Toque em &quot;Importar XML&quot; para começar.</p>
+        )}
+        {entradasFiltradas.map(e => (
+          <div key={`m-${e.id}`} className="bg-white border border-slate-200 rounded-xl px-3 py-3 space-y-2">
+            <button onClick={() => router.push(`/dashboard/entradas-xml/${e.id}`)} className="w-full text-left flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-slate-800 text-sm font-medium break-words">{e.nome_fornecedor ?? '—'}</p>
+                <p className="text-slate-500 text-xs mt-0.5">
+                  NF-e {e.numero ?? '—'}-{e.serie ?? '—'} · {e.data_emissao ? fmtDt(e.data_emissao) : '—'} · {e.origem === 'manual' ? '📂 XML' : '📡 SEFAZ'}
+                </p>
+              </div>
+              <p className="font-semibold text-slate-800 text-sm whitespace-nowrap">{fmt(e.valor_total)}</p>
+            </button>
+            <div className="flex items-center justify-between gap-2">
+              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COR[e.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                {STATUS_LABEL[e.status] ?? e.status}
+              </span>
+              <button onClick={() => router.push(`/dashboard/entradas-xml/${e.id}`)}
+                className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg">Abrir →</button>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5 [&>button]:py-1.5 [&>button]:text-[11px] [&>button]:rounded-lg">
+              <button onClick={() => abrirGestaoPrecos(e.id, e.numero)} disabled={carregandoAcao === `precos-${e.id}`}
+                className="bg-emerald-50 text-emerald-700 disabled:opacity-50">💰 Preços</button>
+              <button onClick={() => router.push(`/dashboard/produtos?entrada=${encodeURIComponent(e.numero ?? '')}`)}
+                className="bg-teal-50 text-teal-700">📦 Produtos</button>
+              <button onClick={() => imprimirEtiquetasEntrada(e.id)} disabled={carregandoAcao === `etiqueta-${e.id}`}
+                className="bg-purple-50 text-purple-700 disabled:opacity-50">🏷️ Etiq.</button>
+              <button onClick={() => exportarXmlEntrada(e.id, e.numero, e.serie)} disabled={carregandoAcao === `xml-${e.id}`}
+                className="bg-slate-50 text-slate-700 disabled:opacity-50">⬇ XML</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Tabela */}
-      <div className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+      <div className="hidden md:block bg-white border border-slate-100 rounded-2xl overflow-x-auto shadow-sm">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-slate-500 bg-slate-50 border-b border-slate-100 text-xs uppercase tracking-wide">
@@ -799,7 +836,7 @@ export default function EntradasXmlClient({
                 )
               )}
               {nfesSefaz.length > 0 && (
-                <table className="w-full text-sm">
+                <table className="w-full text-sm tabela-celular max-md:[&>tbody>tr]:border-b max-md:[&>tbody>tr]:border-slate-100">
                   <thead>
                     <tr className="text-slate-500 text-xs border-b border-slate-100">
                       <th className="pb-2 text-left">Chave</th>
@@ -817,15 +854,15 @@ export default function EntradasXmlClient({
                       const resultado = importadosSefaz[n.chave_nfe]
                       return (
                       <tr key={i} className="text-slate-700">
-                        <td className="py-2 text-xs font-mono text-slate-400 truncate max-w-[120px]">{n.chave_nfe}</td>
-                        <td className="py-2 text-sm">{n.nome_emitente ?? '—'}</td>
-                        <td className="py-2 text-xs text-slate-500 whitespace-nowrap">{n.data_emissao ? fmtDt(n.data_emissao) : '—'}</td>
-                        <td className="py-2 text-right">{fmt(Number(n.valor_total ?? 0))}</td>
-                        <td className="py-2 text-center">
+                        <td data-label="Chave" className="py-2 text-xs font-mono text-slate-400 truncate max-w-[120px] max-md:break-all">{n.chave_nfe}</td>
+                        <td className="py-2 text-sm tc-titulo">{n.nome_emitente ?? '—'}</td>
+                        <td data-label="Emissão" className="py-2 text-xs text-slate-500 whitespace-nowrap">{n.data_emissao ? fmtDt(n.data_emissao) : '—'}</td>
+                        <td data-label="Valor" className="py-2 text-right">{fmt(Number(n.valor_total ?? 0))}</td>
+                        <td data-label="Manifesto" className="py-2 text-center">
                           <span className="text-xs text-slate-500">{n.manifestado ?? 'Pendente'}</span>
                         </td>
                         <td className="py-2 text-center">
-                          <div className="flex gap-1 justify-center flex-wrap">
+                          <div className="flex gap-1 justify-center flex-wrap max-md:grid max-md:grid-cols-2 max-md:w-full max-md:[&>button]:py-2">
                             <button onClick={() => manifestar(n.chave_nfe, 'ciencia')}
                               className="px-2 py-1 bg-teal-600 hover:bg-teal-700 text-white text-xs rounded-lg">Ciência</button>
                             <button onClick={() => manifestar(n.chave_nfe, 'confirmacao')}
@@ -836,7 +873,7 @@ export default function EntradasXmlClient({
                               className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded-lg">Não realizada</button>
                           </div>
                         </td>
-                        <td className="py-2 text-center">
+                        <td data-label="Entrada" className="py-2 text-center">
                           {jaImportada || resultado?.ok ? (
                             <span className="text-xs text-emerald-600 font-medium">✓ Importada</span>
                           ) : (
