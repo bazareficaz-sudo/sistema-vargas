@@ -283,7 +283,7 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
       )}
 
       {/* ── Indicadores ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3 mb-5">
         <Cartao valor={kpi.encomendas} label="Encomendas abertas" destaque={kpi.encomendas > 0} />
         <Cartao valor={kpi.faltas} label="Faltas abertas" />
         <Cartao valor={kpi.produtos} label="Produtos diferentes" />
@@ -307,26 +307,26 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
 
       {/* ── Filtros ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+        <div className="flex w-full sm:w-auto sm:inline-flex rounded-lg border border-slate-200 overflow-hidden">
           <button onClick={() => setVisao('produto')}
-            className={`px-3 py-1.5 text-xs font-medium ${visao === 'produto' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+            className={`flex-1 sm:flex-none px-3 py-2 sm:py-1.5 text-xs font-medium ${visao === 'produto' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
             Por produto
           </button>
           <button onClick={() => setVisao('solicitacao')}
-            className={`px-3 py-1.5 text-xs font-medium ${visao === 'solicitacao' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+            className={`flex-1 sm:flex-none px-3 py-2 sm:py-1.5 text-xs font-medium ${visao === 'solicitacao' ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
             Cada solicitação
           </button>
         </div>
 
         <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value as '' | 'falta' | 'encomenda')}
-          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
+          className="flex-1 sm:flex-none min-w-[30%] sm:min-w-0 rounded-lg border border-slate-200 px-2 sm:px-2.5 py-2 sm:py-1.5 text-xs">
           <option value="">Falta e encomenda</option>
           <option value="encomenda">Só encomendas</option>
           <option value="falta">Só faltas</option>
         </select>
 
         <select value={filtroOrigem} onChange={e => setFiltroOrigem(e.target.value as Origem)}
-          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
+          className="flex-1 sm:flex-none min-w-[30%] sm:min-w-0 rounded-lg border border-slate-200 px-2 sm:px-2.5 py-2 sm:py-1.5 text-xs">
           <option value="">Vendedor e automático</option>
           <option value="vendedor">👤 Anotadas pelo vendedor</option>
           <option value="automatico">🤖 Abaixo do mínimo</option>
@@ -334,7 +334,7 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
         </select>
 
         <select value={filtroStatus} onChange={e => setFiltroStatus(e.target.value)}
-          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
+          className="flex-1 sm:flex-none min-w-[30%] sm:min-w-0 rounded-lg border border-slate-200 px-2 sm:px-2.5 py-2 sm:py-1.5 text-xs">
           <option value="abertos">Em aberto</option>
           <option value="">Todos os status</option>
           {FLUXO.map(s => <option key={s} value={s}>{STATUS[s].label}</option>)}
@@ -343,12 +343,12 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
 
         <input value={busca} onChange={e => setBusca(e.target.value)}
           placeholder="Buscar produto, fornecedor, cliente ou observação..."
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs flex-1 min-w-[200px]" />
+          className="rounded-lg border border-slate-200 px-3 py-2 sm:py-1.5 text-sm sm:text-xs basis-full sm:basis-auto flex-1 min-w-0 sm:min-w-[200px]" />
 
         <span className="text-xs text-slate-400">
           {visao === 'produto'
             ? `${grupos.length} produto${grupos.length !== 1 ? 's' : ''}`
-            : `${filtradas.length} solicitação${filtradas.length !== 1 ? 'ões' : ''}`}
+            : `${filtradas.length} solicitaç${filtradas.length !== 1 ? 'ões' : 'ão'}`}
         </span>
       </div>
 
@@ -370,7 +370,7 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
       )}
 
       {selecionados.size > 0 && (
-        <div className="mb-4 rounded-lg border border-slate-300 bg-white px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
+        <div className="mb-4 sticky bottom-2 z-10 rounded-lg border border-slate-300 bg-white shadow-lg sm:shadow-none sm:static px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-2 text-sm">
           <span className="font-medium text-slate-700">{selecionados.size} selecionada(s)</span>
           <span className="text-slate-400">→</span>
           {FLUXO.slice(1).concat('cancelado').map(s => (
@@ -415,7 +415,11 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
           ))}
         </div>
       ) : (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-x-auto">
+        <>
+        <div className="sm:hidden space-y-2">
+          {filtradas.map(f => <SolicitacaoCartao key={f.id} f={f} selecionado={selecionados.has(f.id)} onSelecionar={() => alternarSelecao([f.id])} />)}
+        </div>
+        <div className="hidden sm:block rounded-xl border border-slate-200 bg-white overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
@@ -466,6 +470,7 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </div>
   )
@@ -475,7 +480,7 @@ export default function FaltasClient({ faltas, automaticos, erro, limite }: {
 
 function Cartao({ valor, label, destaque = false }: { valor: number; label: string; destaque?: boolean }) {
   return (
-    <div className={`rounded-xl border px-4 py-3 ${destaque && valor > 0 ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-white'}`}>
+    <div className={`rounded-xl border px-3 py-2.5 sm:px-4 sm:py-3 ${destaque && valor > 0 ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-white'}`}>
       <div className={`text-2xl font-semibold ${destaque && valor > 0 ? 'text-orange-700' : 'text-slate-800'}`}>{valor}</div>
       <div className="text-[11px] text-slate-500 mt-0.5">{label}</div>
     </div>
@@ -531,6 +536,41 @@ function Estoque({ valor }: { valor: number | null }) {
   return <span className="text-slate-700">{valor}</span>
 }
 
+/** "Cada solicitação" no celular: a tabela de 9 colunas não cabe — vira cartão. */
+function SolicitacaoCartao({ f, selecionado, onSelecionar }: { f: Falta; selecionado: boolean; onSelecionar: () => void }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 flex items-start gap-3">
+      <input type="checkbox" className="mt-1 w-4 h-4" checked={selecionado} onChange={onSelecionar} />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="font-medium text-slate-800 break-words">{f.produto_nome}</p>
+            {f.produto_sku && <p className="text-[11px] text-slate-400">{f.produto_sku}</p>}
+          </div>
+          <EtiquetaStatus status={f.status} />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-600">
+          <EtiquetaTipo tipo={f.tipo} />
+          <span className="whitespace-nowrap"><strong className="text-slate-800">{f.quantidade_solicitada}</strong> un pedida(s)</span>
+          <span className="whitespace-nowrap">Estoque: <Estoque valor={f.estoqueAtual} /></span>
+        </div>
+        {(f.cliente_nome || f.cliente_telefone) && (
+          <div className="text-[12px] text-slate-700">
+            👤 {f.cliente_nome ?? '—'}
+            {f.cliente_telefone && (
+              <a href={whatsapp(f.cliente_telefone, f.produto_nome)} target="_blank" rel="noreferrer"
+                className="ml-2 text-emerald-600 hover:underline">{f.cliente_telefone}</a>
+            )}
+          </div>
+        )}
+        {f.observacao && <p className="text-[12px] text-slate-500 italic">{f.observacao}</p>}
+        <AvisoWhatsapp f={f} />
+        <p className="text-[11px] text-slate-400">{dataHora(f.created_at)} · {f.usuario_nome ?? 'vendedor não identificado'}</p>
+      </div>
+    </div>
+  )
+}
+
 function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onStatus, ocupado }: {
   grupo: Grupo
   aberto: boolean
@@ -548,14 +588,16 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
 
   return (
     <div className={`rounded-xl border bg-white overflow-hidden ${g.temEncomenda ? 'border-orange-200' : 'border-slate-200'}`}>
-      <div className="flex items-start gap-3 px-4 py-3">
-        <input type="checkbox" className="mt-1" checked={temSolicitacoes && todosSelecionados}
+      {/* No celular os botões descem para uma linha própria; ao lado do nome
+          eles espremiam o cartão até cada palavra virar uma linha. */}
+      <div className="flex flex-wrap sm:flex-nowrap items-start gap-x-3 gap-y-2 px-3 sm:px-4 py-3">
+        <input type="checkbox" className="mt-1 w-4 h-4 sm:w-auto sm:h-auto" checked={temSolicitacoes && todosSelecionados}
           disabled={!temSolicitacoes} onChange={() => onSelecionar(ids)}
           title={temSolicitacoes ? undefined : 'Linha automática: monte o pedido em Pedido ao Fornecedor › Faltas'} />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-slate-800">{g.nome}</span>
+            <span className="font-medium text-slate-800 break-words">{g.nome}</span>
             {g.temEncomenda && <EtiquetaTipo tipo="encomenda" />}
             {g.itens.length > 0 && (
               <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600" title="Anotada pelo vendedor no balcão">
@@ -578,10 +620,10 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
 
           {g.itens.length > 0 && (
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-slate-600">
-            <span><strong className="text-slate-800">{g.solicitacoes}</strong> solicitaç{g.solicitacoes === 1 ? 'ão' : 'ões'}</span>
-            {g.clientes > 0 && <span><strong className="text-slate-800">{g.clientes}</strong> cliente{g.clientes !== 1 ? 's' : ''} identificado{g.clientes !== 1 ? 's' : ''}</span>}
-            <span><strong className="text-slate-800">{g.quantidade}</strong> unidade{g.quantidade !== 1 ? 's' : ''} pedida{g.quantidade !== 1 ? 's' : ''}</span>
-            <span className="text-slate-500">
+            <span className="whitespace-nowrap"><strong className="text-slate-800">{g.solicitacoes}</strong> solicitaç{g.solicitacoes === 1 ? 'ão' : 'ões'}</span>
+            {g.clientes > 0 && <span className="whitespace-nowrap"><strong className="text-slate-800">{g.clientes}</strong> cliente{g.clientes !== 1 ? 's' : ''} identificado{g.clientes !== 1 ? 's' : ''}</span>}
+            <span className="whitespace-nowrap"><strong className="text-slate-800">{g.quantidade}</strong> unidade{g.quantidade !== 1 ? 's' : ''} pedida{g.quantidade !== 1 ? 's' : ''}</span>
+            <span className="text-slate-500 whitespace-nowrap">
               de {dataCurta(g.primeira)} a {dataCurta(g.ultima)}
               {diasPrimeira > 0 && ` · há ${diasPrimeira} dia${diasPrimeira !== 1 ? 's' : ''}`}
             </span>
@@ -596,7 +638,7 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
           )}
 
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
-            <span className="text-slate-600">
+            <span className="text-slate-600 whitespace-nowrap">
               Estoque hoje: <Estoque valor={g.estoqueAtual} />
             </span>
             {g.custo > 0 && (
@@ -619,17 +661,17 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
         </div>
 
         {temSolicitacoes && (
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <div className="flex gap-1">
+        <div className="w-full sm:w-auto pl-7 sm:pl-0 flex flex-col items-stretch sm:items-end gap-1.5 shrink-0">
+          <div className="grid grid-cols-3 sm:flex gap-1">
             {(['em_analise', 'em_compra', 'recebido'] as const).map(s => (
               <button key={s} disabled={ocupado} onClick={() => onStatus(ids, s)}
                 title={`Todas as ${g.solicitacoes} deste produto → ${STATUS[s].ajuda}`}
-                className={`px-2 py-1 rounded-md text-[11px] font-medium disabled:opacity-50 ${STATUS[s].cor} hover:brightness-95`}>
+                className={`px-2 py-2 sm:py-1 rounded-md text-xs sm:text-[11px] font-medium whitespace-nowrap disabled:opacity-50 ${STATUS[s].cor} hover:brightness-95`}>
                 {STATUS[s].label}
               </button>
             ))}
           </div>
-          <button onClick={onAlternar} className="text-[11px] text-slate-400 hover:text-slate-600">
+          <button onClick={onAlternar} className="text-xs sm:text-[11px] text-slate-500 sm:text-slate-400 hover:text-slate-600 py-1 sm:py-0 self-center sm:self-end">
             {aberto ? 'ocultar' : 'ver as solicitações'}
           </button>
         </div>
@@ -639,9 +681,9 @@ function GrupoLinha({ grupo, aberto, onAlternar, selecionados, onSelecionar, onS
       {aberto && (
         <div className="border-t border-slate-100 bg-slate-50/60 divide-y divide-slate-100">
           {g.itens.map(f => (
-            <div key={f.id} className="px-4 py-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+            <div key={f.id} className="px-3 sm:px-4 py-2 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-1 text-[12px]">
               <input type="checkbox" checked={selecionados.has(f.id)} onChange={() => onSelecionar([f.id])} />
-              <span className="text-slate-500 w-24">{dataHora(f.created_at)}</span>
+              <span className="text-slate-500 sm:w-24">{dataHora(f.created_at)}</span>
               <EtiquetaTipo tipo={f.tipo} />
               <span className="font-medium text-slate-700">{f.quantidade_solicitada} un</span>
               <span className="text-slate-600">
