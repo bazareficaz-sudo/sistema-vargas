@@ -58,3 +58,40 @@ body {
 .blog-content img { border-radius: 1rem; margin: 1.5em 0; }
 .blog-content blockquote { border-left: 3px solid #3b82f6; padding-left: 1em; color: #6b7280; font-style: italic; margin: 1.5em 0; }
 .blog-content code { background: #f3f4f6; padding: 0.15em 0.4em; border-radius: 0.35em; font-size: 0.9em; }
+
+/* ── Tabela que vira cartão no celular ─────────────────────────────────────
+   Para telas de trabalho com tabela larga (entrada por XML, entrada manual):
+   abaixo de 768px cada linha vira um cartão e cada célula uma linha
+   "rótulo ............ valor", com o rótulo vindo de data-label. A mesma
+   marcação serve às duas telas — nada de lógica duplicada numa versão
+   "mobile" que depois fica para trás.
+     · td.tc-titulo  → a célula vira o título do cartão (sem rótulo);
+     · td.tc-ocultar → some no celular (coluna que só faz sentido na tabela);
+     · td sem data-label e sem tc-titulo → ocupa a linha inteira. */
+@media (max-width: 767px) {
+  table.tabela-celular,
+  table.tabela-celular > tbody { display: block; width: 100%; min-width: 0 !important; }
+  table.tabela-celular > thead { display: none; }
+  table.tabela-celular > tbody > tr { display: flex; flex-direction: column; padding: 0.625rem 0.875rem; }
+  table.tabela-celular > tbody > tr > td {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+    padding: 0.2rem 0 !important; text-align: right; max-width: none !important;
+    white-space: normal; overflow: visible; text-overflow: clip;
+  }
+  table.tabela-celular > tbody > tr > td > div { justify-content: flex-end; }
+  table.tabela-celular > tbody > tr > td[data-label]::before {
+    content: attr(data-label); flex-shrink: 0; text-align: left;
+    font-size: 11px; font-weight: 500; color: #64748b;
+  }
+  table.tabela-celular > tbody > tr > td.tc-titulo {
+    display: block; text-align: left; font-size: 0.8125rem; font-weight: 500;
+    color: #1e293b; padding-bottom: 0.375rem !important; order: -1;
+  }
+  table.tabela-celular > tbody > tr > td.tc-ocultar { display: none; }
+  table.tabela-celular > tbody > tr > td[colspan] { display: block; text-align: center; }
+  table.tabela-celular input[type="number"] { min-height: 2.25rem; font-size: 0.875rem; }
+  table.tabela-celular > tfoot { display: block; }
+  table.tabela-celular > tfoot > tr { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.875rem; }
+  table.tabela-celular > tfoot > tr > td { padding: 0 !important; }
+  table.tabela-celular > tfoot > tr > td:empty { display: none; }
+}

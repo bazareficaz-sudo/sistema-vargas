@@ -352,6 +352,14 @@ export default function NovaEntradaClient({
 
   // Geral
   const [etapa, setEtapa] = useState<Etapa>('dados')
+  // No celular a barra de etapas rola de lado: a etapa atual precisa ficar
+  // à vista, senão quem está em "Pagamento" só enxerga "Dados da NF".
+  const barraEtapasRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const barra = barraEtapasRef.current
+    const atual = barra?.querySelector<HTMLElement>('[data-etapa-atual]')
+    if (barra && atual) barra.scrollTo({ left: Math.max(0, atual.offsetLeft - 16), behavior: 'smooth' })
+  }, [etapa])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
   // Trava síncrona contra clique duplo (o estado "salvando" só bloqueia o
@@ -1124,18 +1132,18 @@ export default function NovaEntradaClient({
       <h1 className="text-gray-900 text-xl font-semibold mb-6">Nova Entrada de Mercadoria</h1>
 
       {/* Steps */}
-      <div className="flex items-center gap-0 mb-8 flex-wrap gap-y-2">
+      <div ref={barraEtapasRef} className="flex items-center gap-0 mb-6 sm:mb-8 sm:flex-wrap gap-y-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 [scrollbar-width:none]">
         {ETAPAS.map((key, i) => (
-          <div key={key} className="flex items-center">
-            <div onClick={() => etapaIdx > i && setEtapa(key)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${etapaIdx > i ? 'cursor-pointer text-green-600 hover:bg-green-50' : ''} ${etapa === key ? 'bg-blue-600 text-white' : etapaIdx <= i ? 'text-gray-400' : ''}`}>
+          <div key={key} className="flex items-center shrink-0">
+            <div onClick={() => etapaIdx > i && setEtapa(key)} data-etapa-atual={etapa === key ? '' : undefined}
+              className={`flex items-center gap-2 px-2.5 sm:px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${etapaIdx > i ? 'cursor-pointer text-green-600 hover:bg-green-50' : ''} ${etapa === key ? 'bg-blue-600 text-white' : etapaIdx <= i ? 'text-gray-400' : ''}`}>
               <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
                 ${etapa === key ? 'bg-white/20 text-white' : etapaIdx > i ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
                 {etapaIdx > i ? '✓' : i + 1}
               </span>
               {ETAPA_LABELS[i]}
             </div>
-            {i < ETAPAS.length - 1 && <div className="w-6 h-px bg-gray-300 mx-1" />}
+            {i < ETAPAS.length - 1 && <div className="w-3 sm:w-6 h-px bg-gray-300 mx-1" />}
           </div>
         ))}
       </div>
@@ -1158,7 +1166,7 @@ export default function NovaEntradaClient({
 
       {/* ── ETAPA 1: Dados NF ── */}
       {etapa === 'dados' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 space-y-5">
           <h2 className="font-semibold text-gray-800">Dados da Nota Fiscal</h2>
 
           <div>
@@ -1221,7 +1229,7 @@ export default function NovaEntradaClient({
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
             <F label="Nº da NF" value={numeroNf} onChange={setNumeroNf} placeholder="000000" />
             <F label="Série" value={serie} onChange={setSerie} placeholder="1" />
             <F label="Data de emissão" value={dataEmissao} onChange={setDataEmissao} type="date" />
@@ -1240,7 +1248,7 @@ export default function NovaEntradaClient({
             <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)} rows={2}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none" />
           </div>
-          <div className="flex justify-between items-center pt-2">
+          <div className="flex flex-wrap justify-between items-center gap-2 pt-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={salvarRascunho} disabled={salvandoRascunho}
               className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
               {salvandoRascunho ? '⏳ Salvando...' : '💾 Salvar Rascunho'}
@@ -1256,7 +1264,7 @@ export default function NovaEntradaClient({
       {/* ── ETAPA 2: Itens ── */}
       {etapa === 'itens' && (
         <div className="space-y-4">
-          <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
             <h2 className="font-semibold text-gray-800 mb-1">Produtos da nota</h2>
             <p className="text-xs text-gray-400 mb-4">Informe os produtos, quantidades e custos. Os preços de venda serão ajustados na próxima etapa.</p>
 
@@ -1267,8 +1275,8 @@ export default function NovaEntradaClient({
                   value={buscaProd}
                   onChange={e => buscarProdutos(e.target.value)}
                   onKeyDown={handleKeyDownProd}
-                  placeholder="Buscar produto por nome, SKU ou EAN... (↑↓ navegar · Enter selecionar)"
-                  className="w-full border-2 border-blue-400 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+                  placeholder="Buscar produto por nome, SKU ou EAN..."
+                  className="w-full border-2 border-blue-400 rounded-lg px-3 py-2.5 text-base sm:text-sm focus:outline-none focus:border-blue-500"
                 />
                 {(resultados.length > 0 || (buscaProd && !buscando)) && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-20 overflow-hidden flex flex-col">
@@ -1301,12 +1309,12 @@ export default function NovaEntradaClient({
             )}
 
             {faseItem === 'qtd' && itemAtual && (
-              <div className="flex items-center gap-4 bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 bg-blue-50 border border-blue-200 rounded-xl px-4 sm:px-5 py-4">
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-gray-900">{itemAtual.nome_produto}</p>
                   {itemAtual.sku && <p className="text-xs text-gray-400 font-mono">{itemAtual.sku}</p>}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <label className="text-sm font-medium text-gray-700">Quantidade:</label>
                   <input
                     ref={inputQtdRef}
@@ -1316,7 +1324,8 @@ export default function NovaEntradaClient({
                       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); confirmarQtd() }
                       if (e.key === 'Escape') { setFaseItem('busca'); setItemAtual(null) }
                     }}
-                    className="w-28 border-2 border-blue-400 rounded-lg px-3 py-2 text-sm text-right focus:outline-none font-mono"
+                    inputMode="decimal"
+                    className="w-28 border-2 border-blue-400 rounded-lg px-3 py-2 text-base sm:text-sm text-right focus:outline-none font-mono"
                     placeholder="1"
                     onFocus={e => e.target.select()}
                   />
@@ -1331,7 +1340,7 @@ export default function NovaEntradaClient({
             )}
 
             {faseItem === 'custo' && itemAtual && (
-              <div className="flex items-center gap-4 bg-green-50 border border-green-200 rounded-xl px-5 py-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 bg-green-50 border border-green-200 rounded-xl px-4 sm:px-5 py-4">
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-gray-900">{itemAtual.nome_produto}</p>
                   <p className="text-xs text-gray-500">
@@ -1339,7 +1348,7 @@ export default function NovaEntradaClient({
                     {itemAtual.preco_custo_anterior > 0 && <span className="ml-2 text-gray-400">· Custo anterior: {fmt(itemAtual.preco_custo_anterior)}</span>}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <label className="text-sm font-medium text-gray-700">Custo unitário (R$):</label>
                   <input
                     ref={inputCustoRef}
@@ -1349,7 +1358,8 @@ export default function NovaEntradaClient({
                       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); confirmarCusto() }
                       if (e.key === 'Escape') setFaseItem('qtd')
                     }}
-                    className="w-32 border-2 border-green-400 rounded-lg px-3 py-2 text-sm text-right focus:outline-none font-mono"
+                    inputMode="decimal"
+                    className="w-32 border-2 border-green-400 rounded-lg px-3 py-2 text-base sm:text-sm text-right focus:outline-none font-mono"
                     placeholder="0,00"
                     onFocus={e => e.target.select()}
                   />
@@ -1366,7 +1376,7 @@ export default function NovaEntradaClient({
 
           {itens.length > 0 && (
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm tabela-celular">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Produto</th>
@@ -1379,23 +1389,23 @@ export default function NovaEntradaClient({
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {itens.map((item, idx) => (
-                    <tr key={idx} className="group hover:bg-gray-50">
-                      <td className="px-4 py-3">
+                    <tr key={idx} className="group hover:bg-gray-50 relative">
+                      <td className="px-4 py-3 tc-titulo max-md:pr-8!">
                         <p className="font-medium text-gray-900">{item.nome_produto}</p>
                         {item.sku && <p className="text-xs text-gray-400 font-mono">{item.sku}</p>}
                         {!item.produto_id && <span className="text-xs text-orange-500 font-medium">Manual</span>}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-700 font-mono">{item.quantidade}</td>
-                      <td className="px-4 py-3 text-right text-gray-400 text-xs">
+                      <td data-label="Qtd" className="px-4 py-3 text-right text-gray-700 font-mono">{item.quantidade}</td>
+                      <td data-label="Custo anterior" className="px-4 py-3 text-right text-gray-400 text-xs">
                         {item.preco_custo_anterior > 0 ? fmt(item.preco_custo_anterior) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-900 font-medium">{fmt(item.preco_custo_novo)}</td>
-                      <td className="px-4 py-3 text-right text-gray-900 font-semibold">
+                      <td data-label="Custo novo" className="px-4 py-3 text-right text-gray-900 font-medium">{fmt(item.preco_custo_novo)}</td>
+                      <td data-label="Subtotal" className="px-4 py-3 text-right text-gray-900 font-semibold">
                         {fmt(item.preco_custo_novo * item.quantidade)}
                       </td>
-                      <td className="px-2 py-3 text-center">
-                        <button onClick={() => removerItem(idx)}
-                          className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none opacity-0 group-hover:opacity-100">×</button>
+                      <td className="px-2 py-3 text-center max-md:absolute max-md:top-2 max-md:right-2">
+                        <button onClick={() => removerItem(idx)} title="Remover item"
+                          className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none opacity-0 group-hover:opacity-100 max-md:opacity-100 max-md:text-red-400 max-md:px-2">×</button>
                       </td>
                     </tr>
                   ))}
@@ -1411,7 +1421,7 @@ export default function NovaEntradaClient({
             </div>
           )}
 
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={() => setEtapa('dados')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
             <button onClick={salvarRascunho} disabled={salvandoRascunho}
               className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
@@ -1428,7 +1438,7 @@ export default function NovaEntradaClient({
       {/* ── ETAPA 3: Despesas e Rateio ── */}
       {etapa === 'encargos' && (
         <div className="space-y-4">
-          <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 space-y-4">
             <div>
               <h2 className="font-semibold text-gray-800">Despesas, abatimentos e rateio</h2>
               <p className="text-xs text-gray-400 mt-0.5">
@@ -1460,12 +1470,12 @@ export default function NovaEntradaClient({
               const abate = ENCARGO_ABATE[e.tipo]
               const escopoTodos = e.itens.length === 0
               return (
-                <div key={e.id} className={`rounded-xl border p-4 space-y-3 ${abate ? 'border-emerald-200 bg-emerald-50/40' : 'border-blue-200 bg-blue-50/40'}`}>
+                <div key={e.id} className={`relative rounded-xl border p-3 sm:p-4 space-y-3 ${abate ? 'border-emerald-200 bg-emerald-50/40' : 'border-blue-200 bg-blue-50/40'}`}>
                   <div className="flex flex-wrap items-end gap-3">
                     <span className={`text-xs font-semibold px-2 py-1 rounded-full ${abate ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
                       {abate ? '−' : '+'} {ENCARGO_LABEL[e.tipo]}
                     </span>
-                    <div className="flex-1 min-w-[10rem]">
+                    <div className="flex-1 basis-full sm:basis-auto min-w-0 sm:min-w-[10rem]">
                       <label className="block text-[10px] font-medium text-gray-500 uppercase mb-0.5">Descrição (opcional)</label>
                       <input value={e.descricao ?? ''} onChange={ev => updEncargo(e.id, { descricao: ev.target.value })}
                         placeholder={e.tipo === 'frete' ? 'Ex: transportadora X, CTe 4432' : ''}
@@ -1486,8 +1496,8 @@ export default function NovaEntradaClient({
                         <option value="quantidade">Quantidade</option>
                       </select>
                     </div>
-                    <button type="button" onClick={() => removeEncargo(e.id)}
-                      className="text-gray-400 hover:text-red-500 text-xl leading-none px-1 pb-1.5">×</button>
+                    <button type="button" onClick={() => removeEncargo(e.id)} title="Remover"
+                      className="text-gray-400 hover:text-red-500 text-xl leading-none px-1 pb-1.5 max-sm:absolute max-sm:top-2 max-sm:right-2">×</button>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4 text-xs">
@@ -1526,7 +1536,7 @@ export default function NovaEntradaClient({
               </div>
             )}
 
-            <div className="border-t border-gray-200 pt-3 grid grid-cols-2 gap-x-8 gap-y-1 text-sm max-w-md ml-auto">
+            <div className="border-t border-gray-200 pt-3 grid grid-cols-2 gap-x-4 sm:gap-x-8 gap-y-1 text-sm max-w-md ml-auto">
               <span className="text-gray-500">Produtos</span>
               <span className="text-right text-gray-900">{fmt(totalProdutos)}</span>
               <span className="text-gray-500">Despesas e abatimentos</span>
@@ -1553,7 +1563,7 @@ export default function NovaEntradaClient({
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm tabela-celular">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="text-left px-4 py-2 text-xs font-medium text-gray-500">Produto</th>
@@ -1568,16 +1578,16 @@ export default function NovaEntradaClient({
                       const unit = it.quantidade > 0 ? rateio.porItem[i] / it.quantidade : 0
                       return (
                         <tr key={i}>
-                          <td className="px-4 py-2">
+                          <td className="px-4 py-2 tc-titulo">
                             <p className="text-gray-800 text-xs">{it.nome_produto}</p>
                             {it.sku && <p className="text-gray-400 text-[11px] font-mono">{it.sku}</p>}
                           </td>
-                          <td className="px-3 py-2 text-right text-xs text-gray-600 font-mono">{it.quantidade}</td>
-                          <td className="px-3 py-2 text-right text-xs text-gray-500 font-mono">{fmt(it.preco_custo_novo)}</td>
-                          <td className={`px-3 py-2 text-right text-xs font-mono ${unit > 0 ? 'text-blue-600' : unit < 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
+                          <td data-label="Qtd" className="px-3 py-2 text-right text-xs text-gray-600 font-mono">{it.quantidade}</td>
+                          <td data-label="Custo da nota" className="px-3 py-2 text-right text-xs text-gray-500 font-mono">{fmt(it.preco_custo_novo)}</td>
+                          <td data-label="Rateio/un" className={`px-3 py-2 text-right text-xs font-mono ${unit > 0 ? 'text-blue-600' : unit < 0 ? 'text-emerald-600' : 'text-gray-300'}`}>
                             {unit === 0 ? '—' : `${unit > 0 ? '+' : ''}${unit.toFixed(4)}`}
                           </td>
-                          <td className="px-4 py-2 text-right text-xs font-bold text-gray-900 font-mono">
+                          <td data-label="Custo de aquisição" className="px-4 py-2 text-right text-xs font-bold text-gray-900 font-mono">
                             {fmt(rateio.custoUnitarioFinal[i])}
                           </td>
                         </tr>
@@ -1589,7 +1599,7 @@ export default function NovaEntradaClient({
             </div>
           )}
 
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={() => setEtapa('itens')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
             <button onClick={salvarRascunho} disabled={salvandoRascunho}
               className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
@@ -1606,7 +1616,7 @@ export default function NovaEntradaClient({
       {/* ── ETAPA 4: Estoque ── */}
       {etapa === 'estoque' && (
         <div className="space-y-4">
-          <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 space-y-4">
             <div>
               <h2 className="font-semibold text-gray-800">Estoque depois desta entrada</h2>
               <p className="text-sm text-gray-500 mt-0.5">
@@ -1616,7 +1626,7 @@ export default function NovaEntradaClient({
             </div>
 
             <div className="border border-gray-200 rounded-lg overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm tabela-celular">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Produto</th>
@@ -1636,29 +1646,35 @@ export default function NovaEntradaClient({
                     const abaixoDoMinimo = minimo > 0 && fica < minimo
                     return (
                       <tr key={idx} className={atual < 0 ? 'bg-red-50' : ''}>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 tc-titulo">
                           <p className="text-gray-800 text-xs">{item.nome_produto}</p>
                           <p className="text-gray-400 text-xs">
                             {item.sku ?? '—'}
                             {!item.produto_id && ' · produto novo, sem estoque anterior'}
                           </p>
                         </td>
-                        <td className={`px-3 py-2 text-right text-xs font-medium ${atual < 0 ? 'text-red-600' : 'text-gray-600'}`}>
-                          {item.produto_id ? atual : '—'}
-                          {atual < 0 && <span className="block text-[10px] font-normal">negativo</span>}
+                        <td data-label="Estoque hoje" className={`px-3 py-2 text-right text-xs font-medium ${atual < 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                          <div>
+                            {item.produto_id ? atual : '—'}
+                            {atual < 0 && <span className="block text-[10px] font-normal">negativo</span>}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-right text-xs text-green-600">+{item.quantidade}</td>
-                        <td className="px-3 py-2 text-right text-xs font-bold text-gray-900">
-                          {fica}
-                          {item.zerar_estoque && atual !== 0 && (
-                            <span className="block text-[10px] font-normal text-orange-600">em vez de {atual + item.quantidade}</span>
-                          )}
+                        <td data-label="Entra" className="px-3 py-2 text-right text-xs text-green-600">+{item.quantidade}</td>
+                        <td data-label="Fica" className="px-3 py-2 text-right text-xs font-bold text-gray-900">
+                          <div>
+                            {fica}
+                            {item.zerar_estoque && atual !== 0 && (
+                              <span className="block text-[10px] font-normal text-orange-600">em vez de {atual + item.quantidade}</span>
+                            )}
+                          </div>
                         </td>
-                        <td className={`px-3 py-2 text-right text-xs ${abaixoDoMinimo ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
-                          {minimo > 0 ? minimo : '—'}
-                          {abaixoDoMinimo && <span className="block text-[10px]">continua abaixo</span>}
+                        <td data-label="Mínimo" className={`px-3 py-2 text-right text-xs ${abaixoDoMinimo ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                          <div>
+                            {minimo > 0 ? minimo : '—'}
+                            {abaixoDoMinimo && <span className="block text-[10px]">continua abaixo</span>}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td data-label="Zerar antes" className="px-3 py-2 text-center">
                           <input type="checkbox" checked={!!item.zerar_estoque}
                             disabled={!item.produto_id}
                             onChange={e => setItens(prev => prev.map((it, i) => i === idx ? { ...it, zerar_estoque: e.target.checked } : it))}
@@ -1680,7 +1696,7 @@ export default function NovaEntradaClient({
             )}
           </div>
 
-          <div className="flex justify-between">
+          <div className="flex flex-wrap justify-between gap-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={() => setEtapa('encargos')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
             <button onClick={entrarNoReajuste}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
@@ -1693,7 +1709,7 @@ export default function NovaEntradaClient({
       {/* ── ETAPA 4: Reajuste de Preços ── */}
       {etapa === 'reajuste' && (
         <div className="space-y-4">
-          <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5">
             <div className="flex items-center justify-between mb-1 flex-wrap gap-3">
               <div>
                 <h2 className="font-semibold text-gray-800">Reajuste de Preços de Venda</h2>
@@ -1706,6 +1722,7 @@ export default function NovaEntradaClient({
                 <span className="text-xs text-gray-500">Aplicar markup em todos:</span>
                 <input
                   placeholder="Ex: 30"
+                  inputMode="decimal"
                   className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500 text-right"
                   onKeyDown={e => {
                     if (e.key === 'Enter') {
@@ -1770,7 +1787,7 @@ export default function NovaEntradaClient({
             </div>
           )}
 
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={() => setEtapa('estoque')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
             <button onClick={salvarRascunho} disabled={salvandoRascunho}
               className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
@@ -1785,13 +1802,13 @@ export default function NovaEntradaClient({
 
       {/* ── ETAPA 4: Pagamento ── */}
       {etapa === 'pagamento' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-5">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6 space-y-5">
           <h2 className="font-semibold text-gray-800">Condições de Pagamento</h2>
           <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 flex items-center justify-between">
             <span className="text-sm text-gray-700">Total da entrada</span>
             <span className="text-xl font-bold text-blue-700">{fmt(totalGeral)}</span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Forma de pagamento</label>
               <select value={formaPag}
@@ -1843,21 +1860,21 @@ export default function NovaEntradaClient({
             <div className="border border-gray-200 rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead><tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-center px-4 py-2 text-xs font-medium text-gray-600">Parcela</th>
+                  <th className="text-center px-2 sm:px-4 py-2 text-xs font-medium text-gray-600">Parcela</th>
                   <th className="text-left px-4 py-2 text-xs font-medium text-gray-600">Vencimento</th>
                   <th className="text-right px-4 py-2 text-xs font-medium text-gray-600">Valor</th>
                 </tr></thead>
                 <tbody className="divide-y divide-gray-100">
                   {parcelas.map((p, i) => (
                     <tr key={i}>
-                      <td className="px-4 py-2 text-center text-gray-600 text-xs">{p.numero}/{parcelas.length}</td>
-                      <td className="px-4 py-2">
+                      <td className="px-2 sm:px-4 py-2 text-center text-gray-600 text-xs">{p.numero}/{parcelas.length}</td>
+                      <td className="px-2 sm:px-4 py-2">
                         <input type="date" value={p.vencimento}
                           onChange={e => setParcelas(prev => prev.map((x, j) => j === i ? { ...x, vencimento: e.target.value } : x))}
                           className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-400" />
                       </td>
-                      <td className="px-4 py-2 text-right">
-                        <div className="w-28 ml-auto">
+                      <td className="px-2 sm:px-4 py-2 text-right">
+                        <div className="w-24 sm:w-28 ml-auto">
                           <CampoNum value={p.valor}
                             onCommit={v => setParcelas(prev => prev.map((x, j) => j === i ? { ...x, valor: v } : x))} />
                         </div>
@@ -1868,7 +1885,7 @@ export default function NovaEntradaClient({
               </table>
             </div>
           )}
-          <div className="flex justify-between items-center pt-2">
+          <div className="flex flex-wrap justify-between items-center gap-2 pt-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={() => setEtapa('reajuste')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
             <button onClick={salvarRascunho} disabled={salvandoRascunho}
               className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors">
@@ -1884,9 +1901,9 @@ export default function NovaEntradaClient({
       {/* ── ETAPA 5: Confirmação ── */}
       {etapa === 'confirmacao' && (
         <div className="space-y-4">
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6">
             <h2 className="font-semibold text-gray-800 mb-4">Resumo da Entrada</h2>
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div className="space-y-2">
                 <Row label="Fornecedor" value={fornecedores.find(f => f.id === fornecedorId)?.razao_social ?? '—'} />
                 <Row label="Nº NF" value={numeroNf || '—'} />
@@ -1903,12 +1920,12 @@ export default function NovaEntradaClient({
               </div>
             </div>
           </div>
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6">
             <h3 className="font-medium text-gray-700 mb-3">{itens.length} item(s) na nota</h3>
             <div className="space-y-1">
               {itens.map((item, i) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                  <div>
+                <div key={i} className="flex items-center justify-between gap-3 py-2 border-b border-gray-100 last:border-0">
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900">{item.nome_produto}</p>
                     <p className="text-xs text-gray-400">{item.quantidade}x · Custo {fmt(item.preco_custo_novo)}</p>
                   </div>
@@ -1918,16 +1935,16 @@ export default function NovaEntradaClient({
             </div>
           </div>
           {reajustes.filter(r => r.atualizar_preco).length > 0 && (
-            <div className="bg-white border border-gray-200 rounded-xl p-6">
+            <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6">
               <h3 className="font-medium text-gray-700 mb-3">Preços que serão atualizados ({reajustes.filter(r => r.atualizar_preco).length})</h3>
               <div className="space-y-1">
                 {reajustes.filter(r => r.atualizar_preco).map((r, i) => (
-                  <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                    <div className="flex items-center gap-2">
+                  <div key={i} className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-x-3 gap-y-0.5 py-2 border-b border-gray-100 last:border-0">
+                    <div className="flex items-center gap-2 min-w-0">
                       {r.is_kit && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded font-medium">KIT</span>}
                       <p className="text-sm text-gray-800">{r.nome_produto}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right whitespace-nowrap ml-auto">
                       <span className="text-xs text-gray-400 line-through mr-2">{fmt(r.preco_venda_anterior)}</span>
                       <span className="text-sm font-semibold text-green-600">{fmt(r.preco_venda_novo)}</span>
                       <span className="text-xs text-gray-400 ml-2">({r.markup.toFixed(1)}%)</span>
@@ -1937,11 +1954,11 @@ export default function NovaEntradaClient({
               </div>
             </div>
           )}
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 rounded-xl p-4 sm:p-6">
             <h3 className="font-medium text-gray-700 mb-3">Contas a Pagar</h3>
             {(parcelasGeradas ? parcelas : [{ numero: 1, vencimento: primeiroVenc, valor: totalGeral }]).map((p, i) => (
-              <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                <div className="flex items-center gap-3">
+              <div key={i} className="flex items-center justify-between gap-3 py-2 border-b border-gray-100 last:border-0">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{p.numero}/{parcelasGeradas ? parcelas.length : 1}</span>
                   <span className="text-sm text-gray-700">Vence {new Date(p.vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
                   <span className="text-xs text-gray-400 capitalize">{formaPag}</span>
@@ -1950,10 +1967,10 @@ export default function NovaEntradaClient({
               </div>
             ))}
           </div>
-          <div className="flex justify-between">
+          <div className="flex flex-wrap justify-between gap-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={() => setEtapa('pagamento')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
             <button onClick={confirmarEntrada} disabled={salvando}
-              className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+              className="px-6 py-2 max-sm:py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
               {salvando ? 'Confirmando...' : '✓ Confirmar entrada'}
             </button>
           </div>
@@ -1964,7 +1981,7 @@ export default function NovaEntradaClient({
       {modalForn && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setModalForn(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden max-h-[92vh] overflow-y-auto">
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Novo Fornecedor</h2>
@@ -1984,7 +2001,7 @@ export default function NovaEntradaClient({
                 <input value={novoForn.nome_fantasia} onChange={e => setNovoForn(p => ({ ...p, nome_fantasia: e.target.value }))}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">CNPJ</label>
                   <input value={novoForn.cnpj} onChange={e => setNovoForn(p => ({ ...p, cnpj: e.target.value }))}
@@ -1997,7 +2014,7 @@ export default function NovaEntradaClient({
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">E-mail</label>
                   <input type="email" value={novoForn.email} onChange={e => setNovoForn(p => ({ ...p, email: e.target.value }))}
@@ -2103,7 +2120,7 @@ function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full text-sm tabela-celular">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">
             <th className="text-left px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Produto</th>
@@ -2131,7 +2148,7 @@ function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
             const promoNaoDesconta = promoValendo && item.preco_promocional >= item.preco_venda_novo && item.preco_venda_novo > 0
             return (
               <tr key={item.produto_id} className="group hover:bg-gray-50/60">
-                <td className="px-4 py-2.5">
+                <td className="px-4 py-2.5 tc-titulo">
                   <p className="font-medium text-gray-900 text-[13px] leading-snug">{item.nome_produto}</p>
                   {item.sku && <p className="text-xs text-gray-400 font-mono">{item.sku}</p>}
                   {item.kit_componentes && (
@@ -2139,36 +2156,36 @@ function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
                   )}
                 </td>
 
-                <td className="px-3 py-2.5 text-right">
+                <td data-label="Custo de aquisição" className="px-3 py-2.5 text-right max-md:items-start">
                   {!isKit ? (
-                    <>
+                    <div>
                       <span className="font-mono text-xs text-gray-700">{fmt(item.preco_custo_novo)}</span>
                       {rateado !== 0 && (
                         <p className="text-[10px] text-gray-400 font-mono">
                           nota {fmt(daNota)} {rateado > 0 ? '+' : '−'} {fmt(Math.abs(rateado))} rateio
                         </p>
                       )}
-                    </>
+                    </div>
                   ) : <span className="text-gray-300">—</span>}
                 </td>
 
-                <td className="px-3 py-2.5">
+                <td data-label="Markup %" className="px-3 py-2.5 max-md:[&>.relative]:w-32">
                   <CampoNum value={item.markup} onCommit={v => onUpdate(idx, 'markup', v)} sufixo="%" />
                 </td>
 
-                <td className="px-3 py-2.5 text-right text-gray-400 text-xs line-through">
-                  {item.preco_venda_anterior > 0 ? fmt(item.preco_venda_anterior) : '—'}
+                <td data-label="Preço anterior" className="px-3 py-2.5 text-right text-gray-400 text-xs">
+                  <span className="line-through">{item.preco_venda_anterior > 0 ? fmt(item.preco_venda_anterior) : '—'}</span>
                 </td>
 
-                <td className="px-3 py-2.5">
+                <td data-label="Preço novo" className="px-3 py-2.5 max-md:[&>.relative]:w-32">
                   <CampoNum value={item.preco_venda_novo} onCommit={v => onUpdate(idx, 'preco_venda_novo', v)} forte />
                 </td>
 
                 {/* PROMOÇÃO POR VALOR OU POR MARKUP.
                     O botão R$/% troca o que o campo significa; os dois são a
                     mesma grandeza e um recalcula o outro. */}
-                <td className="px-3 py-2.5">
-                  <div className="flex items-center justify-end gap-1">
+                <td data-label="Promoção" className="px-3 py-2.5 max-md:flex-wrap max-md:[&>p]:basis-full">
+                  <div className="flex items-center justify-end gap-1 max-md:[&>.relative]:w-32">
                     <button type="button" tabIndex={-1}
                       onClick={() => onUpdate(idx, 'promo_base', item.promo_base === 'valor' ? 'markup' : 'valor')}
                       title="Alternar entre preço promocional e markup da promoção"
@@ -2197,7 +2214,7 @@ function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
                   )}
                 </td>
 
-                <td className="px-3 py-2.5 text-right">
+                <td data-label="Variação" className="px-3 py-2.5 text-right">
                   {variacao !== 0 && (
                     <span className={`text-xs font-medium ${variacao > 0 ? 'text-green-600' : 'text-red-500'}`}>
                       {variacao > 0 ? '+' : ''}{variacao.toFixed(1)}%
@@ -2205,8 +2222,8 @@ function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
                   )}
                 </td>
 
-                <td className="px-4 py-2.5">
-                  <div className="flex flex-col items-center gap-1">
+                <td data-label="Atualizar" className="px-4 py-2.5">
+                  <div className="flex flex-col max-md:flex-row items-center gap-1 max-md:gap-4">
                     <label className="flex items-center gap-1 cursor-pointer">
                       <input type="checkbox" checked={item.atualizar_preco} tabIndex={-1}
                         onChange={e => onUpdate(idx, 'atualizar_preco', e.target.checked)}

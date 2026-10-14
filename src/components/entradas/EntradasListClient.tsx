@@ -369,14 +369,14 @@ export default function EntradasListClient({
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-5">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Entradas de Mercadoria</h1>
           <p className="text-gray-500 text-sm mt-0.5">
             {unificadas.length} de {lista.length + listaXml.length} entradas (manual + XML/NF-e)
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 [&>a]:text-center">
           <Link href="/dashboard/entradas/produtos"
             className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
             📦 Produtos Comprados
@@ -390,7 +390,7 @@ export default function EntradasListClient({
             📄 Importar XML
           </Link>
           <Link href="/dashboard/entradas/nova"
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
+            className="col-span-2 sm:col-span-1 order-first sm:order-none px-4 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors">
             + Nova entrada
           </Link>
         </div>
@@ -398,7 +398,7 @@ export default function EntradasListClient({
 
       {/* Painel de pendências */}
       {(pendencias.semRevisao > 0 || pendencias.semContas > 0 || pendencias.rascunho > 0) && (
-        <div className="mb-5 grid grid-cols-3 gap-3">
+        <div className="mb-5 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
           {pendencias.rascunho > 0 && (
             <button onClick={() => setFiltroStatus('rascunho')}
               className="flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 text-left hover:bg-yellow-100 transition-colors">
@@ -433,7 +433,7 @@ export default function EntradasListClient({
       )}
 
       {/* Origem */}
-      <div className="flex gap-2 mb-3">
+      <div className="flex flex-wrap gap-2 mb-3">
         {([
           { v: '', label: `Todas (${lista.length + listaXml.length})` },
           { v: 'manual', label: `📝 Manual (${lista.length})` },
@@ -449,13 +449,13 @@ export default function EntradasListClient({
       </div>
 
       {/* Filtros */}
-      <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 mb-4 flex flex-wrap gap-3 items-end">
-        <div className="flex-1 min-w-[200px]">
+      <div className="bg-white border border-gray-200 rounded-xl px-3 sm:px-4 py-3 mb-4 flex flex-wrap gap-3 items-end [&>div]:basis-[calc(50%-0.375rem)] sm:[&>div]:basis-auto [&_select]:w-full [&_input]:w-full sm:[&_select]:w-auto sm:[&_input[type=date]]:w-auto">
+        <div className="flex-1 !basis-full sm:!basis-auto min-w-0 sm:min-w-[200px]">
           <label className="block text-xs text-gray-500 mb-1">Buscar (nº entrada, NF, fornecedor)</label>
           <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="ENT-000001, 12345..."
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
         </div>
-        <div className="flex-1 min-w-[200px]">
+        <div className="flex-1 !basis-full sm:!basis-auto min-w-0 sm:min-w-[200px]">
           <label className="block text-xs text-gray-500 mb-1">
             Buscar por produto comprado
             {buscandoProduto && <span className="text-gray-400 font-normal"> · procurando…</span>}
@@ -505,8 +505,119 @@ export default function EntradasListClient({
         )}
       </div>
 
+      {/* Celular: um cartão por entrada (a tabela de 9 colunas não cabe) */}
+      <div className="md:hidden space-y-2">
+        {unificadas.length === 0 && (
+          <p className="py-10 text-center text-sm text-gray-400">
+            {temFiltro ? 'Nenhuma entrada encontrada com esses filtros.' : 'Nenhuma entrada registrada.'}
+          </p>
+        )}
+        {unificadas.map(linha => {
+          if (linha.origem === 'xml') {
+            const x = linha.e
+            return (
+              <div key={`m-xml-${x.id}`} className="bg-white border border-gray-200 rounded-xl px-3 py-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-gray-900 font-medium text-sm break-words">{x.nome_fornecedor ?? '—'}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      <span className="text-purple-600">📄 XML</span> · NF-e {x.numero ?? '—'}{x.serie ? `/${x.serie}` : ''} · {fmtData(dataEfetivaXml(x))}
+                    </p>
+                  </div>
+                  <p className="font-semibold text-gray-900 text-sm whitespace-nowrap">{fmt(Number(x.valor_total))}</p>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COR_XML[x.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                    {STATUS_LABEL_XML[x.status] ?? x.status}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/dashboard/produtos?entrada=${encodeURIComponent(x.numero ?? '')}`}
+                      className="text-xs text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-1.5">📦 Produtos</Link>
+                    <Link href={`/dashboard/entradas-xml/${x.id}`}
+                      className="text-xs text-white bg-blue-600 rounded-lg px-3 py-1.5 font-medium">Abrir →</Link>
+                  </div>
+                </div>
+              </div>
+            )
+          }
+          const e = linha.e
+          const revisao = e.status_revisao ?? 'pendente'
+          return (
+            <div key={`m-${e.id}`} className="bg-white border border-gray-200 rounded-xl px-3 py-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-gray-900 font-medium text-sm break-words">
+                    {e.fornecedores?.nome_fantasia ?? e.fornecedores?.razao_social ?? '—'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    <span className="text-blue-600">📝 {e.numero_entrada ?? 'Manual'}</span>
+                    {(e.numero_nf || e.serie) && <> · NF {e.numero_nf ?? '—'}{e.serie ? `/${e.serie}` : ''}</>}
+                    {' · '}{fmtData(e.data_entrada)}
+                  </p>
+                </div>
+                <p className="font-semibold text-gray-900 text-sm whitespace-nowrap">{fmt(Number(e.valor_total))}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_CLS[e.status] ?? STATUS_CLS.rascunho}`}>
+                  {STATUS_LABEL[e.status] ?? e.status}
+                </span>
+                {e.status === 'confirmada' && (
+                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${REVISAO_CLS[revisao] ?? REVISAO_CLS.pendente}`}>
+                    {REVISAO_LABEL[revisao] ?? revisao}
+                  </span>
+                )}
+                {(e.qtd_itens ?? 0) > 0 && (
+                  <button onClick={() => alternarItens(e.id)}
+                    className={`text-xs px-2 py-0.5 rounded-full border ${expandida === e.id ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                    {expandida === e.id ? '▾' : '▸'} {e.qtd_itens} ite{e.qtd_itens === 1 ? 'm' : 'ns'}
+                  </button>
+                )}
+              </div>
+              {expandida === e.id && (
+                carregandoItens === e.id ? <p className="text-xs text-gray-400">Carregando itens…</p>
+                  : (itensPorEntrada[e.id] ?? []).length === 0 ? <p className="text-xs text-gray-400">Esta entrada não tem itens.</p>
+                    : (
+                      <ul className="border border-gray-100 rounded-lg divide-y divide-gray-100 text-xs">
+                        {(itensPorEntrada[e.id] ?? []).map(item => (
+                          <li key={item.id} className="px-2.5 py-1.5">
+                            <p className="text-gray-900">{item.nome_produto ?? '—'}</p>
+                            <p className="text-gray-500">
+                              {item.sku && <span className="font-mono mr-1.5">{item.sku}</span>}
+                              {Number(item.quantidade).toLocaleString('pt-BR')} × {item.preco_custo_novo != null ? fmt(Number(item.preco_custo_novo)) : '—'}
+                              {item.subtotal != null && <> = <strong className="text-gray-800">{fmt(Number(item.subtotal))}</strong></>}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    )
+              )}
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                {e.status !== 'cancelada' && (
+                  <button onClick={() => { setErroExclusao(''); setConfirmando(e) }} title="Excluir entrada"
+                    className="mr-auto text-xs text-red-500 border border-red-200 rounded-lg px-2.5 py-1.5">🗑 Excluir</button>
+                )}
+                {e.status === 'confirmada' && (
+                  <button onClick={() => imprimirEtiquetasEntrada(e.id)} disabled={carregandoAcao === `etiqueta-${e.id}`}
+                    className="text-xs text-purple-700 border border-purple-200 rounded-lg px-2.5 py-1.5 disabled:opacity-50">
+                    {carregandoAcao === `etiqueta-${e.id}` ? 'Carregando…' : '🏷️ Etiquetas'}
+                  </button>
+                )}
+                {e.status === 'confirmada' && (
+                  <Link href={`/dashboard/produtos?entrada=${encodeURIComponent(e.numero_entrada ?? e.numero_nf ?? '')}`}
+                    className="text-xs text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-1.5">📦 Produtos</Link>
+                )}
+                <Link href={e.status === 'rascunho' ? `/dashboard/entradas/nova?rascunho=${e.id}` : `/dashboard/entradas/${e.id}`}
+                  className="text-xs text-white bg-blue-600 rounded-lg px-3 py-1.5 font-medium">
+                  {e.status === 'rascunho' ? 'Continuar →' : 'Abrir →'}
+                </Link>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
       {/* Tabela */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="hidden md:block bg-white border border-gray-200 rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
