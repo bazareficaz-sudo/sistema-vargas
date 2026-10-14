@@ -10,6 +10,7 @@ import { sincronizarProdutosVinculadosEmLote } from '@/lib/produtos/vinculo'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
 import ConfirmarEnderecoEntradaModal, { type ItemEntradaParaGuardar } from '@/components/enderecamento/ConfirmarEnderecoEntradaModal'
+import { avisarChegada } from '@/lib/getulio/avisarChegada'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -836,6 +837,9 @@ export default function EntradaXmlDetalheClient({
         detalhes: JSON.stringify({ deposito_id: depositoId, gerou_cp: gerarContaPagar }),
       })
       if (erroLog) console.error('Falha ao gravar log de finalização:', erroLog)
+
+      // Boletim "Chegou na loja" para o grupo dos vendedores e o PDV.
+      avisarChegada('entrada_xml', entrada.id)
 
       setEntrada(p => ({ ...p, status: 'finalizada' }))
       setAba('dados')

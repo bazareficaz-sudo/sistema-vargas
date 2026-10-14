@@ -26,6 +26,13 @@ function headers(config: ZAPIConfig): Record<string, string> {
 }
 
 function cleanPhone(phone: string): string {
+  // Grupo não é telefone: "120363...-group" (formato atual da Z-API) ou
+  // "5511...-1623281429" (antigo). Tirar os não-dígitos viraria um número
+  // inexistente — vai como veio.
+  // Telefone formatado ("85 99999-1234") também tem hífen — por isso o
+  // teste é pelo formato inteiro, não pela presença do hífen.
+  const bruto = phone.trim()
+  if (/-group$/i.test(bruto) || /@g\.us$/i.test(bruto) || /^\d{10,15}-\d{9,11}$/.test(bruto)) return bruto
   const digits = phone.replace(/\D/g, '')
   // Se já tem código do país (começa com 55 e tem 12-13 dígitos), retorna como está
   if (digits.startsWith('55') && digits.length >= 12) return digits
@@ -149,6 +156,33 @@ export async function zapiSendImage(
     return { success: true, messageId: data.zaapId ?? data.messageId ?? data.id }
   } catch (e: any) {
     return { success: false, error: e.message }
+  }
+}
+
+export type GrupoWhatsapp = { id: string; nome: string }
+
+/**
+ * Grupos de que o número da empresa participa — para escolher na tela em vez
+ * de digitar o ID. Tenta `/groups`; se a instância não tiver o recurso, cai
+ * para `/chats` e filtra os grupos.
+ */
+export async function zapiListarGrupos(config: ZAPIConfig): Promise<{ grupos: GrupoWhatsapp[]; error?: string }> {
+  type Chat = { isGroup?: boolean; phone?: string; id?: string; name?: string; subject?: string }
+  const ler = (lista: Chat[]): GrupoWhatsapp[] => lista
+    .filter(c => c && (c.isGroup === true || String(c.phone ?? '').endsWith('-group')))
+    .map(c => ({ id: String(c.phone ?? c.id ?? ''), nome: String(c.name ?? c.subject ?? c.phone ?? 'Grupo') }))
+    .filter(g => g.id)
+  try {
+    for (const endpoint of ['groups?page=1&pageSize=200', 'chats?page=1&pageSize=300']) {
+      const res = await fetch(buildUrl(config, endpoint), { headers: headers(config), cache: 'no-store' })
+      if (!res.ok) continue
+      const data = await res.json()
+      const grupos = ler(Array.isArray(data) ? data : [])
+      if (grupos.length > 0) return { grupos }
+    }
+    return { grupos: [] }
+  } catch (e) {
+    return { grupos: [], error: e instanceof Error ? e.message : String(e) }
   }
 }
 

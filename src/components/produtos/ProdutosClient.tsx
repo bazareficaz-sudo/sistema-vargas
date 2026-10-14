@@ -70,7 +70,7 @@ type Props = {
   q: string
   abaAtiva: string
   promoFiltro: boolean
-  apenasAtivos: boolean
+  situacao: 'ativos' | 'inativos' | 'todos'
   empresaId: string
   // Anúncios por produto, agrupados por plataforma — alimenta o selo de
   // canais na linha.
@@ -114,9 +114,18 @@ const ABAS = [
   { key: 'brinde',   label: 'brindes' },
 ]
 
+// Situação do cadastro na URL (`ativos=`): '1' é o padrão; '0' (todos) já
+// existia em links salvos e continua valendo.
+const SITUACOES: { key: 'ativos' | 'inativos' | 'todos'; label: string }[] = [
+  { key: 'ativos', label: 'Ativos' },
+  { key: 'inativos', label: 'Inativos' },
+  { key: 'todos', label: 'Todos' },
+]
+const ATIVOS_PARAM = { ativos: '1', inativos: 'inativos', todos: '0' } as const
+
 export default function ProdutosClient({
   produtos: inicial, imagensMap = {}, enderecosMap = {}, total, totalTodos, totalSimples, totalKits,
-  pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, apenasAtivos: apenasAtivosInicial, empresaId,
+  pagina, totalPaginas, q: qInicial, abaAtiva: abaInicial, promoFiltro: promoInicial, situacao: situacaoInicial, empresaId,
   anunciosMap, abrirProdutoId, abrirProdutoAba,
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
@@ -251,7 +260,7 @@ export default function ProdutosClient({
   const [q, setQ] = useState(qInicial)
   const [aba, setAba] = useState(abaInicial)
   const [promo, setPromo] = useState(promoInicial)
-  const [apenasAtivos, setApenasAtivos] = useState(apenasAtivosInicial)
+  const [situacao, setSituacao] = useState(situacaoInicial)
   const [mostrarFiltros, setMostrarFiltros] = useState(false)
   const [marcaF, setMarcaF] = useState(marcaInicial)
   const [categoriaF, setCategoriaF] = useState(categoriaInicial)
@@ -272,7 +281,7 @@ export default function ProdutosClient({
   useEffect(() => { setQ(qInicial) }, [qInicial])
   useEffect(() => { setAba(abaInicial) }, [abaInicial])
   useEffect(() => { setPromo(promoInicial) }, [promoInicial])
-  useEffect(() => { setApenasAtivos(apenasAtivosInicial) }, [apenasAtivosInicial])
+  useEffect(() => { setSituacao(situacaoInicial) }, [situacaoInicial])
   useEffect(() => { setMarcaF(marcaInicial) }, [marcaInicial])
   useEffect(() => { setCategoriaF(categoriaInicial) }, [categoriaInicial])
   useEffect(() => { setSubcategoriaF(subcategoriaInicial) }, [subcategoriaInicial])
@@ -290,7 +299,7 @@ export default function ProdutosClient({
 
   function navegar(params: Record<string, string>) {
     const sp = new URLSearchParams({
-      q, aba, pagina: String(pagina), promo: promo ? '1' : '', ativos: apenasAtivos ? '1' : '0',
+      q, aba, pagina: String(pagina), promo: promo ? '1' : '', ativos: ATIVOS_PARAM[situacao],
       marca: marcaF, categoria: categoriaF, subcategoria: subcategoriaF, estoque: estoqueF, imagem: imagemF, ncm: ncmF,
       tag: tagF, entrada: entradaF,
       ...params,
@@ -611,21 +620,27 @@ export default function ProdutosClient({
           />
         </div>
         <div className="flex items-center gap-1.5 flex-wrap lg:ml-2">
-          <button
-            type="button"
-            onClick={() => {
-              const next = !apenasAtivos
-              setApenasAtivos(next)
-              navegar({ ativos: next ? '1' : '0', pagina: '1' })
-            }}
-            className={`px-3 py-1.5 text-xs rounded-full border transition-colors flex items-center gap-1.5 ${
-              apenasAtivos
-                ? 'border-blue-500 text-blue-600 bg-blue-50 font-medium'
-                : 'border-gray-300 text-gray-500 bg-white hover:bg-gray-50 line-through'
-            }`}
-          >
-            {apenasAtivos ? '✓ ' : ''}produtos ativos
-          </button>
+          <div className="flex items-center rounded-full border border-gray-300 bg-white p-0.5" role="group" aria-label="Situação do cadastro">
+            {SITUACOES.map(op => (
+              <button
+                key={op.key}
+                type="button"
+                aria-pressed={situacao === op.key}
+                onClick={() => {
+                  if (situacao === op.key) return
+                  setSituacao(op.key)
+                  navegar({ ativos: ATIVOS_PARAM[op.key], pagina: '1' })
+                }}
+                className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
+                  situacao === op.key
+                    ? op.key === 'inativos' ? 'bg-gray-700 text-white font-medium' : 'bg-blue-600 text-white font-medium'
+                    : 'text-gray-500 hover:bg-gray-50'
+                }`}
+              >
+                {op.label}
+              </button>
+            ))}
+          </div>
           <button type="button" onClick={() => { const next = !promo; setPromo(next); navegar({ promo: next ? '1' : '', pagina: '1' }) }} className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${promo ? 'border-orange-300 bg-orange-50 font-medium text-orange-700' : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'}`}>
             Promoções
           </button>

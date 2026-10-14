@@ -27,7 +27,9 @@ export default async function ProdutosPage({
     tag = '', entrada = '', editar = '', abaProduto = '',
   } = await searchParams
   const promoFiltro = promo === '1'
-  const apenasAtivos = ativos !== '0'
+  // Situação do cadastro: ativos (padrão), só os inativos, ou todos.
+  // `ativos=0` é o "todos" que já circulava em links salvos.
+  const situacao: 'ativos' | 'inativos' | 'todos' = ativos === 'inativos' ? 'inativos' : ativos === '0' ? 'todos' : 'ativos'
   const pg = Math.max(1, parseInt(pagina))
   const offset = (pg - 1) * POR_PAGINA
 
@@ -113,7 +115,8 @@ export default async function ProdutosPage({
 
   function aplicarFiltros(qb: any): any {
     let out = qb
-    if (apenasAtivos) out = out.eq('ativo', true)
+    if (situacao === 'ativos') out = out.eq('ativo', true)
+    if (situacao === 'inativos') out = out.eq('ativo', false)
     if (q) out = aplicarBuscaPorTermos(out, q, ['nome', 'sku', 'ean'])
     if (promoFiltro) out = out.eq('promocao_ativa', true)
     if (marca) out = out.eq('marca', marca)
@@ -301,7 +304,7 @@ export default async function ProdutosPage({
       q={q}
       abaAtiva={aba}
       promoFiltro={promoFiltro}
-      apenasAtivos={apenasAtivos}
+      situacao={situacao}
       empresaId={empresaId}
       anunciosMap={anunciosMap}
       abrirProdutoId={editar}
