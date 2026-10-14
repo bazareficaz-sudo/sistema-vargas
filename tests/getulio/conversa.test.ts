@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { destinatarioDoNumero, mesmoNumero } from '../../src/lib/getulio/numero'
 import { chaveConfere, chaveWebhookZapi } from '../../src/lib/getulio/webhook'
 
-describe('quem pode conversar com o Getúlio', () => {
+describe('quem pode conversar com a Betina', () => {
   test('o mesmo número com e sem 55 e com e sem o 9 extra', () => {
     assert.equal(mesmoNumero('5588999887766', '88999887766'), true)
     assert.equal(mesmoNumero('5588999887766', '558899887766'), true)

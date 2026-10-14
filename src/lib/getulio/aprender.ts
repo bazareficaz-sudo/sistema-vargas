@@ -1,10 +1,10 @@
 import type { Consulta, ResultadoConsulta } from '@/lib/ia/consultas/tipos'
 import { VIGIAS } from './tipos'
 
-// O GETÚLIO APRENDE PELO WHATSAPP.
+// O BETINA APRENDE PELO WHATSAPP.
 //
 // "Não me avise mais disso", 👎 num aviso, "não quero aviso de estoque
-// negativo". As três ferramentas abaixo mexem só na CONFIGURAÇÃO do Getúlio
+// negativo". As três ferramentas abaixo mexem só na CONFIGURAÇÃO da Betina
 // (o que ele avisa) — nada em canal, venda, estoque ou dinheiro. Por isso
 // rodam sem pedir confirmação: tudo se desfaz na Central.
 
@@ -14,7 +14,7 @@ const LISTA_TIPOS = VIGIAS.map(v => `"${v.id}" (${v.nome})`).join(', ')
 export const ACOES_APRENDER: Consulta[] = [
   {
     nome: 'parar_de_avisar',
-    descricao: 'Para de avisar UM assunto da última mensagem que o Getúlio mandou (resumo ou alerta), pelo número do item. Use quando o dono disser "não me avise mais disso", "esse não interessa", ou responder 👎 a um aviso. Se a última mensagem foi um alerta, o item é 1. O assunto volta a ser avisado se for resolvido e reaparecer, ou se piorar.',
+    descricao: 'Para de avisar UM assunto da última mensagem que a Betina mandou (resumo ou alerta), pelo número do item. Use quando o dono disser "não me avise mais disso", "esse não interessa", ou responder 👎 a um aviso. Se a última mensagem foi um alerta, o item é 1. O assunto volta a ser avisado se for resolvido e reaparecer, ou se piorar.',
     parametros: {
       type: 'object',
       properties: { item: { type: 'number', description: 'Número do item na última mensagem (1, 2, 3…).' } },
@@ -32,7 +32,7 @@ export const ACOES_APRENDER: Consulta[] = [
         .update({ dispensado_em: new Date().toISOString() })
         .eq('id', id).eq('empresa_id', empresaId).select('titulo').maybeSingle()
       if (!sinal) return erro('Esse assunto já não está mais aberto.')
-      return { linhas: [{ feito: true, parou_de_avisar: sinal.titulo }], periodo: 'agora', ressalvas: ['Dá para voltar a avisar na Central do Getúlio.'] }
+      return { linhas: [{ feito: true, parou_de_avisar: sinal.titulo }], periodo: 'agora', ressalvas: ['Dá para voltar a avisar na Central da Betina.'] }
     },
   },
   {
@@ -51,7 +51,7 @@ export const ACOES_APRENDER: Consulta[] = [
       const desligados = new Set<string>(cfg?.vigias_desligados ?? [])
       desligados.add(tipo)
       await sb.from('getulio_config').update({ vigias_desligados: [...desligados], updated_at: new Date().toISOString() }).eq('empresa_id', empresaId)
-      return { linhas: [{ feito: true, desligado: vigia.nome }], periodo: 'agora', ressalvas: ['Dá para religar na Central do Getúlio ou pedindo aqui.'] }
+      return { linhas: [{ feito: true, desligado: vigia.nome }], periodo: 'agora', ressalvas: ['Dá para religar na Central da Betina ou pedindo aqui.'] }
     },
   },
   {

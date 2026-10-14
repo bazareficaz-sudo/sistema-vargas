@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     .filter((d: Destinatario) => d.numero.length >= 10)
     .slice(0, 5)
   if (body.ativo && destinatarios.length === 0) {
-    return NextResponse.json({ ok: false, erro: 'Cadastre ao menos um número de WhatsApp para ligar o Getúlio' }, { status: 400 })
+    return NextResponse.json({ ok: false, erro: 'Cadastre ao menos um número de WhatsApp para ligar a Betina' }, { status: 400 })
   }
   const idsValidos = new Set<string>(VIGIAS.map(v => v.id))
   const desligados = (Array.isArray(body.vigias_desligados) ? body.vigias_desligados : [])

@@ -31,7 +31,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard',                        label: 'Visão Geral',          icon: '🏠' },
       // O agente que vigia o negócio e avisa pelo WhatsApp. Sem `modulo`: a
       // rota exige permissão de configuração, e a tela diz isso a quem não tem.
-      { href: '/dashboard/getulio',                label: 'Getúlio',              icon: '🧔🏻' },
+      { href: '/dashboard/betina',                label: 'Betina',               icon: '👩🏻‍💼' },
       { href: '/dashboard/relatorios',             label: 'Indicadores BI',       icon: '📊', modulo: 'relatorios' },
       { href: '/dashboard/relatorios/alertas',     label: 'Alertas Inteligentes', icon: '🔔', modulo: 'relatorios_avancados' },
       { href: '/dashboard/assinatura',             label: 'Minha Assinatura',     icon: '💳' },

@@ -1,4 +1,4 @@
-// AGENTE GETÚLIO — o sistema olhando o negócio no lugar do dono.
+// AGENTE BETINA — o sistema olhando o negócio no lugar do dono.
 //
 // Três camadas, e a separação é de propósito:
 //   VIGIAS (vigias.ts)   detectam. Consultas e contas exatas, sem IA — número

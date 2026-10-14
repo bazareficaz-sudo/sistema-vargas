@@ -115,7 +115,7 @@ export async function POST(req: Request) {
   // Remessa para outra empresa do grupo é mercadoria chegando na loja de
   // lá: boletim "Chegou na loja" para a empresa que RECEBEU. Depois da
   // resposta — o boletim nunca atrasa nem derruba a transferência (se
-  // falhar, o cron do Getúlio manda em até 15 min).
+  // falhar, o cron da Betina manda em até 15 min).
   if (!mesmaEmpresa && resultado.transferidos > 0) {
     after(async () => {
       try {

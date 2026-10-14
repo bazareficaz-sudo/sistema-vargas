@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
           enviado_em: new Date().toISOString(),
         })
 
-        // GETÚLIO: só com a chave do endereço conferida (ver
+        // BETINA: só com a chave do endereço conferida (ver
         // lib/getulio/webhook.ts) e só para número cadastrado na Central. A
         // resposta roda depois do 200 — a Z-API não espera a IA pensar.
         if ((text || imagemUrl) && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {

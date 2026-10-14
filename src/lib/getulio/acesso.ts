@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import type { ConfigGetulio, Destinatario } from './tipos'
 
-// A Central do Getúlio mostra dinheiro (contas, estoque a custo, vendas por
+// A Central da Betina mostra dinheiro (contas, estoque a custo, vendas por
 // canal) e configura para quem isso vai no WhatsApp — é coisa de quem
 // administra a empresa.
 export async function guardaGetulio() {

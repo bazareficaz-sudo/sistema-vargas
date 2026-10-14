@@ -7,7 +7,7 @@ import {
 } from '../../src/lib/getulio/regras'
 import { assinar } from '../../src/lib/getulio/vigias'
 
-// Os limiares do Getúlio decidem entre útil e spam. Os números dos casos
+// Os limiares da Betina decidem entre útil e spam. Os números dos casos
 // abaixo são os medidos em 07/10/2026.
 
 describe('vendas por canal', () => {
@@ -172,8 +172,8 @@ describe('texto e relógio', () => {
     assert.equal(minutosDoHorario('lixo'), 450)
   })
   test('saudação pelo horário e com o nome', () => {
-    assert.equal(saudacao(new Date('2026-10-07T10:30:00Z'), 'Silvano'), '☀️ *Bom dia, Silvano. Getúlio aqui.*')
-    assert.match(saudacao(new Date('2026-10-07T17:00:00Z'), ''), /Boa tarde\. Getúlio/)
+    assert.equal(saudacao(new Date('2026-10-07T10:30:00Z'), 'Silvano'), '☀️ *Bom dia, Silvano. Betina aqui.*')
+    assert.match(saudacao(new Date('2026-10-07T17:00:00Z'), ''), /Boa tarde\. Betina/)
   })
   test('mensagem com itens numerados, resto e link', () => {
     const corpo = corpoModelo([{

@@ -5,7 +5,7 @@ import { ehIdDeGrupo } from '@/lib/getulio/chegadasRegras'
 import { enviarWhatsappAutomacao } from '@/lib/automacoes/whatsapp-send'
 
 // Configuração do boletim "Chegou na loja" e os últimos boletins — Central
-// do Getúlio (quem administra a empresa).
+// da Betina (quem administra a empresa).
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- cliente Supabase sem tipos gerados, como no resto do projeto
 async function ultimos(sb: any, empresaId: string) {
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   if (body.acao === 'teste') {
     if (!atual.grupo_id) return NextResponse.json({ ok: false, erro: 'Escolha e salve o grupo primeiro' }, { status: 400 })
     const r = await enviarWhatsappAutomacao(sb, guarda.empresaId, atual.grupo_id,
-      '✅ *Getúlio por aqui!*\nA partir de agora, toda mercadoria que chegar na loja — novidades e o que voltou ao estoque — aparece neste grupo logo depois que a nota é lançada.',
+      '✅ *Betina por aqui!*\nA partir de agora, toda mercadoria que chegar na loja — novidades e o que voltou ao estoque — aparece neste grupo logo depois que a nota é lançada.',
       { tipo: 'getulio_chegada_teste', referencia_tipo: 'getulio_chegada' })
     return NextResponse.json(r.ok ? { ok: true } : { ok: false, erro: r.erro ?? 'Falha no envio' })
   }
