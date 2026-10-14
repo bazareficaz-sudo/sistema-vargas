@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { calcularCustoItem, type NFeItem as NFeItemParser } from '@/lib/nfe-parser'
 import { gerarProximoSku } from '@/components/produtos/sku'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import RevisarKitsEntradaModal from '@/components/entradas/RevisarKitsEntradaModal'
 import { sincronizarProdutosVinculadosEmLote } from '@/lib/produtos/vinculo'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { definirContagemNoDeposito } from '@/lib/produtos/depositoPrincipal'
@@ -255,6 +256,7 @@ export default function EntradaXmlDetalheClient({
   const [margemPadrao, setMargemPadrao] = useState(40)
   const [modoPreco, setModoPreco] = useState<'margem' | 'preco'>('margem')
   const [produtosAtuais, setProdutosAtuais] = useState<Record<string, Produto>>({})
+  const [revisandoKits, setRevisandoKits] = useState(false)
 
   // Promoção — o preço promocional é por item, mas a janela de datas é uma só
   // para toda a nota (foi assim que o gestor pediu: um lote de produtos entra
@@ -550,6 +552,7 @@ export default function EntradaXmlDetalheClient({
       const inicioISO = promoInicio ? new Date(`${promoInicio}T00:00:00`).toISOString() : null
       const fimISO = promoFim ? new Date(`${promoFim}T23:59:59`).toISOString() : null
 
+      const antesGravado: Record<string, number> = {}
       for (const item of itensPrecificados) {
         const preco = precosNovos[item.id]
         const promo = precosPromo[item.id] ?? 0
@@ -579,14 +582,33 @@ export default function EntradaXmlDetalheClient({
           patch.promocao_fim = null
         }
 
+        // Preço da peça ANTES desta nota — é o que a revisão de kits usa para
+        // manter o desconto do kit sobre as peças. Só na primeira gravação:
+        // salvar de novo leria o preço que esta própria tela acabou de pôr.
+        const precoAntes = Number(produtosAtuais[item.produto_id]?.preco_venda ?? 0)
+        const registrarAntes = preco !== undefined && !(Number(item.preco_atual) > 0) && precoAntes > 0
+
         const { error } = await sb.from('produtos').update(patch)
           .eq('id', item.produto_id).eq('empresa_id', empresaId)
         if (error) throw error
+
+        if (registrarAntes || preco !== undefined) {
+          const { error: erroItem } = await sb.from('nfe_itens').update({
+            ...(registrarAntes ? { preco_atual: precoAntes } : {}),
+            novo_preco: preco,
+          }).eq('id', item.id)
+          if (erroItem) console.error('[entrada-xml] preço anterior não registrado:', erroItem.message)
+          else if (registrarAntes) antesGravado[item.id] = precoAntes
+        }
 
         // Custo gravado acima: kits que usam este produto acompanham. Esta
         // tela salvava o custo sem recalcular — só a finalização recalculava,
         // e custo salvo depois dela passava batido.
         if (item.produto_id) await recalcularKitsQueUsam(sb, item.produto_id)
+      }
+
+      if (Object.keys(antesGravado).length > 0) {
+        setItens(prev => prev.map(i => i.id in antesGravado ? { ...i, preco_atual: antesGravado[i.id] } : i))
       }
 
       const { error: erroEntrada } = await sb.from('nfe_entradas').update({ status: 'aguardando_financeiro' }).eq('id', entrada.id)
@@ -1602,6 +1624,24 @@ export default function EntradaXmlDetalheClient({
               ? ` Linha em vermelho: aumento de custo acima de ${alertaCustoPct}% (ajustável em Configurações → Compras e Custos).`
               : ' O destaque de linha por aumento de custo está desligado em Configurações → Compras e Custos.'}
           </p>
+
+          {/* Kits que usam peças desta nota. Continua disponível depois de
+              finalizada: o preço do kit é do cadastro, não da nota. */}
+          {!somenteLeitura && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+              <p className="text-xs text-violet-900 leading-snug">
+                <strong>🧩 Kits com peças desta nota.</strong> Depois de atualizar os preços dos produtos,
+                reveja o preço dos kits que usam essas peças.
+              </p>
+              <button onClick={() => setRevisandoKits(true)}
+                className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-violet-300 bg-white text-violet-700 hover:bg-violet-100">
+                Rever preços dos kits
+              </button>
+            </div>
+          )}
+          {revisandoKits && (
+            <RevisarKitsEntradaModal empresaId={empresaId} origem="xml" entradaId={entrada.id} onClose={() => setRevisandoKits(false)} />
+          )}
 
           {!readonly && (
             <div className="flex justify-end">

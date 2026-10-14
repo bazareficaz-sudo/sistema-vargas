@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
+import RevisarKitsEntradaModal from './RevisarKitsEntradaModal'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -149,6 +150,7 @@ export default function EditarEntradaClient({
   const [revisaoItens, setRevisaoItens] = useState<RevisaoItem[]>(revisaoInicial)
   const [markupGlobal, setMarkupGlobal] = useState('')
   const [salvandoRevisao, setSalvandoRevisao] = useState(false)
+  const [revisandoKits, setRevisandoKits] = useState(false)
   const [historicoPrecos, setHistoricoPrecos] = useState<HistoricoPreco[]>(histInicial)
 
   // ── Contas a pagar ──
@@ -728,6 +730,21 @@ export default function EditarEntradaClient({
       {/* ── ABA: Revisão de Preços ── */}
       {aba === 'revisao' && (
         <div className="space-y-4">
+          {entrada.status === 'confirmada' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+              <p className="text-xs text-violet-900 leading-snug">
+                <strong>🧩 Kits com peças desta entrada.</strong> Depois de aplicar os preços dos produtos,
+                reveja o preço dos kits que usam essas peças.
+              </p>
+              <button onClick={() => setRevisandoKits(true)}
+                className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-violet-300 bg-white text-violet-700 hover:bg-violet-100">
+                Rever preços dos kits
+              </button>
+            </div>
+          )}
+          {revisandoKits && (
+            <RevisarKitsEntradaModal empresaId={empresaId} origem="manual" entradaId={entrada.id} onClose={() => setRevisandoKits(false)} />
+          )}
           {revisaoItens.length === 0 ? (
             <div className="bg-white border border-gray-200 rounded-xl py-12 text-center text-gray-400">
               <p className="text-base mb-1">Nenhum produto vinculado para revisar</p>

@@ -6,6 +6,11 @@ import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
 import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import RevisarKitsEntradaModal from './RevisarKitsEntradaModal'
+
+// Notas por XML nestes status já têm as peças mapeadas para produtos — dá
+// para saber quais kits elas tocam.
+const XML_COM_PRODUTOS = new Set(['aguardando_precos', 'aguardando_financeiro', 'pronta', 'finalizada'])
 
 type Entrada = {
   id: string
@@ -156,6 +161,7 @@ export default function EntradasListClient({
   const [erroExclusao, setErroExclusao] = useState('')
   const [carregandoAcao, setCarregandoAcao] = useState<string | null>(null)
   const [etiquetaProdutos, setEtiquetaProdutos] = useState<(ProdutoParaEtiqueta & { estoque: number })[] | null>(null)
+  const [kitsDe, setKitsDe] = useState<{ origem: 'manual' | 'xml'; id: string } | null>(null)
 
   // Busca por produto: o nome/SKU do item fica em entrada_itens (já
   // desnormalizado), então dá pra achar a entrada pelo que foi comprado sem
@@ -526,16 +532,18 @@ export default function EntradasListClient({
                   </div>
                   <p className="font-semibold text-gray-900 text-sm whitespace-nowrap">{fmt(Number(x.valor_total))}</p>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COR_XML[x.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <span className={`mr-auto text-xs px-2 py-0.5 rounded-full ${STATUS_COR_XML[x.status] ?? 'bg-slate-100 text-slate-500'}`}>
                     {STATUS_LABEL_XML[x.status] ?? x.status}
                   </span>
-                  <div className="flex items-center gap-2">
-                    <Link href={`/dashboard/produtos?entrada=${encodeURIComponent(x.numero ?? '')}`}
-                      className="text-xs text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-1.5">📦 Produtos</Link>
-                    <Link href={`/dashboard/entradas-xml/${x.id}`}
-                      className="text-xs text-white bg-blue-600 rounded-lg px-3 py-1.5 font-medium">Abrir →</Link>
-                  </div>
+                  {XML_COM_PRODUTOS.has(x.status) && (
+                    <button onClick={() => setKitsDe({ origem: 'xml', id: x.id })}
+                      className="text-xs text-violet-700 border border-violet-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">🧩 Kits</button>
+                  )}
+                  <Link href={`/dashboard/produtos?entrada=${encodeURIComponent(x.numero ?? '')}`}
+                    className="text-xs text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">📦 Produtos</Link>
+                  <Link href={`/dashboard/entradas-xml/${x.id}`}
+                    className="text-xs text-white bg-blue-600 rounded-lg px-3 py-1.5 font-medium whitespace-nowrap">Abrir →</Link>
                 </div>
               </div>
             )
@@ -603,8 +611,12 @@ export default function EntradasListClient({
                   </button>
                 )}
                 {e.status === 'confirmada' && (
+                  <button onClick={() => setKitsDe({ origem: 'manual', id: e.id })}
+                    className="text-xs text-violet-700 border border-violet-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">🧩 Kits</button>
+                )}
+                {e.status === 'confirmada' && (
                   <Link href={`/dashboard/produtos?entrada=${encodeURIComponent(e.numero_entrada ?? e.numero_nf ?? '')}`}
-                    className="text-xs text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-1.5">📦 Produtos</Link>
+                    className="text-xs text-emerald-700 border border-emerald-200 rounded-lg px-2.5 py-1.5 whitespace-nowrap">📦 Produtos</Link>
                 )}
                 <Link href={e.status === 'rascunho' ? `/dashboard/entradas/nova?rascunho=${e.id}` : `/dashboard/entradas/${e.id}`}
                   className="text-xs text-white bg-blue-600 rounded-lg px-3 py-1.5 font-medium">
@@ -667,6 +679,12 @@ export default function EntradasListClient({
                           className="text-xs text-emerald-600 hover:text-emerald-800 font-medium whitespace-nowrap">
                           📦 Produtos
                         </Link>
+                        {XML_COM_PRODUTOS.has(x.status) && (
+                          <button onClick={() => setKitsDe({ origem: 'xml', id: x.id })}
+                            className="text-xs text-violet-600 hover:text-violet-800 font-medium whitespace-nowrap">
+                            🧩 Kits
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -749,6 +767,12 @@ export default function EntradasListClient({
                           className="text-xs text-emerald-600 hover:text-emerald-800 font-medium whitespace-nowrap">
                           📦 Produtos
                         </Link>
+                      )}
+                      {e.status === 'confirmada' && (
+                        <button onClick={() => setKitsDe({ origem: 'manual', id: e.id })}
+                          className="text-xs text-violet-600 hover:text-violet-800 font-medium whitespace-nowrap">
+                          🧩 Kits
+                        </button>
                       )}
                       {e.status !== 'cancelada' && (
                         <button
@@ -860,6 +884,10 @@ export default function EntradasListClient({
             </div>
           </div>
         </div>
+      )}
+
+      {kitsDe && (
+        <RevisarKitsEntradaModal empresaId={empresaId} origem={kitsDe.origem} entradaId={kitsDe.id} onClose={() => setKitsDe(null)} />
       )}
 
       {etiquetaProdutos && (

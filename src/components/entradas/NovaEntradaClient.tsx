@@ -1020,7 +1020,10 @@ export default function NovaEntradaClient({
       const reajustesComPatch = reajustes.map(r => {
         const upd: any = { updated_at: new Date().toISOString() }
         if (r.atualizar_custo && !r.is_kit) upd.preco_custo = r.preco_custo_novo
-        if (r.atualizar_preco) { upd.preco_venda = r.preco_venda_novo; upd.markup = r.markup }
+        if (r.atualizar_preco) {
+          upd.preco_venda = r.preco_venda_novo; upd.markup = r.markup
+          if (Math.abs(r.preco_venda_novo - r.preco_venda_anterior) >= 0.005) upd.preco_atualizado_em = upd.updated_at
+        }
         // So grava promocao onde alguem mexeu — ver `promo_alterada`.
         if (r.promo_alterada) {
           const vale = r.promocao_ativa && r.preco_promocional > 0
@@ -1033,6 +1036,31 @@ export default function NovaEntradaClient({
       for (let i = 0; i < reajustesComPatch.length; i += 20) {
         await Promise.all(reajustesComPatch.slice(i, i + 20)
           .map(x => sb.from('produtos').update(x.upd).eq('id', x.produtoId)))
+      }
+
+      // Histórico de preço de quem teve o preço de venda mudado nesta entrada.
+      // Além do registro em si, é dele que a revisão de kits tira o preço da
+      // peça ANTES da nota (para manter o desconto do kit sobre as peças).
+      const mudaramPreco = reajustes.filter(r => !r.is_kit && r.atualizar_preco
+        && Math.abs(r.preco_venda_novo - r.preco_venda_anterior) >= 0.005)
+      if (mudaramPreco.length > 0) {
+        const { data: auth } = await sb.auth.getUser()
+        const margem = (preco: number, custo: number) => custo > 0 ? Math.round(((preco - custo) / custo) * 10000) / 100 : null
+        const { error: erroHist } = await sb.from('historico_precos').insert(mudaramPreco.map(r => ({
+          empresa_id: empresaId, produto_id: r.produto_id, produto_nome: r.nome_produto, produto_sku: r.sku,
+          entrada_id: entrada.id, numero_entrada: entrada.numero_entrada ?? null, numero_nf: numeroNf || null,
+          fornecedor_id: fornecedorId || null,
+          fornecedor_nome: fornecedores.find(f => f.id === fornecedorId)?.razao_social ?? null,
+          preco_venda_anterior: r.preco_venda_anterior, preco_venda_novo: r.preco_venda_novo,
+          custo_anterior: r.preco_custo_anterior, custo_novo: r.preco_custo_novo,
+          margem_anterior: margem(r.preco_venda_anterior, r.preco_custo_anterior),
+          margem_nova: margem(r.preco_venda_novo, r.preco_custo_novo),
+          variacao_custo_pct: r.preco_custo_anterior > 0
+            ? Math.round(((r.preco_custo_novo - r.preco_custo_anterior) / r.preco_custo_anterior) * 10000) / 100 : null,
+          usuario_nome: auth?.user?.email ?? null,
+          motivo: 'Entrada de mercadoria',
+        })))
+        if (erroHist) console.error('[entrada] histórico de preço não gravado:', erroHist.message)
       }
 
       // Custo do KIT acompanha o custo do componente. O recálculo lá em cima
