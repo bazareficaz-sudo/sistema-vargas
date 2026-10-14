@@ -2,7 +2,9 @@
 //
 // Duas portas de entrada, um caminho só:
 //   · a tela que finaliza a nota (manual ou XML) chama a rota de disparo
-//     assim que termina — é o "logo após cada nota";
+//     assim que termina — é o "logo após cada nota"; a remessa recebida de
+//     outra empresa do grupo (transferência) dispara pela própria rota de
+//     transferência, para a empresa que RECEBEU;
 //   · o cron do Getúlio (a cada 15 min) procura nota recente sem boletim —
 //     rede de segurança para a nota lançada por outro caminho ou para o
 //     disparo que não chegou (aba fechada no meio).
@@ -10,13 +12,15 @@
 // outro vê que já existe e para.
 //
 // Fonte dos dados: estoque_movimentacoes da nota (é o que as duas telas de
-// entrada gravam, com referencia_tipo/referencia_id da nota).
+// entrada gravam, com referencia_tipo/referencia_id da nota). Na
+// transferência cada item tem a sua linha em transferencias_estoque; o que
+// junta a remessa é o lote_id, e é ele que o boletim usa como referência.
 
 import { enviarWhatsappAutomacao } from '@/lib/automacoes/whatsapp-send'
 import { promocaoVigente } from '@/lib/produtos/promocao'
 import {
   classificar, contarBoletim, estoqueAntesDaNota, montarAlertaSemPreco, montarTextoChegada, quantidadeDaNota,
-  type BoletimChegada, type ItemChegada, type MovNota,
+  TIPOS_CHEGADA, type BoletimChegada, type ItemChegada, type MovNota,
 } from './chegadasRegras'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -32,8 +36,10 @@ export type ConfigChegadas = {
   ativado_em: string | null
 }
 
+/** Notas de entrada — o que a tela da nota pode pedir pela rota de disparo. */
 export const REFERENCIAS_NOTA = ['entrada', 'entrada_xml'] as const
-export type ReferenciaNota = typeof REFERENCIAS_NOTA[number]
+/** 'transferencia' = remessa recebida de outra empresa do grupo (referência: lote_id). */
+export type ReferenciaNota = typeof REFERENCIAS_NOTA[number] | 'transferencia'
 
 const LOTE = 150
 /** A nota é dada como terminada quando o último movimento dela tem esta idade (rede de segurança). */
@@ -52,6 +58,16 @@ export async function lerConfigChegadas(sb: Sb, empresaId: string): Promise<Conf
 }
 
 async function cabecalhoDaNota(sb: Sb, empresaId: string, tipo: ReferenciaNota, id: string) {
+  if (tipo === 'transferencia') {
+    const { data } = await sb.from('transferencias_estoque').select('empresa_id')
+      .eq('lote_id', id).eq('empresa_destino_id', empresaId).limit(1).maybeSingle()
+    let origem: string | null = null
+    if (data?.empresa_id) {
+      const { data: e } = await sb.from('empresas').select('nome, nome_fantasia, razao_social').eq('id', data.empresa_id).maybeSingle()
+      origem = e?.nome_fantasia || e?.nome || e?.razao_social || null
+    }
+    return { rotulo: 'Transferência', fornecedor: origem ? `de ${origem}` : null }
+  }
   if (tipo === 'entrada_xml') {
     const { data } = await sb.from('nfe_entradas').select('numero, serie, nome_fornecedor')
       .eq('empresa_id', empresaId).eq('id', id).maybeSingle()
@@ -70,13 +86,34 @@ async function cabecalhoDaNota(sb: Sb, empresaId: string, tipo: ReferenciaNota, 
   return { rotulo: data?.numero_nf ? `NF ${data.numero_nf}` : data?.numero_entrada ?? null, fornecedor }
 }
 
-/** Monta o boletim de uma nota. `null` quando a nota não tem entrada de mercadoria. */
+const COLS_MOV = 'produto_id, deposito_id, tipo, quantidade, estoque_anterior, estoque_novo, created_at'
+
+async function movimentosDaChegada(sb: Sb, empresaId: string, tipo: ReferenciaNota, id: string): Promise<any[]> {
+  if (tipo !== 'transferencia') {
+    const { data } = await sb.from('estoque_movimentacoes').select(COLS_MOV)
+      .eq('empresa_id', empresaId).eq('referencia_tipo', tipo).eq('referencia_id', id)
+      .in('tipo', ['entrada_compra', 'entrada_nfe', 'ajuste_entrada', 'ajuste_saida'])
+      .limit(5000)
+    return data ?? []
+  }
+  // Remessa: os itens do lote que vieram de OUTRA empresa para esta. Entre
+  // depósitos da mesma empresa nada chegou na loja — só mudou de lugar.
+  const { data: linhas } = await sb.from('transferencias_estoque').select('id, empresa_id')
+    .eq('lote_id', id).eq('empresa_destino_id', empresaId).limit(5000)
+  const ids = (linhas ?? []).filter((l: any) => l.empresa_id !== empresaId).map((l: any) => l.id as string)
+  const out: any[] = []
+  for (let i = 0; i < ids.length; i += LOTE) {
+    const { data } = await sb.from('estoque_movimentacoes').select(COLS_MOV)
+      .eq('empresa_id', empresaId).eq('referencia_tipo', 'transferencia').eq('tipo', 'transferencia_entrada')
+      .in('referencia_id', ids.slice(i, i + LOTE))
+    out.push(...(data ?? []))
+  }
+  return out
+}
+
+/** Monta o boletim de uma nota (ou remessa). `null` quando não chegou mercadoria. */
 export async function montarBoletim(sb: Sb, empresaId: string, tipo: ReferenciaNota, id: string, agora = new Date()): Promise<BoletimChegada | null> {
-  const { data: movs } = await sb.from('estoque_movimentacoes')
-    .select('produto_id, deposito_id, tipo, quantidade, estoque_anterior, estoque_novo, created_at')
-    .eq('empresa_id', empresaId).eq('referencia_tipo', tipo).eq('referencia_id', id)
-    .in('tipo', ['entrada_compra', 'entrada_nfe', 'ajuste_entrada', 'ajuste_saida'])
-    .limit(5000)
+  const movs = await movimentosDaChegada(sb, empresaId, tipo, id)
   const porProduto = new Map<string, (MovNota & { deposito_id: string | null })[]>()
   for (const m of (movs ?? []) as any[]) {
     if (!m.produto_id) continue
@@ -103,7 +140,7 @@ export async function montarBoletim(sb: Sb, empresaId: string, tipo: ReferenciaN
         .in('id', lote),
       sb.from('estoque_movimentacoes').select('produto_id')
         .eq('empresa_id', empresaId).in('produto_id', lote)
-        .in('tipo', ['entrada_compra', 'entrada_nfe', 'transferencia_entrada'])
+        .in('tipo', TIPOS_CHEGADA)
         .lt('created_at', inicioNota).limit(5000),
       sb.from('produto_estoque').select('produto_id, deposito_id, localizacao')
         .eq('empresa_id', empresaId).in('produto_id', lote).not('localizacao', 'is', null),
@@ -276,6 +313,30 @@ export async function processarPendentes(sb: Sb, cfg: ConfigChegadas, agora = ne
     for (const n of prontas) {
       if (ja.has(`${n.tipo}:${n.id}`)) continue
       await processarChegada(sb, cfg, n.tipo, n.id)
+      processados++
+    }
+  }
+
+  // Remessas recebidas de outra empresa do grupo. A rota de transferência
+  // já dispara na hora; aqui é a rede de segurança.
+  const { data: transfs } = await sb.from('transferencias_estoque')
+    .select('lote_id, empresa_id, created_at')
+    .eq('empresa_destino_id', cfg.empresa_id).not('lote_id', 'is', null)
+    .gte('created_at', desde).limit(5000)
+  const lotes = new Map<string, string>()
+  for (const t of (transfs ?? []) as any[]) {
+    if (t.empresa_id === cfg.empresa_id) continue
+    if (!lotes.has(t.lote_id) || t.created_at > lotes.get(t.lote_id)!) lotes.set(t.lote_id, t.created_at)
+  }
+  const lotesProntos = [...lotes.entries()]
+    .filter(([, em]) => agora.getTime() - new Date(em).getTime() >= NOTA_TERMINADA_MS).map(([lote]) => lote)
+  if (lotesProntos.length > 0) {
+    const { data: feitos } = await sb.from('getulio_chegadas').select('referencia_id')
+      .eq('empresa_id', cfg.empresa_id).eq('referencia_tipo', 'transferencia').in('referencia_id', lotesProntos)
+    const ja = new Set((feitos ?? []).map((f: any) => f.referencia_id))
+    for (const lote of lotesProntos) {
+      if (ja.has(lote)) continue
+      await processarChegada(sb, cfg, 'transferencia', lote)
       processados++
     }
   }

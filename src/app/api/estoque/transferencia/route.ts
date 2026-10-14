@@ -1,5 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { lerConfigChegadas, processarChegada } from '@/lib/getulio/chegadas'
 import { perfilDaSessao, empresasDoUsuario } from '@/lib/auth/empresaAtiva'
 import { executarTransferencia, type ItemTransferencia } from '@/lib/estoque/transferencia'
 
@@ -109,6 +111,22 @@ export async function POST(req: Request) {
     entradaOrigem: entradaOrigem || null,
     produtoDestinoPorOrigem,
   })
+
+  // Remessa para outra empresa do grupo é mercadoria chegando na loja de
+  // lá: boletim "Chegou na loja" para a empresa que RECEBEU. Depois da
+  // resposta — o boletim nunca atrasa nem derruba a transferência (se
+  // falhar, o cron do Getúlio manda em até 15 min).
+  if (!mesmaEmpresa && resultado.transferidos > 0) {
+    after(async () => {
+      try {
+        const admin = createAdminClient()
+        const cfg = await lerConfigChegadas(admin, empresaDestinoId)
+        if (cfg.ativo) await processarChegada(admin, cfg, 'transferencia', resultado.loteId)
+      } catch (e) {
+        console.error('Boletim da transferência:', e instanceof Error ? e.message : e)
+      }
+    })
+  }
 
   return NextResponse.json({ ok: true, ...resultado })
 }

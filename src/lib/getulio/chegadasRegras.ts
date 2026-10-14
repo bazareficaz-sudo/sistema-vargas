@@ -76,9 +76,12 @@ export function estoqueAntesDaNota(movs: MovNota[]): number {
   return Number((ajuste ?? ordenados[0]).estoque_anterior ?? 0)
 }
 
+/** Movimentos que trazem mercadoria: nota de entrada ou remessa recebida de outra empresa do grupo. */
+export const TIPOS_CHEGADA = ['entrada_compra', 'entrada_nfe', 'transferencia_entrada']
+
 export function quantidadeDaNota(movs: MovNota[]): number {
   return movs
-    .filter(m => m.tipo === 'entrada_compra' || m.tipo === 'entrada_nfe')
+    .filter(m => TIPOS_CHEGADA.includes(m.tipo))
     .reduce((s, m) => s + Number(m.quantidade ?? 0), 0)
 }
 

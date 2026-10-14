@@ -27,6 +27,13 @@ describe('estoque antes da nota', () => {
     ]), 15)
   })
 
+  test('remessa recebida de outra empresa conta como chegada', () => {
+    assert.equal(quantidadeDaNota([
+      { tipo: 'transferencia_entrada', quantidade: 12, estoque_anterior: 5, created_at: 'a' },
+    ]), 12)
+    assert.equal(estoqueAntesDaNota([{ tipo: 'transferencia_entrada', quantidade: 12, estoque_anterior: 5, created_at: 'a' }]), 5)
+  })
+
   test('quantidade soma só as entradas (o mesmo item duas vezes na nota)', () => {
     assert.equal(quantidadeDaNota([
       { tipo: 'entrada_compra', quantidade: 4, estoque_anterior: 0, created_at: 'a' },
