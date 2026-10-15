@@ -23,6 +23,7 @@ Quem manda mensagem para a loja vira contato (100 números em uma semana, só 4 
 Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Parte A** (conversas, histórico, resposta pelo sistema): migração `20261015200000_whatsapp_conversas.sql`, aplicada.
 - **Parte B** (ficha do cliente, respostas rápidas, enviar produto do estoque): sem migração.
+- **Etapa 3** (etapas do atendimento, lembrete de retorno, filtro "Para hoje"): migração `20261016120000_whatsapp_funil.sql`.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar

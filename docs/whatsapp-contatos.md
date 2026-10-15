@@ -96,9 +96,30 @@ Sem migração: usa tabelas que já existiam.
   - **Registro:** fica no histórico como `produto_individual`, gravado antes do envio.
   - **Bloqueios:** respeita opt-out. Número oculto não pode receber.
 
+## Caixa de entrada — etapa 3: etapas e lembretes
+
+Migração `supabase/migrations/20261016120000_whatsapp_funil.sql`, testada em Postgres local.
+
+- **Etapa de cada conversa:** Novo → Em atendimento → Orçamento enviado → Comprou, ou Perdido.
+  - Na conversa, um seletor muda a etapa. Na lista, há filtros por etapa com contagem.
+  - **Avanço automático:** só quando a mensagem foi de fato enviada (`status = 'enviado'`), e nunca volta etapa:
+    - resposta, produto ou mensagem pelo celular → Em atendimento (só se ainda era Novo);
+    - orçamento → Orçamento enviado (de Novo, Em atendimento ou Perdido);
+    - comprovante de compra (`cupom`) → Comprou.
+  - **Histórico:** as conversas antigas começam na etapa da última mensagem enviada de cada tipo.
+- **Lembrete de retorno:** um dia e uma nota curta por conversa.
+  - Atalhos: amanhã, em 3 dias, próxima segunda.
+  - É só um aviso na tela: **nada é enviado automaticamente**.
+  - "Concluir" apaga o lembrete.
+- **Para hoje** (filtro): lembretes de hoje ou atrasados (data no fuso de São Paulo) e orçamentos sem resposta do cliente há 3 dias ou mais.
+- **Banco:**
+  - colunas `etapa`, `etapa_em`, `retorno_em` e `retorno_nota` em `whatsapp_contatos`;
+  - o logado só altera `etapa`, `retorno_em` e `retorno_nota`; o RLS de UPDATE limita à empresa;
+  - a view ganha `retorno_vencido` e `orcamento_parado`.
+
 ## Próximas etapas (planejado, não implementado)
 
-1. Etiquetas/funil e lembretes na caixa de entrada.
+1. Avisar o atendente dos lembretes do dia (ex.: resumo do Getúlio).
 2. IA copiloto (sugere resposta com preço e estoque reais; humano envia) e mensagem fora do horário.
 3. Origem do lead (qual post do Vargas Marketing gerou a conversa).
 4. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

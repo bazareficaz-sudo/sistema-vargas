@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { doCliente, rotuloSaida, tempoDeEspera } from '../../src/lib/whatsapp/conversas'
+import { atalhosDeRetorno, doCliente, etapaDe, hojeNaLoja, rotuloRetorno, rotuloSaida, somarDias, tempoDeEspera } from '../../src/lib/whatsapp/conversas'
 
 describe('caixa de entrada do WhatsApp', () => {
   test('só a recebida é do cliente; o resto a loja mandou', () => {
@@ -55,5 +55,32 @@ describe('respostas rápidas', () => {
     assert.equal(preencherResposta('Olá{, nome}! Aqui é da {loja}.', { nome: 'LEILANE souza', loja: 'Bazar Eficaz' }), 'Olá, Leilane! Aqui é da Bazar Eficaz.')
     assert.equal(preencherResposta('Olá{, nome}! Aqui é da {loja}.', { nome: null, loja: 'Bazar Eficaz' }), 'Olá! Aqui é da Bazar Eficaz.')
     assert.equal(preencherResposta('Oi {nome_cliente}, tudo bem?', { nome: '' }), 'Oi , tudo bem?')
+  })
+})
+
+describe('etapas e lembrete de retorno', () => {
+  // 15/10/2026 é quinta-feira; 23h50 em São Paulo já é dia 16 em UTC.
+  const quinta = new Date('2026-10-16T02:50:00Z')
+  test('hoje é o dia da loja, não o UTC', () => {
+    assert.equal(hojeNaLoja(quinta), '2026-10-15')
+  })
+  test('atalhos: amanhã, 3 dias e próxima segunda', () => {
+    assert.deepEqual(atalhosDeRetorno(quinta).map(a => a.dia), ['2026-10-16', '2026-10-18', '2026-10-19'])
+    // Numa segunda, "próxima segunda" é a da semana seguinte.
+    assert.equal(atalhosDeRetorno(new Date('2026-10-19T15:00:00Z'))[2].dia, '2026-10-26')
+  })
+  test('somarDias atravessa mês', () => {
+    assert.equal(somarDias('2026-10-30', 3), '2026-11-02')
+  })
+  test('rótulo do retorno', () => {
+    assert.equal(rotuloRetorno('2026-10-15', quinta), 'hoje')
+    assert.equal(rotuloRetorno('2026-10-16', quinta), 'amanhã')
+    assert.equal(rotuloRetorno('2026-10-14', quinta), 'atrasado 1 dia')
+    assert.equal(rotuloRetorno('2026-10-12', quinta), 'atrasado 3 dias')
+    assert.equal(rotuloRetorno('2026-10-20', quinta), '20/10')
+  })
+  test('etapa desconhecida cai em Novo', () => {
+    assert.equal(etapaDe('orcamento').rotulo, 'Orçamento enviado')
+    assert.equal(etapaDe('xyz').id, 'novo')
   })
 })
