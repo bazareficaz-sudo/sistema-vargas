@@ -29,7 +29,7 @@ export default async function WhatsAppConversasPage({
   const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
-  const campos = 'id, telefone, nome_whatsapp, cliente_id, cliente_nome, status, ultima_atividade, ultima_entrada_em, aguardando, nao_lida, etapa, retorno_em, retorno_nota, retorno_vencido, orcamento_parado'
+  const campos = 'id, telefone, nome_whatsapp, cliente_id, cliente_nome, status, ultima_atividade, ultima_entrada_em, aguardando, nao_lida, etapa, retorno_em, retorno_nota, retorno_vencido, orcamento_parado, origem_codigo, origem_em'
   let lista = supabase.from('whatsapp_conversas').select(campos)
     .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null)
     .order('ultima_atividade', { ascending: false }).limit(80)

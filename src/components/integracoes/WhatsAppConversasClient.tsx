@@ -14,6 +14,8 @@ export type Conversa = {
   id: string; telefone: string; nome_whatsapp: string | null; cliente_id: string | null; cliente_nome: string | null
   status: string; ultima_atividade: string | null; ultima_entrada_em: string | null; aguardando: boolean; nao_lida: boolean
   etapa: string; retorno_em: string | null; retorno_nota: string | null; retorno_vencido: boolean; orcamento_parado: boolean
+  /** Código da publicação do Vargas Marketing que trouxe o contato. */
+  origem_codigo: string | null; origem_em: string | null
 }
 export type Mensagem = {
   id: string; tipo: string; conteudo: string; status: string; erro: string | null
@@ -375,6 +377,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                   {c.cliente_id && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 rounded">cliente</span>}
                   {c.retorno_em && <span className={`text-[10px] px-1.5 rounded ${c.retorno_vencido ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-600'}`}>retorno {rotuloRetorno(c.retorno_em)}</span>}
                   {c.orcamento_parado && <span className="text-[10px] bg-orange-100 text-orange-800 px-1.5 rounded">orçamento parado</span>}
+                  {c.origem_codigo && <span className="text-[10px] bg-violet-100 text-violet-700 px-1.5 rounded" title="Veio de uma publicação do Vargas Marketing">post {c.origem_codigo}</span>}
                   {c.aguardando && c.ultima_entrada_em && <span className="text-[11px] text-amber-700">aguardando há {tempoDeEspera(c.ultima_entrada_em)}</span>}
                   {c.nao_lida && <span className="ml-auto w-2 h-2 rounded-full bg-teal-500" />}
                 </div>
@@ -412,6 +415,11 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                       className="text-xs px-2 py-0.5 rounded-full border border-dashed border-gray-300 text-gray-500 hover:text-gray-700">+ Lembrete de retorno</button>
                   )}
                   {aberta.orcamento_parado && <span className="text-xs text-orange-700">Orçamento sem resposta há 3 dias ou mais</span>}
+                  {aberta.origem_codigo && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-violet-100 text-violet-800" title="O cliente escreveu com o código de uma publicação do Vargas Marketing">
+                      📣 Veio da publicação {aberta.origem_codigo}{aberta.origem_em ? ` · ${dia(aberta.origem_em)}` : ''}
+                    </span>
+                  )}
                 </div>
                 {lembrete && (
                   <div className="mt-2 p-2 rounded-lg bg-gray-50 border border-gray-200 space-y-1.5 max-w-md">
