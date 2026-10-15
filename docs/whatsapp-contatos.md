@@ -170,6 +170,22 @@ Migração `supabase/migrations/20261017120000_whatsapp_resposta_citada.sql`: co
 - **Na tela:** a citação aparece em cima da resposta, como no celular: de quem era, o texto e a miniatura da foto.
   - Mensagem citada que não está no sistema aparece como "Respondeu a uma mensagem que não está no sistema". É o caso das antigas e das enviadas pelo sistema antes de 16/10, quando o id gravado era o `zaapId`.
 - **Assistente de IA:** recebe a citação no histórico ("respondendo a: …"), para entender qual produto o cliente escolheu.
+## Orçamento pela conversa
+
+Migração `supabase/migrations/20261017140000_whatsapp_orcamento_convertido.sql`: gatilho em `orcamentos` e índice de `referencia_id`.
+
+- **"Montar orçamento"** na conversa:
+  - busca de produto igual à do PDV; quantidades e validade (padrão 7 dias); observação;
+  - "Criar e enviar" cria o orçamento **nas mesmas tabelas** do PDV e da tela de Orçamentos (`orcamentos`, `orcamento_itens`) e o envia pela Z-API com o mesmo texto de lá (`montarMensagemOrcamento`);
+  - a conversa vai para "Orçamento enviado".
+- **Preço:** é o vigente do cadastro, calculado no servidor (`POST /api/whatsapp/conversas/orcamento`). O navegador manda só produto e quantidade, e produto sem preço ou inativo recusa o orçamento.
+- **Desconto e condições de pagamento:** são editados na tela de Orçamentos; "Reenviar" manda de novo com as condições salvas.
+- **Na ficha:** aparecem os orçamentos em aberto ou aprovados do cliente e os enviados para esta conversa, mesmo para quem não é cliente. Ações (`POST /api/whatsapp/conversas/orcamento/acao`):
+  - **Cliente fechou:** marca como aprovado e abre o PDV com o orçamento (`/pdv?orcamento=…`). Ao concluir a venda, o PDV o converte (`converter_orcamento_pdv`), e o gatilho leva a conversa para **Comprou**. Vale para quem recebeu o orçamento pela conversa e para o contato do mesmo cliente que estava em "Orçamento enviado".
+  - **Desistiu:** cancela o orçamento e leva a conversa para Perdido.
+  - **Reenviar:** manda de novo pela Z-API.
+  - Só orçamento desta conversa (do cliente dela ou enviado para ela). Fechar e desistir não enviam nada, por isso valem também para número oculto.
+- **Assistente de IA:** quando o cliente parece aceitar ("pode fechar"), a nota sugere usar "Cliente fechou".
 
 ## Próximas etapas (planejado, não implementado)
 

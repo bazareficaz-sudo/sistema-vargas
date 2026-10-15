@@ -27,6 +27,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Arquivos** (fotos e áudios na conversa, colar imagem, busca de produto como no PDV): migração `20261016200000_whatsapp_midias.sql` (bucket privado `whatsapp-midias`).
 - **Assistente de resposta (IA):** rascunho com preço e estoque do cadastro, preço conferido, quem envia é a pessoa; sem migração.
 - **Resposta citada:** mostra a mensagem que o cliente respondeu (ex.: foto do produto); migração `20261017120000_whatsapp_resposta_citada.sql`.
+- **Orçamento pela conversa:** montar e enviar, "Cliente fechou" → PDV → Comprou; migração `20261017140000_whatsapp_orcamento_convertido.sql`.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar

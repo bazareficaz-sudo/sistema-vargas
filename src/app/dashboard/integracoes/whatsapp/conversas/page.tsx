@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
-import WhatsAppConversasClient, { type Conversa, type Mensagem, type Ficha } from '@/components/integracoes/WhatsAppConversasClient'
+import WhatsAppConversasClient, { type Conversa, type Mensagem, type Ficha, type OrcamentoConversa } from '@/components/integracoes/WhatsAppConversasClient'
 import { ETAPAS, respostasPadrao, type RespostaRapida } from '@/lib/whatsapp/conversas'
 import { BUCKET_MIDIAS, caminhoGuardado } from '@/lib/whatsapp/midias'
 
@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic'
 // (dono e equipe) não são contato e não aparecem aqui.
 const FILTROS = ['todas', 'aguardando', 'nao_lidas', 'hoje'] as const
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const COLS_ORC = 'id, numero, created_at, total, validade, status'
 
 export default async function WhatsAppConversasPage({
   searchParams,
@@ -59,16 +60,20 @@ export default async function WhatsAppConversasPage({
   // filtrado pela empresa de quem está logado.
   const conversaAberta = (atual?.data ?? null) as Conversa | null
   const clienteId = conversaAberta?.cliente_id ?? null
-  const [cliente, compras, orcamentos, modelos, cfg, empresa] = await Promise.all([
+  const [cliente, compras, orcamentosCliente, orcamentosEnviados, modelos, cfg, empresa] = await Promise.all([
     clienteId ? supabase.from('clientes')
       .select('saldo_devedor, saldo_credito, valor_vencido, limite_credito, bloqueado_fiado, opt_out_whatsapp')
       .eq('empresa_id', empresaId).eq('id', clienteId).maybeSingle() : null,
     clienteId ? supabase.from('vendas').select('id, numero, created_at, total, canal')
       .eq('empresa_id', empresaId).eq('cliente_id', clienteId).eq('status', 'concluida')
       .order('created_at', { ascending: false }).limit(5) : null,
-    clienteId ? supabase.from('orcamentos').select('id, numero, created_at, total, validade')
-      .eq('empresa_id', empresaId).eq('cliente_id', clienteId).eq('status', 'aberto')
+    clienteId ? supabase.from('orcamentos').select(COLS_ORC)
+      .eq('empresa_id', empresaId).eq('cliente_id', clienteId).in('status', ['aberto', 'aprovado'])
       .order('created_at', { ascending: false }).limit(5) : null,
+    // Orçamentos enviados para esta conversa (também de quem não é cliente).
+    conversaAberta ? supabase.from('whatsapp_mensagens').select('referencia_id')
+      .eq('empresa_id', empresaId).eq('contato_id', conversaAberta.id).eq('referencia_tipo', 'orcamento')
+      .order('created_at', { ascending: false }).limit(30) : null,
     supabase.from('whatsapp_modelos').select('id, nome, conteudo')
       .eq('empresa_id', empresaId).eq('tipo', 'resposta_rapida').eq('ativo', true).order('nome'),
     supabase.from('whatsapp_config').select('horario_atendimento').eq('empresa_id', empresaId).maybeSingle(),
@@ -118,10 +123,16 @@ export default async function WhatsAppConversasPage({
     etapas: Object.fromEntries(ETAPAS.map(e => [e.id, linhas.filter(m => m.etapa === e.id).length])),
   }
 
+  const idsEnviados = [...new Set((orcamentosEnviados?.data ?? []).map(m => m.referencia_id).filter((v): v is string => UUID.test(v ?? '')))]
+  const { data: enviadosAbertos } = idsEnviados.length
+    ? await supabase.from('orcamentos').select(COLS_ORC).eq('empresa_id', empresaId).in('id', idsEnviados).in('status', ['aberto', 'aprovado'])
+    : { data: [] }
+  const orcamentosConversa = [...new Map([...(orcamentosCliente?.data ?? []), ...(enviadosAbertos ?? [])].map(o => [o.id, o])).values()]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 8) as OrcamentoConversa[]
+
   const ficha: Ficha | null = clienteId && cliente?.data ? {
-    ...(cliente.data as Omit<Ficha, 'compras' | 'orcamentos'>),
+    ...(cliente.data as Omit<Ficha, 'compras'>),
     compras: (compras?.data ?? []) as Ficha['compras'],
-    orcamentos: (orcamentos?.data ?? []) as Ficha['orcamentos'],
   } : null
   // Cadastradas pela loja primeiro; as padrão completam (sem repetir nome).
   const proprias = (modelos.data ?? []) as RespostaRapida[]
@@ -132,6 +143,7 @@ export default async function WhatsAppConversasPage({
   return (
     <WhatsAppConversasClient
       ficha={ficha}
+      orcamentos={orcamentosConversa}
       respostas={[...proprias, ...padrao]}
       loja={loja}
       empresaId={empresaId}
