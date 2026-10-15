@@ -20,6 +20,8 @@ export type Mensagem = {
   created_at: string; enviado_em: string | null; operador_nome: string | null
   /** Link para mostrar o arquivo (assinado, quando guardado no bucket). */
   midia_url: string | null
+  /** Mensagem que esta responde (quando o cliente usou "Responder"). */
+  citada?: { achada: true; tipo: string; conteudo: string; midia_url: string | null } | { achada: false } | null
 }
 export type Ficha = {
   saldo_devedor: number | null; saldo_credito: number | null; valor_vencido: number | null
@@ -63,6 +65,32 @@ async function procurarProdutos(empresaId: string, q: string): Promise<ProdutoBu
 }
 
 const EXT_IMAGEM: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
+
+// Citação em cima da resposta, como no celular: de quem era e o que era.
+function Citacao({ c }: { c: NonNullable<Mensagem['citada']> }) {
+  if (!c.achada) return (
+    <p className="mb-1 border-l-4 border-gray-300 bg-black/5 rounded px-2 py-1 text-[11px] text-gray-500">
+      ↩ Respondeu a uma mensagem que não está no sistema (antiga ou enviada antes de a Z-API avisar).
+    </p>
+  )
+  const daLoja = !doCliente(c.tipo)
+  const foto = c.midia_url && comoMostrar(c.conteudo, c.midia_url) === 'foto'
+  const texto = semMarca(c.conteudo) || (c.conteudo.match(/^\[[^\]]+\]/)?.[0] ?? '')
+  return (
+    <div className={`mb-1 flex gap-2 items-start border-l-4 ${daLoja ? 'border-teal-500' : 'border-gray-400'} bg-black/5 rounded px-2 py-1`}>
+      <div className="min-w-0 flex-1">
+        <p className={`text-[10px] font-medium ${daLoja ? 'text-teal-700' : 'text-gray-600'}`}>↩ Respondendo a {daLoja ? 'mensagem da loja' : 'mensagem do cliente'}</p>
+        <p className="text-[12px] text-gray-700 whitespace-pre-wrap break-words line-clamp-4">{texto}</p>
+      </div>
+      {foto && (
+        <a href={c.midia_url!} target="_blank" rel="noreferrer" className="shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={c.midia_url!} alt="" loading="lazy" className="w-14 h-14 object-cover rounded" />
+        </a>
+      )}
+    </div>
+  )
+}
 
 function Midia({ m }: { m: Mensagem }) {
   const tipo = comoMostrar(m.conteudo, m.midia_url)
@@ -464,6 +492,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                   <div key={m.id} className={`flex ${cliente ? 'justify-start' : 'justify-end'}`}>
                     <div className={`max-w-[75%] rounded-xl px-3 py-2 text-sm shadow-sm ${cliente ? 'bg-white text-gray-800' : m.status === 'erro' ? 'bg-red-50 text-red-800 border border-red-200' : 'bg-teal-100 text-gray-900'}`}>
                       {rotulo && <p className="text-[10px] uppercase tracking-wide text-teal-700 mb-0.5">{rotulo}</p>}
+                      {m.citada && <Citacao c={m.citada} />}
                       <Midia m={m} />
                       {(() => { const t = m.midia_url ? semMarca(m.conteudo) : m.conteudo; return t ? <p className="whitespace-pre-wrap break-words">{t}</p> : null })()}
                       <p className="text-[10px] text-gray-400 mt-1 text-right">

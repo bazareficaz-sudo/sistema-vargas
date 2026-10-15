@@ -21,6 +21,7 @@ type Recebida = {
   video?: { videoUrl?: unknown; caption?: unknown }
   document?: { documentUrl?: unknown; fileName?: unknown; title?: unknown; caption?: unknown }
   sticker?: { stickerUrl?: unknown }
+  messageId?: unknown; referenceMessageId?: unknown
 }
 
 /**
@@ -114,3 +115,11 @@ export function semMarca(conteudo: string): string {
   const tipo = tipoPelaMarca(conteudo)
   return tipo ? conteudo.slice(MARCA[tipo].length).trim() : conteudo
 }
+
+const idValido = (v: unknown) => (typeof v === 'string' && /^[\w:.@-]{6,128}$/.test(v.trim()) ? v.trim() : null)
+
+/** Id (WhatsApp) desta mensagem. */
+export const idDaMensagem = (body: Recebida) => idValido(body.messageId)
+
+/** Id da mensagem que esta responde, quando a pessoa usou "Responder". */
+export const respostaDe = (body: Recebida) => idValido(body.referenceMessageId)

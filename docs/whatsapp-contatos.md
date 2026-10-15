@@ -160,6 +160,16 @@ Sem migração. Botão **"✨ Sugerir resposta"** na conversa aberta.
 - **Limites:** respeita a IA desligada para a empresa (`ia_empresa_config`); até 60 sugestões por hora por empresa.
 - **Consumo:** registrado em `ia_consumo` como `whatsapp_sugestao`. Modelo: o mesmo do Getúlio.
 
+## Resposta citada
+
+Migração `supabase/migrations/20261017120000_whatsapp_resposta_citada.sql`: coluna `whatsapp_mensagens.resposta_a` e índice em `(empresa_id, zapi_message_id)`.
+
+- **O caso:** o cliente segura uma mensagem (ex.: a foto de um produto), toca em "Responder" e escreve "quero esse".
+- **Webhook:** a Z-API manda `referenceMessageId`, que fica em `resposta_a`. A mensagem recebida também passa a gravar o próprio `zapi_message_id`, para poder ser citada depois.
+  - Se a coluna ainda não existir, a mensagem é gravada sem a citação (nunca se perde).
+- **Na tela:** a citação aparece em cima da resposta, como no celular: de quem era, o texto e a miniatura da foto.
+  - Mensagem citada que não está no sistema aparece como "Respondeu a uma mensagem que não está no sistema". É o caso das antigas e das enviadas pelo sistema antes de 16/10, quando o id gravado era o `zaapId`.
+- **Assistente de IA:** recebe a citação no histórico ("respondendo a: …"), para entender qual produto o cliente escolheu.
 ## Orçamento pela conversa
 
 Migração `supabase/migrations/20261017140000_whatsapp_orcamento_convertido.sql`: gatilho em `orcamentos` e índice de `referencia_id`.

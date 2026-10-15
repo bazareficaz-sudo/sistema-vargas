@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
   const [{ data: contato }, { data: mensagens }, { data: iaCfg }, { count: usadas }, { data: cfg }, { data: empresa }] = await Promise.all([
     supabase.from('whatsapp_conversas').select('id, nome_whatsapp, cliente_id, cliente_nome')
       .eq('empresa_id', empresaId).eq('id', contatoId).maybeSingle(),
-    supabase.from('whatsapp_mensagens').select('tipo, conteudo, created_at')
+    supabase.from('whatsapp_mensagens').select('tipo, conteudo, created_at, resposta_a')
       .eq('empresa_id', empresaId).eq('contato_id', contatoId)
       .order('created_at', { ascending: false }).limit(20),
     supabase.from('ia_empresa_config').select('habilitado, provedor').eq('empresa_id', empresaId).maybeSingle(),
@@ -59,7 +59,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'A IA está desativada para esta empresa.' }, { status: 403 })
   if ((usadas ?? 0) >= LIMITE_POR_HORA)
     return NextResponse.json({ error: 'Muitas sugestões na última hora. Tente de novo daqui a pouco.' }, { status: 429 })
-  const historico = ((mensagens ?? []) as MensagemHistorico[]).reverse()
+  type Linha = MensagemHistorico & { resposta_a?: string | null }
+  const linhas = ((mensagens ?? []) as Linha[]).reverse()
+  // Resposta citada: o texto da mensagem respondida entra no histórico, para
+  // a IA entender "quero esse" respondendo à foto de um produto.
+  const idsCitados = [...new Set(linhas.map(m => m.resposta_a).filter((v): v is string => Boolean(v)))]
+  const citadas = new Map<string, string>()
+  if (idsCitados.length) {
+    const { data } = await supabase.from('whatsapp_mensagens').select('zapi_message_id, conteudo')
+      .eq('empresa_id', empresaId).in('zapi_message_id', idsCitados)
+    for (const c of data ?? []) if (c.zapi_message_id) citadas.set(c.zapi_message_id, c.conteudo)
+  }
+  const historico: MensagemHistorico[] = linhas.map(({ resposta_a, ...m }) => ({
+    ...m, citada: resposta_a ? citadas.get(resposta_a) ?? '(mensagem antiga, fora do sistema)' : null,
+  }))
   if (!historico.length) return NextResponse.json({ error: 'Ainda não há mensagens nesta conversa.' }, { status: 400 })
 
   // Busca de produto do jeito do balcão (mesma do Getúlio), com o preço que
