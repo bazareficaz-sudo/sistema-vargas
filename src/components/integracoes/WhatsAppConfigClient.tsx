@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { DIAS, HORARIO_SUGERIDO, MENSAGEM_PADRAO, descreverHorario, horarioValido, mensagemForaHorario, type HorarioSemana } from '@/lib/whatsapp/foraHorario'
 
 type Config = {
   id?: string; nome: string; ativo: boolean
@@ -21,6 +22,10 @@ type Config = {
    * nunca escolheu texto nenhum.
    */
   texto_produto_link: string | null
+  /** Resposta automática para quem escreve com a loja fechada (migração 20261017180000). */
+  fora_horario_ativo: boolean
+  fora_horario_mensagem: string | null
+  horario_semana: HorarioSemana | null
 }
 
 type Modelo = { id: string; nome: string; tipo: string; conteudo: string; ativo: boolean }
@@ -66,6 +71,7 @@ const BLANK: Config = {
   texto_pos_venda: 'Olá {nome_cliente}! 😊\nObrigado pela compra na *{nome_empresa}*! Qualquer dúvida, estamos à disposição.\n📞 {telefone_empresa}',
   assinatura: '', saudacao: 'Olá {nome_cliente}! 👋', rodape: '', horario_atendimento: '',
   canal_envio: 'whatsapp_web', texto_produto_link: null,
+  fora_horario_ativo: false, fora_horario_mensagem: null, horario_semana: null,
 }
 
 export default function WhatsAppConfigClient({
@@ -534,6 +540,8 @@ export default function WhatsAppConfigClient({
               />
             </div>
           ))}
+          <ForaDoHorario cfg={cfg} upd={upd} empresaNome={empresaNome} />
+
           <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
             <h3 className="font-semibold text-gray-800">Configurações de texto</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -683,3 +691,74 @@ function Stat({ label, value }: { label: string; value: string }) {
     </div>
   )
 }
+
+// Resposta automática fora do horário: horário por dia, texto e prévia.
+// Desligada por padrão; uma por contato por dia (regras em lib/whatsapp/foraHorario*).
+function ForaDoHorario({ cfg, upd, empresaNome }: {
+  cfg: Config
+  upd: <K extends keyof Config>(k: K, v: Config[K]) => void
+  empresaNome: string
+}) {
+  const semana: HorarioSemana = cfg.horario_semana ?? HORARIO_SUGERIDO
+  const valido = horarioValido(semana)
+  const mudarDia = (d: number, t: { abre: string; fecha: string } | null) =>
+    upd('horario_semana', { ...semana, [String(d)]: t } as HorarioSemana)
+  const previa = valido ? mensagemForaHorario(cfg.fora_horario_mensagem, { nome: 'Maria', loja: empresaNome, horario: descreverHorario(valido) }) : ''
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="font-semibold text-gray-800">Resposta automática fora do horário</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Quem escrever com a loja fechada recebe esta mensagem — uma vez por dia, só clientes (nunca dono ou equipe). A conversa continua aguardando a resposta de verdade.</p>
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer shrink-0">
+          <input type="checkbox" checked={cfg.fora_horario_ativo} onChange={e => { upd('fora_horario_ativo', e.target.checked); if (!cfg.horario_semana) upd('horario_semana', semana) }}
+            className="w-4 h-4 accent-teal-600" />
+          <span className="text-sm text-gray-700">{cfg.fora_horario_ativo ? 'Ligada' : 'Desligada'}</span>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+        {[1, 2, 3, 4, 5, 6, 0].map(d => {
+          const t = semana[String(d) as keyof HorarioSemana] ?? null
+          return (
+            <div key={d} className="flex items-center gap-2 text-sm">
+              <label className="flex items-center gap-1.5 w-20">
+                <input type="checkbox" checked={Boolean(t)} onChange={e => mudarDia(d, e.target.checked ? { abre: '08:00', fecha: '18:00' } : null)} className="accent-teal-600" />
+                <span className="text-gray-700">{DIAS[d]}</span>
+              </label>
+              {t ? <>
+                <input type="time" value={t.abre} onChange={e => mudarDia(d, { ...t, abre: e.target.value })} className="border border-gray-300 rounded px-1.5 py-0.5 text-sm" />
+                <span className="text-gray-400">às</span>
+                <input type="time" value={t.fecha} onChange={e => mudarDia(d, { ...t, fecha: e.target.value })} className="border border-gray-300 rounded px-1.5 py-0.5 text-sm" />
+              </> : <span className="text-xs text-gray-400">fechado</span>}
+            </div>
+          )
+        })}
+      </div>
+      {!valido && <p className="text-xs text-red-600">Marque pelo menos um dia com horário de abertura antes do fechamento.</p>}
+      {valido && (
+        <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+          <span>Fica: <b className="text-gray-700">{descreverHorario(valido)}</b></span>
+          <button type="button" onClick={() => upd('horario_atendimento', descreverHorario(valido))} className="text-teal-700 hover:underline">usar também em &ldquo;Horário de atendimento&rdquo;</button>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Mensagem</label>
+        <textarea value={cfg.fora_horario_mensagem ?? ''} onChange={e => upd('fora_horario_mensagem', e.target.value || null)} rows={3} maxLength={600}
+          placeholder={MENSAGEM_PADRAO}
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-y focus:outline-none focus:border-teal-500" />
+        <p className="text-[11px] text-gray-400 mt-0.5">Vazio = mensagem padrão. Use {'{nome}'} (primeiro nome), {'{loja}'} e {'{horario}'}.</p>
+      </div>
+      {previa && (
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-[11px] text-gray-500 mb-1">Prévia (cliente &ldquo;Maria&rdquo;):</p>
+          <p className="text-sm whitespace-pre-wrap text-gray-800">{previa}</p>
+        </div>
+      )}
+      <p className="text-[11px] text-gray-400">Feriado: desligue no dia ou ajuste o horário. Lembre de clicar em Salvar.</p>
+    </div>
+  )
+}
+
