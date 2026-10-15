@@ -231,7 +231,11 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   const [obsOrc, setObsOrc] = useState('')
   const [validadeOrc, setValidadeOrc] = useState('')
   const [salvandoOrc, setSalvandoOrc] = useState(false)
-  const [orcSalvo, setOrcSalvo] = useState<{ numero: number } | null>(null)
+  const [orcSalvo, setOrcSalvo] = useState<{ numero: number; id: string } | null>(null)
+  // Orçamento pedido numa conversa do WhatsApp (/pdv?conversa=<id>): o
+  // cliente vem da conversa e, ao salvar, a tela de negociação abre já com o
+  // telefone dela para enviar.
+  const [conversaVinculada, setConversaVinculada] = useState<{ id: string; nome: string } | null>(null)
 
   // Modais de devolução
   const [modalTroca, setModalTroca] = useState(false)
@@ -706,6 +710,32 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
     setTimeout(() => buscaRef.current?.focus(), 30)
   }
 
+  // "Montar orçamento" na conversa do WhatsApp abre /pdv?conversa=<id>. Lido
+  // uma vez, como o ?orcamento abaixo. A conversa é lida com o RLS de quem
+  // está logado — id de outra empresa simplesmente não acha nada.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('conversa')
+    if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return
+    window.history.replaceState(null, '', window.location.pathname)
+    let vivo = true
+    ;(async () => {
+      const { data: conv } = await sb.from('whatsapp_conversas').select('id, cliente_id, cliente_nome, nome_whatsapp, telefone')
+        .eq('empresa_id', empresaId).eq('id', id).maybeSingle()
+      if (!vivo || !conv) return
+      const nome = conv.cliente_nome || conv.nome_whatsapp || conv.telefone
+      setConversaVinculada({ id: conv.id, nome })
+      if (conv.cliente_id) {
+        const daLista = clientes.find(c => c.id === conv.cliente_id)
+        const cli = daLista ?? (await sb.from('clientes').select(COLS_CLIENTE_PDV).eq('id', conv.cliente_id).maybeSingle()).data as Cliente | null
+        if (vivo && cli) setClienteSelecionado(cli)
+      } else if (conv.nome_whatsapp) {
+        setNomeNota(conv.nome_whatsapp)
+      }
+    })()
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // "Converter em venda (PDV)" na tela de Orçamentos abre /pdv?orcamento=<id>.
   // Lido uma vez; o parâmetro sai da URL para um F5 não recarregar o orçamento
   // por cima de uma venda nova.
@@ -727,7 +757,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
       const { data: orc, error } = await sb.from('orcamentos').insert({
         empresa_id: empresaId,
         cliente_id: clienteSelecionado?.id ?? null,
-        cliente_nome: clienteSelecionado?.nome ?? null,
+        cliente_nome: clienteSelecionado?.nome ?? conversaVinculada?.nome ?? null,
         operador_nome: operadorNome,
         status: 'aberto',
         subtotal: totalVendas,
@@ -742,7 +772,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         produto_id: i.produto_id, produto_nome: i.nome, produto_sku: i.sku,
         quantidade: i.quantidade, preco_unitario: i.preco_unitario, desconto: i.desconto, total: i.total,
       })))
-      setOrcSalvo({ numero: orc.numero }); setSalvandoOrc(false)
+      setOrcSalvo({ numero: orc.numero, id: orc.id }); setSalvandoOrc(false)
     } catch (e: any) { alert('Erro ao salvar orçamento: ' + e.message); setSalvandoOrc(false) }
   }
 
@@ -897,7 +927,7 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
   }, [clienteSelecionado, sb])
 
   function limparTudo() {
-    setItens([]); setBusca(''); setClienteSelecionado(null)
+    setItens([]); setBusca(''); setClienteSelecionado(null); setConversaVinculada(null)
     setEnderecoEntregaId(null); setEndEntrega({ logradouro: '', numero: '', bairro: '', cidade: '', obs: '' })
     setDescontoGlobal(0); setObs(''); setEntrega(false); setModoDevol(false)
     setCpfNota(''); setNomeNota('')
@@ -1533,6 +1563,13 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
         <span className="text-gray-400 px-2">{operadorNome.split('@')[0]}</span>
         <button onClick={() => router.push('/dashboard')} className="px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded text-xs">← Painel</button>
       </div>
+
+      {conversaVinculada && (
+        <div className="bg-teal-100 text-teal-900 text-center py-1.5 text-xs font-semibold flex-shrink-0 flex items-center justify-center gap-3">
+          <span>💬 Orçamento para a conversa de {conversaVinculada.nome} (WhatsApp) — monte e salve como orçamento (F8).</span>
+          <button onClick={() => setConversaVinculada(null)} className="underline font-normal hover:text-teal-700">desvincular</button>
+        </div>
+      )}
 
       {/* Venda vinda de um orçamento */}
       {orcamentoVinculado && (
@@ -2293,6 +2330,12 @@ export default function PDVClient({ empresaId, empresaNome, empresaEstoqueId, em
                 <p className="text-lg font-bold text-gray-900">Orçamento #{orcSalvo.numero} salvo!</p>
                 <p className="text-sm text-gray-500 mt-1">Sem baixa de estoque ou lançamento financeiro.</p>
               </div>
+              {conversaVinculada && (
+                <button onClick={() => router.push(`/dashboard/orcamentos?abrir=${orcSalvo.id}&conversa=${conversaVinculada.id}`)}
+                  className="w-full py-2.5 bg-teal-600 text-white font-semibold rounded-lg text-sm hover:bg-teal-700">
+                  💬 Abrir negociação e enviar no WhatsApp
+                </button>
+              )}
               <div className="flex gap-2 pt-2">
                 <button onClick={() => { setModalOrc(false); setOrcSalvo(null) }} className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50">Continuar editando</button>
                 <button onClick={limparTudo} className="flex-1 py-2.5 bg-blue-600 text-white font-semibold rounded-lg text-sm hover:bg-blue-700">Nova venda</button>

@@ -3,10 +3,20 @@ import { redirect } from 'next/navigation'
 import OrcamentosClient from '@/components/orcamentos/OrcamentosClient'
 import { promocaoVigente } from '@/lib/produtos/promocao'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { numeroOculto } from '@/lib/whatsapp/contatos'
 
 export const dynamic = 'force-dynamic'
 
-export default async function OrcamentosPage() {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const SELECT_ORC = '*, clientes(nome, telefone), orcamento_itens(id, produto_id, produto_nome, quantidade, preco_unitario, desconto, total)'
+
+// ?abrir=<orçamento> abre ele na tela; ?conversa=<contato do WhatsApp> faz o
+// "Enviar por WhatsApp" desse orçamento ir para o telefone da conversa (vem
+// do PDV aberto a partir da caixa de entrada).
+export default async function OrcamentosPage({ searchParams }: { searchParams: Promise<{ abrir?: string; conversa?: string }> }) {
+  const sp = await searchParams
+  const abrirId = sp.abrir && UUID.test(sp.abrir) ? sp.abrir : null
+  const conversaId = sp.conversa && UUID.test(sp.conversa) ? sp.conversa : null
   const sb = await createClient()
   const { data: { user } } = await sb.auth.getUser()
   if (!user) redirect('/login')
@@ -14,12 +24,23 @@ export default async function OrcamentosPage() {
   const profile = await perfilDaSessao(sb, user.id)
   const empresaId = profile?.empresa_id ?? ''
 
-  const { data: orcamentos } = await sb
+  const { data: recentes } = await sb
     .from('orcamentos')
-    .select('*, clientes(nome, telefone), orcamento_itens(id, produto_id, produto_nome, quantidade, preco_unitario, desconto, total)')
+    .select(SELECT_ORC)
     .eq('empresa_id', empresaId)
     .order('created_at', { ascending: false })
     .limit(100)
+  let orcamentos = recentes
+  if (abrirId && !(recentes ?? []).some((o: { id: string }) => o.id === abrirId)) {
+    const { data: um } = await sb.from('orcamentos').select(SELECT_ORC).eq('empresa_id', empresaId).eq('id', abrirId).maybeSingle()
+    if (um) orcamentos = [um, ...(recentes ?? [])]
+  }
+  const { data: conv } = conversaId
+    ? await sb.from('whatsapp_conversas').select('id, telefone, cliente_nome, nome_whatsapp').eq('empresa_id', empresaId).eq('id', conversaId).maybeSingle()
+    : { data: null }
+  const conversa = conv && !numeroOculto(conv.telefone)
+    ? { id: conv.id, telefone: conv.telefone, nome: conv.cliente_nome || conv.nome_whatsapp || conv.telefone }
+    : null
 
   // Custo de cada produto que aparece nos orçamentos — é o que permite dizer
   // se o orçamento fecha com lucro. É o custo de HOJE, não o do dia em que o
@@ -69,6 +90,8 @@ export default async function OrcamentosPage() {
       precoCheioPorProduto={precoCheioPorProduto}
       saudeConfig={cfg ?? null}
       saudeFaixas={faixas ?? null}
+      abrirId={abrirId}
+      conversa={conversa}
     />
   )
 }

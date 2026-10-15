@@ -7,7 +7,7 @@ import { formatarTelefone } from '@/lib/clientes/telefone'
 import { numeroOculto, semMarca } from '@/lib/whatsapp/contatos'
 import { BUCKET_MIDIAS, LIMITE_MIDIA, comoMostrar } from '@/lib/whatsapp/midias'
 import { filtroNomeOuMarca } from '@/lib/produtos/similares'
-import { ETAPAS, atalhosDeRetorno, etapaDe, hojeNaLoja, somarDias, rotuloRetorno, doCliente, legendaDoProduto, preencherResposta, rotuloSaida, tempoDeEspera, type ProdutoParaEnviar, type RespostaRapida } from '@/lib/whatsapp/conversas'
+import { ETAPAS, atalhosDeRetorno, etapaDe, hojeNaLoja, rotuloRetorno, doCliente, legendaDoProduto, preencherResposta, rotuloSaida, tempoDeEspera, type ProdutoParaEnviar, type RespostaRapida } from '@/lib/whatsapp/conversas'
 import { precoVigente, promocaoVigente } from '@/lib/produtos/promocao'
 
 export type Conversa = {
@@ -127,7 +127,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   const [erro, setErro] = useState('')
   const fim = useRef<HTMLDivElement>(null)
   const [verFicha, setVerFicha] = useState(false)
-  const [painel, setPainel] = useState<'' | 'nova' | 'produto' | 'orcamento'>('')
+  const [painel, setPainel] = useState<'' | 'nova' | 'produto'>('')
   const [nova, setNova] = useState({ nome: '', conteudo: '' })
   const [busca, setBusca] = useState('')
   const [achados, setAchados] = useState<ProdutoBusca[]>([])
@@ -138,47 +138,11 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   const [marcado, setMarcado] = useState(0)
   const [anexo, setAnexo] = useState<{ arquivo: File; previa: string } | null>(null)
   const seletor = useRef<HTMLInputElement>(null)
-  const [orcItens, setOrcItens] = useState<{ p: ProdutoBusca; quantidade: number }[]>([])
-  const [orcValidade, setOrcValidade] = useState('')
-  const [orcObs, setOrcObs] = useState('')
   const [orcOcupado, setOrcOcupado] = useState<string | null>(null)
 
-  function abrirOrcamento() {
-    setPainel(p => p === 'orcamento' ? '' : 'orcamento')
-    setBusca(''); setAchados([]); setEscolhido(null)
-    if (!orcValidade) setOrcValidade(somarDias(hojeNaLoja(), 7))
-  }
-  function adicionarAoOrcamento(p: ProdutoBusca) {
-    setOrcItens(l => l.some(i => i.p.id === p.id) ? l.map(i => i.p.id === p.id ? { ...i, quantidade: i.quantidade + 1 } : i) : [...l, { p, quantidade: 1 }])
-    setBusca(''); setAchados([])
-  }
-  const totalOrcamento = orcItens.reduce((s, i) => s + Math.round(precoVigente(i.p) * i.quantidade * 100) / 100, 0)
-
-  // Cria o orçamento (o mesmo do PDV e da tela de Orçamentos) e envia na
-  // conversa. O preço é recalculado no servidor pelo cadastro.
-  async function criarOrcamento() {
-    if (!aberta || !orcItens.length) return
-    setEnviando(true); setErro(''); setAviso('')
-    try {
-      const res = await fetch('/api/whatsapp/conversas/orcamento', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contatoId: aberta.id, itens: orcItens.map(i => ({ produtoId: i.p.id, quantidade: i.quantidade })), validade: orcValidade, observacao: orcObs }),
-      })
-      const r = await res.json().catch(() => ({}))
-      if (!res.ok && !r.criado) { setErro(r.error ?? 'Não foi possível criar o orçamento.'); return }
-      if (r.error) setErro(r.error)
-      else setAviso(`Orçamento nº ${r.numero} criado e enviado.`)
-      setOrcItens([]); setOrcObs(''); setOrcValidade(''); setPainel('')
-    } finally {
-      setEnviando(false)
-      router.refresh()
-    }
-  }
-
-  async function acaoOrcamento(o: OrcamentoConversa, acao: 'fechou' | 'desistiu' | 'reenviar') {
+  async function acaoOrcamento(o: OrcamentoConversa, acao: 'fechou' | 'desistiu') {
     if (!aberta) return
     if (acao === 'desistiu' && !confirm(`Cancelar o orçamento nº ${o.numero} e marcar a conversa como Perdido?`)) return
-    if (acao === 'reenviar' && !confirm(`Enviar de novo o orçamento nº ${o.numero} para o cliente?`)) return
     setOrcOcupado(o.id); setErro(''); setAviso('')
     try {
       const res = await fetch('/api/whatsapp/conversas/orcamento/acao', {
@@ -190,13 +154,13 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
       // Fechou: o PDV abre com o orçamento; ao concluir a venda ele vira
       // "Convertido" e a conversa vai para "Comprou".
       if (acao === 'fechou' && r.pdv) { router.push(r.pdv); return }
-      setAviso(acao === 'reenviar' ? `Orçamento nº ${o.numero} reenviado.` : `Orçamento nº ${o.numero} cancelado.`)
+      setAviso(`Orçamento nº ${o.numero} cancelado.`)
     } finally {
       setOrcOcupado(null)
       router.refresh()
     }
   }
-  const listaOrcamentos = <OrcamentosDaConversa orcamentos={orcamentos} ocupado={orcOcupado} onAcao={acaoOrcamento} />
+  const listaOrcamentos = aberta ? <OrcamentosDaConversa conversaId={aberta.id} orcamentos={orcamentos} ocupado={orcOcupado} onAcao={acaoOrcamento} /> : null
   type Sugestao = { texto: string; nota: string; produtos: { id: string; nome: string; preco: number | null; estoque: number | null }[] }
   const [sugestao, setSugestao] = useState<Sugestao | null>(null)
   const [sugerindo, setSugerindo] = useState(false)
@@ -221,7 +185,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
 
   // Busca enquanto digita, como no PDV.
   useEffect(() => {
-    if ((painel !== 'produto' && painel !== 'orcamento') || busca.trim().length < 2) return
+    if (painel !== 'produto' || busca.trim().length < 2) return
     let valido = true
     const t = setTimeout(async () => {
       setBuscando(true)
@@ -521,8 +485,11 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                     className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-60">
                     {sugerindo ? 'Pensando…' : '✨ Sugerir resposta'}
                   </button>
-                  <button onClick={abrirOrcamento}
-                    className="text-xs px-2.5 py-1 rounded-lg bg-white border border-amber-500 text-amber-700 hover:bg-amber-50">Montar orçamento</button>
+                  {/* Orçamento no PDV (preço, promoção, logística) e negociação na tela
+                      de Orçamentos — a conversa só faz a ponte. Abre em outra aba. */}
+                  <a href={`/pdv?conversa=${aberta.id}`} target="_blank" rel="noreferrer"
+                    title="Abre o PDV com o cliente desta conversa. Ao salvar o orçamento, a tela de negociação abre pronta para enviar."
+                    className="text-xs px-2.5 py-1 rounded-lg bg-white border border-amber-500 text-amber-700 hover:bg-amber-50">Montar orçamento no PDV ↗</a>
                   <button onClick={() => setPainel(p => p === 'produto' ? '' : 'produto')}
                     className="text-xs px-2.5 py-1 rounded-lg bg-white border border-teal-600 text-teal-700 hover:bg-teal-50">Enviar produto</button>
                 </div>
@@ -538,69 +505,6 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                       <button onClick={salvarResposta} disabled={!nova.nome.trim() || !nova.conteudo.trim()}
                         className="text-xs px-3 py-1 rounded bg-teal-600 text-white disabled:opacity-50">Salvar resposta</button>
                     </div>
-                  </div>
-                )}
-
-                {painel === 'orcamento' && (
-                  <div className="mb-2 p-2 rounded-lg bg-amber-50/60 border border-amber-200 space-y-2">
-                    <input value={busca} onChange={e => setBusca(e.target.value)} autoFocus
-                      onKeyDown={e => {
-                        if (e.key === 'ArrowDown') { e.preventDefault(); setMarcado(i => Math.min(i + 1, achados.length - 1)) }
-                        else if (e.key === 'ArrowUp') { e.preventDefault(); setMarcado(i => Math.max(i - 1, 0)) }
-                        else if (e.key === 'Enter' && achados[marcado]) { e.preventDefault(); adicionarAoOrcamento(achados[marcado]) }
-                      }}
-                      placeholder="Adicionar produto: nome, marca, código ou código de barras" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm" />
-                    {achados.length > 0 && (
-                      <div className="max-h-48 overflow-y-auto divide-y divide-gray-100 bg-white rounded border border-gray-200">
-                        {achados.map((p, i) => (
-                          <button key={p.id} onClick={() => adicionarAoOrcamento(p)} onMouseEnter={() => setMarcado(i)}
-                            className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 ${i === marcado ? 'bg-amber-50' : ''}`}>
-                            <span className="flex-1 min-w-0 truncate">{p.nome}{p.sku ? <span className="text-gray-400"> · {p.sku}</span> : null}</span>
-                            <span className="whitespace-nowrap">{brl(precoVigente(p))}
-                              {p.controlar_estoque && <span className={`ml-1.5 ${Number(p.estoque ?? 0) > 0 ? 'text-gray-400' : 'text-red-600'}`}>est. {Number(p.estoque ?? 0)}</span>}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {orcItens.length === 0 ? <p className="text-[11px] text-gray-500">Busque e clique nos produtos para montar o orçamento.</p> : (
-                      <table className="w-full text-xs bg-white rounded border border-gray-200">
-                        <tbody className="divide-y divide-gray-100">
-                          {orcItens.map(i => {
-                            const preco = precoVigente(i.p)
-                            return (
-                              <tr key={i.p.id}>
-                                <td className="px-2 py-1">{i.p.nome}{!(preco > 0) && <span className="text-red-600"> (sem preço)</span>}</td>
-                                <td className="px-1 py-1 w-20">
-                                  <input type="number" min={0.001} step="any" value={i.quantidade}
-                                    onChange={e => { const q = Number(e.target.value); setOrcItens(l => l.map(x => x.p.id === i.p.id ? { ...x, quantidade: q } : x)) }}
-                                    className="w-full border border-gray-300 rounded px-1 py-0.5 text-right" />
-                                </td>
-                                <td className="px-2 py-1 text-right whitespace-nowrap text-gray-500">× {brl(preco)}</td>
-                                <td className="px-2 py-1 text-right whitespace-nowrap font-medium">{brl(Math.round(preco * i.quantidade * 100) / 100)}</td>
-                                <td className="px-1"><button onClick={() => setOrcItens(l => l.filter(x => x.p.id !== i.p.id))} className="text-red-500 px-1" title="Tirar">×</button></td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-                    <div className="flex gap-2 flex-wrap items-center text-xs">
-                      <label className="flex items-center gap-1 text-gray-600">Válido até
-                        <input type="date" value={orcValidade} onChange={e => setOrcValidade(e.target.value)} className="border border-gray-300 rounded px-1 py-0.5" />
-                      </label>
-                      <input value={orcObs} onChange={e => setOrcObs(e.target.value)} maxLength={500} placeholder="Observação (opcional)"
-                        className="flex-1 min-w-[140px] border border-gray-300 rounded px-2 py-0.5" />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-semibold">Total: {brl(totalOrcamento)}</span>
-                      <div className="flex gap-2">
-                        <button onClick={() => setPainel('')} className="text-xs px-2 py-1 text-gray-600">Fechar</button>
-                        <button onClick={criarOrcamento} disabled={enviando || !orcItens.length || orcItens.some(i => !(i.quantidade > 0) || !(precoVigente(i.p) > 0))}
-                          className="text-xs px-3 py-1 rounded bg-amber-600 text-white disabled:opacity-50">{enviando ? 'Enviando…' : 'Criar e enviar orçamento'}</button>
-                      </div>
-                    </div>
-                    <p className="text-[11px] text-gray-500">Preço de hoje do cadastro. Desconto e condições de pagamento: edite depois em Orçamentos e use &ldquo;Reenviar&rdquo;.</p>
                   </div>
                 )}
 
@@ -713,9 +617,9 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   )
 }
 
-type AcaoOrcamento = 'fechou' | 'desistiu' | 'reenviar'
+type AcaoOrcamento = 'fechou' | 'desistiu'
 
-function OrcamentosDaConversa({ orcamentos, ocupado, onAcao }: { orcamentos: OrcamentoConversa[]; ocupado: string | null; onAcao: (o: OrcamentoConversa, acao: AcaoOrcamento) => void }) {
+function OrcamentosDaConversa({ conversaId, orcamentos, ocupado, onAcao }: { conversaId: string; orcamentos: OrcamentoConversa[]; ocupado: string | null; onAcao: (o: OrcamentoConversa, acao: AcaoOrcamento) => void }) {
   const hoje = hojeNaLoja()
   return (
     <div>
@@ -736,8 +640,9 @@ function OrcamentosDaConversa({ orcamentos, ocupado, onAcao }: { orcamentos: Orc
                 <div className="flex gap-1.5 mt-1.5 flex-wrap">
                   <button onClick={() => onAcao(o, 'fechou')} disabled={ocupado === o.id}
                     className="px-2 py-0.5 rounded bg-green-600 text-white disabled:opacity-50">Cliente fechou</button>
-                  <button onClick={() => onAcao(o, 'reenviar')} disabled={ocupado === o.id}
-                    className="px-2 py-0.5 rounded border border-gray-200 text-gray-700 disabled:opacity-50">Reenviar</button>
+                  <a href={`/dashboard/orcamentos?abrir=${o.id}&conversa=${conversaId}`} target="_blank" rel="noreferrer"
+                    title="Tela de negociação: condições de pagamento, parcelamento e envio por WhatsApp"
+                    className="px-2 py-0.5 rounded border border-gray-200 text-gray-700 hover:bg-gray-50">Abrir negociação ↗</a>
                   <button onClick={() => onAcao(o, 'desistiu')} disabled={ocupado === o.id}
                     className="px-2 py-0.5 rounded text-red-600 hover:bg-red-50 disabled:opacity-50">Desistiu</button>
                 </div>
@@ -746,7 +651,7 @@ function OrcamentosDaConversa({ orcamentos, ocupado, onAcao }: { orcamentos: Orc
           })}
         </ul>
       )}
-      <a href="/dashboard/orcamentos" className="text-[11px] text-blue-600 hover:underline">Ver todos os orçamentos (editar, condições de pagamento)</a>
+      <a href={`/pdv?conversa=${conversaId}`} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline">+ Novo orçamento no PDV</a>
     </div>
   )
 }

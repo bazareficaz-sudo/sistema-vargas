@@ -52,7 +52,7 @@ function fmtDateTime(s: string) { return new Date(s).toLocaleString('pt-BR', { d
 
 export default function OrcamentosClient({
   empresaId, empresaNome, orcamentos: inicial, custoPorProduto, precoCheioPorProduto,
-  saudeConfig, saudeFaixas,
+  saudeConfig, saudeFaixas, abrirId, conversa,
 }: {
   empresaId: string
   empresaNome?: string | null
@@ -61,11 +61,15 @@ export default function OrcamentosClient({
   precoCheioPorProduto?: Record<string, number>
   saudeConfig?: SaudeConfig | null
   saudeFaixas?: FaixaSaude[] | null
+  /** Orçamento a abrir já selecionado (?abrir=). */
+  abrirId?: string | null
+  /** Conversa do WhatsApp de onde veio: o envio desse orçamento vai para o telefone dela. */
+  conversa?: { id: string; telefone: string; nome: string } | null
 }) {
   const sb = createClient()
   const router = useRouter()
   const [lista, setLista] = useState<Orcamento[]>(inicial)
-  const [selecionado, setSelecionado] = useState<Orcamento | null>(null)
+  const [selecionado, setSelecionado] = useState<Orcamento | null>(() => (abrirId ? inicial.find(o => o.id === abrirId) ?? null : null))
   const [filtroBusca, setFiltroBusca] = useState('')
   const [filtroStatus, setFiltroStatus] = useState('todos')
   const [atualizando, setAtualizando] = useState(false)
@@ -195,7 +199,9 @@ export default function OrcamentosClient({
       condicoes: condicoesEfetivas(o),
     })
     setWppPayload({
-      telefone: o.clientes?.telefone ?? '',
+      // Veio de uma conversa do WhatsApp: vai para o número dela (o banco liga
+      // a mensagem à conversa e a move para "Orçamento enviado").
+      telefone: (conversa && o.id === abrirId ? conversa.telefone : null) ?? o.clientes?.telefone ?? '',
       mensagem,
       tipo: 'orcamento',
       cliente_nome: o.cliente_nome ?? o.clientes?.nome ?? null,
@@ -484,6 +490,13 @@ export default function OrcamentosClient({
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                 <p className="text-xs text-amber-700 font-medium mb-1">Observação</p>
                 <p className="text-sm text-gray-700">{selecionado.observacao}</p>
+              </div>
+            )}
+
+            {conversa && selecionado.id === abrirId && (
+              <div className="print:hidden bg-teal-50 border border-teal-200 text-teal-900 rounded-xl px-4 py-2.5 text-sm flex items-center justify-between gap-3 flex-wrap">
+                <span>💬 Pedido pela conversa de <b>{conversa.nome}</b> no WhatsApp. Ajuste as condições e use &ldquo;Enviar por WhatsApp&rdquo;: vai para o número da conversa.</span>
+                <a href={`/dashboard/integracoes/whatsapp/conversas?c=${conversa.id}`} className="text-xs text-teal-700 underline whitespace-nowrap">Voltar para a conversa</a>
               </div>
             )}
 
