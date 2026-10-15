@@ -23,6 +23,12 @@ describe('assistente de resposta', () => {
     ])
     assert.equal(h, '[15/10, 14:00] Cliente: tem tinta coral 18l?\n[15/10, 14:05] Loja: Temos sim\n[15/10, 14:06] Cliente: ([foto]) essa aqui')
   })
+  test('histórico mostra a mensagem citada', () => {
+    const h = historicoParaPrompt([
+      { tipo: 'recebida', conteudo: 'quero esse', created_at: '2026-10-15T17:00:00Z', citada: '[foto] *TINTA CORAL 18L*\n*R$ 188,00*' },
+    ])
+    assert.equal(h, '[15/10, 14:00] Cliente: (respondendo a: "[foto] *TINTA CORAL 18L* *R$ 188,00*") quero esse')
+  })
   test('histórico guarda só as últimas', () => {
     const muitas = Array.from({ length: 30 }, (_, i) => ({ tipo: 'recebida', conteudo: `m${i}`, created_at: '2026-10-15T17:00:00Z' }))
     const h = historicoParaPrompt(muitas, 20).split('\n')

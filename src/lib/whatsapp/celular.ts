@@ -9,7 +9,7 @@ import { guardarMidia } from './midias'
 type Admin = { from: (t: string) => any; storage: { from: (b: string) => any } } // eslint-disable-line @typescript-eslint/no-explicit-any
 const pausa = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-export async function registrarEnviadaPeloCelular(admin: Admin, empresaId: string, dados: { telefone: string; texto: string; messageId: string | null; midiaUrl?: string | null }) {
+export async function registrarEnviadaPeloCelular(admin: Admin, empresaId: string, dados: { telefone: string; texto: string; messageId: string | null; midiaUrl?: string | null; respostaA?: string | null }) {
   // Só conversa com contato (cliente procurou a loja): resposta para o dono,
   // fornecedor ou grupo não entra.
   const chave = chaveTelefone(dados.telefone) ?? `x${dados.telefone.replace(/\D/g, '')}`
@@ -36,6 +36,7 @@ export async function registrarEnviadaPeloCelular(admin: Admin, empresaId: strin
     empresa_id: empresaId, contato_id: contato.id, telefone: dados.telefone, tipo: 'enviada_celular',
     conteudo: dados.texto, conteudo_pdf_url: dados.midiaUrl ?? null,
     status: 'enviado', zapi_message_id: dados.messageId, enviado_em: agora, operador_nome: 'Celular',
+    ...(dados.respostaA ? { resposta_a: dados.respostaA } : {}),
   }).select('id').single()
   if (nova?.id && dados.midiaUrl) await guardarMidia(admin, { empresaId, contatoId: contato.id, mensagemId: nova.id, url: dados.midiaUrl })
 }

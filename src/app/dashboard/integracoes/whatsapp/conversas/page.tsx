@@ -49,7 +49,7 @@ export default async function WhatsAppConversasPage({
       .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null).limit(10000),
     aberta ? supabase.from('whatsapp_conversas').select(campos).eq('empresa_id', empresaId).eq('id', aberta).maybeSingle() : null,
     aberta ? supabase.from('whatsapp_mensagens')
-      .select('id, tipo, conteudo, conteudo_pdf_url, status, erro, created_at, enviado_em, operador_nome')
+      .select('id, tipo, conteudo, conteudo_pdf_url, resposta_a, status, erro, created_at, enviado_em, operador_nome')
       .eq('empresa_id', empresaId).eq('contato_id', aberta)
       .order('created_at', { ascending: false }).limit(200) : null,
   ])
@@ -77,17 +77,36 @@ export default async function WhatsAppConversasPage({
 
   // Arquivos guardados no bucket privado: link assinado de 1 h (o RLS do
   // Storage confere a empresa). Link da Z-API vai como veio.
-  type Linha = Omit<Mensagem, 'midia_url'> & { conteudo_pdf_url: string | null }
+  type Linha = Omit<Mensagem, 'midia_url' | 'citada'> & { conteudo_pdf_url: string | null; resposta_a: string | null }
   const linhasMsg = ((mensagens?.data ?? []) as Linha[]).reverse()
-  const caminhos = [...new Set(linhasMsg.map(m => caminhoGuardado(m.conteudo_pdf_url)).filter((c): c is string => Boolean(c)))]
+
+  // Resposta citada: a mensagem que o cliente respondeu (pelo id do WhatsApp).
+  type Citada = { zapi_message_id: string; tipo: string; conteudo: string; conteudo_pdf_url: string | null }
+  const idsCitados = [...new Set(linhasMsg.map(m => m.resposta_a).filter((v): v is string => Boolean(v)))]
+  const citadas = new Map<string, Citada>()
+  if (idsCitados.length) {
+    const { data } = await supabase.from('whatsapp_mensagens').select('zapi_message_id, tipo, conteudo, conteudo_pdf_url')
+      .eq('empresa_id', empresaId).in('zapi_message_id', idsCitados).limit(idsCitados.length * 2)
+    for (const c of (data ?? []) as Citada[]) if (!citadas.has(c.zapi_message_id)) citadas.set(c.zapi_message_id, c)
+  }
+
+  const caminhos = [...new Set([...linhasMsg, ...citadas.values()].map(m => caminhoGuardado(m.conteudo_pdf_url)).filter((c): c is string => Boolean(c)))]
   const assinados = new Map<string, string>()
   if (caminhos.length) {
     const { data } = await supabase.storage.from(BUCKET_MIDIAS).createSignedUrls(caminhos, 3600)
     for (const a of data ?? []) if (a.path && a.signedUrl) assinados.set(a.path, a.signedUrl)
   }
-  const listaMensagens: Mensagem[] = linhasMsg.map(({ conteudo_pdf_url, ...m }) => {
-    const caminho = caminhoGuardado(conteudo_pdf_url)
-    return { ...m, midia_url: caminho ? assinados.get(caminho) ?? null : (conteudo_pdf_url && /^https:\/\//.test(conteudo_pdf_url) ? conteudo_pdf_url : null) }
+  const linkDe = (ref: string | null) => {
+    const caminho = caminhoGuardado(ref)
+    return caminho ? assinados.get(caminho) ?? null : (ref && /^https:\/\//.test(ref) ? ref : null)
+  }
+  const listaMensagens: Mensagem[] = linhasMsg.map(({ conteudo_pdf_url, resposta_a, ...m }) => {
+    const c = resposta_a ? citadas.get(resposta_a) : undefined
+    return {
+      ...m, midia_url: linkDe(conteudo_pdf_url),
+      // null = não é resposta; { achada: false } = respondeu a algo que não está no sistema.
+      citada: !resposta_a ? null : c ? { achada: true, tipo: c.tipo, conteudo: c.conteudo, midia_url: linkDe(c.conteudo_pdf_url) } : { achada: false },
+    }
   })
 
   type Marca = { etapa: string; aguardando: boolean; nao_lida: boolean; retorno_vencido: boolean; orcamento_parado: boolean }

@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { chaveConfere } from '@/lib/getulio/webhook'
 import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
 import { receberFotoProduto } from '@/lib/getulio/foto'
-import { midiaDaMensagem, nomeDoRemetente, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
+import { idDaMensagem, midiaDaMensagem, nomeDoRemetente, respostaDe, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
 import { guardarMidia } from '@/lib/whatsapp/midias'
 import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
 import { registrarEnviadaPeloCelular } from '@/lib/whatsapp/celular'
@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       if (body.fromMe) {
         const para = telefoneDoRemetente({ ...body, fromMe: false })
         if (para && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {
-          const dados = { telefone: para, texto: textoDaMensagem(body), messageId: typeof body.messageId === 'string' ? body.messageId : null, midiaUrl: midiaDaMensagem(body)?.url ?? null }
+          const dados = { telefone: para, texto: textoDaMensagem(body), messageId: idDaMensagem(body), midiaUrl: midiaDaMensagem(body)?.url ?? null, respostaA: respostaDe(body) }
           after(() => registrarEnviadaPeloCelular(supabase, empresaId, dados))
         }
         return NextResponse.json({ ok: true })
@@ -118,8 +118,10 @@ export async function POST(request: NextRequest) {
 
         // Registra mensagem recebida. Arquivo (foto, áudio…): guarda o link e,
         // depois do 200, copia para o bucket — o link da Z-API é temporário.
+        // `zapi_message_id` e `resposta_a`: para a tela mostrar a mensagem
+        // citada quando o cliente usa "Responder" (ex.: na foto do produto).
         const midia = midiaDaMensagem(body)
-        const { data: registrada } = await supabase.from('whatsapp_mensagens').insert({
+        const linha: Record<string, unknown> = {
           empresa_id: empresaId,
           cliente_id: cliente?.id ?? null,
           cliente_nome: cliente?.nome || null,
@@ -131,7 +133,17 @@ export async function POST(request: NextRequest) {
           enviado_em: new Date().toISOString(),
           // Só com o contato registrado (a coluna vem na mesma migração).
           ...(contato?.contato_id ? { contato_id: contato.contato_id } : {}),
-        }).select('id, contato_id').single()
+          zapi_message_id: idDaMensagem(body),
+        }
+        const respostaA = respostaDe(body)
+        let { data: registrada, error: erroRegistro } = await supabase.from('whatsapp_mensagens')
+          .insert(respostaA ? { ...linha, resposta_a: respostaA } : linha).select('id, contato_id').single()
+        // Coluna `resposta_a` ainda não criada (migração pendente): a mensagem
+        // do cliente não pode se perder por isso — grava sem a citação.
+        if (erroRegistro && respostaA) {
+          ({ data: registrada, error: erroRegistro } = await supabase.from('whatsapp_mensagens').insert(linha).select('id, contato_id').single())
+        }
+        if (erroRegistro) console.error('Mensagem WhatsApp:', erroRegistro.message)
         if (midia && chaveOk && registrada?.id) {
           const dadosMidia = { empresaId, contatoId: registrada.contato_id ?? null, mensagemId: registrada.id, url: midia.url }
           after(() => guardarMidia(supabase, dadosMidia).then(() => undefined))

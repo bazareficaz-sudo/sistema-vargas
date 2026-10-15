@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { midiaDaMensagem, semMarca, textoDaMensagem, tipoPelaMarca } from '../../src/lib/whatsapp/contatos'
+import { idDaMensagem, midiaDaMensagem, respostaDe, semMarca, textoDaMensagem, tipoPelaMarca } from '../../src/lib/whatsapp/contatos'
 import { caminhoGuardado, comoMostrar, extensaoDoArquivo, referenciaGuardada } from '../../src/lib/whatsapp/midias'
 
 describe('arquivos das conversas', () => {
@@ -41,5 +41,12 @@ describe('arquivos das conversas', () => {
     assert.equal(comoMostrar('*TINTA*', 'https://x/produto.webp'), 'foto')
     assert.equal(comoMostrar('Orçamento 12', 'https://x/orc.pdf'), 'documento')
     assert.equal(comoMostrar('oi', null), null)
+  })
+  test('resposta citada: ids do WhatsApp', () => {
+    assert.equal(idDaMensagem({ messageId: '3EB0C431C26A1916E2B5' }), '3EB0C431C26A1916E2B5')
+    assert.equal(respostaDe({ referenceMessageId: ' 3EB0B9D2F6C1 ' }), '3EB0B9D2F6C1')
+    assert.equal(respostaDe({}), null)
+    assert.equal(respostaDe({ referenceMessageId: 'x' }), null)
+    assert.equal(respostaDe({ referenceMessageId: "a'; drop table x;--" }), null)
   })
 })
