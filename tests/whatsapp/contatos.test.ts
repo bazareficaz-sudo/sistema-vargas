@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { chaveTelefone, nomeDoMetadata, nomeDoRemetente, numeroOculto, telefoneDoRemetente, textoDaMensagem } from '../../src/lib/whatsapp/contatos'
+import { camposComTexto, chaveTelefone, nomeDoMetadata, nomeDoRemetente, numeroOculto, telefoneDoRemetente, textoDaMensagem } from '../../src/lib/whatsapp/contatos'
 import { mesmoNumero } from '../../src/lib/getulio/numero'
 
 // Medido em 15/10/2026: 100 números escreveram para a loja em uma semana e só
@@ -77,6 +77,16 @@ describe('nome pela consulta de contato da Z-API', () => {
     assert.equal(nomeDoMetadata({}), null)
     assert.equal(nomeDoMetadata(null), null)
     assert.equal(nomeDoMetadata({ notify: 123 }), null)
+  })
+})
+
+describe('diagnóstico da consulta de nomes', () => {
+  test('só os nomes dos campos com texto, nunca os valores', () => {
+    assert.deepEqual(camposComTexto({ notify: 'Leilane', name: null, phone: '5521992479657', short: ' ', imgUrl: 'https://x' }), ['imgUrl', 'notify', 'phone'])
+    assert.deepEqual(camposComTexto(null), [])
+  })
+  test('nome também pelo pushname, se a Z-API mandar assim', () => {
+    assert.equal(nomeDoMetadata({ pushname: 'Leilane' }), 'Leilane')
   })
 })
 

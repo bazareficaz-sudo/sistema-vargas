@@ -25,7 +25,7 @@ export default function WhatsAppContatosClient({
   empresaId: string
   contatos: ContatoWhatsApp[]
   total: number; pagina: number; totalPaginas: number
-  stats: { novos: number; clientes: number; semana: number; semNome: number }
+  stats: { novos: number; clientes: number; semana: number; semNome: number; vazios: number }
   filtros: { status: string; q: string }
   indisponivel: boolean
 }) {
@@ -39,20 +39,33 @@ export default function WhatsAppContatosClient({
 
   // Pergunta à Z-API o nome de quem está sem (40 por vez, até acabar ou parar
   // de achar). Só leitura no WhatsApp.
-  async function buscarNomes() {
-    setBuscandoNomes(true); setAvisoNomes(''); setErro('')
-    let achados = 0
+  const [diagnostico, setDiagnostico] = useState('')
+
+  // Pergunta à Z-API o nome de quem está sem (40 por vez, até acabar ou parar
+  // de achar). `refazer`: também quem já foi consultado e veio sem nome. Só
+  // leitura no WhatsApp. O diagnóstico mostra só os NOMES dos campos que a
+  // Z-API devolveu (nunca os valores), para entender quando não vem nome.
+  async function buscarNomes(refazer = false) {
+    setBuscandoNomes(true); setAvisoNomes(''); setErro(''); setDiagnostico('')
+    let achados = 0, consultados = 0, desde: string | undefined
+    const soma = { contato: {} as Record<string, number>, conversa: {} as Record<string, number>, situacoes: {} as Record<string, number> }
+    const juntar = (alvo: Record<string, number>, de: Record<string, number> = {}) => Object.entries(de).forEach(([k, v]) => { alvo[k] = (alvo[k] ?? 0) + v })
     try {
       for (let rodada = 0; rodada < 5; rodada++) {
-        const res = await fetch('/api/whatsapp/contatos/nomes', { method: 'POST' })
+        const res = await fetch('/api/whatsapp/contatos/nomes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refazer, desde }) })
         const r = await res.json().catch(() => ({}))
+        if (r.diagnostico) { juntar(soma.contato, r.diagnostico.contato); juntar(soma.conversa, r.diagnostico.conversa); juntar(soma.situacoes, r.diagnostico.situacoes) }
         if (!res.ok) { setErro(r.error ?? 'Não foi possível buscar os nomes.'); break }
+        desde = r.desde
         achados += r.preenchidos ?? 0
+        consultados += r.consultados ?? 0
         // Cada consulta marca o contato (com nome ou vazio): a fila anda. Erro para.
         if (!r.restantes || !r.consultados || r.erros) break
         setAvisoNomes(`Buscando… ${achados} nome${achados === 1 ? '' : 's'} encontrado${achados === 1 ? '' : 's'}`)
       }
-      setAvisoNomes(`${achados} nome${achados === 1 ? '' : 's'} encontrado${achados === 1 ? '' : 's'} no WhatsApp. Quem não colocou nome no WhatsApp continua sem.`)
+      setAvisoNomes(`${achados} de ${consultados} nome${consultados === 1 ? '' : 's'} encontrado${achados === 1 ? '' : 's'} no WhatsApp. Os demais ganham o nome quando mandarem a próxima mensagem.`)
+      const lista = (o: Record<string, number>) => Object.entries(o).map(([k, v]) => `${k} ${v}`).join(', ') || 'nenhum'
+      setDiagnostico(`Respostas: ${lista(soma.situacoes)} · campos no contato: ${lista(soma.contato)} · campos na conversa: ${lista(soma.conversa)}`)
     } finally {
       setBuscandoNomes(false)
       router.refresh()
@@ -121,15 +134,20 @@ export default function WhatsAppContatosClient({
           </select>
         </div>
 
-        {stats.semNome > 0 && (
+        {(stats.semNome > 0 || stats.vazios > 0) && (
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-            <span className="text-blue-800">{stats.semNome} contato{stats.semNome === 1 ? '' : 's'} sem o nome do WhatsApp (chegaram antes de o sistema guardar o nome).</span>
-            <button onClick={buscarNomes} disabled={buscandoNomes} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs rounded-lg whitespace-nowrap">
-              {buscandoNomes ? 'Buscando…' : 'Buscar nomes no WhatsApp'}
+            <span className="text-blue-800">
+              {stats.semNome > 0
+                ? `${stats.semNome} contato${stats.semNome === 1 ? '' : 's'} sem o nome do WhatsApp (chegaram antes de o sistema guardar o nome).`
+                : `${stats.vazios} contato${stats.vazios === 1 ? '' : 's'} já consultado${stats.vazios === 1 ? '' : 's'} sem nome. O nome chega com a próxima mensagem de cada um.`}
+            </span>
+            <button onClick={() => buscarNomes(stats.semNome === 0)} disabled={buscandoNomes} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs rounded-lg whitespace-nowrap">
+              {buscandoNomes ? 'Buscando…' : stats.semNome > 0 ? 'Buscar nomes no WhatsApp' : 'Consultar de novo'}
             </button>
           </div>
         )}
-        {avisoNomes && <p className="text-sm text-gray-600 mb-3">{avisoNomes}</p>}
+        {avisoNomes && <p className="text-sm text-gray-600 mb-1">{avisoNomes}</p>}
+        {diagnostico && <p className="text-xs text-gray-400 mb-3">{diagnostico}</p>}
         {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
 
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
