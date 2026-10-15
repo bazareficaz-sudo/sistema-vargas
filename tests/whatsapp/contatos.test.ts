@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { chaveTelefone, nomeDoRemetente, numeroOculto, telefoneDoRemetente, textoDaMensagem } from '../../src/lib/whatsapp/contatos'
+import { chaveTelefone, nomeDoMetadata, nomeDoRemetente, numeroOculto, telefoneDoRemetente, textoDaMensagem } from '../../src/lib/whatsapp/contatos'
 import { mesmoNumero } from '../../src/lib/getulio/numero'
 
 // Medido em 15/10/2026: 100 números escreveram para a loja em uma semana e só
@@ -62,3 +62,21 @@ describe('o que vira contato', () => {
     assert.equal(textoDaMensagem({}), '[mídia]')
   })
 })
+
+describe('nome pela consulta de contato da Z-API', () => {
+  // 15/10/2026: os contatos da carga do histórico chegaram sem nome — o
+  // histórico nunca guardou. O "~Leilane" que aparece no celular é o `notify`.
+  test('o nome que a pessoa colocou no WhatsApp vem primeiro', () => {
+    assert.equal(nomeDoMetadata({ notify: 'Leilane', name: null, short: null }), 'Leilane')
+    assert.equal(nomeDoMetadata({ notify: '~Leilane' }), 'Leilane')
+    assert.equal(nomeDoMetadata({ notify: null, name: 'Leilane Souza', short: 'Leilane' }), 'Leilane Souza')
+  })
+  test('número no lugar do nome, vazio ou resposta estranha: sem nome', () => {
+    assert.equal(nomeDoMetadata({ notify: '+55 21 99247-9657' }), null)
+    assert.equal(nomeDoMetadata({ notify: '   ' }), null)
+    assert.equal(nomeDoMetadata({}), null)
+    assert.equal(nomeDoMetadata(null), null)
+    assert.equal(nomeDoMetadata({ notify: 123 }), null)
+  })
+})
+

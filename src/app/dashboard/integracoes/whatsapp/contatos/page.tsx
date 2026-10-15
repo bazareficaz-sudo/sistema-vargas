@@ -40,11 +40,13 @@ export default async function WhatsAppContatosPage({
     const nome = q.replace(/[,()%]/g, ' ')
     query = query.or([`nome_whatsapp.ilike.%${nome}%`, ...(digitos.length >= 3 ? [`telefone.ilike.%${digitos}%`] : [])].join(','))
   }
-  const [{ data, count, error }, novos, clientes, semana] = await Promise.all([
+  const [{ data, count, error }, novos, clientes, semana, semNome] = await Promise.all([
     query,
     supabase.from('whatsapp_contatos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).eq('status', 'novo'),
     supabase.from('whatsapp_contatos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).eq('status', 'cliente'),
     supabase.from('whatsapp_contatos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).gte('primeira_em', seteDiasAtras()),
+    // Sem nome e com número conhecido (o código @lid a Z-API não consulta).
+    supabase.from('whatsapp_contatos').select('id', { count: 'exact', head: true }).eq('empresa_id', empresaId).is('nome_whatsapp', null).not('chave', 'like', 'x%'),
   ])
 
   return (
@@ -54,7 +56,7 @@ export default async function WhatsAppContatosPage({
       total={count ?? 0}
       pagina={pg}
       totalPaginas={Math.ceil((count ?? 0) / POR_PAGINA)}
-      stats={{ novos: novos.count ?? 0, clientes: clientes.count ?? 0, semana: semana.count ?? 0 }}
+      stats={{ novos: novos.count ?? 0, clientes: clientes.count ?? 0, semana: semana.count ?? 0, semNome: semNome.count ?? 0 }}
       filtros={{ status, q }}
       // Migração ainda não aplicada: a tela explica em vez de quebrar.
       indisponivel={Boolean(error)}

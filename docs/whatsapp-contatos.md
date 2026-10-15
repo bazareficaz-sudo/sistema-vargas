@@ -24,6 +24,13 @@ Medido em 15/10/2026: desde que o webhook voltou a gravar (08/10), 100 números 
   - "Abrir conversa" abre o wa.me.
 - **Configuração do WhatsApp:** passa a mostrar o endereço do webhook **com** a chave. Antes mostrava sem, e quem copiasse de lá desligava a Betina.
 
+## Nome do WhatsApp
+
+- **Mensagem nova:** o nome vem do próprio webhook (`senderName` ou `chatName`). Se vier sem nome, o webhook pergunta à Z-API depois de responder 200, pela consulta só de leitura `GET /contacts/{phone}`, campo `notify`: o "~Leilane" do celular.
+- **Contatos da carga do histórico:** o histórico nunca guardou o nome. O botão **"Buscar nomes no WhatsApp"** da tela de contatos consulta 40 por vez (`POST /api/whatsapp/contatos/nomes`, empresa da sessão), em até 5 rodadas.
+- **Consultado sem nome:** grava `nome_whatsapp = ''` para não perguntar de novo. A próxima mensagem com nome do remetente ainda preenche, pela função do banco.
+- **Número oculto (`@lid`):** não é consultado.
+
 ## Banco (`supabase/migrations/20261015120000_whatsapp_contatos.sql`)
 
 **Aplicada em 15/10/2026**, a pedido do Silvano, pela conexão do Supabase. Resultado: 99 contatos (96 novos e 3 já ligados a clientes); as 51 mensagens que ficaram sem contato são dos destinatários do Getúlio. Conferido: RLS ligado, `anon` sem leitura, logado sem inserção e função só para `service_role`.

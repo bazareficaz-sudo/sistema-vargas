@@ -47,6 +47,21 @@ export function nomeDoRemetente(body: Recebida): string | null {
   return nome ? String(nome).trim().slice(0, 80) : null
 }
 
+/**
+ * Nome do contato na resposta de dados do contato da Z-API: o que a pessoa
+ * colocou no WhatsApp (`notify`) primeiro; senão o da agenda do aparelho.
+ * Número no lugar do nome (contato sem nome) não conta.
+ */
+export function nomeDoMetadata(dados: Record<string, unknown> | null | undefined): string | null {
+  for (const campo of ['notify', 'name', 'short', 'vname']) {
+    const v = dados?.[campo]
+    if (typeof v !== 'string') continue
+    const nome = v.replace(/^~\s*/, '').trim()
+    if (nome && !/^[+\d\s()-]+$/.test(nome)) return nome.slice(0, 80)
+  }
+  return null
+}
+
 /** Texto para o histórico: mensagem, ou "[foto] legenda", ou "[mídia]". */
 export function textoDaMensagem(body: Recebida): string {
   const texto = body.text?.message ?? body.message?.text
