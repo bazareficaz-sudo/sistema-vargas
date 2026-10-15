@@ -67,10 +67,12 @@ const BLANK: Config = {
 }
 
 export default function WhatsAppConfigClient({
-  empresaId, empresaNome, empresaTelefone, configInicial, modelosIniciais,
+  empresaId, empresaNome, empresaTelefone, configInicial, modelosIniciais, enderecoWebhook,
 }: {
   empresaId: string; empresaNome: string; empresaTelefone: string
   configInicial: Config | null; modelosIniciais: Modelo[]
+  /** Endereço com a chave de segurança; nulo sem instância salva. */
+  enderecoWebhook: string | null
 }) {
   const sb = createClient()
   const [aba, setAba] = useState<'conexao' | 'envio' | 'templates' | 'modelos'>('conexao')
@@ -198,7 +200,9 @@ export default function WhatsAppConfigClient({
     setModelos(prev => prev.filter(m => m.id !== id))
   }
 
-  const webhookUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/zapi`
+  // Sem a chave (?k=) o webhook só registra status: nada de Betina nem de
+  // contatos do WhatsApp. Sem instância salva ainda não há chave.
+  const webhookUrl = enderecoWebhook ?? 'Salve o ID da instância para gerar o endereço.'
 
   return (
     <div>
@@ -369,7 +373,7 @@ export default function WhatsAppConfigClient({
                 <p className="text-xs font-medium text-blue-700">URL do Webhook (configure na Z-API)</p>
                 <p className="text-sm font-mono text-blue-800 mt-0.5">{webhookUrl}</p>
               </div>
-              <button onClick={() => { navigator.clipboard.writeText(webhookUrl); toast('ok', 'URL copiada!') }}
+              <button disabled={!enderecoWebhook} onClick={() => { navigator.clipboard.writeText(webhookUrl); toast('ok', 'URL copiada!') }}
                 className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 whitespace-nowrap">
                 Copiar
               </button>

@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { chaveConfere } from '@/lib/getulio/webhook'
 import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
 import { receberFotoProduto } from '@/lib/getulio/foto'
+import { nomeDoRemetente, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
 
 // Webhook da Z-API — recebe eventos de mensagens e status.
 //
@@ -66,36 +67,57 @@ export async function POST(request: NextRequest) {
       const legenda: string = body.image?.caption ?? ''
 
       if (phone) {
-        // Busca cliente pelo telefone
-        const phoneDigits = String(phone).replace(/\D/g, '').replace(/^55/, '')
-        const { data: clientes } = await supabase
-          .from('clientes')
-          .select('id, nome')
-          .eq('empresa_id', empresaId)
-          // O telefone duplicado casa com os dois cadastros, e `.limit(1)`
-          // pegava qualquer um. A mensagem tem que cair no que está vivo.
-          .is('mesclado_em', null)
-          .or(`telefone.ilike.%${phoneDigits}%,telefone_whatsapp.ilike.%${phoneDigits}%`)
-          .limit(1)
+        const chaveOk = chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))
 
-        const cliente = clientes?.[0]
+        // CONTATO (pré-cadastro): só com a chave do endereço conferida — sem
+        // ela, qualquer um que soubesse o id da instância criaria contatos
+        // falsos. A função já procura o cliente pelo telefone (com e sem 55
+        // e o 9 extra) e ignora o dono e a equipe (destinatários do Getúlio).
+        // Erro aqui (ex.: migração ainda não aplicada) não para o webhook.
+        const remetente = telefoneDoRemetente(body)
+        let contato: { contato_id: string | null; cliente_id: string | null; cliente_nome: string | null; interno: boolean } | null = null
+        if (chaveOk && remetente) {
+          const { data, error } = await supabase.rpc('whatsapp_registrar_contato', {
+            p_empresa: empresaId, p_telefone: remetente, p_nome: nomeDoRemetente(body), p_texto: textoDaMensagem(body),
+          })
+          if (error) console.error('Contato WhatsApp:', error.message)
+          else contato = data?.[0] ?? null
+        }
+
+        let cliente: { id: string; nome: string } | null = contato?.cliente_id ? { id: contato.cliente_id, nome: contato.cliente_nome ?? '' } : null
+        if (!contato) {
+          // Busca cliente pelo telefone (caminho antigo, sem contato registrado).
+          const phoneDigits = String(phone).replace(/\D/g, '').replace(/^55/, '')
+          const { data: clientes } = await supabase
+            .from('clientes')
+            .select('id, nome')
+            .eq('empresa_id', empresaId)
+            // O telefone duplicado casa com os dois cadastros, e `.limit(1)`
+            // pegava qualquer um. A mensagem tem que cair no que está vivo.
+            .is('mesclado_em', null)
+            .or(`telefone.ilike.%${phoneDigits}%,telefone_whatsapp.ilike.%${phoneDigits}%`)
+            .limit(1)
+          cliente = clientes?.[0] ?? null
+        }
 
         // Registra mensagem recebida
         await supabase.from('whatsapp_mensagens').insert({
           empresa_id: empresaId,
           cliente_id: cliente?.id ?? null,
-          cliente_nome: cliente?.nome ?? null,
+          cliente_nome: cliente?.nome || null,
           telefone: phone,
           tipo: 'recebida',
-          conteudo: text || (imagemUrl ? `[foto]${legenda ? ` ${legenda}` : ''}` : '[mídia]'),
+          conteudo: textoDaMensagem(body),
           status: 'recebida',
           enviado_em: new Date().toISOString(),
+          // Só com o contato registrado (a coluna vem na mesma migração).
+          ...(contato?.contato_id ? { contato_id: contato.contato_id } : {}),
         })
 
         // BETINA: só com a chave do endereço conferida (ver
         // lib/getulio/webhook.ts) e só para número cadastrado na Central. A
         // resposta roda depois do 200 — a Z-API não espera a IA pensar.
-        if ((text || imagemUrl) && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {
+        if ((text || imagemUrl) && chaveOk) {
           const dono = await getulioAtendeNumero(supabase, empresaId, String(phone))
           // Foto vai para o cadastro do produto da legenda; texto, para a conversa.
           if (dono && imagemUrl) after(() => receberFotoProduto(supabase, empresaId, String(phone), imagemUrl, legenda))

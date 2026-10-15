@@ -32,13 +32,16 @@ const CLIENTE_VAZIO = {
 
 type Aba = 'dados' | 'endereco' | 'contatos' | 'entrega' | 'financeiro'
 
-export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFechar, onSalvo }: {
+export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFechar, onSalvo, inicial }: {
   empresaId: string
   /** null/undefined abre em branco, para cadastrar. */
   clienteId?: string | null
   aberto: boolean
   onFechar: () => void
   onSalvo?: (clienteId: string) => void
+  /** Ao cadastrar: campos já preenchidos (ex.: contato do WhatsApp). Passe
+   *  um objeto estável (useMemo): mudar recarrega a gaveta. */
+  inicial?: Partial<typeof CLIENTE_VAZIO>
 }) {
   const sb = createClient()
   const [aba, setAba] = useState<Aba>('dados')
@@ -54,7 +57,7 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }))
 
   const carregar = useCallback(async () => {
-    if (!clienteId) { setForm({ ...CLIENTE_VAZIO }); setContatos([]); setEnderecos([]); return }
+    if (!clienteId) { setForm({ ...CLIENTE_VAZIO, ...inicial }); setContatos([]); setEnderecos([]); return }
     setCarregando(true)
     const [{ data: cli }, { data: cts }, { data: ends }] = await Promise.all([
       sb.from('clientes').select('*').eq('id', clienteId).maybeSingle(),
@@ -85,7 +88,7 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
       cidade: e.cidade ?? '', estado: e.estado ?? '', referencia: e.referencia ?? '', padrao: !!e.padrao,
     })))
     setCarregando(false)
-  }, [clienteId, sb])
+  }, [clienteId, sb, inicial])
 
   useEffect(() => { if (aberto) { setAba('dados'); setErro(''); carregar() } }, [aberto, carregar])
 
