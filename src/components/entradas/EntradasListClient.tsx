@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import type { ProdutoParaEtiqueta } from '@/lib/etiquetas/tipos'
-import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { reverterEstoqueDaEntrada } from '@/lib/entradas/reverterEntrada'
 import RevisarKitsEntradaModal from './RevisarKitsEntradaModal'
 
 // Notas por XML nestes status já têm as peças mapeadas para produtos — dá
@@ -262,34 +262,13 @@ export default function EntradasListClient({
     const supabase = createClient()
     try {
       if (entrada.status === 'confirmada') {
-        // Reverte estoque: busca itens e decrementa quantidade
-        const { data: itens } = await supabase
-          .from('entrada_itens')
-          .select('produto_id, quantidade')
-          .eq('entrada_id', entrada.id)
-        if (itens && itens.length > 0) {
-          for (const item of itens) {
-            if (!item.produto_id) continue
-            const { data: prod } = await supabase
-              .from('produtos')
-              // 'quantidade_estoque' não existe nesta tabela (é 'estoque') —
-              // o update abaixo sempre falhava calado (erro não checado) e a
-              // reversão nunca aconteceu de verdade, em nenhum campo.
-              .select('estoque')
-              .eq('id', item.produto_id)
-              .single()
-            if (prod) {
-              await supabase
-                .from('produtos')
-                .update({ estoque: Math.max(0, (prod.estoque ?? 0) - item.quantidade) })
-                .eq('id', item.produto_id)
-            }
-            // Mesma sincronização de EditarEntradaClient.cancelarEntrada():
-            // sem espelhar no depósito, o saldo por depósito (Estoque
-            // Detalhado, PDV) fica inflado mesmo com o agregado revertido.
-            await ajustarDepositoPrincipal(supabase, empresaId, item.produto_id, -item.quantidade)
-          }
-        }
+        // Desfaz exatamente o que a entrada fez no estoque (inclusive o
+        // "zerar antes") e deixa a reversão no extrato — ver reverterEntrada.ts.
+        const r = await reverterEstoqueDaEntrada(supabase, {
+          empresaId, entradaId: entrada.id,
+          motivo: `Exclusão da entrada ${entrada.numero_entrada ?? entrada.numero_nf ?? entrada.id.slice(0, 8)}`,
+        })
+        if (r.erros.length > 0) throw new Error(`Estoque não revertido: ${r.erros.join('; ')}`)
         // Remove contas a pagar vinculadas
         await supabase.from('contas_pagar').delete().eq('entrada_id', entrada.id)
       }

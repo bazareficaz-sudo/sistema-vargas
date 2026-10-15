@@ -366,6 +366,12 @@ export default function NovaEntradaClient({
   // botão após o próximo render, então dois cliques muito rápidos podiam
   // disparar duas inserções antes do disabled= surtir efeito).
   const enviandoRef = useRef(false)
+  // Entrada já confirmada nesta tela. Depois de confirmar, a tela continua
+  // aberta (onde guardar, etiquetas) e o botão voltava a ficar ativo: clicar
+  // de novo gravava OUTRA entrada com os mesmos itens — estoque em dobro, e
+  // com "zerar antes" marcado, a segunda zerava o que a primeira tinha posto.
+  const [confirmada, setConfirmada] = useState<{ id: string; numero: string | null } | null>(null)
+  const confirmadaRef = useRef<string | null>(null)
   // Liga quando a gravacao caiu para o formato antigo por falta de coluna.
   const [migracaoPendente, setMigracaoPendente] = useState(false)
   const [perguntandoEtiqueta, setPerguntandoEtiqueta] = useState<ProdutoParaEtiqueta[] | null>(null)
@@ -823,6 +829,7 @@ export default function NovaEntradaClient({
   }
 
   async function salvarRascunho() {
+    if (confirmadaRef.current) { mostrarRascunhoMsg('Esta entrada já foi confirmada — não há rascunho para salvar.'); return }
     if (!fornecedorId && itens.length === 0) {
       mostrarRascunhoMsg('⚠ Adicione pelo menos um fornecedor ou item para salvar o rascunho.')
       return
@@ -886,12 +893,32 @@ export default function NovaEntradaClient({
 
   async function confirmarEntrada() {
     if (!fornecedorId) { setErro('Selecione o fornecedor.'); return }
-    if (enviandoRef.current) return
+    if (enviandoRef.current || confirmadaRef.current) return
     enviandoRef.current = true
     setSalvando(true); setErro('')
     try {
       const sb = createClient()
       const agora = new Date().toISOString()
+
+      // Mesma nota já confirmada há pouco (outra aba, outro computador, ou a
+      // tela recarregada): pergunta antes de lançar de novo. Casa pela NF
+      // quando há número; sem número, por fornecedor + valor total.
+      {
+        let q = sb.from('entradas').select('numero_entrada, created_at')
+          .eq('empresa_id', empresaId).eq('fornecedor_id', fornecedorId).eq('status', 'confirmada')
+          .gte('created_at', new Date(Date.now() - 6 * 3600_000).toISOString())
+        q = numeroNf ? q.eq('numero_nf', numeroNf) : q.eq('valor_total', totalGeral)
+        if (rascunhoId) q = q.neq('id', rascunhoId)
+        const { data: parecidas } = await q.order('created_at', { ascending: false }).limit(1)
+        const igual = (parecidas ?? [])[0] as { numero_entrada: string | null; created_at: string } | undefined
+        if (igual) {
+          const hora = new Date(igual.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+          const seguir = window.confirm(
+            `Atenção: a entrada ${igual.numero_entrada ?? ''} deste fornecedor ${numeroNf ? `com a NF ${numeroNf}` : 'com o mesmo valor'} ` +
+            `já foi confirmada hoje às ${hora}.\n\nLançar de novo soma o estoque outra vez. Confirmar mesmo assim?`)
+          if (!seguir) return
+        }
+      }
 
       let entrada: any
       if (rascunhoId) {
@@ -925,6 +952,10 @@ export default function NovaEntradaClient({
         if (r.error || !r.data) { setErro(r.error?.message ?? 'Erro ao salvar.'); return }
         entrada = r.data
       }
+
+      // A partir daqui a entrada existe: a tela não deixa confirmar de novo.
+      confirmadaRef.current = entrada.id
+      setConfirmada({ id: entrada.id, numero: entrada.numero_entrada ?? null })
 
       // A promocao definida na etapa de Reajuste fica registrada na propria
       // entrada: seis meses depois, "por que este produto entrou em oferta"
@@ -1997,10 +2028,17 @@ export default function NovaEntradaClient({
           </div>
           <div className="flex flex-wrap justify-between gap-2 max-sm:[&>button:last-child]:w-full max-sm:[&>button:last-child]:order-first max-sm:[&>button:last-child]:py-2.5">
             <button onClick={() => setEtapa('pagamento')} className="px-4 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50">← Voltar</button>
-            <button onClick={confirmarEntrada} disabled={salvando}
-              className="px-6 py-2 max-sm:py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-              {salvando ? 'Confirmando...' : '✓ Confirmar entrada'}
-            </button>
+            {confirmada ? (
+              <a href={`/dashboard/entradas/${confirmada.id}`}
+                className="px-6 py-2 max-sm:py-3 max-sm:w-full max-sm:order-first text-center bg-white border border-green-300 text-green-700 text-sm font-medium rounded-lg">
+                ✓ Entrada {confirmada.numero ?? ''} confirmada — abrir
+              </a>
+            ) : (
+              <button onClick={confirmarEntrada} disabled={salvando}
+                className="px-6 py-2 max-sm:py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+                {salvando ? 'Confirmando...' : '✓ Confirmar entrada'}
+              </button>
+            )}
           </div>
         </div>
       )}
