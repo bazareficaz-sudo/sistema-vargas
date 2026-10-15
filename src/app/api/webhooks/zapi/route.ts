@@ -5,6 +5,7 @@ import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
 import { receberFotoProduto } from '@/lib/getulio/foto'
 import { nomeDoRemetente, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
 import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
+import { registrarEnviadaPeloCelular } from '@/lib/whatsapp/celular'
 
 // Webhook da Z-API — recebe eventos de mensagens e status.
 //
@@ -57,9 +58,18 @@ export async function POST(request: NextRequest) {
 
     // Mensagem recebida
     if (tipo === 'ReceivedCallback' || tipo === 'MessageReceived') {
-      // Mensagem que o próprio número mandou, de grupo ou de canal não é
-      // conversa com a loja.
-      if (body.fromMe || body.isGroup || body.isNewsletter || body.broadcast) return NextResponse.json({ ok: true })
+      // Grupo ou canal não é conversa com a loja.
+      if (body.isGroup || body.isNewsletter || body.broadcast) return NextResponse.json({ ok: true })
+      // Mensagem que a loja mandou pelo celular: entra na conversa (só com a
+      // chave do endereço; o sistema não duplica o que ele mesmo enviou).
+      if (body.fromMe) {
+        const para = telefoneDoRemetente({ ...body, fromMe: false })
+        if (para && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {
+          const dados = { telefone: para, texto: textoDaMensagem(body), messageId: typeof body.messageId === 'string' ? body.messageId : null }
+          after(() => registrarEnviadaPeloCelular(supabase, empresaId, dados))
+        }
+        return NextResponse.json({ ok: true })
+      }
 
       const phone = body.phone ?? body.from?.replace('@s.whatsapp.net', '')
       const text = body.text?.message ?? body.message?.text ?? ''
