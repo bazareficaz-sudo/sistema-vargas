@@ -23,6 +23,12 @@ export interface SaudeConfig {
   // supabase-orcamento-promo-estrategia.sql.
   orcamento_promo_vira_desconto: boolean
   orcamento_promo_formas: string[]
+  // Parcelamento do orçamento: a regra é a PARCELA, não o número de vezes.
+  // Ver `parcelasSugeridas` em lib/orcamentos/condicoes — o teto da faixa de
+  // saúde manda sobre este, porque margem baixa não sustenta parcelamento.
+  orcamento_parcela_minima: number
+  orcamento_parcelas_max: number
+  orcamento_parcelas_sem_juros: boolean
 }
 
 export interface FaixaSaude {
@@ -107,6 +113,11 @@ export const CONFIG_PADRAO: SaudeConfig = {
   // sistema sem que ninguém tenha pedido seria uma surpresa no balcão.
   orcamento_promo_vira_desconto: false,
   orcamento_promo_formas: ['pix', 'dinheiro'],
+  // Os mesmos defaults da coluna no banco. Divergir aqui faria a tela mostrar
+  // um número e o orçamento usar outro enquanto a empresa não salvasse nada.
+  orcamento_parcela_minima: 50,
+  orcamento_parcelas_max: 6,
+  orcamento_parcelas_sem_juros: true,
 }
 
 export const FAIXAS_PADRAO: FaixaSaude[] = [
