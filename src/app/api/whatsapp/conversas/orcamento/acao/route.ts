@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { contextoDaConversa, orcamentoDaConversa } from '@/lib/whatsapp/contextoConversa'
-import { enviarOrcamentoNaConversa } from '@/lib/whatsapp/orcamento'
 
 // Ações no orçamento a partir da conversa:
 //   fechou    → aprovado; a tela abre o PDV com ele (a venda o converte e o
 //               banco move a conversa para "Comprou")
 //   desistiu  → cancelado; conversa vai para "Perdido"
-//   reenviar  → manda de novo pela Z-API
+// Reenviar e condições de pagamento ficam na tela de Orçamentos (negociação).
 // Só orçamento desta conversa (do cliente dela ou enviado para ela).
 
 export async function POST(request: NextRequest) {
   const corpo = await request.json().catch(() => ({})) as { contatoId?: string; orcamentoId?: string; acao?: string }
-  const c = await contextoDaConversa(corpo.contatoId, { enviar: corpo.acao === 'reenviar' })
+  const c = await contextoDaConversa(corpo.contatoId, { enviar: false })
   if (!c.ok) return NextResponse.json({ error: c.erro }, { status: c.status })
   const { supabase, empresaId, contato } = c.ctx
 
@@ -35,12 +34,6 @@ export async function POST(request: NextRequest) {
       .eq('id', orc.id).eq('empresa_id', empresaId).in('status', ['aberto', 'aprovado'])
     if (error) return NextResponse.json({ error: 'Não foi possível cancelar o orçamento.' }, { status: 500 })
     await supabase.from('whatsapp_contatos').update({ etapa: 'perdido' }).eq('id', contato.id)
-    return NextResponse.json({ ok: true })
-  }
-
-  if (corpo.acao === 'reenviar') {
-    const envio = await enviarOrcamentoNaConversa(supabase, { ...c.ctx, orcamentoId: orc.id })
-    if (!envio.ok) return NextResponse.json({ error: envio.erro }, { status: 502 })
     return NextResponse.json({ ok: true })
   }
 
