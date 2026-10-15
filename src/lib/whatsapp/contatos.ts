@@ -53,13 +53,18 @@ export function nomeDoRemetente(body: Recebida): string | null {
  * Número no lugar do nome (contato sem nome) não conta.
  */
 export function nomeDoMetadata(dados: Record<string, unknown> | null | undefined): string | null {
-  for (const campo of ['notify', 'name', 'short', 'vname']) {
+  for (const campo of ['notify', 'pushname', 'pushName', 'name', 'short', 'vname']) {
     const v = dados?.[campo]
     if (typeof v !== 'string') continue
     const nome = v.replace(/^~\s*/, '').trim()
     if (nome && !/^[+\d\s()-]+$/.test(nome)) return nome.slice(0, 80)
   }
   return null
+}
+
+/** Campos com texto na resposta (só os nomes dos campos, para diagnóstico — nunca os valores). */
+export function camposComTexto(dados: Record<string, unknown> | null | undefined): string[] {
+  return Object.entries(dados ?? {}).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k]) => k).sort()
 }
 
 /** Texto para o histórico: mensagem, ou "[foto] legenda", ou "[mídia]". */
