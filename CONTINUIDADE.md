@@ -16,6 +16,11 @@ a seção própria no fim antes de usá-lo no catálogo em geral.
 
 ## Em andamento
 
+### Contatos do WhatsApp (pré-cadastro automático) — PR aberto, NÃO no ar
+
+Quem manda mensagem para a loja vira contato (100 números em uma semana, só 4 eram clientes). Webhook com a chave `?k=` chama `whatsapp_registrar_contato`; tela CRM / WhatsApp → Contatos; gatilho em `clientes` liga o contato quando o telefone é cadastrado. **Migração `supabase/migrations/20261015120000_whatsapp_contatos.sql` precisa ser aplicada** (aditiva e idempotente). Detalhes em [`docs/whatsapp-contatos.md`](docs/whatsapp-contatos.md).
+
+
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar
 
 Branch `claude/api-marketing`. O Vargas Marketing (sistema separado, outro
