@@ -15,6 +15,7 @@ import {
   type LinhaSemana, type SinalGuardado,
 } from './regras'
 import type { Destinatario } from './tipos'
+import { blocoAtendimento, lerAtendimento } from './atendimento'
 
 export const LINK_CENTRAL = urlDoApp('/dashboard/betina')
 
@@ -93,13 +94,23 @@ async function semanaQuePassou(sb: any, empresaId: string, agora: Date): Promise
   }
 }
 
+export type OpcoesResumo = {
+  /** Na segunda, abre com a semana que passou. */
+  semanal?: boolean
+  /** Bloco "Atendimento no WhatsApp" (vigia `atendimento_whatsapp` ligado). */
+  atendimento?: boolean
+}
+
 /** Monta o resumo (sem enviar). `nome` entra na saudação. */
 export async function montarResumo(
-  sb: any, empresaId: string, nome: string, agora = new Date(), opts: { semanal?: boolean } = {},
+  sb: any, empresaId: string, nome: string, agora = new Date(), opts: OpcoesResumo = {},
 ): Promise<Resumo> {
   const { itens, restantes } = selecionarParaResumo(await sinaisAbertos(sb, empresaId), agora)
   const semana = opts.semanal && ehSegunda(agora) ? await semanaQuePassou(sb, empresaId, agora) : null
-  const cabecalho = semana ? `${saudacao(agora, nome)}\n\n${semana}` : saudacao(agora, nome)
+  // Atendimento no WhatsApp: lista exata com links, fora da IA (como a semana).
+  const dadosAtendimento = opts.atendimento ? await lerAtendimento(sb, empresaId, agora).catch(() => null) : null
+  const atendimento = dadosAtendimento ? blocoAtendimento(dadosAtendimento, agora) : null
+  const cabecalho = [saudacao(agora, nome), semana, atendimento].filter(Boolean).join('\n\n')
   if (itens.length === 0) {
     return { texto: `${cabecalho}\n\n${SEM_NOVIDADE}`, geradoPor: 'modelo', itens, restantes: 0 }
   }
@@ -156,7 +167,7 @@ async function entregar(
  */
 export async function enviarResumo(
   sb: any, empresaId: string, destinatarios: Destinatario[], tipo: 'resumo_diario' | 'envio_manual',
-  agora = new Date(), opts: { semanal?: boolean } = {},
+  agora = new Date(), opts: OpcoesResumo = {},
 ): Promise<ResultadoEnvio> {
   const base = await montarResumo(sb, empresaId, '{{NOME}}', agora, opts)
   const r = await entregar(sb, empresaId, destinatarios, base.texto, tipo, base.geradoPor, base.itens.map(s => s.id), agora)

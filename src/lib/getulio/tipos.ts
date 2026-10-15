@@ -35,6 +35,7 @@ export const VIGIAS = [
   { id: 'estoque_parado', nome: 'Dinheiro parado em estoque', ajuda: 'Valor a custo de produtos sem venda há mais de 60 dias.' },
   { id: 'estoque_negativo', nome: 'Estoque negativo', ajuda: 'Produto com estoque abaixo de zero — venda sem entrada lançada ou contagem errada.' },
   { id: 'financeiro', nome: 'Contas a pagar e a receber', ajuda: 'Contas vencidas e o que vence nos próximos 7 dias; clientes em atraso.' },
+  { id: 'atendimento_whatsapp', nome: 'Atendimento no WhatsApp', ajuda: 'No resumo da manhã: retornos marcados para hoje ou atrasados, orçamentos sem resposta há 3 dias e conversas esperando resposta há mais de 2 h — com o link de cada conversa.' },
 ] as const
 
 export type VigiaId = typeof VIGIAS[number]['id']
