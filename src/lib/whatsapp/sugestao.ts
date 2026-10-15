@@ -9,7 +9,7 @@ import { doCliente } from './conversas'
 // descarta o rascunho inteiro — preço inventado chegando ao cliente é o
 // pior erro possível aqui, pior que não sugerir nada.
 
-export type MensagemHistorico = { tipo: string; conteudo: string; created_at: string }
+export type MensagemHistorico = { tipo: string; conteudo: string; created_at: string; /** Texto da mensagem respondida ("Responder" do WhatsApp). */ citada?: string | null }
 
 const hora = (s: string) => new Date(s).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
 
@@ -19,7 +19,8 @@ export function historicoParaPrompt(mensagens: MensagemHistorico[], limite = 20)
     const quem = doCliente(m.tipo) ? 'Cliente' : 'Loja'
     const texto = semMarca(m.conteudo).replace(/\s+/g, ' ').trim().slice(0, 500)
     const anexo = m.conteudo !== semMarca(m.conteudo) ? `(${m.conteudo.match(/^\[[^\]]+\]/)?.[0] ?? 'arquivo'}) ` : ''
-    return `[${hora(m.created_at)}] ${quem}: ${anexo}${texto || '(sem texto)'}`
+    const citada = m.citada ? `(respondendo a: "${m.citada.replace(/\s+/g, ' ').trim().slice(0, 200)}") ` : ''
+    return `[${hora(m.created_at)}] ${quem}: ${citada}${anexo}${texto || '(sem texto)'}`
   }).join('\n')
 }
 
