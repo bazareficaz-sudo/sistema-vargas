@@ -214,3 +214,26 @@ export async function zapiRestart(config: ZAPIConfig): Promise<{ success: boolea
 export function interpolarTemplate(template: string, variaveis: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => variaveis[key] ?? `{${key}}`)
 }
+
+/**
+ * Dados do contato (GET /contacts/{phone}): `notify` é o nome que a pessoa
+ * colocou no WhatsApp ("~Leilane" na tela do celular); `name`/`short`/`vname`
+ * só vêm quando o número está salvo na agenda do aparelho. Só leitura.
+ */
+export async function zapiContatoMetadata(
+  config: ZAPIConfig,
+  phone: string,
+): Promise<{ ok: true; dados: Record<string, unknown> } | { ok: false; status: number | null; error: string }> {
+  try {
+    const res = await fetch(buildUrl(config, `contacts/${cleanPhone(phone)}`), {
+      headers: headers(config),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` }
+    const dados = await res.json().catch(() => null)
+    return dados && typeof dados === 'object' ? { ok: true, dados } : { ok: false, status: res.status, error: 'resposta vazia' }
+  } catch (e: unknown) {
+    return { ok: false, status: null, error: e instanceof Error ? e.message : 'sem resposta' }
+  }
+}

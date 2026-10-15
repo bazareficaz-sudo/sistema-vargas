@@ -25,7 +25,7 @@ export default function WhatsAppContatosClient({
   empresaId: string
   contatos: ContatoWhatsApp[]
   total: number; pagina: number; totalPaginas: number
-  stats: { novos: number; clientes: number; semana: number }
+  stats: { novos: number; clientes: number; semana: number; semNome: number }
   filtros: { status: string; q: string }
   indisponivel: boolean
 }) {
@@ -34,10 +34,34 @@ export default function WhatsAppContatosClient({
   const [q, setQ] = useState(filtros.q)
   const [cadastrando, setCadastrando] = useState<ContatoWhatsApp | null>(null)
   const [erro, setErro] = useState('')
+  const [buscandoNomes, setBuscandoNomes] = useState(false)
+  const [avisoNomes, setAvisoNomes] = useState('')
+
+  // Pergunta à Z-API o nome de quem está sem (40 por vez, até acabar ou parar
+  // de achar). Só leitura no WhatsApp.
+  async function buscarNomes() {
+    setBuscandoNomes(true); setAvisoNomes(''); setErro('')
+    let achados = 0
+    try {
+      for (let rodada = 0; rodada < 5; rodada++) {
+        const res = await fetch('/api/whatsapp/contatos/nomes', { method: 'POST' })
+        const r = await res.json().catch(() => ({}))
+        if (!res.ok) { setErro(r.error ?? 'Não foi possível buscar os nomes.'); break }
+        achados += r.preenchidos ?? 0
+        // Cada consulta marca o contato (com nome ou vazio): a fila anda. Erro para.
+        if (!r.restantes || !r.consultados || r.erros) break
+        setAvisoNomes(`Buscando… ${achados} nome${achados === 1 ? '' : 's'} encontrado${achados === 1 ? '' : 's'}`)
+      }
+      setAvisoNomes(`${achados} nome${achados === 1 ? '' : 's'} encontrado${achados === 1 ? '' : 's'} no WhatsApp. Quem não colocou nome no WhatsApp continua sem.`)
+    } finally {
+      setBuscandoNomes(false)
+      router.refresh()
+    }
+  }
   // Estável enquanto o mesmo contato está aberto: a gaveta recarrega quando muda.
   const inicial = useMemo(() => cadastrando
     // Número escondido pelo WhatsApp (@lid): o código não é telefone, não vai para o cadastro.
-    ? { nome: cadastrando.nome_whatsapp ?? '', ...(numeroOculto(cadastrando.telefone) ? {} : { telefone: normalizarTelefone(cadastrando.telefone), whatsapp: normalizarTelefone(cadastrando.telefone) }) }
+    ? { nome: cadastrando.nome_whatsapp || '', ...(numeroOculto(cadastrando.telefone) ? {} : { telefone: normalizarTelefone(cadastrando.telefone), whatsapp: normalizarTelefone(cadastrando.telefone) }) }
     : undefined, [cadastrando])
 
   function navegar(params: Record<string, string>) {
@@ -97,6 +121,15 @@ export default function WhatsAppContatosClient({
           </select>
         </div>
 
+        {stats.semNome > 0 && (
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <span className="text-blue-800">{stats.semNome} contato{stats.semNome === 1 ? '' : 's'} sem o nome do WhatsApp (chegaram antes de o sistema guardar o nome).</span>
+            <button onClick={buscarNomes} disabled={buscandoNomes} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs rounded-lg whitespace-nowrap">
+              {buscandoNomes ? 'Buscando…' : 'Buscar nomes no WhatsApp'}
+            </button>
+          </div>
+        )}
+        {avisoNomes && <p className="text-sm text-gray-600 mb-3">{avisoNomes}</p>}
         {erro && <p className="text-sm text-red-600 mb-3">{erro}</p>}
 
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -120,7 +153,7 @@ export default function WhatsAppContatosClient({
                 {contatos.map(c => (
                   <tr key={c.id} className="hover:bg-gray-50 align-top">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-gray-900">{c.clientes?.nome ?? c.nome_whatsapp ?? 'Sem nome no WhatsApp'}</p>
+                      <p className="font-medium text-gray-900">{c.clientes?.nome || c.nome_whatsapp || 'Sem nome no WhatsApp'}</p>
                       {c.clientes?.nome && c.nome_whatsapp && <p className="text-xs text-gray-400">no WhatsApp: {c.nome_whatsapp}</p>}
                       {numeroOculto(c.telefone)
                         ? <p className="text-xs text-gray-400" title="O WhatsApp escondeu o número desta pessoa. Peça o telefone na conversa para cadastrar.">Número oculto pelo WhatsApp</p>

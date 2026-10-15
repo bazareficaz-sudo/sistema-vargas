@@ -4,6 +4,7 @@ import { chaveConfere } from '@/lib/getulio/webhook'
 import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
 import { receberFotoProduto } from '@/lib/getulio/foto'
 import { nomeDoRemetente, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
+import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
 
 // Webhook da Z-API — recebe eventos de mensagens e status.
 //
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
     // Busca empresa pelo instanceId
     const { data: cfg } = await supabase
       .from('whatsapp_config')
-      .select('empresa_id')
+      .select('empresa_id, instance_id, token, client_token, url_base')
       .eq('instance_id', instanceId)
       .maybeSingle()
 
@@ -82,6 +83,10 @@ export async function POST(request: NextRequest) {
           })
           if (error) console.error('Contato WhatsApp:', error.message)
           else contato = data?.[0] ?? null
+          // Mensagem sem o nome do remetente: pergunta à Z-API depois do 200.
+          const config = configZapi(cfg)
+          const contatoId = contato?.contato_id
+          if (contatoId && config && !nomeDoRemetente(body)) after(() => preencherNomeDoContato(supabase, config, contatoId, remetente).then(() => undefined))
         }
 
         let cliente: { id: string; nome: string } | null = contato?.cliente_id ? { id: contato.cliente_id, nome: contato.cliente_nome ?? '' } : null
