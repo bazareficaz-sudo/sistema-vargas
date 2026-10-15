@@ -140,13 +140,33 @@ function taxaPorForma(forma: string, parcelas: number, cfg: SaudeConfig): number
   }
 }
 
+// A faixa é uma ESCADA, e escada se define pelo degrau de baixo.
+//
+// ── O DEFEITO QUE ISTO CORRIGE ───────────────────────────────────────────
+//
+// A versão anterior procurava a janela que contém a margem:
+// `>= margem_min && < margem_max`. Parece certo e falha com os dados reais.
+//
+// As faixas do Bazar Eficaz em produção:
+//
+//     Excelente  min 70            Boa       min 50, max 69
+//     Atenção    min 30, max 49    Crítica   min  5, max 29
+//
+// Entre 69 e 70 não existe faixa. Uma margem de 69,5% — excelente — não
+// casava com janela nenhuma e caía no fallback, que é a ÚLTIMA faixa:
+// Prejuízo. E Prejuízo tem `bloqueia_venda: true`.
+//
+// Ou seja: a melhor venda do dia aparecia como prejuízo e era bloqueada.
+// Os quatro vãos reais são 4,99-5, 29-30, 49-50 e 69-70.
+//
+// Corrigir o DADO (max 69 → 70) resolveria hoje e voltaria a quebrar na
+// próxima edição das faixas. Corrigir a REGRA resolve sempre: ordena da
+// maior margem para a menor e pega a primeira cujo piso a margem alcança.
+// `margem_max` passa a ser decorativo — que é o que ele sempre foi.
 function encontrarFaixa(margem: number, faixas: FaixaSaude[]): FaixaSaude | null {
   const ordenadas = [...faixas].sort((a, b) => (b.margem_min ?? -Infinity) - (a.margem_min ?? -Infinity))
-  return ordenadas.find(f => {
-    const min = f.margem_min ?? -Infinity
-    const max = f.margem_max ?? Infinity
-    return margem >= min && margem < max
-  }) ?? ordenadas[ordenadas.length - 1] ?? null
+  return ordenadas.find(f => margem >= (f.margem_min ?? -Infinity))
+    ?? ordenadas[ordenadas.length - 1] ?? null
 }
 
 export function calcSaude(
