@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
-import { ajustarDepositoPrincipal } from '@/lib/produtos/depositoPrincipal'
+import { ajustarEstoquePelaEntrada, reverterEstoqueDaEntrada } from '@/lib/entradas/reverterEntrada'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import RevisarKitsEntradaModal from './RevisarKitsEntradaModal'
 
@@ -189,6 +189,8 @@ export default function EditarEntradaClient({
     router.refresh()
   }
 
+  const rotuloEntrada = entrada.numero_entrada ?? (entrada.numero_nf ? `NF ${entrada.numero_nf}` : entrada.id.slice(0, 8))
+
   // ── Editar item ──
   function abrirEdicaoItem(item: ItemEntrada) {
     setEditandoItem(item.id)
@@ -220,11 +222,13 @@ export default function EditarEntradaClient({
     if (item.preco_custo_nota != null) patch.preco_custo_nota = custoNota
     const { error } = await sb.from('entrada_itens').update(patch).eq('id', item.id)
     if (error) { setErro(error.message); setSalvando(false); return }
-    if (item.produto_id) {
-      const { data: prod } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
-      if (prod) {
-        await sb.from('produtos').update({ estoque: (prod.estoque ?? 0) - qtdAntiga + qtdNova }).eq('id', item.produto_id)
-      }
+    // Só entrada confirmada mexeu no estoque; cancelada já foi revertida.
+    if (item.produto_id && entrada.status === 'confirmada' && qtdNova !== qtdAntiga) {
+      const erroEstoque = await ajustarEstoquePelaEntrada(sb, {
+        empresaId, entradaId: entrada.id, produtoId: item.produto_id, delta: qtdNova - qtdAntiga,
+        motivo: `Quantidade corrigida na entrada ${rotuloEntrada} (${qtdAntiga} → ${qtdNova})`, nomeProduto: item.nome_produto,
+      })
+      if (erroEstoque) setErro(`Item salvo, mas o estoque não foi ajustado: ${erroEstoque}`)
     }
     setItens(prev => prev.map(i => i.id === item.id
       ? {
@@ -242,12 +246,14 @@ export default function EditarEntradaClient({
     if (!confirm(`Remover "${item.nome_produto}" da entrada?`)) return
     setSalvando(true)
     const sb = createClient()
-    await sb.from('entrada_itens').delete().eq('id', item.id)
-    if (item.produto_id) {
-      const { data: prod } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
-      if (prod) {
-        await sb.from('produtos').update({ estoque: Math.max(0, (prod.estoque ?? 0) - item.quantidade) }).eq('id', item.produto_id)
-      }
+    const { error: erroRemover } = await sb.from('entrada_itens').delete().eq('id', item.id)
+    if (erroRemover) { setErro(erroRemover.message); setSalvando(false); return }
+    if (item.produto_id && entrada.status === 'confirmada') {
+      const erroEstoque = await ajustarEstoquePelaEntrada(sb, {
+        empresaId, entradaId: entrada.id, produtoId: item.produto_id, delta: -Number(item.quantidade),
+        motivo: `Item removido da entrada ${rotuloEntrada}`, nomeProduto: item.nome_produto,
+      })
+      if (erroEstoque) setErro(`Item removido, mas o estoque não foi ajustado: ${erroEstoque}`)
     }
     setItens(prev => prev.filter(i => i.id !== item.id))
     setSalvando(false)
@@ -396,18 +402,16 @@ export default function EditarEntradaClient({
     if (!confirm('Cancelar esta entrada? O estoque dos produtos será revertido.')) return
     setSalvando(true)
     const sb = createClient()
-    for (const item of itens) {
-      if (item.produto_id) {
-        const { data: prod } = await sb.from('produtos').select('estoque').eq('id', item.produto_id).single()
-        if (prod) await sb.from('produtos').update({ estoque: Math.max(0, (prod.estoque ?? 0) - item.quantidade) }).eq('id', item.produto_id)
-        // Espelha a reversão no depósito principal — mesma sincronização que
-        // NovaEntradaClient.confirmarEntrada() faz ao ADICIONAR estoque (ver
-        // src/lib/produtos/depositoPrincipal.ts). Sem isto, `produtos.estoque`
-        // (o agregado) voltava certo ao cancelar, mas `produto_estoque` (o que
-        // o Estoque Detalhado e o PDV enxergam por depósito) ficava inflado
-        // pra sempre — a entrada cancelada continuava "no estoque" ali.
-        await ajustarDepositoPrincipal(sb, empresaId, item.produto_id, -item.quantidade)
-      }
+    // Desfaz exatamente o que a entrada fez no estoque (inclusive o "zerar
+    // antes") e deixa a reversão no extrato — ver reverterEntrada.ts.
+    try {
+      const r = await reverterEstoqueDaEntrada(sb, {
+        empresaId, entradaId: entrada.id,
+        motivo: `Cancelamento da entrada ${entrada.numero_entrada ?? entrada.numero_nf ?? entrada.id.slice(0, 8)}`,
+      })
+      if (r.erros.length > 0) { setErro(`Estoque não revertido: ${r.erros.join('; ')}`); setSalvando(false); return }
+    } catch (e) {
+      setErro((e as Error).message); setSalvando(false); return
     }
     await sb.from('entradas').update({ status: 'cancelada' }).eq('id', entrada.id)
     await sb.from('contas_pagar').update({ status: 'cancelado' }).eq('entrada_id', entrada.id)

@@ -274,6 +274,7 @@ export default function EntradaXmlDetalheClient({
   const [gerarContaPagar, setGerarContaPagar] = useState(true)
   const [obsFinanceiro, setObsFinanceiro] = useState('')
   const [finalizando, setFinalizando] = useState(false)
+  const finalizandoRef = useRef(false)
   const [itensParaGuardarEstoque, setItensParaGuardarEstoque] = useState<ItemEntradaParaGuardar[] | null>(null)
   const [cancelando, setCancelando] = useState(false)
 
@@ -719,6 +720,10 @@ export default function EntradaXmlDetalheClient({
 
   // ── Finalizar entrada ────────────────────────────────────────────────────
   async function finalizar() {
+    // Clique duplo antes do botão desabilitar daria entrada no estoque duas
+    // vezes — mesmo defeito que já duplicou entrada manual.
+    if (finalizandoRef.current || entrada.status === 'finalizada') return
+    finalizandoRef.current = true
     setFinalizando(true)
     try {
       const agora = new Date().toISOString()
@@ -886,7 +891,7 @@ export default function EntradaXmlDetalheClient({
         alert('Entrada finalizada com sucesso!')
       }
     } catch (e: any) { alert('Erro ao finalizar: ' + e.message) }
-    finally { setFinalizando(false) }
+    finally { finalizandoRef.current = false; setFinalizando(false) }
   }
 
   async function cancelar() {
