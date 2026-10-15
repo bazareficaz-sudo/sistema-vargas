@@ -110,6 +110,27 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   const [marcado, setMarcado] = useState(0)
   const [anexo, setAnexo] = useState<{ arquivo: File; previa: string } | null>(null)
   const seletor = useRef<HTMLInputElement>(null)
+  type Sugestao = { texto: string; nota: string; produtos: { id: string; nome: string; preco: number | null; estoque: number | null }[] }
+  const [sugestao, setSugestao] = useState<Sugestao | null>(null)
+  const [sugerindo, setSugerindo] = useState(false)
+
+  // Rascunho da IA: aparece num quadro para ler; "Usar" só coloca na caixa
+  // de texto. Quem envia é sempre a pessoa.
+  async function sugerirResposta() {
+    if (!aberta) return
+    setSugerindo(true); setErro(''); setSugestao(null)
+    try {
+      const res = await fetch('/api/whatsapp/conversas/sugerir', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contatoId: aberta.id }),
+      })
+      const r = await res.json().catch(() => ({}))
+      if (!res.ok) setErro(r.error ?? 'Não foi possível sugerir agora.')
+      else setSugestao({ texto: r.sugestao, nota: r.nota ?? '', produtos: r.produtos ?? [] })
+    } finally {
+      setSugerindo(false)
+    }
+  }
 
   // Busca enquanto digita, como no PDV.
   useEffect(() => {
@@ -292,7 +313,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
             {conversas.length === 0 && <p className="p-6 text-sm text-gray-400 text-center">Nenhuma conversa aqui.</p>}
             {conversas.map(c => (
-              <button key={c.id} onClick={() => { setLembrete(null); ir({ c: c.id }) }}
+              <button key={c.id} onClick={() => { setLembrete(null); setSugestao(null); ir({ c: c.id }) }}
                 className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 ${aberta?.id === c.id ? 'bg-teal-50' : ''}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className={`text-sm truncate ${c.nao_lida ? 'font-semibold text-gray-900' : 'text-gray-800'}`}>{nomeDe(c)}</span>
@@ -408,8 +429,12 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                       className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700 hover:bg-teal-50 hover:text-teal-800">{r.nome}</button>
                   ))}
                   <button onClick={() => setPainel(p => p === 'nova' ? '' : 'nova')} className="text-xs px-2 py-1 rounded-full border border-dashed border-gray-300 text-gray-500 hover:text-gray-700">+ Nova</button>
+                  <button onClick={sugerirResposta} disabled={sugerindo}
+                    className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-60">
+                    {sugerindo ? 'Pensando…' : '✨ Sugerir resposta'}
+                  </button>
                   <button onClick={() => setPainel(p => p === 'produto' ? '' : 'produto')}
-                    className="ml-auto text-xs px-2.5 py-1 rounded-lg bg-white border border-teal-600 text-teal-700 hover:bg-teal-50">Enviar produto</button>
+                    className="text-xs px-2.5 py-1 rounded-lg bg-white border border-teal-600 text-teal-700 hover:bg-teal-50">Enviar produto</button>
                 </div>
 
                 {painel === 'nova' && (
@@ -472,6 +497,24 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                   </div>
                 )}
 
+                {sugestao && (
+                  <div className="mb-2 p-2.5 rounded-lg bg-violet-50 border border-violet-200">
+                    <p className="text-[10px] uppercase tracking-wide text-violet-700 mb-1">Sugestão da IA — leia antes de usar</p>
+                    <p className="text-sm whitespace-pre-wrap text-gray-900">{sugestao.texto}</p>
+                    {sugestao.nota && <p className="text-[11px] text-amber-800 mt-1.5">⚠ {sugestao.nota}</p>}
+                    {sugestao.produtos.length > 0 && (
+                      <p className="text-[11px] text-gray-500 mt-1.5">
+                        Consultou no cadastro: {sugestao.produtos.map(p => `${p.nome}${p.preco != null ? ` (${brl(p.preco)}` : ' (sem preço'}${p.estoque === null ? ')' : p.estoque > 0 ? `, estoque ${p.estoque})` : ', em falta)'}`).join('; ')}
+                      </p>
+                    )}
+                    <div className="flex justify-end gap-2 mt-2">
+                      <button onClick={() => setSugestao(null)} className="text-xs px-2 py-1 text-gray-600">Descartar</button>
+                      <button onClick={sugerirResposta} disabled={sugerindo} className="text-xs px-2 py-1 text-violet-700 disabled:opacity-50">Outra sugestão</button>
+                      <button onClick={() => { setTexto(sugestao.texto); setSugestao(null) }}
+                        className="text-xs px-3 py-1 rounded bg-violet-600 text-white">Usar na caixa de texto</button>
+                    </div>
+                  </div>
+                )}
                 {anexo && (
                   <div className="mb-2 flex items-start gap-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
