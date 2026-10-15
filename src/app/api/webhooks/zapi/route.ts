@@ -3,7 +3,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { chaveConfere } from '@/lib/getulio/webhook'
 import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
 import { receberFotoProduto } from '@/lib/getulio/foto'
-import { nomeDoRemetente, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
+import { midiaDaMensagem, nomeDoRemetente, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
+import { guardarMidia } from '@/lib/whatsapp/midias'
 import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
 import { registrarEnviadaPeloCelular } from '@/lib/whatsapp/celular'
 
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
       if (body.fromMe) {
         const para = telefoneDoRemetente({ ...body, fromMe: false })
         if (para && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {
-          const dados = { telefone: para, texto: textoDaMensagem(body), messageId: typeof body.messageId === 'string' ? body.messageId : null }
+          const dados = { telefone: para, texto: textoDaMensagem(body), messageId: typeof body.messageId === 'string' ? body.messageId : null, midiaUrl: midiaDaMensagem(body)?.url ?? null }
           after(() => registrarEnviadaPeloCelular(supabase, empresaId, dados))
         }
         return NextResponse.json({ ok: true })
@@ -115,19 +116,26 @@ export async function POST(request: NextRequest) {
           cliente = clientes?.[0] ?? null
         }
 
-        // Registra mensagem recebida
-        await supabase.from('whatsapp_mensagens').insert({
+        // Registra mensagem recebida. Arquivo (foto, áudio…): guarda o link e,
+        // depois do 200, copia para o bucket — o link da Z-API é temporário.
+        const midia = midiaDaMensagem(body)
+        const { data: registrada } = await supabase.from('whatsapp_mensagens').insert({
           empresa_id: empresaId,
           cliente_id: cliente?.id ?? null,
           cliente_nome: cliente?.nome || null,
           telefone: phone,
           tipo: 'recebida',
           conteudo: textoDaMensagem(body),
+          conteudo_pdf_url: midia?.url ?? null,
           status: 'recebida',
           enviado_em: new Date().toISOString(),
           // Só com o contato registrado (a coluna vem na mesma migração).
           ...(contato?.contato_id ? { contato_id: contato.contato_id } : {}),
-        })
+        }).select('id, contato_id').single()
+        if (midia && chaveOk && registrada?.id) {
+          const dadosMidia = { empresaId, contatoId: registrada.contato_id ?? null, mensagemId: registrada.id, url: midia.url }
+          after(() => guardarMidia(supabase, dadosMidia).then(() => undefined))
+        }
 
         // BETINA: só com a chave do endereço conferida (ver
         // lib/getulio/webhook.ts) e só para número cadastrado na Central. A

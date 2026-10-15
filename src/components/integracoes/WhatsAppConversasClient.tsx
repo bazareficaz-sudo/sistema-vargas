@@ -4,7 +4,9 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { formatarTelefone } from '@/lib/clientes/telefone'
-import { numeroOculto } from '@/lib/whatsapp/contatos'
+import { numeroOculto, semMarca } from '@/lib/whatsapp/contatos'
+import { BUCKET_MIDIAS, LIMITE_MIDIA, comoMostrar } from '@/lib/whatsapp/midias'
+import { filtroNomeOuMarca } from '@/lib/produtos/similares'
 import { ETAPAS, atalhosDeRetorno, etapaDe, rotuloRetorno, doCliente, legendaDoProduto, preencherResposta, rotuloSaida, tempoDeEspera, type ProdutoParaEnviar, type RespostaRapida } from '@/lib/whatsapp/conversas'
 import { precoVigente, promocaoVigente } from '@/lib/produtos/promocao'
 
@@ -16,6 +18,8 @@ export type Conversa = {
 export type Mensagem = {
   id: string; tipo: string; conteudo: string; status: string; erro: string | null
   created_at: string; enviado_em: string | null; operador_nome: string | null
+  /** Link para mostrar o arquivo (assinado, quando guardado no bucket). */
+  midia_url: string | null
 }
 export type Ficha = {
   saldo_devedor: number | null; saldo_credito: number | null; valor_vencido: number | null
@@ -23,7 +27,56 @@ export type Ficha = {
   compras: { id: string; numero: number | string | null; created_at: string; total: number | null; canal: string | null }[]
   orcamentos: { id: string; numero: number | string | null; created_at: string; total: number | null; validade: string | null }[]
 }
-type ProdutoBusca = ProdutoParaEnviar & { id: string; controlar_estoque: boolean | null; estoque: number | null }
+type ProdutoBusca = ProdutoParaEnviar & { id: string; controlar_estoque: boolean | null; estoque: number | null; marca?: string | null; foto_url?: string | null }
+
+// Busca de produto igual à do PDV: EAN ou código exatos primeiro; senão cada
+// palavra precisa aparecer no nome ou na marca ("disj 32a steck"); por fim
+// código parecido. Se o banco ainda não tiver `foto_url`, busca sem a foto.
+const COLS_BUSCA = 'id, nome, sku, ean, marca, unidade, preco_venda, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, controlar_estoque, estoque'
+let comFoto = true
+async function procurarProdutos(empresaId: string, q: string): Promise<ProdutoBusca[]> {
+  const sb = createClient()
+  const palavras = q.trim().split(/\s+/).filter(Boolean)
+  if (!palavras.length) return []
+  const consultar = async (montar: (base: any) => PromiseLike<{ data: unknown[] | null; error: { code?: string; message?: string } | null }>) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    const base = (cols: string) => sb.from('produtos').select(cols).eq('empresa_id', empresaId).eq('ativo', true)
+    if (comFoto) {
+      const r = await montar(base(`${COLS_BUSCA}, foto_url`))
+      if (!(r.error && (r.error.code === '42703' || /foto_url/.test(r.error.message ?? '')))) return (r.error ? [] : r.data ?? []) as ProdutoBusca[]
+      comFoto = false
+    }
+    const r = await montar(base(COLS_BUSCA))
+    return (r.error ? [] : r.data ?? []) as ProdutoBusca[]
+  }
+  if (palavras.length === 1) {
+    const exato = /^\d{8,14}$/.test(palavras[0])
+      ? await consultar(b => b.or(`ean.eq.${palavras[0]},sku.eq.${palavras[0]}`).limit(5))
+      : await consultar(b => b.eq('sku', palavras[0].replace(/[,()"]/g, '')).limit(5))
+    if (exato.length) return exato
+  }
+  let lista = await consultar(b => {
+    for (const p of palavras) { const f = filtroNomeOuMarca(p); if (f) b = b.or(f) }
+    return b.order('nome').limit(20)
+  })
+  if (!lista.length) lista = await consultar(b => b.ilike('sku', `%${palavras[0].replace(/[%*,()"]/g, '')}%`).order('nome').limit(20))
+  return lista
+}
+
+const EXT_IMAGEM: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
+
+function Midia({ m }: { m: Mensagem }) {
+  const tipo = comoMostrar(m.conteudo, m.midia_url)
+  if (!tipo || !m.midia_url) return null
+  if (tipo === 'foto') return (
+    <a href={m.midia_url} target="_blank" rel="noreferrer" className="block mb-1">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={m.midia_url} alt="" loading="lazy" className="max-h-64 max-w-full rounded-lg" />
+    </a>
+  )
+  if (tipo === 'audio') return <audio controls preload="none" src={m.midia_url} className="mb-1 max-w-full" />
+  if (tipo === 'video') return <video controls preload="metadata" src={m.midia_url} className="mb-1 max-h-64 max-w-full rounded-lg" />
+  return <a href={m.midia_url} target="_blank" rel="noreferrer" className="block mb-1 text-blue-700 underline">📄 Abrir arquivo</a>
+}
 
 const nomeDe = (c: Conversa) => c.cliente_nome || c.nome_whatsapp || (numeroOculto(c.telefone) ? 'Número oculto' : formatarTelefone(c.telefone))
 const hora = (s: string) => new Date(s).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
@@ -53,6 +106,56 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   const [escolhido, setEscolhido] = useState<ProdutoBusca | null>(null)
   const [aviso, setAviso] = useState('')
   const [lembrete, setLembrete] = useState<{ dia: string; nota: string } | null>(null)
+  const [buscando, setBuscando] = useState(false)
+  const [marcado, setMarcado] = useState(0)
+  const [anexo, setAnexo] = useState<{ arquivo: File; previa: string } | null>(null)
+  const seletor = useRef<HTMLInputElement>(null)
+
+  // Busca enquanto digita, como no PDV.
+  useEffect(() => {
+    if (painel !== 'produto' || busca.trim().length < 2) return
+    let valido = true
+    const t = setTimeout(async () => {
+      setBuscando(true)
+      const lista = await procurarProdutos(empresaId, busca)
+      if (valido) { setAchados(lista); setMarcado(0); setEscolhido(null); setBuscando(false) }
+    }, 220)
+    return () => { valido = false; clearTimeout(t) }
+  }, [busca, painel, empresaId])
+
+  // Imagem colada (Ctrl+V) ou escolhida: fica de prévia até enviar.
+  function anexar(arquivo: File | null | undefined) {
+    if (!arquivo) return
+    if (!EXT_IMAGEM[arquivo.type]) { setErro('Só dá para enviar imagem (JPG, PNG, WEBP ou GIF).'); return }
+    if (arquivo.size > LIMITE_MIDIA) { setErro('Imagem muito grande (máximo 16 MB).'); return }
+    if (anexo) URL.revokeObjectURL(anexo.previa)
+    setErro(''); setAnexo({ arquivo, previa: URL.createObjectURL(arquivo) })
+  }
+  function tirarAnexo() {
+    if (anexo) URL.revokeObjectURL(anexo.previa)
+    setAnexo(null)
+  }
+
+  async function enviarImagem() {
+    if (!aberta || !anexo) return
+    setEnviando(true); setErro('')
+    try {
+      const arquivo = `${crypto.randomUUID()}.${EXT_IMAGEM[anexo.arquivo.type]}`
+      const { error } = await createClient().storage.from(BUCKET_MIDIAS)
+        .upload(`${empresaId}/${aberta.id}/${arquivo}`, anexo.arquivo, { contentType: anexo.arquivo.type })
+      if (error) { setErro('Não foi possível subir a imagem.'); return }
+      const res = await fetch('/api/whatsapp/conversas/imagem', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contatoId: aberta.id, arquivo, legenda: texto.trim() }),
+      })
+      const r = await res.json().catch(() => ({}))
+      if (!res.ok) setErro(r.error ?? 'Não foi possível enviar a imagem.')
+      else { setTexto(''); tirarAnexo() }
+    } finally {
+      setEnviando(false)
+      router.refresh()
+    }
+  }
 
   const url = (p: Record<string, string | null>) => {
     const sp = new URLSearchParams()
@@ -78,6 +181,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   }, [aberta?.id, aberta?.nao_lida, mensagens.length, router])
 
   async function responder() {
+    if (anexo) return enviarImagem()
     if (!aberta || !texto.trim()) return
     setEnviando(true); setErro('')
     try {
@@ -127,17 +231,6 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
     })
     if (error) { setErro('Não foi possível salvar a resposta.'); return }
     setNova({ nome: '', conteudo: '' }); setPainel(''); router.refresh()
-  }
-
-  async function buscarProdutos() {
-    const termo = busca.trim().replace(/[,()%]/g, ' ')
-    if (termo.length < 2) return
-    const { data } = await createClient().from('produtos')
-      .select('id, nome, sku, unidade, preco_venda, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, controlar_estoque, estoque')
-      .eq('empresa_id', empresaId).eq('ativo', true)
-      .or(`nome.ilike.%${termo}%,sku.ilike.%${termo}%`)
-      .order('nome').limit(10)
-    setAchados((data ?? []) as ProdutoBusca[]); setEscolhido(null)
   }
 
   async function enviarProduto() {
@@ -291,7 +384,8 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                   <div key={m.id} className={`flex ${cliente ? 'justify-start' : 'justify-end'}`}>
                     <div className={`max-w-[75%] rounded-xl px-3 py-2 text-sm shadow-sm ${cliente ? 'bg-white text-gray-800' : m.status === 'erro' ? 'bg-red-50 text-red-800 border border-red-200' : 'bg-teal-100 text-gray-900'}`}>
                       {rotulo && <p className="text-[10px] uppercase tracking-wide text-teal-700 mb-0.5">{rotulo}</p>}
-                      <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>
+                      <Midia m={m} />
+                      {(() => { const t = m.midia_url ? semMarca(m.conteudo) : m.conteudo; return t ? <p className="whitespace-pre-wrap break-words">{t}</p> : null })()}
                       <p className="text-[10px] text-gray-400 mt-1 text-right">
                         {hora(m.enviado_em ?? m.created_at)}
                         {!cliente && m.operador_nome ? ` · ${m.operador_nome.split('@')[0]}` : ''}
@@ -334,20 +428,31 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
 
                 {painel === 'produto' && (
                   <div className="mb-2 p-2 rounded-lg bg-gray-50 border border-gray-200">
-                    <div className="flex gap-1.5">
-                      <input value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={e => e.key === 'Enter' && buscarProdutos()} autoFocus
-                        placeholder="Nome ou código do produto" className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs" />
-                      <button onClick={buscarProdutos} className="text-xs px-3 py-1 rounded bg-gray-200 hover:bg-gray-300">Buscar</button>
-                    </div>
+                    <input value={busca} onChange={e => setBusca(e.target.value)} autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'ArrowDown') { e.preventDefault(); setMarcado(i => Math.min(i + 1, achados.length - 1)) }
+                        else if (e.key === 'ArrowUp') { e.preventDefault(); setMarcado(i => Math.max(i - 1, 0)) }
+                        else if (e.key === 'Enter' && achados[marcado]) { e.preventDefault(); setEscolhido(achados[marcado]) }
+                      }}
+                      placeholder="Nome, marca, código ou código de barras — como no PDV" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm" />
+                    {buscando && <p className="text-[11px] text-gray-400 mt-1">Buscando…</p>}
+                    {!buscando && busca.trim().length >= 2 && achados.length === 0 && <p className="text-[11px] text-gray-400 mt-1">Nenhum produto ativo encontrado.</p>}
                     {achados.length > 0 && !escolhido && (
-                      <div className="mt-1.5 max-h-40 overflow-y-auto divide-y divide-gray-100 bg-white rounded border border-gray-200">
-                        {achados.map(p => (
-                          <button key={p.id} onClick={() => setEscolhido(p)} className="w-full text-left px-2 py-1.5 text-xs hover:bg-teal-50 flex justify-between gap-2">
-                            <span className="truncate">{p.nome}{p.sku ? <span className="text-gray-400"> · {p.sku}</span> : null}</span>
-                            <span className="whitespace-nowrap">
-                              {promocaoVigente(p) && <span className="text-orange-600 mr-1">promo</span>}
-                              {brl(precoVigente(p))}
-                              {p.controlar_estoque && <span className={`ml-1.5 ${Number(p.estoque ?? 0) > 0 ? 'text-gray-400' : 'text-red-600'}`}>est. {Number(p.estoque ?? 0)}</span>}
+                      <div className="mt-1.5 max-h-60 overflow-y-auto divide-y divide-gray-100 bg-white rounded border border-gray-200">
+                        {achados.map((p, i) => (
+                          <button key={p.id} onClick={() => setEscolhido(p)} onMouseEnter={() => setMarcado(i)}
+                            className={`w-full text-left px-2 py-1.5 text-xs flex items-center gap-2 ${i === marcado ? 'bg-teal-50' : ''}`}>
+                            {p.foto_url
+                              // eslint-disable-next-line @next/next/no-img-element
+                              ? <img src={p.foto_url} alt="" loading="lazy" className="w-9 h-9 object-cover rounded border border-gray-100 shrink-0" />
+                              : <span className="w-9 h-9 rounded bg-gray-100 shrink-0" />}
+                            <span className="flex-1 min-w-0">
+                              <span className="block truncate font-medium text-gray-800">{p.nome}</span>
+                              <span className="block truncate text-gray-400">{[p.sku && `Cód. ${p.sku}`, p.marca].filter(Boolean).join(' · ')}</span>
+                            </span>
+                            <span className="text-right whitespace-nowrap">
+                              <span className="block font-medium">{promocaoVigente(p) && <span className="text-orange-600 mr-1">promo</span>}{brl(precoVigente(p))}</span>
+                              {p.controlar_estoque && <span className={`block ${Number(p.estoque ?? 0) > 0 ? 'text-gray-400' : 'text-red-600'}`}>estoque {Number(p.estoque ?? 0)}</span>}
                             </span>
                           </button>
                         ))}
@@ -367,12 +472,30 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                   </div>
                 )}
 
+                {anexo && (
+                  <div className="mb-2 flex items-start gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={anexo.previa} alt="" className="max-h-28 rounded-lg border border-gray-200" />
+                    <div className="text-[11px] text-gray-500">
+                      <p>Imagem pronta. O texto da caixa vai como legenda.</p>
+                      <button onClick={tirarAnexo} className="text-red-600 hover:underline mt-1">Tirar imagem</button>
+                    </div>
+                  </div>
+                )}
                 <div className="flex gap-2 items-end">
+                  <button onClick={() => seletor.current?.click()} title="Enviar imagem (ou cole com Ctrl+V)"
+                    className="px-2.5 py-2 border border-gray-300 rounded-lg text-gray-500 hover:text-teal-700 hover:border-teal-500">📎</button>
+                  <input ref={seletor} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden"
+                    onChange={e => { anexar(e.target.files?.[0]); e.target.value = '' }} />
                   <textarea value={texto} onChange={e => setTexto(e.target.value)} rows={2} maxLength={4000}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); responder() } }}
-                    placeholder="Escreva a resposta… (Enter envia, Shift+Enter quebra a linha)"
+                    onPaste={e => {
+                      const img = Array.from(e.clipboardData.items).find(i => i.kind === 'file' && i.type.startsWith('image/'))
+                      if (img) { e.preventDefault(); anexar(img.getAsFile()) }
+                    }}
+                    placeholder={anexo ? 'Legenda da imagem (opcional)… Enter envia' : 'Escreva a resposta… (Enter envia, Shift+Enter quebra a linha, Ctrl+V cola imagem)'}
                     className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-teal-500" />
-                  <button onClick={responder} disabled={enviando || !texto.trim()}
+                  <button onClick={responder} disabled={enviando || (!texto.trim() && !anexo)}
                     className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-sm rounded-lg">
                     {enviando ? 'Enviando…' : 'Enviar'}
                   </button>

@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
     cliente_nome: contato.cliente_nome ?? null,
     telefone: contato.telefone,
     tipo: 'produto_individual',
-    conteudo: legenda,
+    // "[foto]" marca que foi com imagem: a tela mostra a foto no histórico.
+    conteudo: imagem?.url ? `[foto] ${legenda}` : legenda,
     conteudo_pdf_url: imagem?.url ?? null,
     referencia_tipo: 'produto',
     referencia_id: produto.id,

@@ -17,6 +17,10 @@ type Recebida = {
   phone?: unknown; from?: unknown; chatName?: unknown; senderName?: unknown
   text?: { message?: unknown }; message?: { text?: unknown }
   image?: { imageUrl?: unknown; caption?: unknown }
+  audio?: { audioUrl?: unknown }
+  video?: { videoUrl?: unknown; caption?: unknown }
+  document?: { documentUrl?: unknown; fileName?: unknown; title?: unknown; caption?: unknown }
+  sticker?: { stickerUrl?: unknown }
 }
 
 /**
@@ -67,13 +71,46 @@ export function camposComTexto(dados: Record<string, unknown> | null | undefined
   return Object.entries(dados ?? {}).filter(([, v]) => typeof v === 'string' && v.trim()).map(([k]) => k).sort()
 }
 
-/** Texto para o histórico: mensagem, ou "[foto] legenda", ou "[mídia]". */
+export type TipoMidia = 'foto' | 'audio' | 'video' | 'documento' | 'figurinha'
+const MARCA: Record<TipoMidia, string> = { foto: '[foto]', audio: '[áudio]', video: '[vídeo]', documento: '[documento]', figurinha: '[figurinha]' }
+const txt = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+const link = (v: unknown) => (typeof v === 'string' && /^https:\/\//i.test(v.trim()) ? v.trim() : null)
+
+/** Arquivo que veio na mensagem (link da Z-API, temporário) e o seu tipo. */
+export function midiaDaMensagem(body: Recebida): { tipo: TipoMidia; url: string; legenda: string } | null {
+  const opcoes: [TipoMidia, unknown, unknown][] = [
+    ['foto', body.image?.imageUrl, body.image?.caption],
+    ['audio', body.audio?.audioUrl, ''],
+    ['video', body.video?.videoUrl, body.video?.caption],
+    ['documento', body.document?.documentUrl, body.document?.caption || body.document?.fileName || body.document?.title],
+    ['figurinha', body.sticker?.stickerUrl, ''],
+  ]
+  for (const [tipo, url, legenda] of opcoes) {
+    const u = link(url)
+    if (u) return { tipo, url: u, legenda: txt(legenda) }
+  }
+  return null
+}
+
+/** Texto para o histórico: mensagem, ou "[foto] legenda", "[áudio]"… ou "[mídia]". */
 export function textoDaMensagem(body: Recebida): string {
   const texto = body.text?.message ?? body.message?.text
   if (typeof texto === 'string' && texto.trim()) return texto
-  if (body.image?.imageUrl) {
-    const legenda = typeof body.image.caption === 'string' ? body.image.caption : ''
-    return `[foto]${legenda ? ` ${legenda}` : ''}`
-  }
+  const m = midiaDaMensagem(body)
+  if (m) return `${MARCA[m.tipo]}${m.legenda ? ` ${m.legenda}` : ''}`
   return '[mídia]'
+}
+
+/** Tipo do arquivo pela marca do texto ("[foto] …") — é o que a tela usa para mostrar. */
+export function tipoPelaMarca(conteudo: string): TipoMidia | null {
+  for (const [tipo, marca] of Object.entries(MARCA) as [TipoMidia, string][]) {
+    if (conteudo === marca || conteudo.startsWith(`${marca} `)) return tipo
+  }
+  return null
+}
+
+/** Texto sem a marca do arquivo (o arquivo já aparece na tela). */
+export function semMarca(conteudo: string): string {
+  const tipo = tipoPelaMarca(conteudo)
+  return tipo ? conteudo.slice(MARCA[tipo].length).trim() : conteudo
 }
