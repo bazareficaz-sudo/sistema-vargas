@@ -216,7 +216,17 @@ Migração `supabase/migrations/20261017180000_whatsapp_fora_horario.sql`. Regra
 - **Sem reenvio:** resultado desconhecido não é reenviado; o erro fica na mensagem.
 - **Feriado:** não há calendário; desligue no dia ou ajuste o horário.
 
+## Origem do contato (Vargas Marketing)
+
+Migração `supabase/migrations/20261018120000_whatsapp_origem.sql`. Regra em `src/lib/whatsapp/origem.ts`. A parte do Marketing está em `docs/fase-17-origem-contato.md`, no outro repositório.
+
+- **Código:** cada publicação do Marketing tem um código curto: letra, dígito, letra, dígito, sem I, O, 0 e 1 (ex.: `T7K2`). O link do post já traz o código escrito; no Instagram, o cliente digita.
+- **Webhook:** com a chave conferida e o contato registrado, procura o código como palavra solta (maiúscula ou minúscula) e grava `origem_codigo` e `origem_em`. **Só a primeira origem vale.** O logado só lê essas colunas.
+- **Tela:** selo "post T7K2" na lista e "📣 Veio da publicação T7K2 · dd/mm" na conversa.
+- **API de leitura** `GET /api/integracoes/marketing/v1/origens?desde=&ate=` (token do Marketing, até 92 dias): por código, conversas que chegaram no período, quantas receberam orçamento enviado depois e quantas estão em "Comprou". Usa `marketing_origens()`, que só a chave de serviço executa. Só números: nada de cliente, telefone ou mensagem.
+- **Códigos desconhecidos:** o ERP não conhece a lista de códigos; o Marketing descarta o que não é dele.
+- **Limite:** é um piso. Quem viu o post e escreveu sem o código não entra.
+
 ## Próximas etapas (planejado, não implementado)
 
-1. Origem do lead (qual post do Vargas Marketing gerou a conversa).
-2. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.
+1. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

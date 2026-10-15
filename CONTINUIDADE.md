@@ -30,6 +30,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Orçamento pela conversa:** monta no PDV (`/pdv?conversa=`), negocia e envia na tela de Orçamentos (`?abrir=&conversa=`); "Cliente fechou" → PDV → Comprou; migração `20261017140000_whatsapp_orcamento_convertido.sql`.
 - **Resumo da manhã (Betina):** bloco "Atendimento no WhatsApp" com retornos, orçamentos parados e conversas esperando, com link de cada conversa; vigia `atendimento_whatsapp`; sem migração.
 - **Fora do horário:** resposta automática (desligada por padrão, uma por contato por dia, não tira de "aguardando"); migração `20261017180000_whatsapp_fora_horario.sql`.
+- **Origem do contato:** código da publicação do Vargas Marketing (ex.: T7K2) na mensagem do cliente vira `origem_codigo` do contato (só a primeira); conversa mostra "Veio da publicação"; `v1/origens` entrega ao Marketing só contagens por código (conversas, orçamentos, compras); migração `20261018120000_whatsapp_origem.sql`.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar
@@ -37,7 +38,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 Branch `claude/api-marketing`. O Vargas Marketing (sistema separado, outro
 banco) passa a ler os produtos com a tag **marketing** da empresa.
 
-- **Somente leitura.** Rotas `/api/integracoes/marketing/v1/{empresa,produtos,sinais}`
+- **Somente leitura.** Rotas `/api/integracoes/marketing/v1/{empresa,produtos,sinais,vendas,origens}`
   autenticadas por token de integração (`Authorization: Bearer vgm_…`), no
   mesmo desenho dos tokens da extensão: SHA-256 no banco, validade (365 dias),
   revogação. A empresa vem do token, nunca da requisição.

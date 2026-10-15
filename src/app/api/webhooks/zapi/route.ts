@@ -6,6 +6,7 @@ import { receberFotoProduto } from '@/lib/getulio/foto'
 import { idDaMensagem, midiaDaMensagem, nomeDoRemetente, respostaDe, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
 import { guardarMidia } from '@/lib/whatsapp/midias'
 import { responderForaDoHorario } from '@/lib/whatsapp/foraHorarioEnvio'
+import { codigoDeOrigem, gravarOrigem } from '@/lib/whatsapp/origem'
 import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
 import { registrarEnviadaPeloCelular } from '@/lib/whatsapp/celular'
 
@@ -145,6 +146,14 @@ export async function POST(request: NextRequest) {
           ({ data: registrada, error: erroRegistro } = await supabase.from('whatsapp_mensagens').insert(linha).select('id, contato_id').single())
         }
         if (erroRegistro) console.error('Mensagem WhatsApp:', erroRegistro.message)
+
+        // Origem: código de publicação do Vargas Marketing na mensagem
+        // (o link do post já traz escrito). Só a primeira origem vale.
+        const codigoOrigem = chaveOk && contato?.contato_id ? codigoDeOrigem(textoDaMensagem(body)) : null
+        if (codigoOrigem && contato?.contato_id) {
+          const idOrigem = contato.contato_id
+          after(() => gravarOrigem(supabase, idOrigem, codigoOrigem).catch(() => undefined))
+        }
 
         // Loja fechada: resposta automática (desligada por padrão; uma por
         // contato por dia; regras em lib/whatsapp/foraHorarioEnvio.ts).
