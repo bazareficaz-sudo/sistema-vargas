@@ -7,7 +7,7 @@ import EditarOrcamentoModal from './EditarOrcamentoModal'
 import CondicoesOrcamentoModal from './CondicoesOrcamentoModal'
 import EnviarWhatsAppModal, { type EnviarWppPayload } from '@/components/integracoes/EnviarWhatsAppModal'
 import { calcSaude, CONFIG_PADRAO, FAIXAS_PADRAO, type SaudeConfig, type FaixaSaude } from '@/lib/saude-venda'
-import { calcularVitrinePromo, linhasCondicoes, montarMensagemOrcamento, temCondicoes, totalAvista, type CondicoesOrcamento } from '@/lib/orcamentos/condicoes'
+import { calcularVitrinePromo, linhasCondicoes, montarMensagemOrcamento, parcelasSugeridas, temCondicoes, totalAvista, type CondicoesOrcamento } from '@/lib/orcamentos/condicoes'
 
 type OrcItem = {
   id: string; produto_id: string | null; produto_nome: string
@@ -125,12 +125,50 @@ export default function OrcamentosClient({
   // a estratégia.
   function condicoesEfetivas(o: Orcamento): CondicoesOrcamento {
     const salvas = condicoesDe(o)
-    if (!aplicaEstrategia(o) || salvas.descontoAvistaPct > 0) return salvas
+    const comParcelas = { ...salvas, parcelasMax: parcelasEfetivas(o, salvas) }
+    if (!aplicaEstrategia(o) || salvas.descontoAvistaPct > 0) return comParcelas
     return {
-      ...salvas,
+      ...comParcelas,
       descontoAvistaPct: vitrineDe(o).descontoPct,
       avistaFormas: salvas.avistaFormas.length > 0 ? salvas.avistaFormas : formasDaEstrategia,
     }
+  }
+
+  // Parcelamento quando ninguém digitou: a regra da parcela mínima, apertada
+  // pelo teto da faixa de saúde deste orçamento.
+  //
+  // A CIRCULARIDADE, e como ela é quebrada: `saudeDo` escolhe a taxa a partir
+  // das parcelas, e a sugestão de parcelas quer a faixa da saúde. Medir a
+  // faixa COM o parcelamento que ainda vai ser decidido é raciocínio em
+  // círculo. Mede-se à vista: a pergunta certa é "que margem este orçamento
+  // tem antes de eu conceder parcelamento" — é ela que decide se cabe
+  // parcelar, e é a mesma leitura que um gerente faria no papel.
+  function parcelasEfetivas(o: Orcamento, salvas: CondicoesOrcamento): number | null {
+    if ((salvas.parcelasMax ?? 0) > 1) return salvas.parcelasMax!
+
+    const itens = (o.orcamento_itens ?? []).map(i => ({
+      custo: i.produto_id ? (custoPorProduto?.[i.produto_id] ?? 0) : 0,
+      preco_unitario: i.preco_unitario,
+      quantidade: i.quantidade,
+      tipo: 'venda' as const,
+    }))
+    const aVista = calcSaude(itens, o.desconto ?? 0, 'pix', 1, cfgSaude, faixasSaude)
+    // Sem custo cadastrado a margem sai inflada, e uma faixa inflada
+    // liberaria parcelamento que a venda não sustenta. Nesse caso a faixa não
+    // opina: fica só o teto da configuração.
+    const semCusto = (o.orcamento_itens ?? []).some(
+      i => !i.produto_id || !(Number(custoPorProduto?.[i.produto_id] ?? 0) > 0))
+    const tetoFaixa = semCusto ? null
+      : aVista.faixa?.permite_parcelamento === false ? 1
+      : aVista.faixa?.max_parcelas ?? null
+
+    const n = parcelasSugeridas(totalExibido(o), {
+      parcelaMinima: cfgSaude.orcamento_parcela_minima,
+      teto: cfgSaude.orcamento_parcelas_max,
+      tetoFaixa,
+    })
+    // 1 não é "1x no cartão", é "só à vista" — e aí não há linha a imprimir.
+    return n > 1 ? n : null
   }
 
   // Preço e total que o cliente enxerga.

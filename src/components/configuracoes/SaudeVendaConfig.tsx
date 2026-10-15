@@ -248,6 +248,56 @@ export default function SaudeVendaConfig({ empresaId, configInicial, faixasInici
                 </div>
               </>
             )}
+
+            {/*
+              A outra metade da mesma proposta: quem não paga à vista, parcela.
+              Fica aqui, e não numa tela própria, porque é uma conversa só com
+              o cliente — separar criaria dois lugares para configurar o mesmo
+              papel.
+            */}
+            <div className="mt-6 pt-5 border-t border-slate-100">
+              <p className="text-sm font-medium text-slate-700">Parcelamento oferecido no orçamento</p>
+              <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                O número de parcelas sai do total, não de um número fixo: é o total dividido
+                pelo valor mínimo da parcela. Com mínima de R$ 50, um orçamento de R$ 150 sai
+                em 3x e um de R$ 80 sai só à vista — a parcela pequena some sozinha.
+              </p>
+
+              <div className="flex flex-wrap gap-4 mt-3">
+                <label className="text-xs text-slate-500">
+                  Parcela mínima (R$)
+                  <input type="number" min={1} step={1}
+                    value={cfg.orcamento_parcela_minima}
+                    onChange={e => setCfgField('orcamento_parcela_minima', Number(e.target.value))}
+                    className="block mt-1 w-28 px-2 py-1.5 text-sm border border-slate-200 rounded-lg" />
+                </label>
+                <label className="text-xs text-slate-500">
+                  Máximo de parcelas
+                  <input type="number" min={1} max={24} step={1}
+                    value={cfg.orcamento_parcelas_max}
+                    onChange={e => setCfgField('orcamento_parcelas_max', Number(e.target.value))}
+                    className="block mt-1 w-28 px-2 py-1.5 text-sm border border-slate-200 rounded-lg" />
+                  <span className="block mt-1 text-[11px] text-slate-400">1 desliga a oferta</span>
+                </label>
+                <label className="text-xs text-slate-500 flex items-start gap-2 pt-5">
+                  <input type="checkbox"
+                    checked={cfg.orcamento_parcelas_sem_juros}
+                    onChange={e => setCfgField('orcamento_parcelas_sem_juros', e.target.checked)}
+                    className="mt-0.5" />
+                  Anunciar como <strong className="font-medium">sem juros</strong>
+                </label>
+              </div>
+
+              <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  <strong>A faixa de saúde aperta este número, nunca afrouxa.</strong> Parcelar
+                  custa: o crédito é a taxa à vista mais a de parcelamento por parcela extra, então
+                  3x consome vários por cento da venda. Um orçamento com margem na faixa
+                  &quot;Atenção&quot; sai só à vista mesmo com o máximo em 6x, porque aquela faixa
+                  já está configurada para não permitir parcelamento.
+                </p>
+              </div>
+            </div>
           </div>
 
           <button onClick={salvarTaxas} disabled={salvando}

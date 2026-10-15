@@ -23,6 +23,12 @@ export interface SaudeConfig {
   // supabase-orcamento-promo-estrategia.sql.
   orcamento_promo_vira_desconto: boolean
   orcamento_promo_formas: string[]
+  // Parcelamento do orçamento: a regra é a PARCELA, não o número de vezes.
+  // Ver `parcelasSugeridas` em lib/orcamentos/condicoes — o teto da faixa de
+  // saúde manda sobre este, porque margem baixa não sustenta parcelamento.
+  orcamento_parcela_minima: number
+  orcamento_parcelas_max: number
+  orcamento_parcelas_sem_juros: boolean
 }
 
 export interface FaixaSaude {
@@ -107,6 +113,11 @@ export const CONFIG_PADRAO: SaudeConfig = {
   // sistema sem que ninguém tenha pedido seria uma surpresa no balcão.
   orcamento_promo_vira_desconto: false,
   orcamento_promo_formas: ['pix', 'dinheiro'],
+  // Os mesmos defaults da coluna no banco. Divergir aqui faria a tela mostrar
+  // um número e o orçamento usar outro enquanto a empresa não salvasse nada.
+  orcamento_parcela_minima: 50,
+  orcamento_parcelas_max: 6,
+  orcamento_parcelas_sem_juros: true,
 }
 
 export const FAIXAS_PADRAO: FaixaSaude[] = [
@@ -129,13 +140,33 @@ function taxaPorForma(forma: string, parcelas: number, cfg: SaudeConfig): number
   }
 }
 
+// A faixa é uma ESCADA, e escada se define pelo degrau de baixo.
+//
+// ── O DEFEITO QUE ISTO CORRIGE ───────────────────────────────────────────
+//
+// A versão anterior procurava a janela que contém a margem:
+// `>= margem_min && < margem_max`. Parece certo e falha com os dados reais.
+//
+// As faixas do Bazar Eficaz em produção:
+//
+//     Excelente  min 70            Boa       min 50, max 69
+//     Atenção    min 30, max 49    Crítica   min  5, max 29
+//
+// Entre 69 e 70 não existe faixa. Uma margem de 69,5% — excelente — não
+// casava com janela nenhuma e caía no fallback, que é a ÚLTIMA faixa:
+// Prejuízo. E Prejuízo tem `bloqueia_venda: true`.
+//
+// Ou seja: a melhor venda do dia aparecia como prejuízo e era bloqueada.
+// Os quatro vãos reais são 4,99-5, 29-30, 49-50 e 69-70.
+//
+// Corrigir o DADO (max 69 → 70) resolveria hoje e voltaria a quebrar na
+// próxima edição das faixas. Corrigir a REGRA resolve sempre: ordena da
+// maior margem para a menor e pega a primeira cujo piso a margem alcança.
+// `margem_max` passa a ser decorativo — que é o que ele sempre foi.
 function encontrarFaixa(margem: number, faixas: FaixaSaude[]): FaixaSaude | null {
   const ordenadas = [...faixas].sort((a, b) => (b.margem_min ?? -Infinity) - (a.margem_min ?? -Infinity))
-  return ordenadas.find(f => {
-    const min = f.margem_min ?? -Infinity
-    const max = f.margem_max ?? Infinity
-    return margem >= min && margem < max
-  }) ?? ordenadas[ordenadas.length - 1] ?? null
+  return ordenadas.find(f => margem >= (f.margem_min ?? -Infinity))
+    ?? ordenadas[ordenadas.length - 1] ?? null
 }
 
 export function calcSaude(
