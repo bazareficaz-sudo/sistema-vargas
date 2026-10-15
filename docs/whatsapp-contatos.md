@@ -12,7 +12,8 @@ Medido em 15/10/2026: desde que o webhook voltou a gravar (08/10), 100 números 
   - cria ou atualiza o contato (um por número e empresa), com o nome do WhatsApp, a primeira mensagem, a última data e a contagem;
   - procura o cliente pelo telefone, aceitando número com e sem 55 e com e sem o 9 extra (`tel_chave`: DDD + 8 últimos dígitos);
   - ignora os destinatários do Getúlio (dono e equipe).
-- **Fica de fora:** grupo, canal, transmissão, mensagem da própria loja e id que não é telefone (`@lid`). Ver `src/lib/whatsapp/contatos.ts`.
+- **Fica de fora:** grupo, canal, transmissão e mensagem da própria loja. Ver `src/lib/whatsapp/contatos.ts`.
+- **Número oculto (`@lid`)**: o WhatsApp esconde o número de parte das pessoas e manda só um código. Em 15/10/2026 eram 22 dos 99 contatos. Eles **entram** como contato, com chave `x` + código, e a tela mostra "Número oculto pelo WhatsApp". Não há link wa.me, e o cadastro de cliente não recebe telefone: o balconista pede o número na conversa.
 - **Sem a chave no endereço**, nada muda: a mensagem é gravada como antes e o contato não é criado, porque sem chave qualquer um criaria contatos falsos.
 - **Erro na função** (ex.: migração ainda não aplicada): o webhook segue como antes.
 - **Cadastro de cliente** (tela de contatos, balcão ou importação) com o mesmo telefone: um gatilho em `clientes` liga o contato e as mensagens recebidas dele ao cliente. Cliente unificado em outro: o contato segue o destino.
@@ -24,6 +25,9 @@ Medido em 15/10/2026: desde que o webhook voltou a gravar (08/10), 100 números 
 - **Configuração do WhatsApp:** passa a mostrar o endereço do webhook **com** a chave. Antes mostrava sem, e quem copiasse de lá desligava a Betina.
 
 ## Banco (`supabase/migrations/20261015120000_whatsapp_contatos.sql`)
+
+**Aplicada em 15/10/2026**, a pedido do Silvano, pela conexão do Supabase. Resultado: 99 contatos (96 novos e 3 já ligados a clientes); as 51 mensagens que ficaram sem contato são dos destinatários do Getúlio. Conferido: RLS ligado, `anon` sem leitura, logado sem inserção e função só para `service_role`.
+
 
 - `tel_chave(text)` e índices por expressão em `clientes` (telefone, whatsapp, telefone_whatsapp).
 - `whatsapp_contatos`:

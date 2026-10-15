@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { formatarTelefone, normalizarTelefone } from '@/lib/clientes/telefone'
+import { numeroOculto } from '@/lib/whatsapp/contatos'
 import ClienteFormDrawer from '@/components/clientes/ClienteFormDrawer'
 
 export type ContatoWhatsApp = {
@@ -35,7 +36,8 @@ export default function WhatsAppContatosClient({
   const [erro, setErro] = useState('')
   // Estável enquanto o mesmo contato está aberto: a gaveta recarrega quando muda.
   const inicial = useMemo(() => cadastrando
-    ? { nome: cadastrando.nome_whatsapp ?? '', telefone: normalizarTelefone(cadastrando.telefone), whatsapp: normalizarTelefone(cadastrando.telefone) }
+    // Número escondido pelo WhatsApp (@lid): o código não é telefone, não vai para o cadastro.
+    ? { nome: cadastrando.nome_whatsapp ?? '', ...(numeroOculto(cadastrando.telefone) ? {} : { telefone: normalizarTelefone(cadastrando.telefone), whatsapp: normalizarTelefone(cadastrando.telefone) }) }
     : undefined, [cadastrando])
 
   function navegar(params: Record<string, string>) {
@@ -120,7 +122,9 @@ export default function WhatsAppContatosClient({
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-900">{c.clientes?.nome ?? c.nome_whatsapp ?? 'Sem nome no WhatsApp'}</p>
                       {c.clientes?.nome && c.nome_whatsapp && <p className="text-xs text-gray-400">no WhatsApp: {c.nome_whatsapp}</p>}
-                      <p className="text-xs text-gray-500 font-mono">{formatarTelefone(c.telefone)}</p>
+                      {numeroOculto(c.telefone)
+                        ? <p className="text-xs text-gray-400" title="O WhatsApp escondeu o número desta pessoa. Peça o telefone na conversa para cadastrar.">Número oculto pelo WhatsApp</p>
+                        : <p className="text-xs text-gray-500 font-mono">{formatarTelefone(c.telefone)}</p>}
                       <span className={`inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_CLS[c.status]}`}>{c.status === 'novo' ? 'novo' : c.status === 'cliente' ? 'cliente' : 'ignorado'}</span>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-600 max-w-md">
@@ -130,7 +134,7 @@ export default function WhatsAppContatosClient({
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{data(c.ultima_em)}</td>
                     <td className="px-4 py-3 text-xs text-gray-500">{c.total_mensagens}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
-                      <a href={`https://wa.me/${c.telefone}`} target="_blank" rel="noreferrer" className="text-xs text-green-700 hover:underline">Abrir conversa</a>
+                      {!numeroOculto(c.telefone) && <a href={`https://wa.me/${c.telefone}`} target="_blank" rel="noreferrer" className="text-xs text-green-700 hover:underline">Abrir conversa</a>}
                       {c.cliente_id
                         ? <a href={`/dashboard/clientes/${c.cliente_id}`} className="text-xs text-blue-600 hover:underline">Ver cliente</a>
                         : <button onClick={() => setCadastrando(c)} className="text-xs px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md">Cadastrar cliente</button>}

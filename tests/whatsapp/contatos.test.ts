@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { chaveTelefone, nomeDoRemetente, telefoneDoRemetente, textoDaMensagem } from '../../src/lib/whatsapp/contatos'
+import { chaveTelefone, nomeDoRemetente, numeroOculto, telefoneDoRemetente, textoDaMensagem } from '../../src/lib/whatsapp/contatos'
 import { mesmoNumero } from '../../src/lib/getulio/numero'
 
 // Medido em 15/10/2026: 100 números escreveram para a loja em uma semana e só
@@ -40,8 +40,14 @@ describe('o que vira contato', () => {
     assert.equal(telefoneDoRemetente({ phone: '5521991203602', fromMe: true }), null)
     assert.equal(telefoneDoRemetente({ phone: '5521991203602', isNewsletter: true }), null)
     assert.equal(telefoneDoRemetente({ phone: 'status@broadcast' }), null)
-    assert.equal(telefoneDoRemetente({ phone: '123456789012345@lid' }), null)
+    assert.equal(telefoneDoRemetente({ phone: '5521991203602@g.us' }), null)
     assert.equal(telefoneDoRemetente({}), null)
+  })
+  test('número escondido pelo WhatsApp (@lid) também vira contato, sem telefone conhecido', () => {
+    // 22 de 99 contatos em 15/10/2026 chegaram assim.
+    assert.equal(telefoneDoRemetente({ phone: '123456789012345@lid' }), '123456789012345')
+    assert.equal(numeroOculto('123456789012345'), true)
+    assert.equal(numeroOculto('5521991203602'), false)
   })
   test('nome do WhatsApp: o do remetente, senão o da conversa, limitado', () => {
     assert.equal(nomeDoRemetente({ senderName: ' João da Obra ', chatName: 'João' }), 'João da Obra')

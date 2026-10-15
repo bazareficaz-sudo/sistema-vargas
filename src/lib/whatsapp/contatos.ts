@@ -20,17 +20,26 @@ type Recebida = {
 }
 
 /**
- * Número de quem escreveu, se a mensagem é conversa com a loja. Grupo, canal,
- * lista de transmissão, mensagem do próprio número e id que não é telefone
- * (grupo "1203...-1234", "@lid", "status@broadcast") ficam de fora.
+ * Identificação de quem escreveu, se a mensagem é conversa com a loja.
+ * Grupo, canal, lista de transmissão, mensagem do próprio número e
+ * "status@broadcast" ficam de fora.
+ *
+ * "@lid": o WhatsApp esconde o número de parte das pessoas e manda só um
+ * código (medido em 15/10/2026: 22 de 99 contatos). É gente de verdade
+ * procurando a loja — vira contato com o código, sem telefone conhecido.
  */
 export function telefoneDoRemetente(body: Recebida): string | null {
   if (body.fromMe || body.isGroup || body.isNewsletter || body.broadcast) return null
-  const bruto = String(body.phone ?? body.from ?? '')
-  if (!bruto || /[-@]/.test(bruto.replace('@s.whatsapp.net', ''))) return null
-  const d = bruto.replace('@s.whatsapp.net', '').replace(/\D/g, '')
+  const bruto = String(body.phone ?? body.from ?? '').replace('@s.whatsapp.net', '')
+  if (!bruto || bruto.includes('-') || bruto.includes('broadcast')) return null
+  if (bruto.includes('@') && !bruto.endsWith('@lid')) return null
+  const d = bruto.replace(/\D/g, '')
+  if (bruto.endsWith('@lid')) return d.length >= 8 ? d : null
   return d.length >= 10 && d.length <= 13 ? d : null
 }
+
+/** Número escondido pelo WhatsApp (código "@lid") ou fora do padrão brasileiro: sem wa.me nem telefone no cadastro. */
+export const numeroOculto = (telefone: string) => chaveTelefone(telefone) === null
 
 /** Nome que a pessoa usa no WhatsApp (pode não existir). */
 export function nomeDoRemetente(body: Recebida): string | null {
