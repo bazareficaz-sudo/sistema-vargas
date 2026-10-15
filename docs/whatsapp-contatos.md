@@ -51,9 +51,32 @@ Medido em 15/10/2026: desde que o webhook voltou a gravar (08/10), 100 números 
 
 Guardar o contato serve para responder quem procurou a loja. **Não é autorização para mandar promoção.** Envio de campanha precisa de consentimento registrado; isso fica para as próximas etapas.
 
+## Caixa de entrada — etapa 2, parte A
+
+Tela **CRM / WhatsApp → Conversas** (`/dashboard/integracoes/whatsapp/conversas`).
+
+- **Lista:** uma linha por contato, a mais recente no topo. Mostra o nome (do cliente ou do WhatsApp), "aguardando há X" quando o cliente escreveu por último e um ponto para "não lida". Filtros: todas, aguardando resposta, não lidas. Tem busca.
+- **Conversa aberta:**
+  - histórico com tudo o que o cliente mandou e tudo o que a loja enviou pelo sistema (orçamento, cupom, comprovante, automações), com rótulo;
+  - abrir marca como lida (`lida_em`);
+  - a tela se atualiza a cada 20 s.
+- **Responder:** usa a rota que já existia, `/api/whatsapp/enviar`, com `tipo = 'atendimento'`. Ela registra, respeita opt-out e guarda o resultado da Z-API.
+- **Número oculto (`@lid`) não pode ser respondido pelo sistema.** A Z-API trataria o código como telefone; a tela orienta responder pelo celular.
+- **Resposta dada pelo celular** entra na conversa como `enviada_celular`, mas só se a Z-API estiver avisando as mensagens enviadas (opção "notificar as enviadas por mim" da instância).
+  - Só entra conversa com contato, nunca com o dono ou a equipe.
+  - Não duplica o que o sistema mandou: confere o mesmo `messageId`, ou o mesmo texto nos últimos 3 min, depois de esperar 5 s.
+
+**Banco** (`supabase/migrations/20261015200000_whatsapp_conversas.sql`):
+- gatilho que liga **toda** mensagem ao contato pelo telefone;
+- `ultima_entrada_em`, `ultima_saida_em` e `lida_em` em `whatsapp_contatos`; o logado só altera `lida_em`;
+- view `whatsapp_conversas` (`security_invoker`, sem `anon`), com `aguardando` e `nao_lida`;
+- histórico: as mensagens que a loja já mandou para contatos passam a ser ligadas a eles, e as conversas antigas começam lidas.
+
+Testada em Postgres local.
+
 ## Próximas etapas (planejado, não implementado)
 
-1. Caixa de entrada (conversa por cliente, responder pelo sistema, ficha ao lado, enviar produto do estoque, respostas rápidas, etiquetas/funil, lembretes).
+1. Caixa de entrada, parte B: ficha do cliente ao lado, respostas rápidas, enviar produto do estoque. Depois: etiquetas/funil e lembretes.
 2. IA copiloto (sugere resposta com preço e estoque reais; humano envia) e mensagem fora do horário.
 3. Origem do lead (qual post do Vargas Marketing gerou a conversa).
 4. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

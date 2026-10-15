@@ -31,6 +31,7 @@ const TIPO_LABEL: Record<string, string> = {
   lista_produtos: 'Produtos', teste: 'Teste', manual: 'Manual',
   recebida: 'Recebida', confirmacao_pag: 'Confirmação Pgto',
   lembrete_venc: 'Lembrete Venc.', pos_venda: 'Pós-Venda',
+  atendimento: 'Atendimento', enviada_celular: 'Pelo celular',
 }
 
 export default function WhatsAppHistoricoClient({
