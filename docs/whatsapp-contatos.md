@@ -74,9 +74,31 @@ Tela **CRM / WhatsApp → Conversas** (`/dashboard/integracoes/whatsapp/conversa
 
 Testada em Postgres local.
 
+## Caixa de entrada — etapa 2, parte B
+
+Sem migração: usa tabelas que já existiam.
+
+- **Ficha do cliente** (terceira coluna em tela larga; botão "Ficha" em tela menor):
+  - saldo em aberto, vencido, crédito e limite; avisos de fiado bloqueado e de opt-out;
+  - últimas 5 compras concluídas e orçamentos em aberto (com validade);
+  - tudo filtrado pela empresa logada;
+  - contato que ainda não é cliente mostra "Cadastrar cliente".
+- **Respostas rápidas:** botões acima da caixa de texto.
+  - **Uso:** o clique só coloca o texto na caixa para ajustar; nada é enviado sozinho.
+  - **Variáveis:** `{nome}` vira o primeiro nome e `{loja}` o nome da loja. `{, nome}` some quando não há nome.
+  - **Onde ficam:** em `whatsapp_modelos`, com `tipo = 'resposta_rapida'`. "+ Nova" cria uma na própria conversa. Para editar ou apagar, use Configuração → Modelos.
+  - **Padrão:** Saudação, Horário, Endereço e Obrigado. Saem do horário do WhatsApp e do endereço da empresa, e só entram se esses dados existirem. Uma resposta da loja com o mesmo nome substitui a padrão.
+- **Enviar produto:** `POST /api/whatsapp/conversas/produto` com `{contatoId, produtoId}`.
+  - **Um por envio:** sempre um produto, para a conversa aberta.
+  - **Busca:** produtos ativos da empresa, por nome ou código. Mostra o preço vigente e o estoque.
+  - **Prévia:** a legenda aparece antes do envio.
+  - **O que vai:** a foto principal com a legenda (`legendaDoProduto`): nome, preço vigente e código. A promoção só aparece enquanto vale, em "de/por" com a validade. Custo nunca vai. Sem preço cadastrado, vai só o nome. Sem foto, vai só o texto.
+  - **Registro:** fica no histórico como `produto_individual`, gravado antes do envio.
+  - **Bloqueios:** respeita opt-out. Número oculto não pode receber.
+
 ## Próximas etapas (planejado, não implementado)
 
-1. Caixa de entrada, parte B: ficha do cliente ao lado, respostas rápidas, enviar produto do estoque. Depois: etiquetas/funil e lembretes.
+1. Etiquetas/funil e lembretes na caixa de entrada.
 2. IA copiloto (sugere resposta com preço e estoque reais; humano envia) e mensagem fora do horário.
 3. Origem do lead (qual post do Vargas Marketing gerou a conversa).
 4. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.
