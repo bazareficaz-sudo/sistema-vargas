@@ -25,6 +25,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Parte B** (ficha do cliente, respostas rápidas, enviar produto do estoque): sem migração.
 - **Etapa 3** (etapas do atendimento, lembrete de retorno, filtro "Para hoje"): migração `20261016120000_whatsapp_funil.sql`.
 - **Arquivos** (fotos e áudios na conversa, colar imagem, busca de produto como no PDV): migração `20261016200000_whatsapp_midias.sql` (bucket privado `whatsapp-midias`).
+- **Assistente de resposta (IA):** rascunho com preço e estoque do cadastro, preço conferido, quem envia é a pessoa; sem migração.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar
