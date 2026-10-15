@@ -1,8 +1,28 @@
 export function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
 
+// ANÚNCIO COM VARIAÇÃO: preço e estoque moram em cada variação. Os do
+// próprio anúncio a Shopee deixa zerados — medido em 15/10/2026: "Torneira 2
+// Saídas" aparecia R$ 0,00, estoque 0 e "Diverge do produto", com a única
+// variação a R$ 49,89 e 99 unidades no canal.
+export function resumoDasVariacoes(a: any): { precoMin: number; precoMax: number; estoque: number } | null {
+  const vs = a.tem_variacao ? (a.marketplace_anuncio_variacoes ?? []) : []
+  const precos = vs.map((v: any) => Number(v.preco)).filter((n: number) => n > 0)
+  if (vs.length === 0) return null
+  return {
+    precoMin: precos.length ? Math.min(...precos) : 0,
+    precoMax: precos.length ? Math.max(...precos) : 0,
+    estoque: vs.reduce((s: number, v: any) => s + (Number(v.estoque) || 0), 0),
+  }
+}
+
 // Um anúncio só "diverge" se estiver vinculado a um produto — sem vínculo
-// não há com o que comparar preço/estoque.
+// não há com o que comparar preço/estoque. Com variação, compara cada
+// variação vinculada com o produto DELA.
 export function temDivergencia(a: any): boolean {
+  if (a.tem_variacao && (a.marketplace_anuncio_variacoes ?? []).length > 0) {
+    return (a.marketplace_anuncio_variacoes as any[]).some(v => v.produto_id && v.produtos && (
+      Number(v.preco) !== Number(v.produtos.preco_venda) || (Number(v.estoque) || 0) !== (Number(v.produtos.estoque) || 0)))
+  }
   if (!a.produto_id || !a.produtos) return false
   const precoDiverge = Number(a.preco_venda) !== Number(a.produtos.preco_venda)
   const estoqueDiverge = (a.estoque_externo ?? 0) !== (a.produtos.estoque ?? 0)

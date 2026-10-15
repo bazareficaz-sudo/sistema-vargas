@@ -20,7 +20,7 @@ import CriarAnuncioShopeeModal from './CriarAnuncioShopeeModal'
 import CriarAnuncioMercadoLivreModal from './CriarAnuncioMercadoLivreModal'
 import CriarAnuncioNuvemshopModal from './CriarAnuncioNuvemshopModal'
 import CriarAnuncioTiktokModal from './CriarAnuncioTiktokModal'
-import { fmt, temDivergencia } from './utils'
+import { fmt, resumoDasVariacoes, temDivergencia } from './utils'
 import { calcularKit } from '@/lib/produtos/kit'
 import { calcularPrecoParaMargem } from '@/lib/shopee/comissao'
 import { calcular as calcularPreco, saudeDoResultado, medidaDeSaude, ROTULO_SAUDE } from '@/lib/precificacao/motor'
@@ -708,7 +708,12 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         const data = await resp.json()
         if (data.ok) {
           sucesso++
-          setAnuncios(prev => prev.map(x => x.id === data.anuncio.id ? data.anuncio : x))
+          // A rota devolve o anúncio SEM as variações (vêm em `data.variacoes`).
+          // Trocar a linha inteira apagava a lista delas, e a tela passava a
+          // dizer "Não vinculado" num anúncio com todas as variações mapeadas.
+          setAnuncios(prev => prev.map(x => x.id === data.anuncio.id
+            ? { ...x, ...data.anuncio, marketplace_anuncio_variacoes: data.variacoes ?? x.marketplace_anuncio_variacoes }
+            : x))
         } else {
           falha++
           if (data.erro) erros.push(data.erro)
@@ -979,7 +984,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
     if (editando) {
       const { data, error } = await sb.from('marketplace_anuncios').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', editando.id).select('*, produtos(id,nome,sku,preco_venda,estoque,tipo,tags)').single()
       if (error) { setErro(error.message); setSalvando(false); return }
-      setAnuncios(prev => prev.map(a => a.id === editando.id ? data : a))
+      setAnuncios(prev => prev.map(a => a.id === editando.id ? { ...a, ...data } : a))
     } else {
       const { data, error } = await sb.from('marketplace_anuncios').insert(payload).select('*, produtos(id,nome,sku,preco_venda,estoque,tipo,tags)').single()
       if (error) { setErro(error.message); setSalvando(false); return }
@@ -1542,7 +1547,7 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-gray-900 leading-snug line-clamp-2">{a.titulo}</p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {a.sku_canal ? `SKU ${a.sku_canal}` : 'sem SKU no canal'} · {fmt(a.preco_venda)}
+                  {a.sku_canal ? `SKU ${a.sku_canal}` : 'sem SKU no canal'} · {resumoDasVariacoes(a) ? fmt(resumoDasVariacoes(a)!.precoMin) : fmt(a.preco_venda)}
                 </p>
                 {a.qualidade_em != null && (
                   <p className="text-xs mt-0.5">
@@ -1724,8 +1729,14 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                   </button>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <p className="text-gray-900 font-mono text-sm">{a.estoque_reservado ?? 0}</p>
-                  {a.produtos && <p className="text-xs text-gray-400">estoque: {a.produtos.estoque ?? 0}</p>}
+                  {resumoDasVariacoes(a) ? (
+                    <p className="text-gray-900 font-mono text-sm" title="Soma das variações no canal">{resumoDasVariacoes(a)!.estoque}</p>
+                  ) : (
+                    <>
+                      <p className="text-gray-900 font-mono text-sm">{a.estoque_reservado ?? 0}</p>
+                      {a.produtos && <p className="text-xs text-gray-400">estoque: {a.produtos.estoque ?? 0}</p>}
+                    </>
+                  )}
                   {/* O QUE ACHAMOS QUE MANDAMOS, quando discorda do que o canal
                       devolveu. Sao duas colunas diferentes e so uma aparecia:
                       `estoque_reservado` e a LEITURA da plataforma,
@@ -1742,7 +1753,15 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
                 </td>
                 <td className="px-4 py-3 text-right text-gray-600 font-mono text-sm">{a.vendas ?? '—'}</td>
                 <td className="px-4 py-3 text-right">
-                  <p className="font-semibold text-gray-900">{fmt(a.preco_venda)}</p>
+                  {(() => {
+                    const r = resumoDasVariacoes(a)
+                    if (!r) return <p className="font-semibold text-gray-900">{fmt(a.preco_venda)}</p>
+                    return (
+                      <p className="font-semibold text-gray-900" title="Preço das variações no canal">
+                        {r.precoMin === r.precoMax ? fmt(r.precoMin) : `${fmt(r.precoMin)} – ${fmt(r.precoMax)}`}
+                      </p>
+                    )
+                  })()}
                   <SaudeDoAnuncio anuncio={a} cfg={configPreco} />
                 </td>
                 <td className="px-4 py-3 text-right">

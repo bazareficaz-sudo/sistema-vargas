@@ -27,7 +27,7 @@ const COLUNAS_LISTAGEM_ANUNCIO = [
 ].join(', ')
 
 export const SELECT_LISTAGEM_ANUNCIO =
-  `${COLUNAS_LISTAGEM_ANUNCIO}, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao, produto_id)`
+  `${COLUNAS_LISTAGEM_ANUNCIO}, produtos(id, nome, sku, preco_venda, preco_custo, estoque, tipo, tags), marketplace_anuncio_variacoes(nome_variacao, sku_variacao, produto_id, preco, estoque, produtos(preco_venda, estoque))`
 
 /** Opções do seletor "carregar N anúncios" na tela de Anúncios. */
 export const TAMANHOS_PAGINA_ANUNCIOS = [50, 100, 150, 200] as const

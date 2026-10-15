@@ -54,7 +54,7 @@ export default function AnuncioDetalheModal({ anuncio, canal, regras, onClose, o
       })
       const data = await resp.json()
       if (!data.ok) { setErro(data.erro ?? 'Erro ao sincronizar'); return }
-      onAtualizado(data.anuncio)
+      onAtualizado({ ...anuncio, ...data.anuncio, marketplace_anuncio_variacoes: data.variacoes ?? anuncio.marketplace_anuncio_variacoes })
       setVariacoes(data.variacoes ?? [])
       setAviso(data.warnings?.length ? `Sincronizado com ${data.warnings.length} aviso(s).` : 'Sincronizado com sucesso.')
     } catch (e: any) {
