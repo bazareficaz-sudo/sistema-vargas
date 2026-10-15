@@ -117,6 +117,31 @@ Migração `supabase/migrations/20261016120000_whatsapp_funil.sql`, testada em P
   - o logado só altera `etapa`, `retorno_em` e `retorno_nota`; o RLS de UPDATE limita à empresa;
   - a view ganha `retorno_vencido` e `orcamento_parado`.
 
+## Arquivos na conversa, imagem colada e busca de produto
+
+Migração `supabase/migrations/20261016200000_whatsapp_midias.sql`, testada em Postgres local.
+
+- **Arquivos recebidos** (foto, áudio, vídeo, documento, figurinha):
+  - o webhook guarda o link em `conteudo_pdf_url` e marca o texto (`[foto]`, `[áudio]`…);
+  - depois do 200, copia o arquivo para o bucket **privado** `whatsapp-midias`, na pasta `<empresa>/<contato>/`. O link da Z-API é temporário;
+  - só https, até 16 MB, e só com a chave do webhook conferida;
+  - se a cópia falhar, fica o link original.
+- **O que a loja mandou pelo celular** com arquivo também é guardado.
+- **Na tela:** foto e figurinha aparecem como imagem, áudio e vídeo com player, documento como link. O arquivo guardado abre por link assinado de 1 h.
+- **Mensagens antigas** marcadas só como "[mídia]" não tinham o link guardado e não têm como ser recuperadas.
+- **Foto do produto enviado** aparece no histórico: o texto passa a ser gravado como `[foto] legenda`.
+- **Imagem colada (Ctrl+V) ou 📎:**
+  - fica de prévia, e o texto da caixa vai como legenda;
+  - o navegador sobe a imagem para a pasta da empresa (o RLS do Storage só deixa a própria empresa);
+  - `POST /api/whatsapp/conversas/imagem` monta o caminho no servidor e manda à Z-API um link assinado de 10 min;
+  - uma imagem por envio; respeita opt-out e bloqueia número oculto.
+- **Mensagem duplicada "Pelo celular":** o envio gravava o `zaapId`, e o aviso da Z-API traz o `messageId` do WhatsApp. Agora as rotas gravam o `messageId`, e a conferência também aceita o texto com a marca `[foto]`.
+- **Busca de produto para enviar:** igual à do PDV.
+  - Busca enquanto digita.
+  - EAN ou código exato primeiro; depois cada palavra no nome ou na marca; por fim código parecido.
+  - Mostra foto, marca, preço vigente e estoque.
+  - Navega com ↑ ↓ e Enter.
+
 ## Próximas etapas (planejado, não implementado)
 
 1. Avisar o atendente dos lembretes do dia (ex.: resumo do Getúlio).

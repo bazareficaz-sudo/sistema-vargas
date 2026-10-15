@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import WhatsAppConversasClient, { type Conversa, type Mensagem, type Ficha } from '@/components/integracoes/WhatsAppConversasClient'
 import { ETAPAS, respostasPadrao, type RespostaRapida } from '@/lib/whatsapp/conversas'
+import { BUCKET_MIDIAS, caminhoGuardado } from '@/lib/whatsapp/midias'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,7 +49,7 @@ export default async function WhatsAppConversasPage({
       .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null).limit(10000),
     aberta ? supabase.from('whatsapp_conversas').select(campos).eq('empresa_id', empresaId).eq('id', aberta).maybeSingle() : null,
     aberta ? supabase.from('whatsapp_mensagens')
-      .select('id, tipo, conteudo, status, erro, created_at, enviado_em, operador_nome')
+      .select('id, tipo, conteudo, conteudo_pdf_url, status, erro, created_at, enviado_em, operador_nome')
       .eq('empresa_id', empresaId).eq('contato_id', aberta)
       .order('created_at', { ascending: false }).limit(200) : null,
   ])
@@ -73,6 +74,21 @@ export default async function WhatsAppConversasPage({
     supabase.from('whatsapp_config').select('horario_atendimento').eq('empresa_id', empresaId).maybeSingle(),
     supabase.from('empresas').select('nome, nome_fantasia, logradouro, numero, bairro, cidade, uf').eq('id', empresaId).maybeSingle(),
   ])
+
+  // Arquivos guardados no bucket privado: link assinado de 1 h (o RLS do
+  // Storage confere a empresa). Link da Z-API vai como veio.
+  type Linha = Omit<Mensagem, 'midia_url'> & { conteudo_pdf_url: string | null }
+  const linhasMsg = ((mensagens?.data ?? []) as Linha[]).reverse()
+  const caminhos = [...new Set(linhasMsg.map(m => caminhoGuardado(m.conteudo_pdf_url)).filter((c): c is string => Boolean(c)))]
+  const assinados = new Map<string, string>()
+  if (caminhos.length) {
+    const { data } = await supabase.storage.from(BUCKET_MIDIAS).createSignedUrls(caminhos, 3600)
+    for (const a of data ?? []) if (a.path && a.signedUrl) assinados.set(a.path, a.signedUrl)
+  }
+  const listaMensagens: Mensagem[] = linhasMsg.map(({ conteudo_pdf_url, ...m }) => {
+    const caminho = caminhoGuardado(conteudo_pdf_url)
+    return { ...m, midia_url: caminho ? assinados.get(caminho) ?? null : (conteudo_pdf_url && /^https:\/\//.test(conteudo_pdf_url) ? conteudo_pdf_url : null) }
+  })
 
   type Marca = { etapa: string; aguardando: boolean; nao_lida: boolean; retorno_vencido: boolean; orcamento_parado: boolean }
   const linhas = (marcas.data ?? []) as Marca[]
@@ -102,7 +118,7 @@ export default async function WhatsAppConversasPage({
       empresaId={empresaId}
       conversas={(conversas.data ?? []) as Conversa[]}
       aberta={conversaAberta}
-      mensagens={((mensagens?.data ?? []) as Mensagem[]).reverse()}
+      mensagens={listaMensagens}
       contagem={contagem}
       filtros={{ f: filtro, q, e: etapa }}
       // Migração da caixa de entrada ainda não aplicada: a tela explica.

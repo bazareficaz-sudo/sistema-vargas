@@ -84,7 +84,7 @@ export async function zapiSendText(
     })
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
-    return { success: true, messageId: data.zaapId ?? data.messageId ?? data.id }
+    return { success: true, messageId: data.messageId ?? data.zaapId ?? data.id }
   } catch (e: any) {
     return { success: false, error: e.message }
   }
@@ -133,7 +133,7 @@ export async function zapiSendDocument(
     })
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
-    return { success: true, messageId: data.zaapId ?? data.messageId ?? data.id }
+    return { success: true, messageId: data.messageId ?? data.zaapId ?? data.id }
   } catch (e: any) {
     return { success: false, error: e.message }
   }
@@ -153,7 +153,7 @@ export async function zapiSendImage(
     })
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
-    return { success: true, messageId: data.zaapId ?? data.messageId ?? data.id }
+    return { success: true, messageId: data.messageId ?? data.zaapId ?? data.id }
   } catch (e: any) {
     return { success: false, error: e.message }
   }
