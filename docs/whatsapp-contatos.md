@@ -200,8 +200,23 @@ Sem migração. É um bloco no resumo diário da Betina (`src/lib/getulio/atendi
 - **Liga e desliga** em Betina → "O que vigiar" → "Atendimento no WhatsApp" (id `atendimento_whatsapp`, em `vigias_desligados`). Não gera sinal na Central, só o bloco.
 - **Aparece também** na prévia e no envio manual do resumo. Se a leitura falhar, o resumo sai sem o bloco.
 
+## Resposta automática fora do horário
+
+Migração `supabase/migrations/20261017180000_whatsapp_fora_horario.sql`. Regras em `src/lib/whatsapp/foraHorario.ts` (puras, também usadas na tela) e envio em `foraHorarioEnvio.ts`.
+
+- **Configuração do WhatsApp → "Resposta automática fora do horário":** liga e desliga (**desligada por padrão**), horário por dia da semana, texto (`{nome}`, `{loja}`, `{horario}`; vazio usa o padrão) e prévia.
+- **Quando envia:** o webhook, depois do 200, para cada mensagem recebida de um **contato**, com a chave conferida. Dono e equipe nem viram contato. Envia se a loja está fechada (fuso de São Paulo, abertura incluída, fechamento não).
+- **Quando não envia:**
+  - mais de uma vez por contato por dia: `whatsapp_contatos.fora_horario_dia`, gravado num UPDATE condicional **antes** de enviar, então duas mensagens seguidas nunca geram duas respostas;
+  - quando alguém da loja respondeu nos últimos 30 min;
+  - para conversa ignorada ou número oculto;
+  - para quem pediu para não receber (opt-out).
+- **Registro:** a mensagem fica como `automacao_fora_horario` ("Fora do horário (automática)").
+- **Não conta como resposta:** o gatilho não mexe em `ultima_saida_em`, e a conversa continua "aguardando" e no resumo da manhã.
+- **Sem reenvio:** resultado desconhecido não é reenviado; o erro fica na mensagem.
+- **Feriado:** não há calendário; desligue no dia ou ajuste o horário.
+
 ## Próximas etapas (planejado, não implementado)
 
-1. Mensagem automática fora do horário (uma por pessoa por dia, desligada por padrão).
-2. Origem do lead (qual post do Vargas Marketing gerou a conversa).
-3. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.
+1. Origem do lead (qual post do Vargas Marketing gerou a conversa).
+2. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

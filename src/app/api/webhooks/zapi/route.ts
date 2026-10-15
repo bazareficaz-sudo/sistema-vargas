@@ -5,6 +5,7 @@ import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
 import { receberFotoProduto } from '@/lib/getulio/foto'
 import { idDaMensagem, midiaDaMensagem, nomeDoRemetente, respostaDe, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
 import { guardarMidia } from '@/lib/whatsapp/midias'
+import { responderForaDoHorario } from '@/lib/whatsapp/foraHorarioEnvio'
 import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
 import { registrarEnviadaPeloCelular } from '@/lib/whatsapp/celular'
 
@@ -144,6 +145,13 @@ export async function POST(request: NextRequest) {
           ({ data: registrada, error: erroRegistro } = await supabase.from('whatsapp_mensagens').insert(linha).select('id, contato_id').single())
         }
         if (erroRegistro) console.error('Mensagem WhatsApp:', erroRegistro.message)
+
+        // Loja fechada: resposta automática (desligada por padrão; uma por
+        // contato por dia; regras em lib/whatsapp/foraHorarioEnvio.ts).
+        if (chaveOk && remetente && contato?.contato_id) {
+          const dadosFora = { contatoId: contato.contato_id, telefone: remetente, clienteId: contato.cliente_id, clienteNome: contato.cliente_nome, nome: nomeDoRemetente(body) }
+          after(() => responderForaDoHorario(supabase, empresaId, dadosFora).then(() => undefined).catch(() => undefined))
+        }
         if (midia && chaveOk && registrada?.id) {
           const dadosMidia = { empresaId, contatoId: registrada.contato_id ?? null, mensagemId: registrada.id, url: midia.url }
           after(() => guardarMidia(supabase, dadosMidia).then(() => undefined))
