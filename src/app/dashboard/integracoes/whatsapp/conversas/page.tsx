@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
-import WhatsAppConversasClient, { type Conversa, type Mensagem } from '@/components/integracoes/WhatsAppConversasClient'
+import WhatsAppConversasClient, { type Conversa, type Mensagem, type Ficha } from '@/components/integracoes/WhatsAppConversasClient'
+import { respostasPadrao, type RespostaRapida } from '@/lib/whatsapp/conversas'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,10 +48,46 @@ export default async function WhatsAppConversasPage({
       .order('created_at', { ascending: false }).limit(200) : null,
   ])
 
+  // Ficha do cliente (parte B): saldo, últimas compras e orçamentos em
+  // aberto, só quando a conversa já é de um cliente cadastrado. Tudo
+  // filtrado pela empresa de quem está logado.
+  const conversaAberta = (atual?.data ?? null) as Conversa | null
+  const clienteId = conversaAberta?.cliente_id ?? null
+  const [cliente, compras, orcamentos, modelos, cfg, empresa] = await Promise.all([
+    clienteId ? supabase.from('clientes')
+      .select('saldo_devedor, saldo_credito, valor_vencido, limite_credito, bloqueado_fiado, opt_out_whatsapp')
+      .eq('empresa_id', empresaId).eq('id', clienteId).maybeSingle() : null,
+    clienteId ? supabase.from('vendas').select('id, numero, created_at, total, canal')
+      .eq('empresa_id', empresaId).eq('cliente_id', clienteId).eq('status', 'concluida')
+      .order('created_at', { ascending: false }).limit(5) : null,
+    clienteId ? supabase.from('orcamentos').select('id, numero, created_at, total, validade')
+      .eq('empresa_id', empresaId).eq('cliente_id', clienteId).eq('status', 'aberto')
+      .order('created_at', { ascending: false }).limit(5) : null,
+    supabase.from('whatsapp_modelos').select('id, nome, conteudo')
+      .eq('empresa_id', empresaId).eq('tipo', 'resposta_rapida').eq('ativo', true).order('nome'),
+    supabase.from('whatsapp_config').select('horario_atendimento').eq('empresa_id', empresaId).maybeSingle(),
+    supabase.from('empresas').select('nome, nome_fantasia, logradouro, numero, bairro, cidade, uf').eq('id', empresaId).maybeSingle(),
+  ])
+
+  const ficha: Ficha | null = clienteId && cliente?.data ? {
+    ...(cliente.data as Omit<Ficha, 'compras' | 'orcamentos'>),
+    compras: (compras?.data ?? []) as Ficha['compras'],
+    orcamentos: (orcamentos?.data ?? []) as Ficha['orcamentos'],
+  } : null
+  // Cadastradas pela loja primeiro; as padrão completam (sem repetir nome).
+  const proprias = (modelos.data ?? []) as RespostaRapida[]
+  const padrao = respostasPadrao({ horario: cfg.data?.horario_atendimento, endereco: empresa.data })
+    .filter(p => !proprias.some(m => m.nome.trim().toLowerCase() === p.nome.toLowerCase()))
+  const loja = empresa.data?.nome_fantasia || empresa.data?.nome || ''
+
   return (
     <WhatsAppConversasClient
+      ficha={ficha}
+      respostas={[...proprias, ...padrao]}
+      loja={loja}
+      empresaId={empresaId}
       conversas={(conversas.data ?? []) as Conversa[]}
-      aberta={(atual?.data ?? null) as Conversa | null}
+      aberta={conversaAberta}
       mensagens={((mensagens?.data ?? []) as Mensagem[]).reverse()}
       contagem={{ aguardando: aguardando.count ?? 0, naoLidas: naoLidas.count ?? 0 }}
       filtros={{ f: filtro, q }}

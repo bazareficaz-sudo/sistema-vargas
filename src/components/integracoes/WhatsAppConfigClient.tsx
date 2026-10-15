@@ -29,6 +29,8 @@ const TIPOS_MODELO = [
   'cupom', 'orcamento', 'pedido', 'cobranca', 'lembrete_vencimento',
   'confirmacao_pagamento', 'lista_produtos', 'produto_individual',
   'follow_up', 'aniversario', 'pos_venda', 'aviso_retirada', 'promocao',
+  // Botões da caixa de entrada (Conversas): {nome} e {loja} são preenchidos lá.
+  'resposta_rapida',
 ]
 
 const VARIAVEIS = [
