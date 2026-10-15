@@ -28,6 +28,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Assistente de resposta (IA):** rascunho com preço e estoque do cadastro, preço conferido, quem envia é a pessoa; sem migração.
 - **Resposta citada:** mostra a mensagem que o cliente respondeu (ex.: foto do produto); migração `20261017120000_whatsapp_resposta_citada.sql`.
 - **Orçamento pela conversa:** monta no PDV (`/pdv?conversa=`), negocia e envia na tela de Orçamentos (`?abrir=&conversa=`); "Cliente fechou" → PDV → Comprou; migração `20261017140000_whatsapp_orcamento_convertido.sql`.
+- **Resumo da manhã (Betina):** bloco "Atendimento no WhatsApp" com retornos, orçamentos parados e conversas esperando, com link de cada conversa; vigia `atendimento_whatsapp`; sem migração.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar

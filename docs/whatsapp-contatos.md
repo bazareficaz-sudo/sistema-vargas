@@ -188,9 +188,20 @@ O orçamento é montado no **PDV** e negociado na **tela de Orçamentos**, as me
   - Fechar e desistir não enviam nada. Só valem para orçamento desta conversa (do cliente dela ou enviado para ela).
 - **Assistente de IA:** quando o cliente parece aceitar ("pode fechar"), a nota sugere usar "Cliente fechou".
 
+## Resumo da manhã: atendimento no WhatsApp
+
+Sem migração. É um bloco no resumo diário da Betina (`src/lib/getulio/atendimento.ts`), escrito sem IA (lista exata, como o bloco da semana) e entregue aos mesmos destinatários, no mesmo horário.
+
+- **Três listas**, até 5 itens cada, com o link de cada conversa (`/dashboard/integracoes/whatsapp/conversas?c=<id>`). Quando passa de 5, vai "…e mais N" com o link do filtro.
+  - **Retornos para hoje:** `retorno_vencido`, com a nota.
+  - **Orçamentos sem resposta:** `orcamento_parado`, com a data do envio.
+  - **Esperando resposta da loja:** `aguardando` há mais de 2 h e no máximo 3 dias. As mais antigas viram ruído enquanto a Z-API não avisa as respostas dadas pelo celular.
+  - Conversa ignorada não entra, e quem já está numa lista não repete na seguinte.
+- **Liga e desliga** em Betina → "O que vigiar" → "Atendimento no WhatsApp" (id `atendimento_whatsapp`, em `vigias_desligados`). Não gera sinal na Central, só o bloco.
+- **Aparece também** na prévia e no envio manual do resumo. Se a leitura falhar, o resumo sai sem o bloco.
+
 ## Próximas etapas (planejado, não implementado)
 
-1. Avisar o atendente dos lembretes do dia (ex.: resumo do Getúlio).
-2. IA copiloto (sugere resposta com preço e estoque reais; humano envia) e mensagem fora do horário.
-3. Origem do lead (qual post do Vargas Marketing gerou a conversa).
-4. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.
+1. Mensagem automática fora do horário (uma por pessoa por dia, desligada por padrão).
+2. Origem do lead (qual post do Vargas Marketing gerou a conversa).
+3. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

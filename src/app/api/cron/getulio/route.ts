@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { VIGIA_ATENDIMENTO } from '@/lib/getulio/atendimento'
 import { diaISO } from '@/lib/datas'
 import { varrer } from '@/lib/getulio/varredura'
 import { enviarAlertas, enviarResumo } from '@/lib/getulio/resumo'
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
     try {
       if (varreduraVencida || horaDoResumo) r.varredura = await varrer(sb, cfg.empresa_id, cfg.vigias_desligados ?? [], agora)
       if (horaDoResumo) {
-        const envio = await enviarResumo(sb, cfg.empresa_id, cfg.destinatarios ?? [], 'resumo_diario', agora, { semanal: cfg.resumo_semanal !== false })
+        const envio = await enviarResumo(sb, cfg.empresa_id, cfg.destinatarios ?? [], 'resumo_diario', agora, { semanal: cfg.resumo_semanal !== false, atendimento: !(cfg.vigias_desligados ?? []).includes(VIGIA_ATENDIMENTO) })
         r.resumo = { ok: envio.ok, enviados: envio.enviados, falhas: envio.falhas }
       } else if (cfg.alertas_imediatos !== false && r.varredura) {
         // Na hora do resumo o urgente já vai nele; fora dela, alerta.

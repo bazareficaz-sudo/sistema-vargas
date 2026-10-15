@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { VIGIA_ATENDIMENTO } from '@/lib/getulio/atendimento'
 import { guardaGetulio, lerConfig } from '@/lib/getulio/acesso'
 import { montarResumo } from '@/lib/getulio/resumo'
 
@@ -11,6 +12,6 @@ export async function POST() {
   if (!guarda.ok) return NextResponse.json({ ok: false, erro: guarda.erro }, { status: guarda.status })
   const cfg = await lerConfig(sb, guarda.empresaId)
   const nome = cfg.destinatarios?.[0]?.nome ?? ''
-  const r = await montarResumo(createAdminClient(), guarda.empresaId, nome, new Date(), { semanal: cfg.resumo_semanal !== false })
+  const r = await montarResumo(createAdminClient(), guarda.empresaId, nome, new Date(), { semanal: cfg.resumo_semanal !== false, atendimento: !(cfg.vigias_desligados ?? []).includes(VIGIA_ATENDIMENTO) })
   return NextResponse.json({ ok: true, texto: r.texto, geradoPor: r.geradoPor, itens: r.itens.length, restantes: r.restantes })
 }
