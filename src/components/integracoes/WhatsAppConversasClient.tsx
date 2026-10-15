@@ -5,12 +5,13 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { formatarTelefone } from '@/lib/clientes/telefone'
 import { numeroOculto } from '@/lib/whatsapp/contatos'
-import { doCliente, legendaDoProduto, preencherResposta, rotuloSaida, tempoDeEspera, type ProdutoParaEnviar, type RespostaRapida } from '@/lib/whatsapp/conversas'
+import { ETAPAS, atalhosDeRetorno, etapaDe, rotuloRetorno, doCliente, legendaDoProduto, preencherResposta, rotuloSaida, tempoDeEspera, type ProdutoParaEnviar, type RespostaRapida } from '@/lib/whatsapp/conversas'
 import { precoVigente, promocaoVigente } from '@/lib/produtos/promocao'
 
 export type Conversa = {
   id: string; telefone: string; nome_whatsapp: string | null; cliente_id: string | null; cliente_nome: string | null
   status: string; ultima_atividade: string | null; ultima_entrada_em: string | null; aguardando: boolean; nao_lida: boolean
+  etapa: string; retorno_em: string | null; retorno_nota: string | null; retorno_vencido: boolean; orcamento_parado: boolean
 }
 export type Mensagem = {
   id: string; tipo: string; conteudo: string; status: string; erro: string | null
@@ -28,13 +29,13 @@ const nomeDe = (c: Conversa) => c.cliente_nome || c.nome_whatsapp || (numeroOcul
 const hora = (s: string) => new Date(s).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
 const dia = (s: string) => new Date(s).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'America/Sao_Paulo' })
 const brl = (v: number | null | undefined) => Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const FILTROS: Record<string, string> = { todas: 'Todas', aguardando: 'Aguardando resposta', nao_lidas: 'Não lidas' }
+const FILTROS: Record<string, string> = { todas: 'Todas', hoje: 'Para hoje', aguardando: 'Aguardando resposta', nao_lidas: 'Não lidas' }
 
 export default function WhatsAppConversasClient({ conversas, aberta, mensagens, contagem, filtros, indisponivel, ficha, respostas, loja, empresaId }: {
   conversas: Conversa[]; aberta: Conversa | null; mensagens: Mensagem[]
   ficha: Ficha | null; respostas: RespostaRapida[]; loja: string; empresaId: string
-  contagem: { aguardando: number; naoLidas: number }
-  filtros: { f: string; q: string }
+  contagem: { aguardando: number; naoLidas: number; hoje: number; etapas: Record<string, number> }
+  filtros: { f: string; q: string; e: string | null }
   indisponivel: boolean
 }) {
   const router = useRouter()
@@ -51,10 +52,11 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   const [achados, setAchados] = useState<ProdutoBusca[]>([])
   const [escolhido, setEscolhido] = useState<ProdutoBusca | null>(null)
   const [aviso, setAviso] = useState('')
+  const [lembrete, setLembrete] = useState<{ dia: string; nota: string } | null>(null)
 
   const url = (p: Record<string, string | null>) => {
     const sp = new URLSearchParams()
-    const base = { f: filtros.f, q: filtros.q, c: aberta?.id ?? null, ...p }
+    const base = { f: filtros.f, q: filtros.q, e: filtros.e, c: aberta?.id ?? null, ...p }
     Object.entries(base).forEach(([k, v]) => { if (v && !(k === 'f' && v === 'todas')) sp.set(k, v) })
     return `/dashboard/integracoes/whatsapp/conversas?${sp}`
   }
@@ -92,6 +94,24 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
       setEnviando(false)
       router.refresh()
     }
+  }
+
+  // Etapa e lembrete: o banco só deixa o logado mudar essas colunas (e o
+  // RLS limita à empresa). Lembrete é só aviso na tela; nada sai sozinho.
+  async function mudarEtapa(etapa: string) {
+    if (!aberta) return
+    const { error } = await createClient().from('whatsapp_contatos').update({ etapa }).eq('id', aberta.id)
+    if (error) setErro('Não foi possível mudar a etapa.')
+    router.refresh()
+  }
+
+  async function salvarLembrete(valor: { dia: string; nota: string } | null) {
+    if (!aberta) return
+    const { error } = await createClient().from('whatsapp_contatos')
+      .update({ retorno_em: valor?.dia || null, retorno_nota: valor?.nota.trim().slice(0, 200) || null })
+      .eq('id', aberta.id)
+    if (error) { setErro('Não foi possível salvar o lembrete.'); return }
+    setLembrete(null); router.refresh()
   }
 
   // Resposta rápida: entra na caixa de texto para ajustar antes de enviar.
@@ -139,7 +159,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
 
   if (indisponivel) return (
     <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
-      A caixa de entrada ainda não foi ativada no banco. Peça para aplicar a migração <code>20261015200000_whatsapp_conversas.sql</code>.
+      A caixa de entrada ainda não foi ativada no banco. Peça para aplicar as migrações <code>20261015200000_whatsapp_conversas.sql</code> e <code>20261016120000_whatsapp_funil.sql</code>.
     </div>
   )
 
@@ -163,7 +183,15 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
               {Object.entries(FILTROS).map(([k, v]) => (
                 <button key={k} onClick={() => ir({ f: k, c: null })}
                   className={`text-xs px-2 py-1 rounded-full ${filtros.f === k ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                  {v}{k === 'aguardando' && contagem.aguardando ? ` (${contagem.aguardando})` : ''}{k === 'nao_lidas' && contagem.naoLidas ? ` (${contagem.naoLidas})` : ''}
+                  {v}{k === 'hoje' && contagem.hoje ? ` (${contagem.hoje})` : ''}{k === 'aguardando' && contagem.aguardando ? ` (${contagem.aguardando})` : ''}{k === 'nao_lidas' && contagem.naoLidas ? ` (${contagem.naoLidas})` : ''}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              {ETAPAS.map(e => (
+                <button key={e.id} onClick={() => ir({ e: filtros.e === e.id ? null : e.id, c: null })}
+                  className={`text-[11px] px-2 py-0.5 rounded-full ${filtros.e === e.id ? 'ring-2 ring-teal-500 ' : ''}${e.cor}`}>
+                  {e.rotulo} {contagem.etapas[e.id] ?? 0}
                 </button>
               ))}
             </div>
@@ -171,14 +199,17 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
           <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
             {conversas.length === 0 && <p className="p-6 text-sm text-gray-400 text-center">Nenhuma conversa aqui.</p>}
             {conversas.map(c => (
-              <button key={c.id} onClick={() => ir({ c: c.id })}
+              <button key={c.id} onClick={() => { setLembrete(null); ir({ c: c.id }) }}
                 className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 ${aberta?.id === c.id ? 'bg-teal-50' : ''}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className={`text-sm truncate ${c.nao_lida ? 'font-semibold text-gray-900' : 'text-gray-800'}`}>{nomeDe(c)}</span>
                   {c.ultima_atividade && <span className="text-[11px] text-gray-400 whitespace-nowrap">{hora(c.ultima_atividade)}</span>}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
+                  {c.etapa !== 'novo' && <span className={`text-[10px] px-1.5 rounded ${etapaDe(c.etapa).cor}`}>{etapaDe(c.etapa).rotulo}</span>}
                   {c.cliente_id && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 rounded">cliente</span>}
+                  {c.retorno_em && <span className={`text-[10px] px-1.5 rounded ${c.retorno_vencido ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-600'}`}>retorno {rotuloRetorno(c.retorno_em)}</span>}
+                  {c.orcamento_parado && <span className="text-[10px] bg-orange-100 text-orange-800 px-1.5 rounded">orçamento parado</span>}
                   {c.aguardando && c.ultima_entrada_em && <span className="text-[11px] text-amber-700">aguardando há {tempoDeEspera(c.ultima_entrada_em)}</span>}
                   {c.nao_lida && <span className="ml-auto w-2 h-2 rounded-full bg-teal-500" />}
                 </div>
@@ -201,6 +232,45 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                   {oculto ? 'Número oculto pelo WhatsApp' : formatarTelefone(aberta.telefone)}
                   {aberta.cliente_nome && aberta.nome_whatsapp ? ` · no WhatsApp: ${aberta.nome_whatsapp}` : ''}
                 </p>
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <select value={aberta.etapa} onChange={e => mudarEtapa(e.target.value)}
+                    className={`text-xs rounded-full px-2 py-0.5 border-0 cursor-pointer ${etapaDe(aberta.etapa).cor}`}>
+                    {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.rotulo}</option>)}
+                  </select>
+                  {aberta.retorno_em ? (
+                    <button onClick={() => setLembrete({ dia: aberta.retorno_em!, nota: aberta.retorno_nota ?? '' })}
+                      className={`text-xs px-2 py-0.5 rounded-full ${aberta.retorno_vencido ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-700'}`}>
+                      Retornar {rotuloRetorno(aberta.retorno_em)}{aberta.retorno_nota ? ` · ${aberta.retorno_nota}` : ''}
+                    </button>
+                  ) : (
+                    <button onClick={() => setLembrete({ dia: atalhosDeRetorno()[0].dia, nota: '' })}
+                      className="text-xs px-2 py-0.5 rounded-full border border-dashed border-gray-300 text-gray-500 hover:text-gray-700">+ Lembrete de retorno</button>
+                  )}
+                  {aberta.orcamento_parado && <span className="text-xs text-orange-700">Orçamento sem resposta há 3 dias ou mais</span>}
+                </div>
+                {lembrete && (
+                  <div className="mt-2 p-2 rounded-lg bg-gray-50 border border-gray-200 space-y-1.5 max-w-md">
+                    <div className="flex gap-1 flex-wrap items-center">
+                      {atalhosDeRetorno().map(a => (
+                        <button key={a.rotulo} onClick={() => setLembrete(l => l && { ...l, dia: a.dia })}
+                          className={`text-[11px] px-2 py-0.5 rounded-full ${lembrete.dia === a.dia ? 'bg-teal-600 text-white' : 'bg-white border border-gray-200 text-gray-700'}`}>{a.rotulo}</button>
+                      ))}
+                      <input type="date" value={lembrete.dia} onChange={e => setLembrete(l => l && { ...l, dia: e.target.value })}
+                        className="text-[11px] border border-gray-300 rounded px-1.5 py-0.5" />
+                    </div>
+                    <input value={lembrete.nota} onChange={e => setLembrete(l => l && { ...l, nota: e.target.value })} maxLength={200}
+                      placeholder="Nota (ex.: ver se fechou o orçamento da tinta)" className="w-full border border-gray-300 rounded px-2 py-1 text-xs" />
+                    <div className="flex justify-between items-center">
+                      {aberta.retorno_em
+                        ? <button onClick={() => salvarLembrete(null)} className="text-[11px] text-gray-600 hover:underline">Concluir (apagar lembrete)</button>
+                        : <span className="text-[11px] text-gray-400">Só um aviso na tela: nada é enviado sozinho.</span>}
+                      <div className="flex gap-2">
+                        <button onClick={() => setLembrete(null)} className="text-xs px-2 py-1 text-gray-600">Cancelar</button>
+                        <button onClick={() => salvarLembrete(lembrete)} disabled={!lembrete.dia} className="text-xs px-3 py-1 rounded bg-teal-600 text-white disabled:opacity-50">Salvar</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex gap-3 text-xs">
                 <button onClick={() => setVerFicha(v => !v)} className="xl:hidden text-blue-600 hover:underline">{verFicha ? 'Fechar ficha' : 'Ficha'}</button>

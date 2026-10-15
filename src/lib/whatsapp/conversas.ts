@@ -93,3 +93,49 @@ export function preencherResposta(conteudo: string, dados: { nome?: string | nul
     .replace(/\{(nome|nome_cliente|loja|nome_empresa)\}/gi, '')
     .replace(/[ \t]{2,}/g, ' ')
 }
+
+// ── Etapa 3: etapas do atendimento e lembrete de retorno ─────────────────
+
+export const ETAPAS = [
+  { id: 'novo', rotulo: 'Novo', cor: 'bg-gray-100 text-gray-700' },
+  { id: 'atendimento', rotulo: 'Em atendimento', cor: 'bg-blue-100 text-blue-700' },
+  { id: 'orcamento', rotulo: 'Orçamento enviado', cor: 'bg-amber-100 text-amber-800' },
+  { id: 'comprou', rotulo: 'Comprou', cor: 'bg-green-100 text-green-700' },
+  { id: 'perdido', rotulo: 'Perdido', cor: 'bg-red-100 text-red-700' },
+] as const
+export type Etapa = (typeof ETAPAS)[number]['id']
+export const etapaDe = (id: string | null | undefined) => ETAPAS.find(e => e.id === id) ?? ETAPAS[0]
+
+/** Data de hoje (AAAA-MM-DD) no fuso da loja — o lembrete é por dia, não por hora. */
+export function hojeNaLoja(agora: Date = new Date()): string {
+  return agora.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+}
+
+/** Soma dias a uma data AAAA-MM-DD, sem depender do fuso de quem roda. */
+export function somarDias(dia: string, n: number): string {
+  const d = new Date(`${dia}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+/** Atalhos do lembrete: amanhã, em 3 dias e a próxima segunda-feira (nunca hoje). */
+export function atalhosDeRetorno(agora: Date = new Date()): { rotulo: string; dia: string }[] {
+  const hoje = hojeNaLoja(agora)
+  const semana = new Date(`${hoje}T12:00:00Z`).getUTCDay() // 0 = domingo
+  const ateSegunda = ((8 - semana) % 7) || 7
+  return [
+    { rotulo: 'Amanhã', dia: somarDias(hoje, 1) },
+    { rotulo: 'Em 3 dias', dia: somarDias(hoje, 3) },
+    { rotulo: 'Próx. segunda', dia: somarDias(hoje, ateSegunda) },
+  ]
+}
+
+/** "hoje", "amanhã", "atrasado 2 dias" ou "dd/mm". */
+export function rotuloRetorno(dia: string, agora: Date = new Date()): string {
+  const hoje = hojeNaLoja(agora)
+  const dif = Math.round((new Date(`${dia}T12:00:00Z`).getTime() - new Date(`${hoje}T12:00:00Z`).getTime()) / 864e5)
+  if (dif === 0) return 'hoje'
+  if (dif === 1) return 'amanhã'
+  if (dif < 0) return `atrasado ${-dif} dia${dif === -1 ? '' : 's'}`
+  return `${dia.slice(8, 10)}/${dia.slice(5, 7)}`
+}
