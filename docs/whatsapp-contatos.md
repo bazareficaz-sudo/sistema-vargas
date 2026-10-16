@@ -227,6 +227,14 @@ Migração `supabase/migrations/20261018120000_whatsapp_origem.sql`. Regra em `s
 - **Códigos desconhecidos:** o ERP não conhece a lista de códigos; o Marketing descarta o que não é dele.
 - **Limite:** é um piso. Quem viu o post e escreveu sem o código não entra.
 
+## Nova conversa e visual de WhatsApp
+
+Migração `supabase/migrations/20261018150000_whatsapp_nova_conversa.sql`. Regra do número em `telefoneParaWhatsapp` (`src/lib/whatsapp/contatos.ts`).
+
+- **Começar conversa:** botão **＋** no topo da lista e **"＋ Nova conversa"** quando nenhuma conversa está aberta. Busca cliente do cadastro (nome ou telefone) ou aceita um número com DDD ("Conversar com …").
+- **`whatsapp_abrir_conversa(empresa, telefone)`:** devolve o contato desse número ou cria (total 0, sem mensagem recebida), ligado ao cadastro pelo telefone como no webhook. Recusa número sem DDD, de outro país e da equipe (destinatários da Betina). Só quem é da empresa. **Nada é enviado** — a conversa só entra na lista depois da primeira mensagem.
+- **Visual:** lista com foto (iniciais), prévia da última mensagem, hora, tiques e contador de não lidas; filtros em chips (Tudo, Não lidas, Aguardando, Para hoje) e etapa; conversa com fundo bege, balões com "rabinho", separador de dia e tiques ✓/✓✓/✓✓ azul (pela confirmação de entrega); barra de digitação com **＋** (imagem, produto, orçamento no PDV, nova resposta rápida), ✨ IA e botão verde de enviar. A ficha do cliente abre ao clicar no nome ("Dados do contato").
+
 ## Próximas etapas (planejado, não implementado)
 
 1. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

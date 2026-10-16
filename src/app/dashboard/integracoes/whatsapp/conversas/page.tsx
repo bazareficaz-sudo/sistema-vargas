@@ -50,10 +50,21 @@ export default async function WhatsAppConversasPage({
       .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null).limit(10000),
     aberta ? supabase.from('whatsapp_conversas').select(campos).eq('empresa_id', empresaId).eq('id', aberta).maybeSingle() : null,
     aberta ? supabase.from('whatsapp_mensagens')
-      .select('id, tipo, conteudo, conteudo_pdf_url, resposta_a, status, erro, created_at, enviado_em, operador_nome')
+      .select('id, tipo, conteudo, conteudo_pdf_url, resposta_a, status, status_entrega, erro, created_at, enviado_em, operador_nome')
       .eq('empresa_id', empresaId).eq('contato_id', aberta)
       .order('created_at', { ascending: false }).limit(200) : null,
   ])
+
+  // Última mensagem de cada conversa da lista (prévia, como no WhatsApp).
+  // As 600 mais recentes cobrem a lista; conversa sem prévia mostra só o nome.
+  type Previa = { contato_id: string; tipo: string; conteudo: string; status: string; status_entrega: string | null }
+  const idsLista = (conversas.data ?? []).map(c => c.id)
+  const { data: recentes } = idsLista.length
+    ? await supabase.from('whatsapp_mensagens').select('contato_id, tipo, conteudo, status, status_entrega')
+      .eq('empresa_id', empresaId).in('contato_id', idsLista).order('created_at', { ascending: false }).limit(600)
+    : { data: [] as Previa[] }
+  const previaPor = new Map<string, Previa>()
+  for (const m of (recentes ?? []) as Previa[]) if (!previaPor.has(m.contato_id)) previaPor.set(m.contato_id, m)
 
   // Ficha do cliente (parte B): saldo, últimas compras e orçamentos em
   // aberto, só quando a conversa já é de um cliente cadastrado. Tudo
@@ -147,7 +158,7 @@ export default async function WhatsAppConversasPage({
       respostas={[...proprias, ...padrao]}
       loja={loja}
       empresaId={empresaId}
-      conversas={(conversas.data ?? []) as Conversa[]}
+      conversas={((conversas.data ?? []) as Conversa[]).map(c => ({ ...c, ultima: previaPor.get(c.id) ?? null }))}
       aberta={conversaAberta}
       mensagens={listaMensagens}
       contagem={contagem}

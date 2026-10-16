@@ -123,3 +123,19 @@ export const idDaMensagem = (body: Recebida) => idValido(body.messageId)
 
 /** Id da mensagem que esta responde, quando a pessoa usou "Responder". */
 export const respostaDe = (body: Recebida) => idValido(body.referenceMessageId)
+
+/**
+ * Número para começar conversa: só dígitos com 55 + DDD (10 ou 11 dígitos
+ * depois do 55). Aceita máscara, 0 de discagem e o 55 já digitado. Nulo se
+ * não der para entender o DDD — mesma regra da função whatsapp_abrir_conversa.
+ */
+export function telefoneParaWhatsapp(v: string | null | undefined): string | null {
+  const bruto = String(v ?? '').trim()
+  let d = bruto.replace(/\D/g, '')
+  // "+" na frente é código de país: só o 55 serve (+1 415… não é DDD 14).
+  if (bruto.startsWith('+') && !d.startsWith('55')) return null
+  if ((d.length === 11 || d.length === 12) && d.startsWith('0')) d = d.slice(1)
+  if (d.length === 10 || d.length === 11) d = `55${d}`
+  if ((d.length !== 12 && d.length !== 13) || !d.startsWith('55')) return null
+  return chaveTelefone(d) ? d : null
+}

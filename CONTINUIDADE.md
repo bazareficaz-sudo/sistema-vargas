@@ -31,6 +31,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Resumo da manhã (Betina):** bloco "Atendimento no WhatsApp" com retornos, orçamentos parados e conversas esperando, com link de cada conversa; vigia `atendimento_whatsapp`; sem migração.
 - **Fora do horário:** resposta automática (desligada por padrão, uma por contato por dia, não tira de "aguardando"); migração `20261017180000_whatsapp_fora_horario.sql`.
 - **Origem do contato:** código da publicação do Vargas Marketing (ex.: T7K2) na mensagem do cliente vira `origem_codigo` do contato (só a primeira); conversa mostra "Veio da publicação"; `v1/origens` entrega ao Marketing só contagens por código (conversas, orçamentos, compras); migração `20261018120000_whatsapp_origem.sql`.
+- **Nova conversa e visual de WhatsApp:** botão para começar conversa com cliente do cadastro ou número com DDD (`whatsapp_abrir_conversa`, nada é enviado); tela redesenhada como o WhatsApp Web (prévia, tiques, balões, menu ＋); migração `20261018150000_whatsapp_nova_conversa.sql`.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar
