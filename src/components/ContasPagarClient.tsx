@@ -7,6 +7,7 @@ import PagarContasModal from '@/components/contas-pagar/PagarContasModal'
 import NovaDespesaModal from '@/components/contas-pagar/NovaDespesaModal'
 import { resumoDoFornecedor, type ContaParaResumo } from '@/lib/contas/resumoFornecedor'
 import type { OrigemDaConta } from '@/lib/contas/origemDaConta'
+import { PERIODOS } from '@/lib/contas/periodo'
 
 type Conta = {
   id: string; descricao: string; valor: number; vencimento: string
@@ -39,14 +40,21 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 export default function ContasPagarClient({
-  contas: inicial, contasAbertas, statusFiltro, qInicial, empresaId,
-  totalPendente, totalVencido, totalPago, hojeIso,
+  contas: inicial, contasAbertas, statusFiltro, periodoFiltro, deFiltro, ateFiltro, intervaloRotulo,
+  qInicial, empresaId, escopoCartoes, hojeIso,
 }: {
   contas: Conta[]
   /** TODAS as contas em aberto da empresa — a base do resumo por fornecedor. */
   contasAbertas: (ContaParaResumo & { fornecedor_id: string | null })[]
-  statusFiltro: string; qInicial: string; empresaId: string
-  totalPendente: number; totalVencido: number; totalPago: number
+  /** Um ou vários status separados por vírgula ("pendente,vencido"), ou "todos". */
+  statusFiltro: string
+  /** '' = qualquer data. Ver src/lib/contas/periodo.ts. */
+  periodoFiltro: string; deFiltro: string; ateFiltro: string
+  /** Intervalo já resolvido pelo servidor, em texto ("28/09/2026 a 04/10/2026"). */
+  intervaloRotulo: string
+  qInicial: string; empresaId: string
+  /** Contas do período escolhido, de TODOS os status — base dos cartões do topo. */
+  escopoCartoes: { status: string; valor: number; fornecedor_id: string | null; descricao: string }[]
   hojeIso: string
 }) {
   const router = useRouter()
@@ -122,10 +130,26 @@ export default function ContasPagarClient({
     : null
   const nomeDoFiltro = fornecedoresPresentes.find(([id]) => id === fornecedorFiltro)?.[1].nome ?? ''
 
+  // Status e período vivem na URL (o servidor filtra). `params` sobrescreve
+  // só o que mudou; o resto da seleção atual é preservado.
   function navegar(params: Record<string, string>) {
-    const sp = new URLSearchParams({ status: statusFiltro, q, ...params })
+    const atual: Record<string, string> = {
+      status: statusFiltro, q, periodo: periodoFiltro, de: deFiltro, ate: ateFiltro, ...params,
+    }
+    const sp = new URLSearchParams()
+    for (const [k, v] of Object.entries(atual)) if (v) sp.set(k, v)
     router.push(`/dashboard/contas-pagar?${sp.toString()}`)
   }
+
+  // Status é multi-seleção: clicar liga/desliga cada um, e "Todos" limpa.
+  // Sem nenhum marcado volta a "todos" (sem recorte), nunca a uma lista vazia.
+  const statusAtivos = new Set(statusFiltro === 'todos' ? [] : statusFiltro.split(','))
+  function alternarStatus(s: string) {
+    const novo = new Set(statusAtivos)
+    if (novo.has(s)) novo.delete(s); else novo.add(s)
+    navegar({ status: novo.size ? [...novo].join(',') : 'todos' })
+  }
+  const emAbertoAtivo = statusAtivos.size === 2 && statusAtivos.has('pendente') && statusAtivos.has('vencido')
 
   // Marca só o que está VISÍVEL. Usava `contas` (a lista inteira), então
   // filtrar por fornecedor e clicar no cabeçalho selecionava as 78 contas —
@@ -212,6 +236,22 @@ export default function ContasPagarClient({
       if (ordem === 'valor') return (b.valor ?? 0) - (a.valor ?? 0)
       return String(a.vencimento ?? '').localeCompare(String(b.vencimento ?? ''))
     })
+  // CARTÕES DO TOPO: mesmo recorte da lista (período, fornecedor, descrição),
+  // exceto o status — cada cartão É um status. Sai de `escopoCartoes`, não de
+  // `contas`: a lista vem cortada em 200 e já filtrada por status.
+  const cartoes = (() => {
+    const t = { pendente: 0, vencido: 0, pago: 0 }
+    const busca = q.toLowerCase()
+    for (const c of escopoCartoes) {
+      if (!(c.status in t)) continue // cancelado não entra em nenhum cartão
+      if (fornecedorFiltro && (c.fornecedor_id ?? '') !== fornecedorFiltro) continue
+      if (busca && !c.descricao.toLowerCase().includes(busca)) continue
+      t[c.status as keyof typeof t] += Number(c.valor)
+    }
+    return t
+  })()
+  const recorteAtivo = !!(periodoFiltro || fornecedorFiltro || q)
+
   const totalFiltrado = filtradas.reduce((s, c) => s + Number(c.valor), 0)
   // Conta paga ou cancelada não entra em pagamento em massa.
   const selecionaveis = filtradas.filter(c => c.status !== 'pago' && c.status !== 'cancelado')
@@ -245,30 +285,43 @@ export default function ContasPagarClient({
       </div>
 
       {/* Cards resumo */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-3 gap-4 mb-1">
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <p className="text-xs text-gray-500 mb-1">A vencer</p>
-          <p className="text-2xl font-bold text-yellow-600">{fmt(totalPendente)}</p>
+          <p className="text-2xl font-bold text-yellow-600">{fmt(cartoes.pendente)}</p>
         </div>
         <div className="bg-white border border-red-100 rounded-xl p-4">
           <p className="text-xs text-gray-500 mb-1">Vencido</p>
-          <p className="text-2xl font-bold text-red-600">{fmt(totalVencido)}</p>
+          <p className="text-2xl font-bold text-red-600">{fmt(cartoes.vencido)}</p>
         </div>
         <div className="bg-white border border-green-100 rounded-xl p-4">
-          <p className="text-xs text-gray-500 mb-1">Pago (total)</p>
-          <p className="text-2xl font-bold text-green-600">{fmt(totalPago)}</p>
+          <p className="text-xs text-gray-500 mb-1">{recorteAtivo ? 'Pago' : 'Pago (total)'}</p>
+          <p className="text-2xl font-bold text-green-600">{fmt(cartoes.pago)}</p>
         </div>
       </div>
+      <p className="text-[11px] text-gray-400 mb-5">
+        {recorteAtivo
+          ? 'Totais do recorte atual (vencimento, fornecedor e descrição) — os botões de status só mudam a lista abaixo.'
+          : 'Totais de todas as contas.'}
+      </p>
 
       {/* Filtros */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex gap-1">
-          {[['pendente','A vencer'], ['vencido','Vencidos'], ['pago','Pagos'], ['todos','Todos']].map(([s, l]) => (
-            <button key={s} onClick={() => navegar({ status: s })}
-              className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${statusFiltro === s ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <div className="flex gap-1 flex-wrap" title="Dá para combinar: marque A vencer e Vencidos juntos para ver tudo que está em aberto">
+          <button onClick={() => navegar({ status: 'pendente,vencido' })}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${emAbertoAtivo ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+            Em aberto
+          </button>
+          {[['pendente','A vencer'], ['vencido','Vencidos'], ['pago','Pagos']].map(([s, l]) => (
+            <button key={s} onClick={() => alternarStatus(s)}
+              className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${statusAtivos.has(s) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
               {l}
             </button>
           ))}
+          <button onClick={() => navegar({ status: 'todos' })}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${statusFiltro === 'todos' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+            Todos
+          </button>
         </div>
         <input value={q} onChange={e => setQ(e.target.value)}
           placeholder="Filtrar por descrição..."
@@ -294,6 +347,35 @@ export default function ContasPagarClient({
           <button onClick={() => { setFornecedorFiltro(''); setOrdem('vencimento') }}
             className="text-xs text-gray-500 hover:text-gray-700 underline">limpar</button>
         )}
+      </div>
+
+      {/* Período do VENCIMENTO. Filtra no servidor (a lista é cortada em 200),
+          então cada clique recarrega. Clicar no período ativo tira o filtro. */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="text-xs text-gray-500">Vencimento:</span>
+        <button onClick={() => navegar({ periodo: '', de: '', ate: '' })}
+          className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${!periodoFiltro ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+          Qualquer data
+        </button>
+        {PERIODOS.map(p => (
+          <button key={p.id}
+            onClick={() => navegar(periodoFiltro === p.id ? { periodo: '', de: '', ate: '' } : { periodo: p.id, de: p.id === 'custom' ? deFiltro : '', ate: p.id === 'custom' ? ateFiltro : '' })}
+            className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${periodoFiltro === p.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+            {p.label}
+          </button>
+        ))}
+        {periodoFiltro === 'custom' && (
+          <>
+            <input type="date" value={deFiltro} onChange={e => navegar({ periodo: 'custom', de: e.target.value })}
+              title="De (vencimento)"
+              className="border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 bg-white" />
+            <span className="text-xs text-gray-400">até</span>
+            <input type="date" value={ateFiltro} onChange={e => navegar({ periodo: 'custom', ate: e.target.value })}
+              title="Até (vencimento)"
+              className="border border-gray-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 bg-white" />
+          </>
+        )}
+        {intervaloRotulo && <span className="text-xs text-gray-500">{intervaloRotulo}</span>}
       </div>
 
       {/* RESUMO DO FORNECEDOR — só quando há um escolhido.
