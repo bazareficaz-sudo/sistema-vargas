@@ -13,8 +13,12 @@ import { createClient } from '@/lib/supabase/client'
 // O gestor só corrige o que o histórico não sabe:
 //   · Fixar   — sugerir sempre, mesmo sem histórico (produto novo).
 //   · Ocultar — nunca sugerir, mesmo com histórico (coincidência).
-// Os ajustes moram em produto_compre_junto_ajuste e valem no sentido
-// "este produto no carrinho → sugere aquele".
+// Os ajustes moram em produto_compre_junto_ajuste e valem para o PAR, nos
+// dois sentidos (a função lê a linha pelos dois lados): indicar a fita no
+// disjuntor faz o disjuntor aparecer também no cadastro e no carrinho da fita.
+// Por isso cada par tem UMA linha só — gravar é apagar o par nos dois
+// sentidos e inserir de novo, senão sobraria "fixar" de um lado e "ocultar"
+// do outro.
 
 type Linha = {
   id: string; nome: string; marca: string | null; sku: string | null
@@ -76,11 +80,12 @@ export default function AbaCompreJunto({ produtoId, empresaId, podeEditar }: {
 
   async function ajustar(sugeridoId: string, acao: 'fixar' | 'ocultar' | null) {
     setMexendo(sugeridoId); setErro('')
-    const r = acao === null
-      ? await sb.from('produto_compre_junto_ajuste').delete().eq('produto_id', produtoId).eq('sugerido_id', sugeridoId)
-      : await sb.from('produto_compre_junto_ajuste').upsert(
-          { empresa_id: empresaId, produto_id: produtoId, sugerido_id: sugeridoId, acao },
-          { onConflict: 'produto_id,sugerido_id' })
+    const apagar = await sb.from('produto_compre_junto_ajuste').delete()
+      .or(`and(produto_id.eq.${produtoId},sugerido_id.eq.${sugeridoId}),and(produto_id.eq.${sugeridoId},sugerido_id.eq.${produtoId})`)
+    const r = apagar.error || acao === null
+      ? apagar
+      : await sb.from('produto_compre_junto_ajuste').insert(
+          { empresa_id: empresaId, produto_id: produtoId, sugerido_id: sugeridoId, acao })
     if (r.error) setErro(r.error.message)
     setMexendo(null)
     await carregar()
@@ -125,7 +130,7 @@ export default function AbaCompreJunto({ produtoId, empresaId, podeEditar }: {
                 </button>
               ) : (
                 <button onClick={() => ajustar(l.id, 'ocultar')} disabled={mexendo === l.id}
-                  title="Não sugerir mais este produto junto com este"
+                  title="Não sugerir mais estes dois produtos juntos (vale para os dois)"
                   className="text-xs px-2 py-1 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
                   Ocultar
                 </button>
@@ -156,7 +161,8 @@ export default function AbaCompreJunto({ produtoId, empresaId, podeEditar }: {
             )}
           </div>
           <p className="text-[11px] text-gray-400 mt-1">
-            Produto indicado aparece sempre no PDV quando este estiver no carrinho, mesmo sem histórico de vendas.
+            Os dois produtos ficam associados: o indicado aparece no PDV quando este estiver no carrinho, e este aparece
+            quando o indicado estiver — mesmo sem histórico de vendas.
           </p>
         </div>
       )}

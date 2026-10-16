@@ -171,6 +171,14 @@ export const NAV: NavGroup[] = [
           { href: '/dashboard/relatorios/financeiro', label: 'Fluxo Financeiro', icon: '📈', modulo: 'relatorios_avancados' },
         ],
       },
+      {
+        // Sem `modulo`: entregar os XMLs ao contador é obrigação de toda
+        // empresa, qualquer que seja o plano.
+        label: 'Contabilidade',
+        items: [
+          { href: '/dashboard/fiscal/fechamento', label: 'Fechamento do Contador', icon: '🗂️' },
+        ],
+      },
     ],
   },
   {
