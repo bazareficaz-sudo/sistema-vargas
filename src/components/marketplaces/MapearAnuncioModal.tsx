@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
 import CriarProdutoModal from './CriarProdutoModal'
+import { gerarProximoSku } from '@/components/produtos/sku'
 
 type Alvo = { tipo: 'anuncio' } | { tipo: 'variacao'; variacaoId: string; skuVariacao: string | null }
 
@@ -234,7 +235,11 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
     for (const v of variacoes.filter(v => !v.produto_id)) {
       const dados = loteForm[v.id]
       if (!dados) continue
-      const sku = dados.sku.trim() || null
+      // A variação nem sempre tem SKU próprio no marketplace — sem isto o
+      // produto nascia com sku: null ("SKU zerado"). Gera um a cada
+      // iteração (não antes do loop) pra cada linha ver o SKU que a
+      // anterior acabou de gravar e não colidir dentro do mesmo lote.
+      const sku = dados.sku.trim() || await gerarProximoSku(sb, empresaId)
 
       if (sku) {
         const { data: existente } = await sb.from('produtos').select('id, nome').eq('empresa_id', empresaId).eq('sku', sku).maybeSingle()
@@ -353,7 +358,8 @@ export default function MapearAnuncioModal({ anuncio, canal, empresaId, operador
                           <input value={loteForm[v.id]?.nome ?? ''} onChange={e => setLoteForm(p => ({ ...p, [v.id]: { ...p[v.id], nome: e.target.value } }))}
                             placeholder="Nome" className="col-span-2 border border-gray-300 rounded-lg px-2 py-1.5 text-xs" />
                           <input value={loteForm[v.id]?.sku ?? ''} onChange={e => setLoteForm(p => ({ ...p, [v.id]: { ...p[v.id], sku: e.target.value } }))}
-                            placeholder="SKU" className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
+                            placeholder="auto" title="Em branco, um SKU é gerado automaticamente ao criar"
+                            className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs font-mono" />
                           <div className="flex gap-1">
                             <input type="number" value={loteForm[v.id]?.preco ?? ''} onChange={e => setLoteForm(p => ({ ...p, [v.id]: { ...p[v.id], preco: e.target.value } }))}
                               placeholder="Preço" className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs" />
