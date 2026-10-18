@@ -3,8 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { empresasDoUsuario } from '@/lib/auth/empresaAtiva'
-import { montarCsv, montarFechamento, nomeDoZip, periodoDoMes, type Partes } from '@/lib/fiscal/fechamento'
-import { gerarZip } from '@/lib/zip/zip'
+import { montarFechamento, montarZipFechamento, nomeDoZip, periodoDoMes, type Partes } from '@/lib/fiscal/fechamento'
 
 // Fechamento do contador — GET ?mes=AAAA-MM
 //   &formato=resumo  → números do mês e pendências (a tela)
@@ -48,24 +47,7 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const leiaMe = [
-      `Fechamento fiscal — ${f.empresa.nome} (CNPJ ${f.empresa.cnpj})`,
-      `Competência: ${f.periodo.rotulo}`,
-      '',
-      `Vendas NFC-e: ${f.vendasNfce.quantidade} notas — R$ ${f.vendasNfce.valor.toFixed(2).replace('.', ',')}`,
-      `Vendas NF-e: ${f.vendasNfe.quantidade} notas — R$ ${f.vendasNfe.valor.toFixed(2).replace('.', ',')}`,
-      `Compras NF-e: ${f.compras.quantidade} notas — R$ ${f.compras.valor.toFixed(2).replace('.', ',')}`,
-      '',
-      ...(f.pendencias.length ? ['Pendências:', ...f.pendencias.map(x => `- ${x.tipo}: ${x.quantidade}. ${x.detalhe}`)] : ['Sem pendências.']),
-      '',
-      `Gerado em ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`,
-    ].join('\r\n')
-
-    const zip = gerarZip([
-      ...f.arquivos,
-      { nome: 'resumo.csv', conteudo: montarCsv(f.linhas) },
-      { nome: 'LEIA-ME.txt', conteudo: leiaMe },
-    ])
+    const zip = montarZipFechamento(f)
     const nome = nomeDoZip(f, partes)
     return new Response(new Uint8Array(zip), {
       headers: {

@@ -46,6 +46,10 @@
     {
       "path": "/api/cron/getulio",
       "schedule": "1,16,31,46 * * * *"
+    },
+    {
+      "path": "/api/cron/fechamento-contador",
+      "schedule": "5 11 * * *"
     }
   ]
 }

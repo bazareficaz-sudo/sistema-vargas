@@ -18,7 +18,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- cliente Supabase sem tipos gerados, como no resto de lib/ */
 
 import { buscarTudo } from '@/lib/supabase/paginar'
-import type { ArquivoZip } from '@/lib/zip/zip'
+import { gerarZip, type ArquivoZip } from '@/lib/zip/zip'
 
 export type MesCompetencia = { mes: string; inicio: string; fim: string; rotulo: string }
 
@@ -285,4 +285,33 @@ export async function montarFechamento(sb: any, empresaId: string, mes: string, 
 export function nomeDoZip(f: Pick<Fechamento, 'empresa' | 'periodo'>, partes: Partes): string {
   const sufixo = partes.vendas && partes.compras ? '' : partes.vendas ? '_vendas' : '_compras'
   return `Fechamento_${f.periodo.mes}_${f.empresa.cnpj || 'empresa'}${sufixo}.zip`
+}
+
+const reais = (v: number) => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+/** Texto do LEIA-ME (vai no .zip e serve de base para o e-mail). */
+export function textoResumo(f: Pick<Fechamento, 'empresa' | 'periodo' | 'vendasNfce' | 'vendasNfe' | 'compras' | 'pendencias'>): string[] {
+  return [
+    `Fechamento fiscal — ${f.empresa.nome} (CNPJ ${f.empresa.cnpj})`,
+    `Competência: ${f.periodo.rotulo}`,
+    '',
+    `Vendas NFC-e: ${f.vendasNfce.quantidade} notas — ${reais(f.vendasNfce.valor)}`,
+    `Vendas NF-e: ${f.vendasNfe.quantidade} notas — ${reais(f.vendasNfe.valor)}`,
+    `Compras NF-e: ${f.compras.quantidade} notas — ${reais(f.compras.valor)}`,
+    '',
+    ...(f.pendencias.length ? ['Pendências:', ...f.pendencias.map(x => `- ${x.tipo}: ${x.quantidade}. ${x.detalhe}`)] : ['Sem pendências.']),
+  ]
+}
+
+/** O .zip completo: XMLs, resumo.csv e LEIA-ME.txt. */
+export function montarZipFechamento(f: Fechamento): Buffer {
+  const leiaMe = [
+    ...textoResumo(f), '',
+    `Gerado em ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}.`,
+  ].join('\r\n')
+  return gerarZip([
+    ...f.arquivos,
+    { nome: 'resumo.csv', conteudo: montarCsv(f.linhas) },
+    { nome: 'LEIA-ME.txt', conteudo: leiaMe },
+  ])
 }
