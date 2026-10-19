@@ -1062,7 +1062,12 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
           inicial={inicialCadastro} sobrepor={cadastro?.sobrepor} abaInicial={cadastro && Object.keys(cadastro.sobrepor).length ? 'endereco' : 'dados'}
           aviso={cadastro?.aviso || undefined}
           onFechar={() => setCadastro(null)}
-          onSalvo={() => { setCadastro(null); setAviso(aberta.cliente_id ? 'Cadastro atualizado.' : 'Cliente cadastrado e ligado a esta conversa.'); router.refresh() }} />
+          onSalvo={id => {
+            setCadastro(null); setAviso(aberta.cliente_id ? 'Cadastro atualizado.' : 'Cliente cadastrado e ligado a esta conversa.')
+            // Cliente novo: a foto do perfil do WhatsApp vai para o cadastro (se houver e se ainda não tiver foto).
+            if (!aberta.cliente_id) fetch('/api/clientes/foto-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clienteId: id }) }).catch(() => undefined)
+            router.refresh()
+          }} />
       )}
     </div>
   )

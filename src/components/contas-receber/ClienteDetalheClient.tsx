@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import ClienteFormDrawer from '@/components/clientes/ClienteFormDrawer'
+import { AvatarCliente } from '@/components/clientes/FotoCliente'
 
 type Cliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null
@@ -43,11 +44,13 @@ type Compra = {
 type ProdutoComprado = { nome: string; sku: string | null; quantidade: number; valor: number; ultima: string }
 
 export default function ClienteDetalheClient({
-  cliente, contasIniciais, creditosIniciais, historicoIniciais, compras = [], produtosComprados = [], empresaId, operador
+  cliente, contasIniciais, creditosIniciais, historicoIniciais, compras = [], produtosComprados = [], empresaId, operador, fotoUrl = null
 }: {
   cliente: Cliente; contasIniciais: Conta[]; creditosIniciais: Credito[]
   historicoIniciais: Historico[]; compras?: Compra[]; produtosComprados?: ProdutoComprado[]
   empresaId: string; operador: string
+  /** Foto do cadastro (link assinado). */
+  fotoUrl?: string | null
 }) {
   const sb = createClient()
   const router = useRouter()
@@ -92,8 +95,13 @@ export default function ClienteDetalheClient({
           <div className="flex items-center gap-2">
             <Link href="/dashboard/clientes" className="text-gray-500 hover:text-gray-800 text-sm">← Clientes</Link>
           </div>
-          <h1 className="text-gray-900 text-xl font-semibold mt-1">{cli.nome}</h1>
-          <p className="text-gray-500 text-sm">{cli.cpf_cnpj ?? ''} {cli.telefone ? `· ${cli.telefone}` : ''}</p>
+          <div className="flex items-center gap-3 mt-1">
+            <AvatarCliente nome={cli.nome} url={fotoUrl} tamanho="w-14 h-14 text-lg" />
+            <div>
+              <h1 className="text-gray-900 text-xl font-semibold">{cli.nome}</h1>
+              <p className="text-gray-500 text-sm">{cli.cpf_cnpj ?? ''} {cli.telefone ? `· ${cli.telefone}` : ''}</p>
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className={`text-xs px-2 py-1 rounded-full border ${
