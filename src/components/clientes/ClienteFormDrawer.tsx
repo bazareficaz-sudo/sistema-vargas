@@ -32,7 +32,7 @@ const CLIENTE_VAZIO = {
 
 type Aba = 'dados' | 'endereco' | 'contatos' | 'entrega' | 'financeiro'
 
-export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFechar, onSalvo, inicial }: {
+export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFechar, onSalvo, inicial, sobrepor, abaInicial, aviso }: {
   empresaId: string
   /** null/undefined abre em branco, para cadastrar. */
   clienteId?: string | null
@@ -42,6 +42,13 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
   /** Ao cadastrar: campos já preenchidos (ex.: contato do WhatsApp). Passe
    *  um objeto estável (useMemo): mudar recarrega a gaveta. */
   inicial?: Partial<typeof CLIENTE_VAZIO>
+  /** Também para cliente já cadastrado: campos trocados depois de carregar
+   *  (ex.: endereço que o cliente mandou no WhatsApp). Só os preenchidos
+   *  valem; nada é gravado até salvar. Objeto estável, como `inicial`. */
+  sobrepor?: Partial<typeof CLIENTE_VAZIO>
+  abaInicial?: Aba
+  /** Faixa de aviso no topo (ex.: de onde vieram os dados). */
+  aviso?: string
 }) {
   const sb = createClient()
   const [aba, setAba] = useState<Aba>('dados')
@@ -57,7 +64,8 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }))
 
   const carregar = useCallback(async () => {
-    if (!clienteId) { setForm({ ...CLIENTE_VAZIO, ...inicial }); setContatos([]); setEnderecos([]); return }
+    const trocas = Object.fromEntries(Object.entries(sobrepor ?? {}).filter(([, v]) => v !== '' && v != null))
+    if (!clienteId) { setForm({ ...CLIENTE_VAZIO, ...inicial, ...trocas }); setContatos([]); setEnderecos([]); return }
     setCarregando(true)
     const [{ data: cli }, { data: cts }, { data: ends }] = await Promise.all([
       sb.from('clientes').select('*').eq('id', clienteId).maybeSingle(),
@@ -76,6 +84,7 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
         cobranca_whatsapp_ativa: cli.cobranca_whatsapp_ativa !== false,
         alerta_pedido_whatsapp: !!cli.alerta_pedido_whatsapp,
         alerta_pedido_telefone: cli.alerta_pedido_telefone ?? '',
+        ...trocas,
       })
     }
     setContatos((cts ?? []).map((c: any) => ({
@@ -88,9 +97,9 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
       cidade: e.cidade ?? '', estado: e.estado ?? '', referencia: e.referencia ?? '', padrao: !!e.padrao,
     })))
     setCarregando(false)
-  }, [clienteId, sb, inicial])
+  }, [clienteId, sb, inicial, sobrepor])
 
-  useEffect(() => { if (aberto) { setAba('dados'); setErro(''); carregar() } }, [aberto, carregar])
+  useEffect(() => { if (aberto) { setAba(abaInicial ?? 'dados'); setErro(''); carregar() } }, [aberto, carregar, abaInicial])
 
   async function preencherPorCep(cep: string, alvo: 'principal' | number) {
     setBuscandoCep(alvo)
@@ -255,6 +264,7 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {carregando && <p className="text-sm text-gray-400">Carregando...</p>}
+          {aviso && <p className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 whitespace-pre-wrap">{aviso}</p>}
 
           {aba === 'dados' && (
             <>

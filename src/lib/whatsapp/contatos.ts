@@ -146,7 +146,8 @@ export function semMarca(conteudo: string): string {
   return tipo ? conteudo.slice(MARCA[tipo].length).trim() : conteudo
 }
 
-const idValido = (v: unknown) => (typeof v === 'string' && /^[\w:.@-]{6,128}$/.test(v.trim()) ? v.trim() : null)
+/** Id de mensagem do WhatsApp com formato aceitável (ou nulo). */
+export const idValido = (v: unknown) => (typeof v === 'string' && /^[\w:.@-]{6,128}$/.test(v.trim()) ? v.trim() : null)
 
 /** Id (WhatsApp) desta mensagem. */
 export const idDaMensagem = (body: Recebida) => idValido(body.messageId)

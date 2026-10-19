@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { zapiSendText, zapiSendDocument } from '@/lib/zapi'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { ehTipoCobranca } from '@/lib/whatsapp/tiposCobranca'
+import { chaveTelefone, idValido } from '@/lib/whatsapp/contatos'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -27,6 +28,18 @@ export async function POST(request: NextRequest) {
 
   if (!telefone || !mensagem)
     return NextResponse.json({ error: 'Telefone e mensagem são obrigatórios' }, { status: 400 })
+
+  // Responder citando: só uma mensagem desta empresa e desta mesma conversa.
+  let respostaA: string | null = null
+  if (body.resposta_a != null) {
+    respostaA = idValido(body.resposta_a)
+    const { data: citada } = respostaA
+      ? await supabase.from('whatsapp_mensagens').select('telefone')
+        .eq('empresa_id', empresaId).eq('zapi_message_id', respostaA).limit(1).maybeSingle()
+      : { data: null }
+    if (!citada || chaveTelefone(citada.telefone) !== chaveTelefone(telefone))
+      return NextResponse.json({ error: 'A mensagem respondida não é desta conversa.' }, { status: 400 })
+  }
 
   // Verifica opt-out (tudo) e, se for mensagem de cobrança, o toggle
   // específico de cobrança (extrato/situação da conta) — um cliente pode
@@ -54,6 +67,7 @@ export async function POST(request: NextRequest) {
     conteudo_pdf_url: pdf_url ?? null,
     referencia_tipo: referencia_tipo ?? null,
     referencia_id: referencia_id ?? null,
+    ...(respostaA ? { resposta_a: respostaA } : {}),
     status: 'pendente',
     operador_nome: profile?.nome ?? null,
   }).select('id').single()
@@ -66,7 +80,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await zapiSendText(zapiCfg, telefone, mensagem)
+    const result = await zapiSendText(zapiCfg, telefone, mensagem, respostaA)
 
     if (!result.success) {
       await supabase.from('whatsapp_mensagens').update({
