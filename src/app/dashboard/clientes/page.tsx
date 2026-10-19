@@ -2,13 +2,20 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import NovoClienteBotao from '@/components/clientes/NovoClienteBotao'
+import GerenciarCategorias from '@/components/clientes/GerenciarCategorias'
+import ClientesTabela, { type LinhaCliente } from '@/components/clientes/ClientesTabela'
+import { corValida, emOrdem, type Categoria } from '@/lib/clientes/categorias'
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const COLUNAS = 'id, nome, cpf_cnpj, telefone, cidade, estado, saldo_credito, saldo_devedor, status_credito, ativo'
 
 export default async function ClientesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; pagina?: string }>
+  searchParams: Promise<{ q?: string; pagina?: string; cat?: string }>
 }) {
-  const { q = '', pagina = '1' } = await searchParams
+  const { q = '', pagina = '1', cat: catBruta = '' } = await searchParams
+  const cat = UUID.test(catBruta) ? catBruta : ''
   const pg = Math.max(1, parseInt(pagina))
   const POR_PAGINA = 50
   const offset = (pg - 1) * POR_PAGINA
@@ -18,40 +25,61 @@ export default async function ClientesPage({
   const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id
 
-  let query = supabase
-    .from('clientes')
-    .select('id, nome, cpf_cnpj, telefone, cidade, estado, saldo_credito, saldo_devedor, status_credito, ativo', { count: 'exact' })
-    .eq('empresa_id', empresaId)
-    // Cadastro unificado noutro não aparece: continua no banco pelo
-    // histórico, mas listá-lo faz o mesmo cliente surgir duas vezes — foi
-    // o que aconteceu com o ESCRITORIO ROCHA RANGEL depois de unificado
-    // (ver supabase-cliente-mesclado-redirecionar.sql).
-    .is('mesclado_em', null)
-    .order('nome')
-    .range(offset, offset + POR_PAGINA - 1)
+  // Categorias do cliente vêm junto (cats); filtrar por uma usa o vínculo
+  // obrigatório (filtro). Sem a tabela de categorias, lista sem elas.
+  const montar = (comCategorias: boolean) => {
+    let query = supabase
+      .from('clientes')
+      .select(comCategorias
+        ? `${COLUNAS}, cats:cliente_categoria_vinculos(categoria_id)${cat ? ', filtro:cliente_categoria_vinculos!inner(categoria_id)' : ''}`
+        : COLUNAS, { count: 'exact' })
+      .eq('empresa_id', empresaId)
+      // Cadastro unificado noutro não aparece: continua no banco pelo
+      // histórico, mas listá-lo faz o mesmo cliente surgir duas vezes — foi
+      // o que aconteceu com o ESCRITORIO ROCHA RANGEL depois de unificado
+      // (ver supabase-cliente-mesclado-redirecionar.sql).
+      .is('mesclado_em', null)
+      .order('nome')
+      .range(offset, offset + POR_PAGINA - 1)
+    if (comCategorias && cat) query = query.eq('filtro.categoria_id', cat)
 
-  // Buscar só por nome obrigava a saber como o cliente foi cadastrado.
-  // Documento e telefone são o que o balconista tem na mão.
-  if (q) {
-    const digitos = q.replace(/\D/g, '')
-    const alvos = [`nome.ilike.%${q}%`]
-    if (digitos.length >= 3) {
-      alvos.push(`cpf_cnpj.ilike.%${digitos}%`, `telefone.ilike.%${digitos}%`)
+    // Buscar só por nome obrigava a saber como o cliente foi cadastrado.
+    // Documento e telefone são o que o balconista tem na mão.
+    if (q) {
+      const digitos = q.replace(/\D/g, '')
+      const alvos = [`nome.ilike.%${q}%`]
+      if (digitos.length >= 3) {
+        alvos.push(`cpf_cnpj.ilike.%${digitos}%`, `telefone.ilike.%${digitos}%`)
+      }
+      query = query.or(alvos.join(','))
     }
-    query = query.or(alvos.join(','))
+    return query
   }
 
-  const { data: clientes, count } = await query
+  const [res, contagemRes] = await Promise.all([
+    montar(true),
+    supabase.from('cliente_categorias_contagem').select('id, nome, cor, clientes').eq('empresa_id', empresaId),
+  ])
+  const { data, count } = res.error ? await montar(false) : res
+  type Linha = Omit<LinhaCliente, 'categorias'> & { cats?: { categoria_id: string }[] }
+  const clientes: LinhaCliente[] = ((data ?? []) as unknown as Linha[]).map(({ cats, ...c }) => ({ ...c, categorias: (cats ?? []).map(v => v.categoria_id) }))
+  const categorias: Categoria[] = emOrdem((contagemRes.data ?? []).map(c => ({ id: c.id, nome: c.nome, cor: corValida(c.cor) })))
+  const contagem = Object.fromEntries((contagemRes.data ?? []).map(c => [c.id, Number(c.clientes ?? 0)]))
   const totalPaginas = Math.ceil((count ?? 0) / POR_PAGINA)
+  const catAtual = categorias.find(c => c.id === cat)
+  const link = (p: number) => `?${new URLSearchParams({ ...(q ? { q } : {}), ...(cat ? { cat } : {}), pagina: String(p) })}`
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-gray-900 text-xl font-semibold">Clientes</h1>
-          <p className="text-gray-500 text-sm mt-0.5">{count?.toLocaleString('pt-BR')} clientes cadastrados</p>
+          <p className="text-gray-500 text-sm mt-0.5">{count?.toLocaleString('pt-BR')} clientes {catAtual ? `em ${catAtual.nome}` : 'cadastrados'}</p>
         </div>
-        <NovoClienteBotao empresaId={empresaId ?? ''} />
+        <div className="flex gap-2">
+          <GerenciarCategorias empresaId={empresaId ?? ''} categorias={categorias} contagem={contagem} />
+          <NovoClienteBotao empresaId={empresaId ?? ''} />
+        </div>
       </div>
 
       <form className="mb-4">
@@ -61,63 +89,28 @@ export default async function ClientesPage({
           placeholder="Buscar por nome, CPF/CNPJ ou telefone..."
           className="bg-white border border-gray-300 text-gray-800 rounded-lg px-4 py-2 text-sm w-72 focus:outline-none focus:border-blue-500 placeholder-gray-400"
         />
+        {categorias.length > 0 && (
+          <select name="cat" defaultValue={cat}
+            className="ml-2 bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+            <option value="">Todas as categorias</option>
+            {categorias.map(c => <option key={c.id} value={c.id}>{c.nome} ({contagem[c.id] ?? 0})</option>)}
+          </select>
+        )}
         <button type="submit" className="ml-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
           Buscar
         </button>
+        {(q || cat) && <Link href="/dashboard/clientes" className="ml-2 text-sm text-gray-500 hover:underline">Limpar</Link>}
       </form>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-gray-500 bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-4 py-3 font-medium">Nome</th>
-              <th className="text-left px-4 py-3 font-medium">CPF/CNPJ</th>
-              <th className="text-left px-4 py-3 font-medium">Telefone</th>
-              <th className="text-left px-4 py-3 font-medium">Cidade</th>
-              <th className="text-right px-4 py-3 font-medium">Crédito</th>
-              <th className="text-right px-4 py-3 font-medium">Débito</th>
-              <th className="text-center px-4 py-3 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {(clientes ?? []).map(c => (
-              <tr key={c.id} className="text-gray-600 hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-2.5 text-gray-900 font-medium">
-                  <Link href={`/dashboard/clientes/${c.id}`} className="hover:text-blue-600 transition-colors">{c.nome}</Link>
-                </td>
-                <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{c.cpf_cnpj ?? '—'}</td>
-                <td className="px-4 py-2.5 text-gray-400">{c.telefone ?? '—'}</td>
-                <td className="px-4 py-2.5 text-gray-400">{c.cidade ? `${c.cidade}/${c.estado}` : '—'}</td>
-                <td className="px-4 py-2.5 text-right text-emerald-600">
-                  {(c.saldo_credito ?? 0) > 0
-                    ? (c.saldo_credito ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                    : '—'}
-                </td>
-                <td className="px-4 py-2.5 text-right text-red-600">
-                  {(c.saldo_devedor ?? 0) > 0
-                    ? (c.saldo_devedor ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                    : '—'}
-                </td>
-                <td className="px-4 py-2.5 text-center">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                    c.status_credito === 'liberado' ? 'bg-green-100 text-green-700 border-green-200' :
-                    c.status_credito === 'bloqueado' ? 'bg-red-100 text-red-600 border-red-200' :
-                    'bg-yellow-100 text-yellow-700 border-yellow-200'
-                  }`}>
-                    {c.status_credito ?? 'liberado'}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ClientesTabela clientes={clientes} categorias={categorias} empresaId={empresaId ?? ''} />
 
         {totalPaginas > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
             <p className="text-gray-500 text-xs">Página {pg} de {totalPaginas}</p>
             <div className="flex gap-2">
-              {pg > 1 && <a href={`?q=${q}&pagina=${pg - 1}`} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">← Anterior</a>}
-              {pg < totalPaginas && <a href={`?q=${q}&pagina=${pg + 1}`} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">Próxima →</a>}
+              {pg > 1 && <a href={link(pg - 1)} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">← Anterior</a>}
+              {pg < totalPaginas && <a href={link(pg + 1)} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">Próxima →</a>}
             </div>
           </div>
         )}

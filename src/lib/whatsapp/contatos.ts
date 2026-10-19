@@ -15,6 +15,7 @@ export function chaveTelefone(v: string | null | undefined): string | null {
 type Recebida = {
   fromMe?: boolean; isGroup?: boolean; isNewsletter?: boolean; broadcast?: boolean
   phone?: unknown; from?: unknown; chatName?: unknown; senderName?: unknown
+  chatLid?: unknown; senderLid?: unknown; photo?: unknown; senderPhoto?: unknown
   text?: { message?: unknown }; message?: { text?: unknown }
   image?: { imageUrl?: unknown; caption?: unknown }
   audio?: { audioUrl?: unknown }
@@ -46,10 +47,39 @@ export function telefoneDoRemetente(body: Recebida): string | null {
 /** Número escondido pelo WhatsApp (código "@lid") ou fora do padrão brasileiro: sem wa.me nem telefone no cadastro. */
 export const numeroOculto = (telefone: string) => chaveTelefone(telefone) === null
 
-/** Nome que a pessoa usa no WhatsApp (pode não existir). */
+/**
+ * Nome que a pessoa usa no WhatsApp (pode não existir). O código oculto
+ * ("7674…@lid") e número no lugar do nome não contam — viravam o "nome" do
+ * contato na lista.
+ */
 export function nomeDoRemetente(body: Recebida): string | null {
-  const nome = [body.senderName, body.chatName].find(v => typeof v === 'string' && v.trim())
+  const nome = [body.senderName, body.chatName]
+    .find(v => typeof v === 'string' && v.trim() && !/@lid$/i.test(v.trim()) && !/^[+\d\s()-]+$/.test(v.trim()))
   return nome ? String(nome).trim().slice(0, 80) : null
+}
+
+/**
+ * Código oculto ("@lid") da PESSOA da conversa, só os dígitos. A Z-API manda
+ * em `chatLid` — junto do número quando sabe os dois (é assim que o código
+ * fica ligado ao número). `senderLid` só vale na mensagem DO CLIENTE: na
+ * enviada pela loja, é o código da própria loja.
+ */
+export function lidDaMensagem(body: Recebida): string | null {
+  const candidatos = [body.chatLid, body.fromMe ? null : body.senderLid, body.phone]
+  for (const v of candidatos) {
+    if (typeof v !== 'string' || !/@lid$/i.test(v.trim())) continue
+    const d = v.replace(/\D/g, '')
+    if (d.length >= 8) return d
+  }
+  return null
+}
+
+/** Foto do perfil da pessoa (link do WhatsApp, temporário). Na mensagem da loja, `senderPhoto` é a da loja. */
+export function fotoDaMensagem(body: Recebida): string | null {
+  for (const v of [body.photo, body.fromMe ? null : body.senderPhoto]) {
+    if (typeof v === 'string' && /^https:\/\//i.test(v.trim())) return v.trim().slice(0, 1000)
+  }
+  return null
 }
 
 /**
@@ -116,7 +146,8 @@ export function semMarca(conteudo: string): string {
   return tipo ? conteudo.slice(MARCA[tipo].length).trim() : conteudo
 }
 
-const idValido = (v: unknown) => (typeof v === 'string' && /^[\w:.@-]{6,128}$/.test(v.trim()) ? v.trim() : null)
+/** Id de mensagem do WhatsApp com formato aceitável (ou nulo). */
+export const idValido = (v: unknown) => (typeof v === 'string' && /^[\w:.@-]{6,128}$/.test(v.trim()) ? v.trim() : null)
 
 /** Id (WhatsApp) desta mensagem. */
 export const idDaMensagem = (body: Recebida) => idValido(body.messageId)
@@ -138,4 +169,15 @@ export function telefoneParaWhatsapp(v: string | null | undefined): string | nul
   if (d.length === 10 || d.length === 11) d = `55${d}`
   if ((d.length !== 12 && d.length !== 13) || !d.startsWith('55')) return null
   return chaveTelefone(d) ? d : null
+}
+
+/**
+ * Qual conversa fica ao juntar duas: a com número recebe a só do código.
+ * Duas com número: não junta (nulo). Duas só com código: a segunda recebe.
+ */
+export function destinoDaJuncao(a: { id: string; telefone: string }, b: { id: string; telefone: string }): { de: string; para: string } | null {
+  const ocultoA = numeroOculto(a.telefone), ocultoB = numeroOculto(b.telefone)
+  if (!ocultoA && !ocultoB) return null
+  if (ocultoA) return { de: a.id, para: b.id }
+  return { de: b.id, para: a.id }
 }

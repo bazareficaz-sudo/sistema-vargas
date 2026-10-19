@@ -75,18 +75,25 @@ export async function zapiSendText(
   config: ZAPIConfig,
   phone: string,
   message: string,
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  /** Id (WhatsApp) da mensagem respondida: sai citada, como o "Responder" do celular. */
+  responderA?: string | null,
+): Promise<{ success: boolean; messageId?: string; error?: string; incerto?: boolean }> {
+  let recusou = false
   try {
     const res = await fetch(buildUrl(config, 'send-text'), {
       method: 'POST',
       headers: headers(config),
-      body: JSON.stringify({ phone: cleanPhone(phone), message }),
+      body: JSON.stringify({ phone: cleanPhone(phone), message, ...(responderA ? { messageId: responderA } : {}) }),
+      signal: AbortSignal.timeout(30_000),
     })
+    recusou = !res.ok
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
     return { success: true, messageId: data.messageId ?? data.zaapId ?? data.id }
   } catch (e: any) {
-    return { success: false, error: e.message }
+    // Sem resposta (queda, tempo esgotado) ou resposta 200 ilegível: pode ter
+    // saído ou não — `incerto`, para quem chama não reenviar sozinho.
+    return { success: false, error: e.message, incerto: !recusou }
   }
 }
 
@@ -144,12 +151,14 @@ export async function zapiSendImage(
   phone: string,
   imageUrl: string,
   caption?: string,
+  /** Id (WhatsApp) da mensagem respondida. */
+  responderA?: string | null,
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
     const res = await fetch(buildUrl(config, 'send-image'), {
       method: 'POST',
       headers: headers(config),
-      body: JSON.stringify({ phone: cleanPhone(phone), image: imageUrl, caption }),
+      body: JSON.stringify({ phone: cleanPhone(phone), image: imageUrl, caption, ...(responderA ? { messageId: responderA } : {}) }),
     })
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
@@ -236,3 +245,23 @@ export const zapiConversaMetadata = (config: ZAPIConfig, phone: string) => zapiL
  * só vêm quando o número está salvo na agenda do aparelho. Só leitura.
  */
 export const zapiContatoMetadata = (config: ZAPIConfig, phone: string) => zapiLer(config, `contacts/${cleanPhone(phone)}`)
+
+/**
+ * Link da foto do perfil (GET /profile-picture). Aceita número ou código
+ * oculto ("…@lid"). O link é do WhatsApp e vence em alguns dias. Só leitura.
+ */
+export async function zapiFotoPerfil(config: ZAPIConfig, phone: string): Promise<{ ok: true; link: string | null } | { ok: false; error: string }> {
+  try {
+    const alvo = /@lid$/i.test(phone) ? phone.trim() : phone.replace(/\D/g, '')
+    const res = await fetch(buildUrl(config, `profile-picture?phone=${encodeURIComponent(alvo)}`), {
+      headers: headers(config), cache: 'no-store', signal: AbortSignal.timeout(10_000),
+    })
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+    const dados = await res.json().catch(() => null)
+    const item = Array.isArray(dados) ? dados[0] : dados
+    const link = item && typeof item.link === 'string' && /^https:\/\//i.test(item.link) ? item.link : null
+    return { ok: true, link }
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'sem resposta' }
+  }
+}

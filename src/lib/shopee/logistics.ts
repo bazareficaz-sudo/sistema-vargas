@@ -20,6 +20,33 @@ async function callOpts(ctx: CallCtx) {
   return { partnerId, partnerKey, accessToken: ctx.canal.accessToken, shopId: ctx.canal.sellerId }
 }
 
+/** Campos do destinatário que a Shopee entrega (como imagem) para a etiqueta própria. */
+export const CAMPOS_DESTINATARIO = ['name', 'phone', 'full_address', 'district', 'city', 'state', 'zipcode'] as const
+export type CampoDestinatario = (typeof CAMPOS_DESTINATARIO)[number]
+
+/**
+ * Nome, telefone e endereço do comprador — a Shopee NÃO entrega em texto
+ * para o nosso app (vem "****" no pedido). O único caminho é o de quem
+ * imprime a própria etiqueta: get_shipping_document_data_info, que devolve
+ * cada campo como IMAGEM (PNG em data URL). Medido em 19/10/2026 em pedido
+ * "PROCESSED". Só leitura; nada é gravado — a tela mostra e esquece.
+ */
+export async function destinatarioEmImagem(ctx: CallCtx, orderSn: string, packageNumber?: string): Promise<Partial<Record<CampoDestinatario, string>>> {
+  const callOptions = await callOpts(ctx)
+  const data = await shopeePost('/api/v2/logistics/get_shipping_document_data_info', {
+    order_sn: orderSn, ...(packageNumber ? { package_number: packageNumber } : {}),
+    recipient_address_info: CAMPOS_DESTINATARIO.map(key => ({ key })),
+  }, callOptions)
+  const lista: unknown = data?.response?.recipient_address_info
+  const saida: Partial<Record<CampoDestinatario, string>> = {}
+  for (const item of Array.isArray(lista) ? lista : []) {
+    const key = (item as { key?: string })?.key as CampoDestinatario
+    const img = (item as { image?: unknown })?.image
+    if (CAMPOS_DESTINATARIO.includes(key) && typeof img === 'string' && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(img) && img.length < 200_000) saida[key] = img
+  }
+  return saida
+}
+
 export async function getShippingParameter(ctx: CallCtx, orderSn: string, packageNumber?: string) {
   const callOptions = await callOpts(ctx)
   const params: Record<string, string> = { order_sn: orderSn }

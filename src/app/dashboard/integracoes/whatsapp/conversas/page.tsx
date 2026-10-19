@@ -3,6 +3,7 @@ import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import WhatsAppConversasClient, { type Conversa, type Mensagem, type Ficha, type OrcamentoConversa } from '@/components/integracoes/WhatsAppConversasClient'
 import { ETAPAS, respostasPadrao, type RespostaRapida } from '@/lib/whatsapp/conversas'
 import { BUCKET_MIDIAS, caminhoGuardado } from '@/lib/whatsapp/midias'
+import { corValida, emOrdem, type Categoria } from '@/lib/clientes/categorias'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,49 +17,62 @@ const COLS_ORC = 'id, numero, created_at, total, validade, status'
 export default async function WhatsAppConversasPage({
   searchParams,
 }: {
-  searchParams: Promise<{ c?: string; f?: string; q?: string; e?: string }>
+  searchParams: Promise<{ c?: string; f?: string; q?: string; e?: string; cat?: string }>
 }) {
   const sp = await searchParams
   const filtro = (FILTROS as readonly string[]).includes(sp.f ?? '') ? sp.f! : 'todas'
   const etapa = ETAPAS.some(e => e.id === sp.e) ? sp.e! : null
   const aberta = sp.c && UUID.test(sp.c) ? sp.c : null
   const q = (sp.q ?? '').trim().slice(0, 60)
+  const cat = sp.cat && UUID.test(sp.cat) ? sp.cat : null
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
-  const campos = 'id, telefone, nome_whatsapp, cliente_id, cliente_nome, status, ultima_atividade, ultima_entrada_em, aguardando, nao_lida, etapa, retorno_em, retorno_nota, retorno_vencido, orcamento_parado, origem_codigo, origem_em'
-  let lista = supabase.from('whatsapp_conversas').select(campos)
-    .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null)
-    .order('ultima_atividade', { ascending: false }).limit(80)
-  if (filtro === 'aguardando') lista = lista.eq('aguardando', true)
-  if (filtro === 'nao_lidas') lista = lista.eq('nao_lida', true)
-  // Para hoje: lembrete de hoje ou atrasado, e orçamento sem resposta há 3 dias.
-  if (filtro === 'hoje') lista = lista.or('retorno_vencido.eq.true,orcamento_parado.eq.true')
-  if (etapa) lista = lista.eq('etapa', etapa)
-  if (q) {
-    const digitos = q.replace(/\D/g, ''), nome = q.replace(/[,()%]/g, ' ')
-    lista = lista.or([`nome_whatsapp.ilike.%${nome}%`, `cliente_nome.ilike.%${nome}%`, ...(digitos.length >= 3 ? [`telefone.ilike.%${digitos}%`] : [])].join(','))
+  const camposBase = 'id, telefone, nome_whatsapp, cliente_id, cliente_nome, status, ultima_atividade, ultima_entrada_em, aguardando, nao_lida, etapa, retorno_em, retorno_nota, retorno_vencido, orcamento_parado, origem_codigo, origem_em, foto_url, foto_em'
+  const montarLista = (cols: string, comCategoria: boolean) => {
+    let lista = supabase.from('whatsapp_conversas').select(cols)
+      .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null)
+      .order('ultima_atividade', { ascending: false }).limit(80)
+    if (filtro === 'aguardando') lista = lista.eq('aguardando', true)
+    if (filtro === 'nao_lidas') lista = lista.eq('nao_lida', true)
+    // Para hoje: lembrete de hoje ou atrasado, e orçamento sem resposta há 3 dias.
+    if (filtro === 'hoje') lista = lista.or('retorno_vencido.eq.true,orcamento_parado.eq.true')
+    if (etapa) lista = lista.eq('etapa', etapa)
+    // Categoria do cliente (Eletricista, Pedreiro…).
+    if (comCategoria && cat) lista = lista.contains('categorias', [cat])
+    if (q) {
+      const digitos = q.replace(/\D/g, ''), nome = q.replace(/[,()%]/g, ' ')
+      lista = lista.or([`nome_whatsapp.ilike.%${nome}%`, `cliente_nome.ilike.%${nome}%`, ...(digitos.length >= 3 ? [`telefone.ilike.%${digitos}%`] : [])].join(','))
+    }
+    return lista
   }
+  // Sem a migração das categorias, a lista sai sem elas (e sem o filtro).
+  let campos = `${camposBase}, categorias`
+  let lista = await montarLista(campos, true)
+  if (lista.error) { campos = camposBase; lista = await montarLista(campos, false) }
 
   // Contagens dos filtros e das etapas numa consulta só (poucas colunas por contato).
-  const [conversas, marcas, atual, mensagens] = await Promise.all([
+  const [conversas, marcas, atual, mensagens, cats] = await Promise.all([
     lista,
     supabase.from('whatsapp_conversas').select('etapa, aguardando, nao_lida, retorno_vencido, orcamento_parado')
       .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null).limit(10000),
     aberta ? supabase.from('whatsapp_conversas').select(campos).eq('empresa_id', empresaId).eq('id', aberta).maybeSingle() : null,
     aberta ? supabase.from('whatsapp_mensagens')
-      .select('id, tipo, conteudo, conteudo_pdf_url, resposta_a, status, status_entrega, erro, created_at, enviado_em, operador_nome')
+      .select('id, tipo, conteudo, conteudo_pdf_url, resposta_a, zapi_message_id, status, status_entrega, erro, created_at, enviado_em, operador_nome')
       .eq('empresa_id', empresaId).eq('contato_id', aberta)
       .order('created_at', { ascending: false }).limit(200) : null,
+    supabase.from('cliente_categorias').select('id, nome, cor').eq('empresa_id', empresaId),
   ])
+  const categorias: Categoria[] = emOrdem((cats.data ?? []).map(c => ({ id: c.id, nome: c.nome, cor: corValida(c.cor) })))
 
   // Última mensagem de cada conversa da lista (prévia, como no WhatsApp).
   // As 600 mais recentes cobrem a lista; conversa sem prévia mostra só o nome.
   type Previa = { contato_id: string; tipo: string; conteudo: string; status: string; status_entrega: string | null }
-  const idsLista = (conversas.data ?? []).map(c => c.id)
+  const listaConversas = (conversas.data ?? []) as unknown as Conversa[]
+  const idsLista = listaConversas.map(c => c.id)
   const { data: recentes } = idsLista.length
     ? await supabase.from('whatsapp_mensagens').select('contato_id, tipo, conteudo, status, status_entrega')
       .eq('empresa_id', empresaId).in('contato_id', idsLista).order('created_at', { ascending: false }).limit(600)
@@ -69,7 +83,7 @@ export default async function WhatsAppConversasPage({
   // Ficha do cliente (parte B): saldo, últimas compras e orçamentos em
   // aberto, só quando a conversa já é de um cliente cadastrado. Tudo
   // filtrado pela empresa de quem está logado.
-  const conversaAberta = (atual?.data ?? null) as Conversa | null
+  const conversaAberta = (atual?.data ?? null) as unknown as Conversa | null
   const clienteId = conversaAberta?.cliente_id ?? null
   const [cliente, compras, orcamentosCliente, orcamentosEnviados, modelos, cfg, empresa] = await Promise.all([
     clienteId ? supabase.from('clientes')
@@ -158,11 +172,12 @@ export default async function WhatsAppConversasPage({
       respostas={[...proprias, ...padrao]}
       loja={loja}
       empresaId={empresaId}
-      conversas={((conversas.data ?? []) as Conversa[]).map(c => ({ ...c, ultima: previaPor.get(c.id) ?? null }))}
+      conversas={listaConversas.map(c => ({ ...c, ultima: previaPor.get(c.id) ?? null }))}
       aberta={conversaAberta}
       mensagens={listaMensagens}
       contagem={contagem}
-      filtros={{ f: filtro, q, e: etapa }}
+      filtros={{ f: filtro, q, e: etapa, cat: campos === camposBase ? null : cat }}
+      categorias={categorias}
       // Migração da caixa de entrada ainda não aplicada: a tela explica.
       indisponivel={Boolean(conversas.error)}
     />

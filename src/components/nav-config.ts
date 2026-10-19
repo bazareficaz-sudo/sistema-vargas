@@ -181,6 +181,8 @@ export const NAV: NavGroup[] = [
         // teste em tests/dashboard/menu.test.ts reprova.
         label: 'Cadastros e Taxas',
         items: [
+          { href: '/dashboard/financeiro/formas-pagamento', label: 'Formas de Pagamento', icon: '💳', modulo: 'financeiro' },
+          { href: '/dashboard/financeiro/contas', label: 'Bancos e Contas', icon: '🏦', modulo: 'financeiro' },
           { href: '/dashboard/financeiro/taxas', label: 'Taxas e Custos de Venda', icon: '💲', modulo: 'saude_venda' },
         ],
       },
@@ -255,6 +257,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/integracoes/whatsapp',           label: 'WhatsApp / Z-API', icon: '📱', modulo: 'whatsapp' },
       { href: '/dashboard/integracoes/whatsapp/conversas', label: 'Conversas',        icon: '💬', modulo: 'whatsapp' },
       { href: '/dashboard/integracoes/whatsapp/contatos',  label: 'Contatos',         icon: '👥', modulo: 'whatsapp' },
+      { href: '/dashboard/integracoes/whatsapp/envios',    label: 'Envio por categoria', icon: '📣', modulo: 'whatsapp' },
       { href: '/dashboard/integracoes/whatsapp/historico', label: 'Histórico',        icon: '📋', modulo: 'whatsapp' },
     ],
   },

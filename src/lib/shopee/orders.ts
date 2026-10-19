@@ -120,6 +120,21 @@ function somaItens(itemList: any[]): number {
   }, 0)
 }
 
+/**
+ * Nome do comprador para a lista de pedidos. A Shopee mascara ("****") nome,
+ * endereço e telefone do destinatário em TODO pedido — medido em 19/10/2026:
+ * 315 de 315 pedidos dos últimos 45 dias, inclusive os já entregues. O que
+ * vem aberto é o usuário da Shopee, que vira "@usuario". A NF-e não usa este
+ * campo: lê o destinatário do pedido cru (lib/fiscal/destinatario.ts).
+ */
+export function nomeDoComprador(rawOrder: any): string | null {
+  const nome = String(rawOrder?.recipient_address?.name ?? '').trim()
+  if (nome && !/\*{3,}/.test(nome)) return nome
+  const usuario = String(rawOrder?.buyer_username ?? '').trim()
+  if (usuario && !/\*{3,}/.test(usuario)) return `@${usuario}`
+  return nome || null
+}
+
 function mapOrderToPedidoRow(rawOrder: any, canal: ShopeeChannel, algumItemPendente: boolean): Record<string, any> {
   const addr = rawOrder.recipient_address ?? {}
   const orderStatus = rawOrder.order_status as string | undefined
@@ -129,7 +144,7 @@ function mapOrderToPedidoRow(rawOrder: any, canal: ShopeeChannel, algumItemPende
     canal_id: canal.id,
     id_externo: rawOrder.order_sn,
     numero_pedido: rawOrder.order_sn,
-    cliente_nome: addr.name ?? rawOrder.buyer_username ?? null,
+    cliente_nome: nomeDoComprador(rawOrder),
     entrega_cep: addr.zipcode ?? null,
     entrega_logradouro: addr.full_address ?? null,
     entrega_bairro: addr.district ?? null,
