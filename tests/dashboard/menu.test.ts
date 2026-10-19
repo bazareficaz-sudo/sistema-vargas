@@ -134,6 +134,8 @@ describe('o Financeiro reúne o que é financeiro', () => {
     '/dashboard/contas-pagar',
     '/dashboard/configuracoes/tipos-despesa',
     '/dashboard/financeiro/taxas',
+    '/dashboard/financeiro/formas-pagamento',
+    '/dashboard/financeiro/contas',
   ]) {
     test(`inclui ${href}`, () => {
       assert.ok(hrefs.includes(href), `${href} não está no menu Financeiro`)
@@ -149,7 +151,11 @@ describe('o Financeiro reúne o que é financeiro', () => {
   test('as taxas ficam num subgrupo de cadastro, não soltas em Relatórios', () => {
     const cad = (financeiro.subGroups ?? []).find(sg => sg.label === 'Cadastros e Taxas')
     assert.ok(cad, 'subgrupo Cadastros e Taxas desapareceu')
-    assert.deepEqual(cad!.items.map(i => i.href), ['/dashboard/financeiro/taxas'])
+    assert.deepEqual(cad!.items.map(i => i.href), [
+      '/dashboard/financeiro/formas-pagamento',
+      '/dashboard/financeiro/contas',
+      '/dashboard/financeiro/taxas',
+    ])
   })
 })
 

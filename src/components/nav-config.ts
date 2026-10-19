@@ -181,6 +181,8 @@ export const NAV: NavGroup[] = [
         // teste em tests/dashboard/menu.test.ts reprova.
         label: 'Cadastros e Taxas',
         items: [
+          { href: '/dashboard/financeiro/formas-pagamento', label: 'Formas de Pagamento', icon: '💳', modulo: 'financeiro' },
+          { href: '/dashboard/financeiro/contas', label: 'Bancos e Contas', icon: '🏦', modulo: 'financeiro' },
           { href: '/dashboard/financeiro/taxas', label: 'Taxas e Custos de Venda', icon: '💲', modulo: 'saude_venda' },
         ],
       },
