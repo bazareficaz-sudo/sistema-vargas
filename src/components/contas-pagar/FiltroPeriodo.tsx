@@ -16,7 +16,7 @@ export default function FiltroPeriodo({ de, ate }: { de: string; ate: string }) 
 
   function ir(a: string, b: string) {
     setD1(a); setD2(b)
-    router.push(`/dashboard/contas-pagar/relatorio?de=${a}&ate=${b}`)
+    router.push(`/dashboard/contas-pagar/relatorio?aba=pagamentos&de=${a}&ate=${b}`)
   }
 
   function atalho(tipo: 'mes' | 'anterior' | 'ano' | '90') {

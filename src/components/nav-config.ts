@@ -166,7 +166,7 @@ export const NAV: NavGroup[] = [
         label: 'Pagar',
         items: [
           { href: '/dashboard/contas-pagar', label: 'Contas a Pagar', icon: '💳', modulo: 'contas_pagar' },
-          { href: '/dashboard/contas-pagar/relatorio', label: 'Relatório de Pagamentos', icon: '📊', modulo: 'contas_pagar' },
+          { href: '/dashboard/contas-pagar/relatorio', label: 'Relatórios a Pagar', icon: '📊', modulo: 'contas_pagar' },
           // Existia e funcionava, alcançável só por um link dentro do Contas a
           // Pagar. Quem não soubesse do link não achava a tela — e classificar
           // despesa é tarefa de quem abre o Financeiro, não de quem já está

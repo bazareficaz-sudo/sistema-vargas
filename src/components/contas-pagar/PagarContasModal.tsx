@@ -32,7 +32,8 @@ export default function PagarContasModal({
   onFechar: () => void
   onPago: (ids: string[], dados: { data: string; forma: string }) => void
 }) {
-  const [data, setData] = useState(() => new Date().toISOString().split('T')[0])
+  // Dia de hoje em Brasília: toISOString é UTC e, depois das 21h, já marca amanhã.
+  const [data, setData] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }))
   const [forma, setForma] = useState('pix')
   const [entrada, setEntrada] = useState<EntradaPagamento>(ENTRADA_VAZIA)
   const [tipos, setTipos] = useState<TipoDespesa[]>([])
