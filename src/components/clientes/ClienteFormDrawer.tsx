@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatarTelefone, formatarCep, formatarCpfCnpj, soDigitos, buscarCep, ESTADOS } from '@/lib/formato/contato'
+import { diferenca } from '@/lib/clientes/categorias'
+import CategoriasCliente from './CategoriasCliente'
 
 // Cadastro de cliente — o formulário que nunca existiu. Antes daqui só era
 // possível editar os campos financeiros; nome, telefone, e-mail e endereço
@@ -60,13 +62,19 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
   const [erro, setErro] = useState('')
   const [buscandoCep, setBuscandoCep] = useState<'principal' | number | null>(null)
   const [buscandoCnpj, setBuscandoCnpj] = useState(false)
+  // Categorias (etiquetas): gravadas junto com o resto, ao salvar.
+  const [categorias, setCategorias] = useState<string[]>([])
+  const [categoriasAntes, setCategoriasAntes] = useState<string[]>([])
 
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }))
 
   const carregar = useCallback(async () => {
     const trocas = Object.fromEntries(Object.entries(sobrepor ?? {}).filter(([, v]) => v !== '' && v != null))
-    if (!clienteId) { setForm({ ...CLIENTE_VAZIO, ...inicial, ...trocas }); setContatos([]); setEnderecos([]); return }
+    if (!clienteId) { setForm({ ...CLIENTE_VAZIO, ...inicial, ...trocas }); setContatos([]); setEnderecos([]); setCategorias([]); setCategoriasAntes([]); return }
     setCarregando(true)
+    // Sem a tabela de categorias (migração não aplicada) a consulta só volta vazia.
+    sb.from('cliente_categoria_vinculos').select('categoria_id').eq('cliente_id', clienteId)
+      .then(({ data }) => { const ids = (data ?? []).map(v => v.categoria_id as string); setCategorias(ids); setCategoriasAntes(ids) })
     const [{ data: cli }, { data: cts }, { data: ends }] = await Promise.all([
       sb.from('clientes').select('*').eq('id', clienteId).maybeSingle(),
       sb.from('cliente_contatos').select('*').eq('cliente_id', clienteId).eq('ativo', true).order('nome'),
@@ -229,6 +237,14 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
         else await sb.from('cliente_enderecos_entrega').insert(linha)
       }
 
+      const cats = diferenca(categoriasAntes, categorias)
+      if (cats.apagar.length) await sb.from('cliente_categoria_vinculos').delete().eq('cliente_id', id!).in('categoria_id', cats.apagar)
+      if (cats.inserir.length) {
+        const { error } = await sb.from('cliente_categoria_vinculos')
+          .insert(cats.inserir.map(categoria_id => ({ cliente_id: id!, categoria_id, empresa_id: empresaId })))
+        if (error) throw new Error('Cliente salvo, mas as categorias não: ' + error.message)
+      }
+
       onSalvo?.(id!)
       onFechar()
     } catch (e: any) {
@@ -287,6 +303,10 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Telefone" value={formatarTelefone(form.telefone)} onChange={v => set('telefone', v)} placeholder="(21) 99999-9999" />
                 <Field label="WhatsApp" value={formatarTelefone(form.whatsapp)} onChange={v => set('whatsapp', v)} placeholder="Se diferente do telefone" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Categorias <span className="font-normal text-gray-400">— ex.: Eletricista, Pedreiro; serve para filtrar depois</span></label>
+                <CategoriasCliente empresaId={empresaId} selecionadas={categorias} onMudar={setCategorias} />
               </div>
             </>
           )}

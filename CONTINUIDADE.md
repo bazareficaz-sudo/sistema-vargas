@@ -33,6 +33,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Origem do contato:** código da publicação do Vargas Marketing (ex.: T7K2) na mensagem do cliente vira `origem_codigo` do contato (só a primeira); conversa mostra "Veio da publicação"; `v1/origens` entrega ao Marketing só contagens por código (conversas, orçamentos, compras); migração `20261018120000_whatsapp_origem.sql`.
 - **Nova conversa e visual de WhatsApp:** botão para começar conversa com cliente do cadastro ou número com DDD (`whatsapp_abrir_conversa`, nada é enviado); tela redesenhada como o WhatsApp Web (prévia, tiques, balões, menu ＋); migração `20261018150000_whatsapp_nova_conversa.sql`.
 - **Responder, emojis e endereço:** responder citando (Z-API `messageId`, texto e imagem), copiar, painel de emojis; endereço que o cliente mandou abre o cadastro na conversa já preenchido (`src/lib/whatsapp/endereco.ts` + ViaCEP), sempre conferido antes de salvar; sem migração.
+- **Categorias de cliente:** etiquetas (Eletricista, Pedreiro…) no cadastro, na conversa e em lote na lista; filtro em Clientes, Conversas e relatório; `docs/clientes-categorias.md`; migração `20261020120000_cliente_categorias.sql`.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar

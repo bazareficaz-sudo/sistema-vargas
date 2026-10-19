@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import { formatarTelefone, normalizarTelefone } from '@/lib/clientes/telefone'
 import { buscarCep } from '@/lib/formato/contato'
 import ClienteFormDrawer from '@/components/clientes/ClienteFormDrawer'
+import CategoriasCliente from '@/components/clientes/CategoriasCliente'
+import { CORES, diferenca, type Categoria } from '@/lib/clientes/categorias'
 import { blocoDoCliente, completarComCep, extrairEndereco, pareceEndereco } from '@/lib/whatsapp/endereco'
 import { numeroOculto, semMarca, telefoneParaWhatsapp, tipoPelaMarca } from '@/lib/whatsapp/contatos'
 import { BUCKET_MIDIAS, LIMITE_MIDIA, comoMostrar } from '@/lib/whatsapp/midias'
@@ -21,6 +23,8 @@ export type Conversa = {
   origem_codigo: string | null; origem_em: string | null
   /** Foto do perfil no WhatsApp (link que vence; some se der erro). */
   foto_url?: string | null; foto_em?: string | null
+  /** Categorias do cliente (ids), quando é cliente. */
+  categorias?: string[]
   /** Última mensagem (prévia na lista). */
   ultima?: { tipo: string; conteudo: string; status: string; status_entrega: string | null } | null
 }
@@ -192,12 +196,13 @@ const FUNDO_CONVERSA = { backgroundColor: '#efeae2', backgroundImage: 'radial-gr
 
 type ClienteBusca = { id: string; nome: string; telefone: string | null; whatsapp: string | null; telefone_whatsapp: string | null }
 
-export default function WhatsAppConversasClient({ conversas, aberta, mensagens, contagem, filtros, indisponivel, ficha, orcamentos, respostas, loja, empresaId }: {
+export default function WhatsAppConversasClient({ conversas, aberta, mensagens, contagem, filtros, indisponivel, ficha, orcamentos, respostas, loja, empresaId, categorias }: {
   conversas: Conversa[]; aberta: Conversa | null; mensagens: Mensagem[]
   ficha: Ficha | null; orcamentos: OrcamentoConversa[]; respostas: RespostaRapida[]; loja: string; empresaId: string
   contagem: { aguardando: number; naoLidas: number; hoje: number; etapas: Record<string, number> }
-  filtros: { f: string; q: string; e: string | null }
+  filtros: { f: string; q: string; e: string | null; cat: string | null }
   indisponivel: boolean
+  categorias: Categoria[]
 }) {
   const router = useRouter()
   const [, startTransition] = useTransition()
@@ -356,7 +361,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
 
   const url = (p: Record<string, string | null>) => {
     const sp = new URLSearchParams()
-    const base = { f: filtros.f, q: filtros.q, e: filtros.e, c: aberta?.id ?? null, ...p }
+    const base = { f: filtros.f, q: filtros.q, e: filtros.e, cat: filtros.cat, c: aberta?.id ?? null, ...p }
     Object.entries(base).forEach(([k, v]) => { if (v && !(k === 'f' && v === 'todas')) sp.set(k, v) })
     return `/dashboard/integracoes/whatsapp/conversas?${sp}`
   }
@@ -448,6 +453,22 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   }
 
   const oculto = aberta ? numeroOculto(aberta.telefone) : false
+
+  // Categorias do cliente pela ficha: grava na hora (o banco confere a empresa).
+  const porCategoria = new Map(categorias.map(c => [c.id, c]))
+  const [catsLocal, setCatsLocal] = useState<{ conversa: string; ids: string[] } | null>(null)
+  const catsAberta = aberta ? (catsLocal?.conversa === aberta.id ? catsLocal.ids : aberta.categorias ?? []) : []
+  async function salvarCategorias(ids: string[]) {
+    if (!aberta?.cliente_id) return
+    const antes = catsAberta, conversa = aberta.id, cliente = aberta.cliente_id
+    setCatsLocal({ conversa, ids }); setErro('')
+    const { inserir, apagar } = diferenca(antes, ids)
+    const sb = createClient()
+    const r1 = apagar.length ? await sb.from('cliente_categoria_vinculos').delete().eq('cliente_id', cliente).in('categoria_id', apagar) : { error: null }
+    const r2 = inserir.length ? await sb.from('cliente_categoria_vinculos').insert(inserir.map(categoria_id => ({ cliente_id: cliente, categoria_id, empresa_id: empresaId }))) : { error: null }
+    if (r1.error || r2.error) { setCatsLocal({ conversa, ids: antes }); setErro('Não foi possível salvar a categoria.') }
+    router.refresh()
+  }
 
   function responderA(m: Mensagem) {
     if (!aberta) return
@@ -646,6 +667,13 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                 <option value="">Etapa</option>
                 {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.rotulo} ({contagem.etapas[e.id] ?? 0})</option>)}
               </select>
+              {categorias.length > 0 && (
+                <select value={filtros.cat ?? ''} onChange={e => ir({ cat: e.target.value || null, c: null })} title="Categoria do cliente"
+                  className={`text-[13px] rounded-full px-2 py-1 border-0 cursor-pointer ${filtros.cat ? 'bg-[#d9fdd3] text-[#008069]' : 'bg-[#f0f2f5] text-gray-600'}`}>
+                  <option value="">Categoria</option>
+                  {categorias.map(k => <option key={k.id} value={k.id}>{k.nome}</option>)}
+                </select>
+              )}
             </div>
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -662,6 +690,9 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                       <span className="min-w-0 flex items-baseline gap-1.5">
                         <span className={`truncate text-[15px] ${c.nao_lida ? 'font-semibold text-gray-900' : 'text-gray-900'}`}>{nome}</span>
                         {c.cliente_id && <span title="Cliente cadastrado" className="shrink-0 text-[10px] leading-4 px-1.5 rounded-full bg-emerald-100 text-emerald-800">cliente</span>}
+                        {(c.categorias ?? []).map(id => porCategoria.get(id)).filter((k): k is Categoria => Boolean(k)).slice(0, 3).map(k => (
+                          <span key={k.id} title={k.nome} className={`shrink-0 w-2 h-2 rounded-full self-center ${CORES[k.cor].ponto}`} />
+                        ))}
                       </span>
                       {c.ultima_atividade && <span className={`text-xs whitespace-nowrap ${c.nao_lida ? 'text-[#00a884] font-medium' : 'text-gray-500'}`}>{quandoNaLista(c.ultima_atividade)}</span>}
                     </span>
@@ -1017,7 +1048,8 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
             </div>
             {juntar && painelJuntar}
             <FichaCliente aberta={aberta} ficha={ficha} orcamentos={listaOrcamentos}
-              endereco={enderecoNaConversa} onCadastro={abrirCadastro} />
+              endereco={enderecoNaConversa} onCadastro={abrirCadastro}
+              categorias={aberta.cliente_id ? <CategoriasCliente empresaId={empresaId} categorias={categorias} selecionadas={catsAberta} onMudar={salvarCategorias} /> : null} />
           </div>
         </aside>
       )}
@@ -1087,8 +1119,8 @@ function EnderecoDaConversa({ endereco, cliente, onUsar }: { endereco: { texto: 
   )
 }
 
-function FichaCliente({ aberta, ficha, orcamentos, endereco, onCadastro }: {
-  aberta: Conversa; ficha: Ficha | null; orcamentos: React.ReactNode
+function FichaCliente({ aberta, ficha, orcamentos, endereco, onCadastro, categorias }: {
+  aberta: Conversa; ficha: Ficha | null; orcamentos: React.ReactNode; categorias: React.ReactNode
   endereco: { texto: string; quando: string } | null; onCadastro: (textoEndereco: string | null) => void
 }) {
   if (!aberta.cliente_id || !ficha) return (
@@ -1114,6 +1146,13 @@ function FichaCliente({ aberta, ficha, orcamentos, endereco, onCadastro }: {
         </div>
         <button onClick={() => onCadastro(null)} className="mt-1 text-[11px] text-[#008069] hover:underline">Editar cadastro</button>
       </div>
+
+      {categorias && (
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1">Categorias</p>
+          {categorias}
+        </div>
+      )}
 
       {endereco && <EnderecoDaConversa endereco={endereco} cliente onUsar={() => onCadastro(endereco.texto)} />}
 
