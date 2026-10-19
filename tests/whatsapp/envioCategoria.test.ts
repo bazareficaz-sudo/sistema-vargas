@@ -20,3 +20,15 @@ describe('envio por categoria', () => {
     assert.equal(avisoDaSituacao('ok'), '')
   })
 })
+
+describe('prévia do envio por categoria', () => {
+  it('explica quem fica de fora, só com os motivos que aconteceram', async () => {
+    const { motivosDeFora } = await import('../../src/lib/whatsapp/envioCategoria')
+    const p = { na_categoria: 4, entram: 1, repetidos: 0, cadastro: 0, nao_quer: 0, sem_celular: 2, equipe: 1, nao_comprou: 0, recente: 0 }
+    assert.deepEqual(motivosDeFora(p), [
+      '1 é número da equipe (destinatário da Betina)',
+      '2 não têm celular válido no cadastro (fixo ou sem DDD)',
+    ])
+    assert.deepEqual(motivosDeFora({ ...p, sem_celular: 0, equipe: 0 }), [])
+  })
+})

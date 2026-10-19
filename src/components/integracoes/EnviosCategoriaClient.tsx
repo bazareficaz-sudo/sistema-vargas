@@ -7,7 +7,8 @@ import { createClient } from '@/lib/supabase/client'
 import { formatarTelefone } from '@/lib/clientes/telefone'
 import type { Categoria } from '@/lib/clientes/categorias'
 import {
-  HORARIO, INTERVALO_MINIMO_S, LIMITE_POR_DIA, SITUACAO_ITEM, avisoDaSituacao, esperaAutomatica, montarMensagem,
+  HORARIO, INTERVALO_MINIMO_S, LIMITE_POR_DIA, SITUACAO_ITEM, avisoDaSituacao, esperaAutomatica, montarMensagem, motivosDeFora,
+  type PreviaLote,
 } from '@/lib/whatsapp/envioCategoria'
 
 // Envio por categoria (envio assistido): monta a fila e manda uma por vez,
@@ -60,6 +61,22 @@ export default function EnviosCategoriaClient({ empresaId, indisponivel, lotes, 
   const [auto, setAuto] = useState(false)
   const [falta, setFalta] = useState(0)
   const caixa = useRef<HTMLTextAreaElement>(null)
+  // Prévia da fila: quantos recebem e por que os outros ficam de fora.
+  const [previa, setPrevia] = useState<{ chave: string; p: PreviaLote | null; erro?: string } | null>(null)
+  const chavePrevia = `${form.categoria}|${form.dias}`
+  useEffect(() => {
+    if (!form.categoria) return
+    let valido = true
+    const chave = `${form.categoria}|${form.dias}`
+    createClient().rpc('whatsapp_lote_previa', { p_empresa: empresaId, p_categoria: form.categoria, p_comprou_dias: form.dias ? Number(form.dias) : null })
+      .then(({ data, error }) => {
+        if (!valido) return
+        const p = ((data ?? []) as PreviaLote[])[0] ?? null
+        setPrevia({ chave, p, erro: error ? 'Não foi possível calcular a prévia.' : undefined })
+      })
+    return () => { valido = false }
+  }, [form.categoria, form.dias, empresaId])
+  const previaAtual = previa?.chave === chavePrevia ? previa : null
 
   const proximo = itens.find(i => i.status === 'pendente')
   const conta = (s: string[]) => itens.filter(i => s.includes(i.status)).length
@@ -226,6 +243,25 @@ export default function EnviosCategoriaClient({ empresaId, indisponivel, lotes, 
                   </select>
                 </label>
               </div>
+              {form.categoria && (
+                <div className={`rounded-lg border px-3 py-2 text-sm ${previaAtual?.p && previaAtual.p.entram === 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50'}`}>
+                  {!previaAtual ? <span className="text-gray-400">Calculando quem recebe…</span>
+                    : previaAtual.erro || !previaAtual.p ? <span className="text-red-600">{previaAtual.erro ?? 'Prévia indisponível.'}</span>
+                    : <>
+                      <p className="text-gray-800">
+                        {previaAtual.p.entram === 0
+                          ? <b>Ninguém desta seleção pode receber agora.</b>
+                          : <>Vão receber: <b>{previaAtual.p.entram}</b> de {previaAtual.p.na_categoria} cliente{previaAtual.p.na_categoria === 1 ? '' : 's'} da categoria.</>}
+                      </p>
+                      {motivosDeFora(previaAtual.p).length > 0 && (
+                        <ul className="mt-1 text-xs text-gray-600 list-disc pl-5">
+                          {motivosDeFora(previaAtual.p).map(m => <li key={m}>{m}</li>)}
+                        </ul>
+                      )}
+                      {previaAtual.p.equipe > 0 && <p className="mt-1 text-[11px] text-gray-500">Número da equipe fica de fora para não misturar com os avisos da Betina. Para testar, marque na categoria um cliente com outro celular.</p>}
+                    </>}
+                </div>
+              )}
               <label className="block">
                 <span className="block text-xs font-medium text-gray-600 mb-1">Nome do envio <span className="font-normal text-gray-400">(só para você achar depois)</span></span>
                 <input value={form.nome} onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} maxLength={80}
@@ -252,7 +288,7 @@ export default function EnviosCategoriaClient({ empresaId, indisponivel, lotes, 
               {erro && <p className="text-sm text-red-600">{erro}</p>}
               <div className="flex justify-end gap-2">
                 {lote && <button onClick={() => setNovo(false)} className="px-3 py-2 text-sm text-gray-600">Voltar</button>}
-                <button onClick={montarFila} disabled={criando || !form.categoria || !form.mensagem.trim()}
+                <button onClick={montarFila} disabled={criando || !form.categoria || !form.mensagem.trim() || previaAtual?.p?.entram === 0}
                   className="px-4 py-2 rounded-lg bg-[#008069] text-white text-sm disabled:opacity-50">{criando ? 'Montando…' : 'Montar fila'}</button>
               </div>
               <p className="text-[11px] text-gray-400 text-right">Montar a fila não envia nada. Você confere a lista e envia na tela seguinte.</p>

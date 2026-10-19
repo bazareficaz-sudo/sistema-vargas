@@ -15,7 +15,7 @@ A Z-API não é a API oficial e o número é o mesmo do ERP e da Betina. Disparo
 
 ## Como funciona
 
-1. **Novo envio:** categoria, "quem" (todos ou quem comprou nos últimos 30/90/180/365 dias), nome e texto com `{nome}` e `{loja}`. Prévia de como chega. **Montar fila** não envia nada (`whatsapp_lote_criar`).
+1. **Novo envio:** categoria, "quem" (todos ou quem comprou nos últimos 30/90/180/365 dias), nome e texto com `{nome}` e `{loja}`. Prévia de como chega e **prévia da fila**: quantos vão receber e por que os outros ficam de fora (equipe, sem celular, não quer receber, envio nos últimos 7 dias, não comprou no período, cadastro unificado/inativo, número repetido) — `whatsapp_lote_previa`. **Montar fila** não envia nada (`whatsapp_lote_criar`) e é recusado quando ninguém pode receber (não fica fila vazia).
 2. **Enviar:** botão "Enviar para Fulano" (um) ou **Envio automático** (um a cada 60–120 s, sorteado, só com a tela aberta). O automático para no limite do dia, fora do horário, no fim da fila, em erro de conexão e em qualquer envio sem confirmação.
 3. Toda mensagem leva o rodapé "Para não receber mais mensagens como esta, responda SAIR." Se o cliente responder só SAIR/PARAR/STOP/"não quero receber" em até 30 dias de um envio, o webhook marca o cadastro como "não quer receber WhatsApp".
 4. A mensagem entra na conversa do cliente (rótulo "Envio por categoria"); a conversa é aberta antes do envio, então a resposta cai nela.
@@ -26,6 +26,7 @@ A Z-API não é a API oficial e o número é o mesmo do ERP e da Betina. Disparo
 - `whatsapp_lotes` e `whatsapp_lote_itens`: o logado **só lê** (RLS da empresa); tudo que muda passa pelas funções `SECURITY DEFINER`, que conferem a empresa.
 - `whatsapp_lotes_resumo` (view): contagem por situação para a lista.
 - `whatsapp_celular()`: celular brasileiro (55 + DDD + 9…), fixo fica de fora.
+- `whatsapp_lote_candidatos()` (interna): cada cliente da categoria com o primeiro motivo que o tira da fila; a mesma regra serve à prévia e à fila (`20261020200000_whatsapp_envio_previa.sql`).
 - `whatsapp_lote_agora()`: a hora usada pelo ritmo (função à parte só para os testes fixarem a hora).
 
 Rota de envio: `POST /api/whatsapp/lotes/proximo` — reserva no banco, registra em `whatsapp_mensagens` (tipo `envio_categoria`), envia pela Z-API e grava o resultado. Regras de texto em `src/lib/whatsapp/envioCategoria.ts`.
