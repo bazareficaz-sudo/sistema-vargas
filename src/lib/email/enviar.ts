@@ -26,14 +26,31 @@ export function listaDeEmails(texto: string | null | undefined): string[] {
   return Array.from(new Set(String(texto ?? '').split(/[;,\s]+/).map(s => s.trim().toLowerCase()).filter(s => EMAIL_VALIDO.test(s))))
 }
 
+/**
+ * O remetente como o Resend exige: "Nome <email@dominio>" ou só o e-mail.
+ *
+ * A variável é digitada à mão na Vercel, e o primeiro envio real falhou com
+ * "Invalid `from` field" — aspas em volta, falta dos sinais < >, espaço ou
+ * quebra de linha sobrando. Em vez de exigir o formato exato, acha o e-mail
+ * dentro do texto e remonta. null quando não há e-mail nenhum ali.
+ */
+export function normalizarRemetente(bruto: string | null | undefined): string | null {
+  const texto = String(bruto ?? '').replace(/[\r\n\t]+/g, ' ').trim().replace(/^["'`]+|["'`]+$/g, '').trim()
+  const email = /[^\s<>"'`(),;:]+@[^\s<>"'`(),;:]+\.[a-z]{2,}/i.exec(texto)?.[0]
+  if (!email) return null
+  const nome = texto.replace(email, '').replace(/[<>"'`]/g, ' ').replace(/\s+/g, ' ').trim()
+  return nome ? `${nome} <${email.toLowerCase()}>` : email.toLowerCase()
+}
+
 export function emailConfigurado(): boolean {
-  return !!process.env.RESEND_API_KEY && !!process.env.EMAIL_REMETENTE
+  return !!process.env.RESEND_API_KEY && !!normalizarRemetente(process.env.EMAIL_REMETENTE)
 }
 
 export async function enviarEmail(e: EmailParaEnviar): Promise<ResultadoEmail> {
-  const chave = process.env.RESEND_API_KEY
-  const de = process.env.EMAIL_REMETENTE
-  if (!chave || !de) return { ok: false, erro: 'Envio de e-mail não configurado (RESEND_API_KEY e EMAIL_REMETENTE na Vercel).' }
+  const chave = process.env.RESEND_API_KEY?.trim()
+  const de = normalizarRemetente(process.env.EMAIL_REMETENTE)
+  if (!chave) return { ok: false, erro: 'Envio de e-mail não configurado (RESEND_API_KEY na Vercel).' }
+  if (!de) return { ok: false, erro: 'EMAIL_REMETENTE na Vercel não tem um e-mail válido — use: Sistema Vargas <fechamento@sistemavargas.com.br>' }
   if (e.para.length === 0) return { ok: false, erro: 'Nenhum destinatário válido.' }
 
   try {
