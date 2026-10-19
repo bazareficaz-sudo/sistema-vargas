@@ -11,21 +11,23 @@ import {
   diaMes, diasEntre, nomeDoMes, linhaCsv,
   type Situacao, type Periodo, type Agrupamento,
 } from '@/lib/contas/agendaPagar'
+import { chaveDoFornecedor, type EmpresaPagar } from '@/lib/contas/empresasPagar'
+import SeletorEmpresasPagar, { gravarEscolha, EtiquetaEmpresa } from '@/components/contas-pagar/SeletorEmpresasPagar'
 
 export type ContaPagar = {
-  id: string; descricao: string; valor: number; vencimento: string
+  id: string; empresa_id: string; descricao: string; valor: number; vencimento: string
   status: string; data_pagamento: string | null; forma_pagamento: string | null
   parcela: number; total_parcelas: number; observacoes: string | null
   valor_pago: number | null; juros: number | null; multa: number | null
   tipo_despesa_id: string | null; competencia: string | null
   fornecedor_id: string | null
-  fornecedores: { id?: string; razao_social: string; nome_fantasia: string | null } | null
+  fornecedores: { id?: string; razao_social: string; nome_fantasia: string | null; cnpj?: string | null } | null
   origemDoc: OrigemDaConta | null
   pedidoDoc: OrigemDaConta | null
   obsDaEntrada: string | null
 }
 type Conta = ContaPagar
-type Tipo = { id: string; nome: string; cor: string | null }
+type Tipo = { id: string; nome: string; cor: string | null; empresa_id?: string }
 
 type Filtro = {
   situacao: Situacao; periodo: Periodo; de: string; ate: string; q: string
@@ -62,8 +64,10 @@ const BADGE: Record<string, [string, string]> = {
 
 const PADRAO: Filtro = { situacao: 'aberto', periodo: 'todos', de: '', ate: '', q: '', fornecedor: '', tipo: '', agrupar: 'semana' }
 
-function Cartao({ titulo, valor, linha, cor, onClick, marcado, destaque }: {
+function Cartao({ titulo, valor, linha, cor, onClick, marcado, destaque, porEmpresa }: {
   titulo: string; valor: number; linha: React.ReactNode; cor: string; onClick: () => void; marcado: boolean; destaque?: string
+  /** Com mais de uma empresa na tela: quanto do valor é de cada uma. */
+  porEmpresa?: { empresa: EmpresaPagar; valor: number }[]
 }) {
   return (
     <button onClick={onClick}
@@ -71,19 +75,36 @@ function Cartao({ titulo, valor, linha, cor, onClick, marcado, destaque }: {
       <p className="text-[11px] text-gray-500 truncate">{titulo}</p>
       <p className={`text-lg sm:text-xl font-bold ${cor}`}>{fmt(valor)}</p>
       <p className="text-[11px] text-gray-500 leading-tight">{linha}</p>
+      {porEmpresa && (
+        <div className="mt-1.5 pt-1.5 border-t border-gray-100 space-y-0.5">
+          {porEmpresa.map(({ empresa, valor: v }) => (
+            <p key={empresa.id} className="flex items-center justify-between gap-1 text-[11px] leading-tight">
+              <span className="inline-flex items-center gap-1 min-w-0 text-gray-600">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: empresa.cor }} />
+                <span className="truncate">{empresa.curto}</span>
+              </span>
+              <span className={v ? 'text-gray-800 font-medium' : 'text-gray-300'}>{fmt(v)}</span>
+            </p>
+          ))}
+        </div>
+      )}
     </button>
   )
 }
 
 export default function ContasPagarClient({
-  contas: inicial, tipos, desde, filtroInicial, empresaId, hojeIso,
+  contas: inicial, tipos, desde, filtroInicial, empresaId, empresas, empresasIniciais, hojeIso,
 }: {
   /** Todas as contas em aberto + pagas/canceladas desde `desde`. */
   contas: Conta[]
   tipos: Tipo[]
   desde: string
   filtroInicial: Record<string, string>
+  /** A empresa em que a sessão está trabalhando. */
   empresaId: string
+  /** Empresas que o usuário pode ver aqui; mais de uma liga o seletor. */
+  empresas: EmpresaPagar[]
+  empresasIniciais: string[]
   hojeIso: string
 }) {
   const router = useRouter()
@@ -120,6 +141,18 @@ export default function ContasPagarClient({
   }))
   const [ordem, setOrdem] = useState<'vencimento' | 'fornecedor' | 'valor'>('vencimento')
 
+  // EMPRESAS. As contas de todas as empresas permitidas já vieram; escolher
+  // quais mostrar é um filtro como os outros, e a escolha fica gravada para
+  // a próxima vez.
+  const [empresasSel, setEmpresasSel] = useState(empresasIniciais)
+  const infoEmpresa = new Map(empresas.map(e => [e.id, e]))
+  const variasEmpresas = empresasSel.length > 1
+  function escolherEmpresas(ids: string[]) {
+    setEmpresasSel(ids)
+    gravarEscolha(ids, empresas.map(e => e.id))
+    if (!ids.length || (ids.length < 2 && f.agrupar === 'empresa')) mudar({ agrupar: 'semana' })
+  }
+
   function mudar(p: Partial<Filtro>) {
     const novo = { ...f, ...p }
     setF(novo)
@@ -134,14 +167,26 @@ export default function ContasPagarClient({
 
   const nomeForn = (c: Conta) => c.fornecedores?.nome_fantasia || c.fornecedores?.razao_social || ''
   const nomeTipo = new Map(tipos.map(t => [t.id, t]))
+  // Cada empresa tem a sua lista de tipos; o filtro junta pelo NOME, para
+  // "Energia" das duas empresas ser uma opção só.
+  const chaveTipo = (id: string | null) => (id ? nomeTipo.get(id)?.nome.trim().toLowerCase() ?? id : '__sem__')
+  const tiposVisiveis = [...new Map(tipos
+    .filter(t => !t.empresa_id || empresasSel.includes(t.empresa_id))
+    .map(t => [t.nome.trim().toLowerCase(), t.nome])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'))
+
+  const dasEmpresas = contas.filter(c => empresasSel.includes(c.empresa_id))
 
   // Seletor de fornecedor: só quem tem conta carregada, com quantas estão em
-  // aberto. POR ID, NÃO POR NOME — dois homônimos somariam a dívida dos dois.
+  // aberto. POR CNPJ (ou id), NÃO POR NOME — dois homônimos somariam a dívida
+  // dos dois; e o mesmo fornecedor nas duas empresas, que são dois cadastros,
+  // vira uma opção só pelo CNPJ.
+  const chaveForn = (c: Conta) => chaveDoFornecedor(c.fornecedor_id, c.fornecedores?.cnpj)
   const fornecedores = (() => {
     const m = new Map<string, { nome: string; abertas: number }>()
-    for (const c of contas) {
+    for (const c of dasEmpresas) {
       if (c.status === 'cancelado') continue
-      const id = c.fornecedor_id ?? ''
+      const id = chaveForn(c)
       const at = m.get(id) ?? { nome: nomeForn(c) || '(sem fornecedor)', abertas: 0 }
       if (c.status !== 'pago') at.abertas += 1
       m.set(id, at)
@@ -157,10 +202,15 @@ export default function ContasPagarClient({
 
   // Fornecedor e tipo valem para tudo, inclusive os cartões: escolher um
   // fornecedor responde "quanto devo a ele, vencido, nesta semana, neste mês".
-  const doRecorte = contas.filter(c =>
-    (!f.fornecedor || (f.fornecedor === '__sem__' ? !c.fornecedor_id : c.fornecedor_id === f.fornecedor))
-    && (!f.tipo || (f.tipo === '__sem__' ? !c.tipo_despesa_id : c.tipo_despesa_id === f.tipo)))
+  const doRecorte = dasEmpresas.filter(c =>
+    (!f.fornecedor || chaveForn(c) === f.fornecedor)
+    && (!f.tipo || chaveTipo(c.tipo_despesa_id) === f.tipo))
   const painel = painelDoPagar(doRecorte, hojeIso)
+  const paineisPorEmpresa = variasEmpresas
+    ? empresas.filter(e => empresasSel.includes(e.id)).map(e => ({ empresa: e, p: painelDoPagar(doRecorte.filter(c => c.empresa_id === e.id), hojeIso) }))
+    : null
+  const divisao = (campo: (p: typeof painel) => number) =>
+    paineisPorEmpresa?.map(({ empresa, p }) => ({ empresa, valor: campo(p) }))
 
   const intervalo = intervaloDoPeriodo(f.periodo, hojeIso, f.de, f.ate)
   const base = doRecorte.filter(c => noIntervalo(c.vencimento, intervalo) && casaBusca(c))
@@ -182,7 +232,7 @@ export default function ContasPagarClient({
     if (f.agrupar === 'nenhum') return [{ chave: '', rotulo: '', contas: filtradas, total: 0 }]
     const m = new Map<string, Grupo>()
     for (const c of filtradas) {
-      const g = grupoDaConta({ ...c, fornecedorNome: nomeForn(c) }, f.agrupar, hojeIso)
+      const g = grupoDaConta({ ...c, fornecedorNome: nomeForn(c), empresaNome: infoEmpresa.get(c.empresa_id)?.nome }, f.agrupar, hojeIso)
       const at = m.get(g.chave) ?? { ...g, contas: [], total: 0 }
       at.contas.push(c); at.total += Number(c.valor)
       m.set(g.chave, at)
@@ -248,9 +298,11 @@ export default function ContasPagarClient({
   }
 
   function exportar() {
-    const cab = ['Vencimento', 'Descrição', 'Fornecedor', 'Documento', 'Tipo de despesa', 'Competência', 'Parcela',
+    const comEmpresa = empresas.length > 1
+    const cab = [...(comEmpresa ? ['Empresa'] : []), 'Vencimento', 'Descrição', 'Fornecedor', 'Documento', 'Tipo de despesa', 'Competência', 'Parcela',
       'Valor', 'Situação', 'Pago em', 'Forma', 'Valor pago', 'Observação']
     const linhas = filtradas.map(c => linhaCsv([
+      ...(comEmpresa ? [infoEmpresa.get(c.empresa_id)?.nome ?? ''] : []),
       dataBr(c.vencimento), c.descricao, nomeForn(c), c.origemDoc?.rotulo ?? '',
       c.tipo_despesa_id ? nomeTipo.get(c.tipo_despesa_id)?.nome ?? '' : '',
       c.competencia ? c.competencia.slice(0, 7) : '', c.total_parcelas > 1 ? `${c.parcela}/${c.total_parcelas}` : '',
@@ -339,16 +391,30 @@ export default function ContasPagarClient({
     )
   }
 
+  // O documento de outra empresa só abre com a sessão nela: a tela da
+  // entrada procura na empresa ativa. Então o clique troca de empresa antes,
+  // avisando — trocar em silêncio faria a próxima tela gravar na empresa
+  // errada sem ninguém perceber.
+  async function abrirDeOutraEmpresa(e: React.MouseEvent, c: Conta, href: string) {
+    if (c.empresa_id === empresaId) return
+    e.preventDefault()
+    const nome = infoEmpresa.get(c.empresa_id)?.nome ?? 'a outra empresa'
+    if (!confirm(`Este documento é de ${nome}. Para abrir, o sistema vai passar a trabalhar em ${nome}. Continuar?`)) return
+    const r = await fetch('/api/empresa-ativa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ empresaId: c.empresa_id }) })
+    if (!r.ok) { alert('Não foi possível trocar de empresa.'); return }
+    window.location.href = href
+  }
+
   function origem(c: Conta) {
     return (
       <>
         {c.origemDoc && (
-          <a href={c.origemDoc.href} title={c.origemDoc.descricao} className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium">
+          <a href={c.origemDoc.href} onClick={e => void abrirDeOutraEmpresa(e, c, c.origemDoc!.href)} title={c.origemDoc.descricao} className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium">
             {c.origemDoc.rotulo}
           </a>
         )}
         {c.pedidoDoc && (
-          <a href={c.pedidoDoc.href} title={c.pedidoDoc.descricao} className="block text-[11px] text-blue-600 hover:underline">
+          <a href={c.pedidoDoc.href} onClick={e => void abrirDeOutraEmpresa(e, c, c.pedidoDoc!.href)} title={c.pedidoDoc.descricao} className="block text-[11px] text-blue-600 hover:underline">
             {c.pedidoDoc.rotulo}
           </a>
         )}
@@ -397,6 +463,10 @@ export default function ContasPagarClient({
         </div>
       </div>
 
+      {empresas.length > 1 && (
+        <div className="mb-3"><SeletorEmpresasPagar empresas={empresas} valor={empresasSel} onChange={escolherEmpresas} /></div>
+      )}
+
       {/* PAINEL. Cada cartão é uma pergunta de quem paga boleto, e clicar nele
           filtra a lista para mostrar exatamente o que ele somou. */}
       {nomeDoFornecedor && (
@@ -406,21 +476,27 @@ export default function ContasPagarClient({
         <Cartao titulo="🔴 Vencidos" valor={painel.vencido.total} cor={painel.vencido.quantidade ? 'text-red-600' : 'text-gray-400'}
           destaque={painel.vencido.quantidade ? 'bg-red-50' : undefined}
           linha={painel.vencido.quantidade ? <>{painel.vencido.quantidade} boleto(s) · desde {diaMes(painel.vencido.maisAntigo!)}</> : 'nada em atraso'}
+          porEmpresa={divisao(p => p.vencido.total)}
           marcado={ativo('vencido', 'todos')} onClick={() => mudar({ situacao: 'vencido', periodo: 'todos' })} />
         <Cartao titulo="⏰ Vence hoje" valor={painel.hoje.total} cor={painel.hoje.quantidade ? 'text-orange-600' : 'text-gray-400'}
           linha={`${painel.hoje.quantidade} boleto(s)`}
+          porEmpresa={divisao(p => p.hoje.total)}
           marcado={ativo('aberto', 'hoje')} onClick={() => mudar({ situacao: 'aberto', periodo: 'hoje' })} />
         <Cartao titulo={`📅 Esta semana · ${diaMes(painel.semana.de)} a ${diaMes(painel.semana.ate)}`} valor={painel.semana.total} cor="text-gray-900"
           linha={faltaPago({falta: painel.semana.aberto.total, pago: painel.semana.pago.total, qtd: painel.semana.quantidade})}
+          porEmpresa={divisao(p => p.semana.total)}
           marcado={ativo('todos', 'semana')} onClick={() => mudar({ situacao: 'todos', periodo: 'semana' })} />
         <Cartao titulo={`🗓 ${nomeDoMes(painel.mes.mes)} (este mês)`} valor={painel.mes.total} cor="text-gray-900"
           linha={faltaPago({falta: painel.mes.aberto.total, pago: painel.mes.pago.total, qtd: painel.mes.quantidade})}
+          porEmpresa={divisao(p => p.mes.total)}
           marcado={ativo('todos', 'mes')} onClick={() => mudar({ situacao: 'todos', periodo: 'mes' })} />
         <Cartao titulo={`➡️ ${nomeDoMes(painel.proximoMes.mes)} (próximo mês)`} valor={painel.proximoMes.total} cor="text-blue-700"
           linha={faltaPago({falta: painel.proximoMes.aberto.total, pago: painel.proximoMes.pago.total, qtd: painel.proximoMes.quantidade})}
+          porEmpresa={divisao(p => p.proximoMes.total)}
           marcado={ativo('todos', 'proximo_mes')} onClick={() => mudar({ situacao: 'todos', periodo: 'proximo_mes' })} />
         <Cartao titulo="💳 Total em aberto" valor={painel.totalAberto.total} cor="text-gray-900"
           linha={`${painel.totalAberto.quantidade} boleto(s), vencidos e a vencer`}
+          porEmpresa={divisao(p => p.totalAberto.total)}
           marcado={ativo('aberto', 'todos')} onClick={() => mudar({ situacao: 'aberto', periodo: 'todos' })} />
       </div>
 
@@ -455,11 +531,11 @@ export default function ContasPagarClient({
               <option key={id || '__sem__'} value={id || '__sem__'}>{x.nome}{x.abertas ? ` (${x.abertas} em aberto)` : ''}</option>
             ))}
           </select>
-          {tipos.length > 0 && (
+          {tiposVisiveis.length > 0 && (
             <select value={f.tipo} onChange={e => mudar({ tipo: e.target.value })}
               className="col-span-2 sm:col-span-1 border border-gray-300 rounded-lg px-2.5 py-2 sm:py-1.5 text-base sm:text-sm bg-white focus:outline-none focus:border-blue-500">
               <option value="">Todos os tipos de despesa</option>
-              {tipos.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
+              {tiposVisiveis.map(([k, nome]) => <option key={k} value={k}>{nome}</option>)}
               <option value="__sem__">Sem tipo</option>
             </select>
           )}
@@ -468,6 +544,7 @@ export default function ContasPagarClient({
           <select value={f.agrupar} onChange={e => mudar({ agrupar: e.target.value as Agrupamento })}
             className="border border-gray-300 rounded-lg px-2.5 py-2 sm:py-1.5 text-base sm:text-sm bg-white focus:outline-none focus:border-blue-500">
             {AGRUPAR.map(([a, l]) => <option key={a} value={a}>{l}</option>)}
+            {variasEmpresas && <option value="empresa">Agrupar por empresa</option>}
           </select>
           <select value={ordem} onChange={e => setOrdem(e.target.value as typeof ordem)} title="Ordem dentro de cada grupo"
             className="border border-gray-300 rounded-lg px-2.5 py-2 sm:py-1.5 text-base sm:text-sm bg-white focus:outline-none focus:border-blue-500">
@@ -541,7 +618,9 @@ export default function ContasPagarClient({
                           <p className="text-sm font-semibold text-gray-900 shrink-0">{fmt(Number(c.valor))}</p>
                         </div>
                         {nomeForn(c) && <p className="text-xs text-gray-500 break-words">{c.descricao}</p>}
-                        <div className="flex flex-wrap items-center gap-x-2">{origem(c)}{detalhes(c)}</div>
+                        <div className="flex flex-wrap items-center gap-x-2">
+                          {variasEmpresas && <EtiquetaEmpresa empresa={infoEmpresa.get(c.empresa_id)} />}{origem(c)}{detalhes(c)}
+                        </div>
                         <div className="flex items-center justify-between gap-2 pt-0.5">
                           <div className="flex items-center gap-2">
                             {situ(c)}
@@ -571,6 +650,7 @@ export default function ContasPagarClient({
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500 uppercase tracking-wide">
                   <th className="w-10 px-4 py-2.5"></th>
+                  {variasEmpresas && <th className="text-left px-3 py-2.5 font-medium">Empresa</th>}
                   <th className="text-left px-3 py-2.5 font-medium">Fornecedor / descrição</th>
                   <th className="text-left px-3 py-2.5 font-medium" title="Documento que originou a conta">Origem</th>
                   <th className="text-left px-3 py-2.5 font-medium">Vencimento</th>
@@ -585,7 +665,7 @@ export default function ContasPagarClient({
                 <tbody key={g.chave || 'lista'} className="divide-y divide-gray-100 border-b border-gray-200 last:border-b-0">
                   {g.rotulo && (
                     <tr className={g.atraso ? 'bg-red-50' : 'bg-slate-50'}>
-                      <td colSpan={9} className="px-4 py-2">{cabecalhoGrupo(g)}</td>
+                      <td colSpan={variasEmpresas ? 10 : 9} className="px-4 py-2">{cabecalhoGrupo(g)}</td>
                     </tr>
                   )}
                   {g.contas.map(c => (
@@ -595,6 +675,7 @@ export default function ContasPagarClient({
                           <input type="checkbox" checked={selecionadas.has(c.id)} onChange={e => marcar([c.id], e.target.checked)} className="w-4 h-4 accent-blue-600" />
                         )}
                       </td>
+                      {variasEmpresas && <td className="px-3 py-2.5"><EtiquetaEmpresa empresa={infoEmpresa.get(c.empresa_id)} /></td>}
                       <td className="px-3 py-2.5 max-w-[22rem]">
                         <p className="text-gray-900 font-medium text-xs truncate" title={nomeForn(c)}>{nomeForn(c) || '—'}</p>
                         <p className="text-[11px] text-gray-500 truncate" title={c.descricao}>{c.descricao}</p>
@@ -627,7 +708,7 @@ export default function ContasPagarClient({
               ))}
               <tfoot>
                 <tr className="bg-gray-50 border-t border-gray-200">
-                  <td colSpan={4} className="px-4 py-2.5 text-xs text-gray-500">{filtradas.length} conta(s)</td>
+                  <td colSpan={variasEmpresas ? 5 : 4} className="px-4 py-2.5 text-xs text-gray-500">{filtradas.length} conta(s)</td>
                   <td className="px-3 py-2.5 text-right text-sm font-bold text-gray-900 whitespace-nowrap">{fmt(totalFiltrado)}</td>
                   <td colSpan={4}></td>
                 </tr>
@@ -645,7 +726,10 @@ export default function ContasPagarClient({
 
       {modalNova && (
         <NovaDespesaModal
-          empresaId={empresaId}
+          // Com uma empresa na tela, a despesa é dela; com várias, o modal
+          // pergunta, começando pela empresa em que a sessão está.
+          empresaId={empresasSel.length === 1 ? empresasSel[0] : (empresasSel.includes(empresaId) ? empresaId : empresasSel[0])}
+          empresas={variasEmpresas ? empresas.filter(e => empresasSel.includes(e.id)) : undefined}
           onFechar={() => setModalNova(false)}
           onCriada={qtd => {
             setModalNova(false)
@@ -658,7 +742,9 @@ export default function ContasPagarClient({
       {modalPgto && (
         <PagarContasModal
           contas={modalPgto}
-          empresaId={empresaId}
+          // Tipo de despesa é por empresa: só dá para escolher um quando as
+          // contas do pagamento são todas da mesma.
+          empresaId={new Set(modalPgto.map(c => c.empresa_id)).size === 1 ? modalPgto[0].empresa_id : null}
           onFechar={() => setModalPgto(null)}
           onPago={aplicarPagamento}
         />

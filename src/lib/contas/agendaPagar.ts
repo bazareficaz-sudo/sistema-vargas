@@ -19,7 +19,7 @@ export type ContaAgenda = {
 
 export type Situacao = 'aberto' | 'vencido' | 'a_vencer' | 'pago' | 'todos' | 'cancelado'
 export type Periodo = 'todos' | 'hoje' | 'semana' | 'proxima_semana' | 'mes' | 'proximo_mes' | 'personalizado'
-export type Agrupamento = 'nenhum' | 'dia' | 'semana' | 'mes' | 'fornecedor'
+export type Agrupamento = 'nenhum' | 'dia' | 'semana' | 'mes' | 'fornecedor' | 'empresa'
 
 export type Faixa = { quantidade: number; total: number }
 export type FaixaComPago = Faixa & { aberto: Faixa; pago: Faixa }
@@ -188,10 +188,14 @@ export function painelDoPagar(contas: ContaAgenda[], hoje: string): PainelPagar 
  * agosto ficaria escondido entre boletos já pagos.
  */
 export function grupoDaConta(
-  c: ContaAgenda & { fornecedorNome?: string },
+  c: ContaAgenda & { fornecedorNome?: string; empresaNome?: string },
   por: Agrupamento, hoje: string,
 ): { chave: string; rotulo: string; atraso?: boolean } {
   const venc = String(c.vencimento ?? '').slice(0, 10)
+  if (por === 'empresa') {
+    const nome = c.empresaNome || 'Empresa'
+    return { chave: nome.toLocaleLowerCase('pt-BR'), rotulo: nome }
+  }
   if (por === 'fornecedor') {
     const nome = c.fornecedorNome || '(sem fornecedor)'
     return { chave: nome.toLocaleLowerCase('pt-BR'), rotulo: nome }

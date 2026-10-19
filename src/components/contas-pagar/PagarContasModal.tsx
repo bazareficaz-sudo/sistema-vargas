@@ -28,7 +28,9 @@ export default function PagarContasModal({
   contas, empresaId, onFechar, onPago,
 }: {
   contas: ContaSimples[]
-  empresaId: string
+  /** null quando as contas são de empresas diferentes: aí não há uma lista
+   *  de tipos de despesa que sirva para todas, e o campo some. */
+  empresaId: string | null
   onFechar: () => void
   onPago: (ids: string[], dados: { data: string; forma: string }) => void
 }) {
@@ -44,6 +46,7 @@ export default function PagarContasModal({
   const calc = calcularRateio(contas, entrada)
 
   useEffect(() => {
+    if (!empresaId) return
     const sb = createClient()
     sb.from('tipos_despesa').select('id, nome').eq('empresa_id', empresaId).eq('ativo', true)
       .order('nome').then(({ data }) => setTipos(data ?? []))
@@ -112,14 +115,20 @@ export default function PagarContasModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Tipo de despesa</label>
-            <select value={tipoId} onChange={e => setTipoId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-500">
-              <option value="">Manter o que já está na conta</option>
-              {tipos.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
-            </select>
-          </div>
+          {empresaId ? (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Tipo de despesa</label>
+              <select value={tipoId} onChange={e => setTipoId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-blue-500">
+                <option value="">Manter o que já está na conta</option>
+                {tipos.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
+              </select>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+              Contas de empresas diferentes: cada uma fica registrada na sua empresa, e o tipo de despesa de cada conta é mantido.
+            </p>
+          )}
 
           {/* Como o acréscimo vai ser informado */}
           <div className="border-t border-gray-100 pt-4">

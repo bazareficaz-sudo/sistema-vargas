@@ -31,8 +31,15 @@ function rotuloMes(mes: string) {
 }
 
 export default function NovaDespesaModal({
-  empresaId, onFechar, onCriada,
-}: { empresaId: string; onFechar: () => void; onCriada: (qtd: number) => void }) {
+  empresaId: empresaInicial, empresas, onFechar, onCriada,
+}: {
+  empresaId: string
+  /** Com mais de uma, o modal pergunta de qual empresa é a despesa. */
+  empresas?: { id: string; nome: string }[]
+  onFechar: () => void
+  onCriada: (qtd: number) => void
+}) {
+  const [empresaId, setEmpresaId] = useState(empresaInicial)
   const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 
   const [descricao, setDescricao] = useState('')
@@ -51,6 +58,12 @@ export default function NovaDespesaModal({
   const [forns, setForns] = useState<Fornecedor[]>([])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+
+  // Tipos e fornecedores são da empresa: trocar de empresa recarrega as duas
+  // listas e limpa o que estava escolhido da outra.
+  function trocarEmpresa(id: string) {
+    setEmpresaId(id); setTipoId(''); setFornecedorId('')
+  }
 
   useEffect(() => {
     const sb = createClient()
@@ -130,6 +143,19 @@ export default function NovaDespesaModal({
         </div>
 
         <div className="px-6 py-5 space-y-4">
+          {empresas && empresas.length > 1 && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Empresa *</label>
+              <div className="flex flex-wrap gap-2">
+                {empresas.map(e => (
+                  <button key={e.id} type="button" onClick={() => trocarEmpresa(e.id)}
+                    className={`px-3 py-1.5 text-sm rounded-lg border ${empresaId === e.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                    {e.nome}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Descrição *</label>
             <input value={descricao} onChange={e => setDescricao(e.target.value)}

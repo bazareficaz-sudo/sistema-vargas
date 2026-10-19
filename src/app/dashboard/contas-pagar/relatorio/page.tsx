@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import VisaoGeralPagar from '@/components/contas-pagar/VisaoGeralPagar'
 import RelatorioPagamentos from '@/components/contas-pagar/RelatorioPagamentos'
+import { SeletorEmpresasRecarregar } from '@/components/contas-pagar/SeletorEmpresasPagar'
+import { empresasDoPagar } from '@/lib/contas/empresasPagarServidor'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +23,8 @@ export default async function RelatorioContasPagarPage({
   const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
   const hojeIso = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  // Mesma escolha de empresas da tela de contas a pagar (o mesmo cookie).
+  const { empresas, escolhidas } = await empresasDoPagar(supabase, user!.id, empresaId)
 
   const abas: [string, string, string][] = [
     ['visao', '📅 Visão geral', '/dashboard/contas-pagar/relatorio'],
@@ -34,6 +38,7 @@ export default async function RelatorioContasPagarPage({
         <span>›</span><span className="text-gray-600">Relatórios</span>
       </div>
       <h1 className="text-xl font-semibold text-gray-900 mb-3">Relatórios de Contas a Pagar</h1>
+      {empresas.length > 1 && <div className="mb-3"><SeletorEmpresasRecarregar empresas={empresas} escolhidas={escolhidas} /></div>}
       <div className="flex gap-1 border-b border-gray-200 mb-5 overflow-x-auto">
         {abas.map(([k, l, href]) => (
           <Link key={k} href={href}
@@ -44,8 +49,8 @@ export default async function RelatorioContasPagarPage({
       </div>
 
       {aba === 'visao'
-        ? <VisaoGeralPagar supabase={supabase} empresaId={empresaId} hojeIso={hojeIso} />
-        : <RelatorioPagamentos supabase={supabase} empresaId={empresaId} sp={sp} />}
+        ? <VisaoGeralPagar supabase={supabase} empresaIds={escolhidas} empresas={empresas} hojeIso={hojeIso} />
+        : <RelatorioPagamentos supabase={supabase} empresaIds={escolhidas} sp={sp} />}
     </div>
   )
 }

@@ -3,6 +3,7 @@ import ContasPagarClient, { type ContaPagar } from '@/components/ContasPagarClie
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { origemDaConta, pedidoDaConta, type DadosDaEntrada, type DadosDaNfe } from '@/lib/contas/origemDaConta'
 import { somarMeses } from '@/lib/contas/agendaPagar'
+import { empresasDoPagar } from '@/lib/contas/empresasPagarServidor'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,6 +26,13 @@ export default async function ContasPagarPage({
   const profile = await perfilDaSessao(supabase, user!.id)
   const empresaId = profile?.empresa_id ?? ''
 
+  // VÁRIAS EMPRESAS NA MESMA TELA. Carrega as contas de todas as empresas
+  // que o usuário pode ver; a escolha de quais mostrar é feita na tela, sem
+  // recarregar. Quem tem uma empresa só recebe uma lista de um item e a tela
+  // fica como sempre foi.
+  const { empresas, escolhidas } = await empresasDoPagar(supabase, user!.id, empresaId)
+  const ids = empresas.map(e => e.id)
+
   // Atualiza status vencido automaticamente
   try { await supabase.rpc('atualizar_contas_vencidas') } catch {}
 
@@ -42,14 +50,14 @@ export default async function ContasPagarPage({
   // Antes a tela pedia um status por vez, cortado em 200 linhas — por isso
   // não dava para ver vencidos e a vencer juntos, nem somar a semana.
   const desde = `${somarMeses(hojeIso.slice(0, 7), -12)}-01`
-  const colunas = '*, fornecedores(id, razao_social, nome_fantasia)'
+  const colunas = '*, fornecedores(id, razao_social, nome_fantasia, cnpj)'
   type Linha = { entrada_id: string | null; origem: string | null; origem_id: string | null } & Record<string, unknown>
   const lista: Linha[] = []
   for (let de = 0; ; de += 1000) {
     const { data } = await supabase
       .from('contas_pagar')
       .select(colunas)
-      .eq('empresa_id', empresaId)
+      .in('empresa_id', ids)
       .or(`status.in.(pendente,vencido),vencimento.gte.${desde},data_pagamento.gte.${desde}`)
       .order('vencimento', { ascending: true })
       .order('id', { ascending: true })
@@ -73,11 +81,11 @@ export default async function ContasPagarPage({
   const [entradas, nfes, { data: tipos }] = await Promise.all([
     emLotes<DadosDaEntrada>(entradaIds, lote => supabase.from('entradas')
       .select('id, numero_nf, numero_entrada, observacoes, pedido_compra_id')
-      .eq('empresa_id', empresaId).in('id', lote)),
+      .in('empresa_id', ids).in('id', lote)),
     emLotes<DadosDaNfe>(nfeIds, lote => supabase.from('nfe_entradas')
       .select('id, numero, serie')
-      .eq('empresa_id', empresaId).in('id', lote)),
-    supabase.from('tipos_despesa').select('id, nome, cor').eq('empresa_id', empresaId).order('nome'),
+      .in('empresa_id', ids).in('id', lote)),
+    supabase.from('tipos_despesa').select('id, nome, cor, empresa_id').in('empresa_id', ids).order('nome'),
   ])
 
   const porEntrada = new Map(entradas.map(e => [e.id, e]))
@@ -110,6 +118,8 @@ export default async function ContasPagarPage({
         q: sp.q ?? '',
       }}
       empresaId={empresaId}
+      empresas={empresas}
+      empresasIniciais={escolhidas}
       hojeIso={hojeIso}
     />
   )

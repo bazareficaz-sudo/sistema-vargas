@@ -1,5 +1,6 @@
 import type { createClient } from '@/lib/supabase/server'
 import FiltroPeriodo from '@/components/contas-pagar/FiltroPeriodo'
+import { chaveDoFornecedor } from '@/lib/contas/empresasPagar'
 
 // Aba "Pagamentos do período" do relatório: o dinheiro que SAIU, pela data
 // de pagamento, com juros, multa e desconto.
@@ -19,9 +20,10 @@ function diasAtraso(vencimento: string | null, pagamento: string | null): number
   return Math.round((p - v) / 86400000)
 }
 
-export default async function RelatorioPagamentos({ supabase, empresaId, sp }: {
+export default async function RelatorioPagamentos({ supabase, empresaIds, sp }: {
   supabase: Awaited<ReturnType<typeof createClient>>
-  empresaId: string
+  /** As empresas escolhidas no seletor (uma ou várias). */
+  empresaIds: string[]
   sp: { de?: string; ate?: string }
 }) {
   const de = sp.de || primeiroDiaDoMes()
@@ -33,7 +35,7 @@ export default async function RelatorioPagamentos({ supabase, empresaId, sp }: {
   const { data: pagas } = await supabase
     .from('contas_pagar')
     .select('id, descricao, valor, valor_pago, juros, multa, desconto, vencimento, competencia, data_pagamento, forma_pagamento, fornecedor_id, tipo_despesa_id')
-    .eq('empresa_id', empresaId)
+    .in('empresa_id', empresaIds)
     .eq('status', 'pago')
     .gte('data_pagamento', de)
     .lte('data_pagamento', ate)
@@ -48,14 +50,16 @@ export default async function RelatorioPagamentos({ supabase, empresaId, sp }: {
 
   const [{ data: forns }, { data: tipos }] = await Promise.all([
     fornIds.length
-      ? supabase.from('fornecedores').select('id, razao_social, nome_fantasia').in('id', fornIds)
-      : Promise.resolve({ data: [] as { id: string; razao_social: string; nome_fantasia: string | null }[] }),
+      ? supabase.from('fornecedores').select('id, razao_social, nome_fantasia, cnpj').in('id', fornIds)
+      : Promise.resolve({ data: [] as { id: string; razao_social: string; nome_fantasia: string | null; cnpj: string | null }[] }),
     tipoIds.length
       ? supabase.from('tipos_despesa').select('id, nome, cor').in('id', tipoIds)
       : Promise.resolve({ data: [] as { id: string; nome: string; cor: string | null }[] }),
   ])
 
   const nomeForn = new Map((forns ?? []).map(f => [f.id, f.nome_fantasia || f.razao_social]))
+  // O mesmo fornecedor nas duas empresas são dois cadastros com o mesmo CNPJ.
+  const chaveForn = new Map((forns ?? []).map(f => [f.id, chaveDoFornecedor(f.id, f.cnpj)]))
   const infoTipo = new Map((tipos ?? []).map(t => [t.id, t]))
 
   // ── Totais ──
@@ -72,7 +76,7 @@ export default async function RelatorioPagamentos({ supabase, empresaId, sp }: {
   // ── Por fornecedor ──
   const porForn = new Map<string, { nome: string; total: number; juros: number; qtd: number }>()
   for (const c of contas) {
-    const k = c.fornecedor_id ?? '__sem__'
+    const k = c.fornecedor_id ? chaveForn.get(c.fornecedor_id) ?? c.fornecedor_id : '__sem__'
     const nome = c.fornecedor_id ? (nomeForn.get(c.fornecedor_id) ?? 'Fornecedor removido') : 'Sem fornecedor'
     const at = porForn.get(k) ?? { nome, total: 0, juros: 0, qtd: 0 }
     at.total += pago(c); at.juros += Number(c.juros ?? 0) + Number(c.multa ?? 0); at.qtd += 1
@@ -83,8 +87,9 @@ export default async function RelatorioPagamentos({ supabase, empresaId, sp }: {
   // ── Por tipo de despesa ──
   const porTipo = new Map<string, { nome: string; cor: string | null; total: number; qtd: number }>()
   for (const c of contas) {
-    const k = c.tipo_despesa_id ?? '__sem__'
     const t = c.tipo_despesa_id ? infoTipo.get(c.tipo_despesa_id) : null
+    // Cada empresa tem seus tipos; somados pelo nome.
+    const k = t ? t.nome.trim().toLowerCase() : (c.tipo_despesa_id ?? '__sem__')
     const at = porTipo.get(k) ?? { nome: t?.nome ?? 'Sem classificação', cor: t?.cor ?? '#d1d5db', total: 0, qtd: 0 }
     at.total += pago(c); at.qtd += 1
     porTipo.set(k, at)
