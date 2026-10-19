@@ -56,6 +56,10 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/monitor-vendas',         label: 'Monitor de Vendas',  icon: '📡',  modulo: 'vendas' },
       { href: '/dashboard/orcamentos',             label: 'Orçamentos',         icon: '📋',  modulo: 'orcamentos' },
       { href: '/dashboard/incentivos',             label: 'Incentivos',         icon: '🏆',  modulo: 'incentivos' },
+      // A régua de desconto e autorização. As taxas de pagamento saíram daqui
+      // para Financeiro → Taxas e Custos de Venda; esta tela continua
+      // mostrando as duas abas, mas abre nas faixas, que é o que se procura
+      // entrando pelo Comercial.
       { href: '/dashboard/configuracoes/saude-venda', label: 'Saúde da Venda', icon: '💚', modulo: 'saude_venda' },
       { href: '/dashboard/configuracoes/pdv',      label: 'Configurações do PDV', icon: '⚙️', modulo: 'pdv' },
       { href: '/dashboard/configuracoes/terminais-pdv', label: 'Terminais de PDV', icon: '🖧', modulo: 'pdv' },
@@ -163,6 +167,21 @@ export const NAV: NavGroup[] = [
         items: [
           { href: '/dashboard/contas-pagar', label: 'Contas a Pagar', icon: '💳', modulo: 'contas_pagar' },
           { href: '/dashboard/contas-pagar/relatorio', label: 'Relatório de Pagamentos', icon: '📊', modulo: 'contas_pagar' },
+          // Existia e funcionava, alcançável só por um link dentro do Contas a
+          // Pagar. Quem não soubesse do link não achava a tela — e classificar
+          // despesa é tarefa de quem abre o Financeiro, não de quem já está
+          // dentro de uma conta.
+          { href: '/dashboard/configuracoes/tipos-despesa', label: 'Tipos de Despesa', icon: '🏷', modulo: 'contas_pagar' },
+        ],
+      },
+      {
+        // Aqui chegam, no passo seguinte, Formas de Pagamento, Bancos e Contas
+        // e Adquirentes. Hoje mora só a tela de taxas, que é a única que já
+        // existe: item de menu para tela que não existe é link morto, e o
+        // teste em tests/dashboard/menu.test.ts reprova.
+        label: 'Cadastros e Taxas',
+        items: [
+          { href: '/dashboard/financeiro/taxas', label: 'Taxas e Custos de Venda', icon: '💲', modulo: 'saude_venda' },
         ],
       },
       {
