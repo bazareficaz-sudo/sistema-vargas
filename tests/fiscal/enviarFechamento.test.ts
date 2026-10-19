@@ -1,12 +1,25 @@
 import { test, describe, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { listaDeEmails } from '../../src/lib/email/enviar'
+import { listaDeEmails, normalizarRemetente } from '../../src/lib/email/enviar'
 import { deveEnviarAutomatico, enviarFechamento, hojeEmBrasilia } from '../../src/lib/fiscal/enviarFechamento'
 
 describe('e-mails', () => {
   test('aceita lista com ; , e espaço, descarta o inválido e repetido', () => {
     assert.deepEqual(listaDeEmails('Contador@Escritorio.com.br; outro@x.com, invalido  outro@x.com'), ['contador@escritorio.com.br', 'outro@x.com'])
     assert.deepEqual(listaDeEmails(null), [])
+  })
+})
+
+describe('remetente', () => {
+  test('aceita o formato certo e conserta os erros comuns de digitação', () => {
+    const certo = 'Sistema Vargas <fechamento@sistemavargas.com.br>'
+    assert.equal(normalizarRemetente(certo), certo)
+    assert.equal(normalizarRemetente('"Sistema Vargas <fechamento@sistemavargas.com.br>"'), certo)
+    assert.equal(normalizarRemetente('Sistema Vargas fechamento@sistemavargas.com.br'), certo)
+    assert.equal(normalizarRemetente(' Sistema Vargas <Fechamento@SistemaVargas.com.br>\n'), certo)
+    assert.equal(normalizarRemetente('fechamento@sistemavargas.com.br'), 'fechamento@sistemavargas.com.br')
+    assert.equal(normalizarRemetente('Sistema Vargas'), null)
+    assert.equal(normalizarRemetente(undefined), null)
   })
 })
 
