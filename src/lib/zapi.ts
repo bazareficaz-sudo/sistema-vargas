@@ -77,18 +77,23 @@ export async function zapiSendText(
   message: string,
   /** Id (WhatsApp) da mensagem respondida: sai citada, como o "Responder" do celular. */
   responderA?: string | null,
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
+): Promise<{ success: boolean; messageId?: string; error?: string; incerto?: boolean }> {
+  let recusou = false
   try {
     const res = await fetch(buildUrl(config, 'send-text'), {
       method: 'POST',
       headers: headers(config),
       body: JSON.stringify({ phone: cleanPhone(phone), message, ...(responderA ? { messageId: responderA } : {}) }),
+      signal: AbortSignal.timeout(30_000),
     })
+    recusou = !res.ok
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
     return { success: true, messageId: data.messageId ?? data.zaapId ?? data.id }
   } catch (e: any) {
-    return { success: false, error: e.message }
+    // Sem resposta (queda, tempo esgotado) ou resposta 200 ilegível: pode ter
+    // saído ou não — `incerto`, para quem chama não reenviar sozinho.
+    return { success: false, error: e.message, incerto: !recusou }
   }
 }
 

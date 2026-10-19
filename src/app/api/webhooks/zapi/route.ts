@@ -7,6 +7,7 @@ import { fotoDaMensagem, idDaMensagem, lidDaMensagem, midiaDaMensagem, nomeDoRem
 import { guardarMidia } from '@/lib/whatsapp/midias'
 import { responderForaDoHorario } from '@/lib/whatsapp/foraHorarioEnvio'
 import { codigoDeOrigem, gravarOrigem } from '@/lib/whatsapp/origem'
+import { pedeParaSair, registrarPedidoDeSaida } from '@/lib/whatsapp/envioCategoria'
 import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
 import { registrarEnviadaPeloCelular } from '@/lib/whatsapp/celular'
 
@@ -155,6 +156,12 @@ export async function POST(request: NextRequest) {
         if (codigoOrigem && contato?.contato_id) {
           const idOrigem = contato.contato_id
           after(() => gravarOrigem(supabase, idOrigem, codigoOrigem).catch(() => undefined))
+        }
+
+        // Respondeu SAIR a uma mensagem de envio por categoria: não recebe mais.
+        if (chaveOk && contato?.cliente_id && pedeParaSair(textoDaMensagem(body))) {
+          const clienteSaiu = contato.cliente_id
+          after(() => registrarPedidoDeSaida(supabase, empresaId, clienteSaiu).then(() => undefined).catch(() => undefined))
         }
 
         // Loja fechada: resposta automática (desligada por padrão; uma por
