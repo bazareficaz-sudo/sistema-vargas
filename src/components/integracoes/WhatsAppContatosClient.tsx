@@ -218,7 +218,12 @@ export default function WhatsAppContatosClient({
         inicial={inicial}
         onFechar={() => setCadastrando(null)}
         // O gatilho do banco já ligou o contato pelo telefone.
-        onSalvo={() => { setCadastrando(null); router.refresh() }}
+        onSalvo={id => {
+          setCadastrando(null)
+          // A foto do perfil do WhatsApp vai para o cadastro novo (se houver).
+          fetch('/api/clientes/foto-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clienteId: id }) })
+            .catch(() => undefined).finally(() => router.refresh())
+        }}
       />
     </div>
   )

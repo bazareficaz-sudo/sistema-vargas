@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatarTelefone, formatarCep, formatarCpfCnpj, soDigitos, buscarCep, ESTADOS } from '@/lib/formato/contato'
 import { diferenca } from '@/lib/clientes/categorias'
 import CategoriasCliente from './CategoriasCliente'
+import FotoCliente from './FotoCliente'
 
 // Cadastro de cliente — o formulário que nunca existiu. Antes daqui só era
 // possível editar os campos financeiros; nome, telefone, e-mail e endereço
@@ -284,6 +285,9 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
 
           {aba === 'dados' && (
             <>
+              {clienteId
+                ? <FotoCliente empresaId={empresaId} clienteId={clienteId} nome={form.nome} />
+                : <p className="text-xs text-gray-400">Foto: depois de salvar dá para enviar uma — ou ela vem sozinha do WhatsApp do cliente.</p>}
               <Field label="Nome / Razão Social *" value={form.nome} onChange={v => set('nome', v)} />
               <div className="grid grid-cols-2 gap-4">
                 <div>

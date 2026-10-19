@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import ClienteDetalheClient from '@/components/contas-receber/ClienteDetalheClient'
+import { linksDasFotos } from '@/lib/clientes/foto'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 
 export const dynamic = 'force-dynamic'
@@ -104,8 +105,12 @@ export default async function ClienteDetalhePage({ params }: { params: Promise<{
     ...cliente,
   }
 
+  const fotoPath = (cliente as { foto_path?: string | null }).foto_path ?? null
+  const fotoUrl = fotoPath ? (await linksDasFotos(sb, [fotoPath])).get(fotoPath) ?? null : null
+
   return (
     <ClienteDetalheClient
+      fotoUrl={fotoUrl}
       cliente={clienteCompleto}
       contasIniciais={contas}
       creditosIniciais={creditos}
