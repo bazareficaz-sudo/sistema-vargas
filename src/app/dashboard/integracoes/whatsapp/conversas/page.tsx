@@ -50,7 +50,7 @@ export default async function WhatsAppConversasPage({
       .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null).limit(10000),
     aberta ? supabase.from('whatsapp_conversas').select(campos).eq('empresa_id', empresaId).eq('id', aberta).maybeSingle() : null,
     aberta ? supabase.from('whatsapp_mensagens')
-      .select('id, tipo, conteudo, conteudo_pdf_url, resposta_a, status, status_entrega, erro, created_at, enviado_em, operador_nome')
+      .select('id, tipo, conteudo, conteudo_pdf_url, resposta_a, zapi_message_id, status, status_entrega, erro, created_at, enviado_em, operador_nome')
       .eq('empresa_id', empresaId).eq('contato_id', aberta)
       .order('created_at', { ascending: false }).limit(200) : null,
   ])

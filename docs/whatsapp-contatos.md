@@ -235,6 +235,16 @@ Migração `supabase/migrations/20261018150000_whatsapp_nova_conversa.sql`. Regr
 - **`whatsapp_abrir_conversa(empresa, telefone)`:** devolve o contato desse número ou cria (total 0, sem mensagem recebida), ligado ao cadastro pelo telefone como no webhook. Recusa número sem DDD, de outro país e da equipe (destinatários da Betina). Só quem é da empresa. **Nada é enviado** — a conversa só entra na lista depois da primeira mensagem.
 - **Visual:** lista com foto (iniciais), prévia da última mensagem, hora, tiques e contador de não lidas; filtros em chips (Tudo, Não lidas, Aguardando, Para hoje) e etapa; conversa com fundo bege, balões com "rabinho", separador de dia e tiques ✓/✓✓/✓✓ azul (pela confirmação de entrega); barra de digitação com **＋** (imagem, produto, orçamento no PDV, nova resposta rápida), ✨ IA e botão verde de enviar. A ficha do cliente abre ao clicar no nome ("Dados do contato").
 
+## Responder, emojis e endereço da conversa
+
+Sem migração (usa `resposta_a`, de `20261017120000_whatsapp_resposta_citada.sql`). Leitura do endereço em `src/lib/whatsapp/endereco.ts`.
+
+- **Responder citando:** setinha ⌄ ao passar o mouse na mensagem (ou duplo clique) → **Responder**. A barra "respondendo a…" aparece em cima da caixa de texto (✕ ou Esc cancela). Sai pela Z-API com `messageId` (texto e imagem), então o cliente vê a citação no celular; fica em `resposta_a` e a tela mostra a citação. As rotas só aceitam mensagem da mesma empresa e da mesma conversa. Mensagem antiga, sem id do WhatsApp, não dá para citar.
+- **Copiar texto** no mesmo menu.
+- **Emojis:** botão 😊 ao lado do ＋; painel com Recentes (guardados só no navegador) e grupos Carinhas, Gestos, Corações, Loja e Obra. O emoji entra onde está o cursor.
+- **Endereço que o cliente mandou:** mensagem do cliente com CEP ou "rua/avenida … número" ganha o link **📍 Cadastrar cliente com este endereço** (ou **Atualizar endereço no cadastro**, se já é cliente); qualquer mensagem do cliente tem **Usar como endereço do cliente** no menu. Junta as mensagens seguidas do cliente (até 10 min, sem a loja no meio), lê rua, número, complemento, bairro, cidade/UF e CEP, e completa pelo ViaCEP. A gaveta do cadastro abre **na conversa**, na aba Endereço, com aviso e o texto original — **nada é salvo sem conferir e clicar em Salvar**. Cliente novo já vem com nome e WhatsApp; ao salvar, a conversa liga ao cadastro sozinha.
+- **Ficha:** mostra o último endereço que o cliente mandou, com o botão para usar; "Cadastrar cliente" abre a gaveta ali mesmo (antes ia para a tela de Contatos) e "Editar cadastro" para quem já é cliente.
+
 ## Próximas etapas (planejado, não implementado)
 
 1. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

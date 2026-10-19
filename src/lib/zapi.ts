@@ -75,12 +75,14 @@ export async function zapiSendText(
   config: ZAPIConfig,
   phone: string,
   message: string,
+  /** Id (WhatsApp) da mensagem respondida: sai citada, como o "Responder" do celular. */
+  responderA?: string | null,
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
     const res = await fetch(buildUrl(config, 'send-text'), {
       method: 'POST',
       headers: headers(config),
-      body: JSON.stringify({ phone: cleanPhone(phone), message }),
+      body: JSON.stringify({ phone: cleanPhone(phone), message, ...(responderA ? { messageId: responderA } : {}) }),
     })
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
@@ -144,12 +146,14 @@ export async function zapiSendImage(
   phone: string,
   imageUrl: string,
   caption?: string,
+  /** Id (WhatsApp) da mensagem respondida. */
+  responderA?: string | null,
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
     const res = await fetch(buildUrl(config, 'send-image'), {
       method: 'POST',
       headers: headers(config),
-      body: JSON.stringify({ phone: cleanPhone(phone), image: imageUrl, caption }),
+      body: JSON.stringify({ phone: cleanPhone(phone), image: imageUrl, caption, ...(responderA ? { messageId: responderA } : {}) }),
     })
     const data = await res.json()
     if (!res.ok) return { success: false, error: data.value ?? data.error ?? `HTTP ${res.status}` }
