@@ -257,6 +257,7 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/integracoes/whatsapp',           label: 'WhatsApp / Z-API', icon: '📱', modulo: 'whatsapp' },
       { href: '/dashboard/integracoes/whatsapp/conversas', label: 'Conversas',        icon: '💬', modulo: 'whatsapp' },
       { href: '/dashboard/integracoes/whatsapp/contatos',  label: 'Contatos',         icon: '👥', modulo: 'whatsapp' },
+      { href: '/dashboard/integracoes/whatsapp/envios',    label: 'Envio por categoria', icon: '📣', modulo: 'whatsapp' },
       { href: '/dashboard/integracoes/whatsapp/historico', label: 'Histórico',        icon: '📋', modulo: 'whatsapp' },
     ],
   },

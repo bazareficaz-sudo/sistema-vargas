@@ -13,6 +13,7 @@ const ROTULO: Record<string, string> = {
   lembrete_venc: 'Lembrete', pos_venda: 'Pós-venda', automacao_alerta_pedido: 'Aviso de pedido',
   automacao_whatsapp_aviso_falta_chegou: 'Aviso: chegou',
   automacao_fora_horario: 'Fora do horário (automática)',
+  envio_categoria: 'Envio por categoria',
 }
 /** Rótulo do que a loja mandou (nada para conversa comum). */
 export function rotuloSaida(tipo: string): string | null {

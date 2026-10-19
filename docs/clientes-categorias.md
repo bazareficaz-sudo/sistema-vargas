@@ -19,6 +19,6 @@ Para marcar o tipo de cliente — Eletricista, Bombeiro hidráulico, Pedreiro, G
 - **Conversas do WhatsApp:** filtro "Categoria" ao lado de "Etapa"; bolinhas da cor de cada categoria na lista; em "Dados do contato", marcar e tirar com um clique (grava na hora). Só para quem já é cliente.
 - **Relatório de clientes:** quadro "Por categoria" (clientes, quantos compraram, compras, total gasto, ticket médio, desde o primeiro registro); clicar filtra o relatório inteiro pela categoria (a nota RFM continua comparando com todos).
 
-## Planejado, não implementado
+## Mensagem para uma categoria
 
-- Mensagem para uma categoria (envio assistido, um por vez, com limite por dia e respeitando quem não quer receber). Disparo em massa pela Z-API não: risco de bloqueio do número, que é o mesmo do ERP e da Betina.
+Implementado como envio assistido: `docs/whatsapp-envio-categoria.md`.
