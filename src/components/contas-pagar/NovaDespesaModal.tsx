@@ -33,7 +33,7 @@ function rotuloMes(mes: string) {
 export default function NovaDespesaModal({
   empresaId, onFechar, onCriada,
 }: { empresaId: string; onFechar: () => void; onCriada: (qtd: number) => void }) {
-  const hoje = new Date().toISOString().split('T')[0]
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
 
   const [descricao, setDescricao] = useState('')
   const [valor, setValor] = useState('')
