@@ -10,23 +10,19 @@
 -- tipos_despesa estava SEM RLS: qualquer usuário logado lia e alterava os
 -- tipos de qualquer empresa. Ganha a mesma regra.
 
-drop policy if exists contas_pagar_empresa on public.contas_pagar;
-create policy contas_pagar_empresa on public.contas_pagar for all
+alter policy contas_pagar_empresa on public.contas_pagar
   using (empresa_do_meu_grupo(empresa_id) or is_system_admin())
   with check (empresa_do_meu_grupo(empresa_id) or is_system_admin());
 
-drop policy if exists fornecedores_empresa on public.fornecedores;
-create policy fornecedores_empresa on public.fornecedores for all
+alter policy fornecedores_empresa on public.fornecedores
   using (empresa_do_meu_grupo(empresa_id) or is_system_admin())
   with check (empresa_do_meu_grupo(empresa_id) or is_system_admin());
 
-drop policy if exists nfe_entradas_empresa on public.nfe_entradas;
-create policy nfe_entradas_empresa on public.nfe_entradas for all
+alter policy nfe_entradas_empresa on public.nfe_entradas
   using (empresa_do_meu_grupo(empresa_id) or is_system_admin())
   with check (empresa_do_meu_grupo(empresa_id) or is_system_admin());
 
-alter table public.tipos_despesa enable row level security;
-drop policy if exists tipos_despesa_empresa on public.tipos_despesa;
 create policy tipos_despesa_empresa on public.tipos_despesa for all
   using (empresa_do_meu_grupo(empresa_id) or is_system_admin())
   with check (empresa_do_meu_grupo(empresa_id) or is_system_admin());
+alter table public.tipos_despesa enable row level security;
