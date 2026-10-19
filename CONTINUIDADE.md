@@ -35,6 +35,7 @@ Caixa de entrada (CRM / WhatsApp → Conversas):
 - **Responder, emojis e endereço:** responder citando (Z-API `messageId`, texto e imagem), copiar, painel de emojis; endereço que o cliente mandou abre o cadastro na conversa já preenchido (`src/lib/whatsapp/endereco.ts` + ViaCEP), sempre conferido antes de salvar; sem migração.
 - **Categorias de cliente:** etiquetas (Eletricista, Pedreiro…) no cadastro, na conversa e em lote na lista; filtro em Clientes, Conversas e relatório; `docs/clientes-categorias.md`; migração `20261020120000_cliente_categorias.sql`.
 - **Envio por categoria:** mensagem para uma categoria, uma por vez (até 30/dia, 45 s entre envios, 8h–20h, opt-out e SAIR; sem confirmação nunca reenvia); `docs/whatsapp-envio-categoria.md`; migração `20261020180000_whatsapp_envio_categoria.sql`.
+- **Foto do cliente:** cadastro com foto (bucket privado `clientes-fotos`), copiada sozinha da foto do perfil do WhatsApp quando o cliente não tem; enviar/usar do WhatsApp/tirar na gaveta; `docs/clientes-foto.md`; migração `20261021120000_cliente_foto.sql`.
 
 
 ### Integração com o Vargas Marketing — PR aberto, NÃO no ar

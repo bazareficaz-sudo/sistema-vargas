@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Categoria } from '@/lib/clientes/categorias'
 import { ChipCategoria } from './CategoriasCliente'
+import { AvatarCliente } from './FotoCliente'
 
 // Tabela da lista de clientes com seleção para marcar ou tirar uma categoria
 // de vários de uma vez (só os desta página).
@@ -13,6 +14,8 @@ import { ChipCategoria } from './CategoriasCliente'
 export type LinhaCliente = {
   id: string; nome: string; cpf_cnpj: string | null; telefone: string | null; cidade: string | null; estado: string | null
   saldo_credito: number | null; saldo_devedor: number | null; status_credito: string | null; categorias: string[]
+  /** Foto do cadastro (link assinado). */
+  foto_url?: string | null
 }
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -83,12 +86,17 @@ export default function ClientesTabela({ clientes, categorias, empresaId }: { cl
             <tr key={c.id} className={`text-gray-600 hover:bg-gray-50 transition-colors ${sel.has(c.id) ? 'bg-blue-50/50' : ''}`}>
               <td className="px-4 py-2.5"><input type="checkbox" checked={sel.has(c.id)} onChange={() => alternar(c.id)} /></td>
               <td className="px-4 py-2.5 text-gray-900 font-medium">
-                <Link href={`/dashboard/clientes/${c.id}`} className="hover:text-blue-600 transition-colors">{c.nome}</Link>
-                {c.categorias.length > 0 && (
-                  <span className="flex flex-wrap gap-1 mt-0.5">
-                    {c.categorias.map(id => porId.get(id)).filter((k): k is Categoria => Boolean(k)).map(k => <ChipCategoria key={k.id} c={k} pequeno />)}
+                <span className="flex items-center gap-2.5">
+                  <AvatarCliente nome={c.nome} url={c.foto_url} tamanho="w-8 h-8 text-xs" />
+                  <span className="min-w-0">
+                    <Link href={`/dashboard/clientes/${c.id}`} className="hover:text-blue-600 transition-colors">{c.nome}</Link>
+                    {c.categorias.length > 0 && (
+                      <span className="flex flex-wrap gap-1 mt-0.5">
+                        {c.categorias.map(id => porId.get(id)).filter((k): k is Categoria => Boolean(k)).map(k => <ChipCategoria key={k.id} c={k} pequeno />)}
+                      </span>
+                    )}
                   </span>
-                )}
+                </span>
               </td>
               <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{c.cpf_cnpj ?? '—'}</td>
               <td className="px-4 py-2.5 text-gray-400">{c.telefone ?? '—'}</td>

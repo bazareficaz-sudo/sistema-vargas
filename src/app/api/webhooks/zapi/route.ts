@@ -8,6 +8,7 @@ import { guardarMidia } from '@/lib/whatsapp/midias'
 import { responderForaDoHorario } from '@/lib/whatsapp/foraHorarioEnvio'
 import { codigoDeOrigem, gravarOrigem } from '@/lib/whatsapp/origem'
 import { pedeParaSair, registrarPedidoDeSaida } from '@/lib/whatsapp/envioCategoria'
+import { copiarSeSemFoto } from '@/lib/clientes/foto'
 import { configZapi, preencherNomeDoContato } from '@/lib/whatsapp/nomes'
 import { registrarEnviadaPeloCelular } from '@/lib/whatsapp/celular'
 
@@ -156,6 +157,13 @@ export async function POST(request: NextRequest) {
         if (codigoOrigem && contato?.contato_id) {
           const idOrigem = contato.contato_id
           after(() => gravarOrigem(supabase, idOrigem, codigoOrigem).catch(() => undefined))
+        }
+
+        // Cliente cadastrado sem foto: a foto do perfil (quando a Z-API manda) vai para o cadastro.
+        const fotoPerfil = chaveOk && contato?.cliente_id ? fotoDaMensagem(body) : null
+        if (fotoPerfil && contato?.cliente_id) {
+          const clienteFoto = contato.cliente_id
+          after(() => copiarSeSemFoto(supabase, empresaId, clienteFoto, fotoPerfil).catch(() => undefined))
         }
 
         // Respondeu SAIR a uma mensagem de envio por categoria: não recebe mais.

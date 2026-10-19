@@ -5,9 +5,11 @@ import NovoClienteBotao from '@/components/clientes/NovoClienteBotao'
 import GerenciarCategorias from '@/components/clientes/GerenciarCategorias'
 import ClientesTabela, { type LinhaCliente } from '@/components/clientes/ClientesTabela'
 import { corValida, emOrdem, type Categoria } from '@/lib/clientes/categorias'
+import { linksDasFotos } from '@/lib/clientes/foto'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COLUNAS = 'id, nome, cpf_cnpj, telefone, cidade, estado, saldo_credito, saldo_devedor, status_credito, ativo'
+const COLUNA_FOTO = ', foto_path'
 
 export default async function ClientesPage({
   searchParams,
@@ -31,7 +33,7 @@ export default async function ClientesPage({
     let query = supabase
       .from('clientes')
       .select(comCategorias
-        ? `${COLUNAS}, cats:cliente_categoria_vinculos(categoria_id)${cat ? ', filtro:cliente_categoria_vinculos!inner(categoria_id)' : ''}`
+        ? `${COLUNAS}${COLUNA_FOTO}, cats:cliente_categoria_vinculos(categoria_id)${cat ? ', filtro:cliente_categoria_vinculos!inner(categoria_id)' : ''}`
         : COLUNAS, { count: 'exact' })
       .eq('empresa_id', empresaId)
       // Cadastro unificado noutro não aparece: continua no banco pelo
@@ -61,8 +63,12 @@ export default async function ClientesPage({
     supabase.from('cliente_categorias_contagem').select('id, nome, cor, clientes').eq('empresa_id', empresaId),
   ])
   const { data, count } = res.error ? await montar(false) : res
-  type Linha = Omit<LinhaCliente, 'categorias'> & { cats?: { categoria_id: string }[] }
-  const clientes: LinhaCliente[] = ((data ?? []) as unknown as Linha[]).map(({ cats, ...c }) => ({ ...c, categorias: (cats ?? []).map(v => v.categoria_id) }))
+  type Linha = Omit<LinhaCliente, 'categorias' | 'foto_url'> & { cats?: { categoria_id: string }[]; foto_path?: string | null }
+  const linhas = (data ?? []) as unknown as Linha[]
+  const fotos = await linksDasFotos(supabase, linhas.map(c => c.foto_path))
+  const clientes: LinhaCliente[] = linhas.map(({ cats, foto_path, ...c }) => ({
+    ...c, categorias: (cats ?? []).map(v => v.categoria_id), foto_url: foto_path ? fotos.get(foto_path) ?? null : null,
+  }))
   const categorias: Categoria[] = emOrdem((contagemRes.data ?? []).map(c => ({ id: c.id, nome: c.nome, cor: corValida(c.cor) })))
   const contagem = Object.fromEntries((contagemRes.data ?? []).map(c => [c.id, Number(c.clientes ?? 0)]))
   const totalPaginas = Math.ceil((count ?? 0) / POR_PAGINA)

@@ -154,6 +154,16 @@ export const NAV: NavGroup[] = [
         ],
       },
       {
+        // O ledger tinha quatro tabelas e seis RPCs desde setembro e nenhuma
+        // tela: zero rotas, zero componentes. Com a Fase 4E ligada em 20/10 a
+        // venda lança sozinha, e sem esta entrada o dinheiro entraria num
+        // lugar que ninguém consegue abrir.
+        label: 'Caixa',
+        items: [
+          { href: '/dashboard/financeiro/caixa', label: 'Saldos e Extrato', icon: '🧾', modulo: 'financeiro' },
+        ],
+      },
+      {
         label: 'Receber',
         items: [
           { href: '/dashboard/contas-receber',    label: 'Contas a Receber', icon: '💰', modulo: 'contas_receber' },
