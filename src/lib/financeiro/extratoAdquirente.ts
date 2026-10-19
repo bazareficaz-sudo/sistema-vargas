@@ -29,6 +29,17 @@ export type LinhaExtrato = {
   liquido: number
   parcelas: number | null
   metodo: string | null
+  /**
+   * A linha do arquivo, exatamente como veio.
+   *
+   * Vem daqui e não de uma busca posterior porque o Mercado Pago emite VÁRIOS
+   * registros com o mesmo `source_id` — o pagamento, o ajuste de taxa, o
+   * estorno. Procurar a linha depois, pelo identificador, acharia a mesma para
+   * todos eles: as duas viravam o mesmo hash, e a segunda seria descartada
+   * como se fosse reimportação. Descarte invisível, que é o erro que a trava
+   * de unicidade existe para não cometer.
+   */
+  linhaOriginal: string
 }
 
 /** O que precisa existir no cabeçalho, com os nomes que já vi em uso. */
@@ -237,6 +248,7 @@ export function lerExtrato(csv: string): LeituraExtrato {
         ? Math.max(1, Math.floor(Number(parcelasLidas)))
         : null,
       metodo: (pegar(campos, 'metodo') ?? '').trim() || null,
+      linhaOriginal: todas[i],
     })
   }
 

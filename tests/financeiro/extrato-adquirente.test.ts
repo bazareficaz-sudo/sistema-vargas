@@ -164,6 +164,29 @@ describe('ler o arquivo inteiro', () => {
     assert.equal(linhas[2].parcelas, 3)
   })
 
+  test('CADA linha traz a SUA original, mesmo com source_id repetido', () => {
+    // O Mercado Pago emite vários registros com o mesmo `source_id`: o
+    // pagamento, o ajuste de taxa, o estorno. A importação usa a linha
+    // original para montar o hash de unicidade — se duas linhas devolvessem a
+    // mesma original, virariam o mesmo hash e a segunda seria descartada como
+    // reimportação. Descarte invisível, que é o erro que a trava existe para
+    // não cometer.
+    const mesmoId = [
+      'DATE;SOURCE_ID;RECORD_TYPE;GROSS_AMOUNT;MP_FEE_AMOUNT',
+      '2026-10-20;MP-55;release;100,00;-3,04',
+      '2026-10-20;MP-55;fee_adjustment;0,00;-0,50',
+      '2026-11-02;MP-55;refund;-100,00;0,00',
+    ].join('\n')
+
+    const { linhas } = lerExtrato(mesmoId)
+    assert.equal(linhas.length, 3)
+    const originais = linhas.map(l => l.linhaOriginal)
+    assert.equal(new Set(originais).size, 3, 'as tres originais tem de ser distintas')
+    assert.match(originais[0], /release/)
+    assert.match(originais[1], /fee_adjustment/)
+    assert.match(originais[2], /refund/)
+  })
+
   test('pula linhas de resumo antes do cabeçalho', () => {
     const comLixo = 'Relatorio de liberacoes\nConta: 123\n\n' + CSV
     const { linhas, cabecalho } = lerExtrato(comLixo)
