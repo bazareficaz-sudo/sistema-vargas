@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import EnvioContadorCard from './EnvioContadorCard'
 
 // Fechamento do contador: escolhe o mês, confere o resumo e as pendências,
 // baixa o .zip com os XMLs de venda e de compra.
@@ -183,12 +183,9 @@ export default function FechamentoContadorClient({ mesInicial, empresa }: {
                 {baixando === 'compras' ? 'Gerando…' : 'Só compras'}
               </button>
             </div>
-            <p className="text-[11px] text-gray-400">
-              {empresa.emailContador
-                ? <>Envie o arquivo para {empresa.contador ? `${empresa.contador} — ` : ''}<strong>{empresa.emailContador}</strong>.</>
-                : <>O e-mail do contador ainda não está no cadastro. <Link href="/dashboard/empresas" className="text-blue-600 hover:underline">Cadastrar em Empresas</Link> — vai servir para o envio automático.</>}
-            </p>
           </div>
+
+          <EnvioContadorCard mes={mes} rotulo={resumo.periodo.rotulo} totalNotas={totalNotas} />
 
           {resumo.notasCompra.length > 0 && (
             <div className="bg-white border border-gray-200 rounded-xl">
