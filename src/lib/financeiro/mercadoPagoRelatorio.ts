@@ -180,7 +180,19 @@ export function resumir(texto: string): string {
     .slice(0, 300)
 }
 
-/** O token, do ambiente do servidor. Nunca do navegador, nunca do terminal. */
+/**
+ * O token, do ambiente do servidor. Nunca do navegador, nunca do terminal.
+ *
+ * ── POR QUE ESTE NOME, E NÃO `MERCADO_PAGO_ACCESS_TOKEN` ────────────────
+ *
+ * Porque já existe `MERCADOPAGO_ACCESS_TOKEN` em produção, usado pelas
+ * assinaturas (`src/lib/mercadopago/client.ts`). Os dois nomes diferiam por
+ * UM SUBLINHADO, e a confusão não daria erro: daria token errado chamando o
+ * endpoint certo, com mensagem de permissão que ninguém relacionaria à causa.
+ *
+ * `MP_RELATORIOS_TOKEN` não se parece com nenhum dos dois, e diz para que
+ * serve. Vale a conta dedicada: revogar este token não derruba a assinatura.
+ */
 export function tokenDoAmbiente(): string {
-  return process.env.MERCADO_PAGO_ACCESS_TOKEN ?? ''
+  return process.env.MP_RELATORIOS_TOKEN ?? ''
 }
