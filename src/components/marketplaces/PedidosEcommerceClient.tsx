@@ -928,8 +928,11 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                         <>
                           <td className="px-3 py-2" rowSpan={linhasItens.length}>
                             {/^\*+$/.test(String(p.cliente_nome ?? '').trim()) ? (
-                              // A Shopee mascara nome e endereço até a etiqueta ser gerada.
-                              <p className="text-gray-400 italic" title="A Shopee libera nome e endereço do comprador depois que a etiqueta é gerada.">oculto pela Shopee</p>
+                              // A Shopee mascara nome e endereço; sem nem o usuário dela.
+                              <p className="text-gray-400 italic" title="A Shopee não libera nome e endereço do comprador para o sistema. Abra o pedido para ver nas imagens da etiqueta.">oculto pela Shopee</p>
+                            ) : String(p.cliente_nome ?? '').startsWith('@') ? (
+                              // Usuário da Shopee: o nome de verdade só nas imagens da etiqueta (abra o pedido).
+                              <p className="text-gray-900 truncate" title="Usuário na Shopee. Nome e endereço: abra o pedido.">{p.cliente_nome}</p>
                             ) : (<>
                               <p className="text-gray-900 truncate" title={p.cliente_nome ?? ''}>{p.cliente_nome ?? '—'}</p>
                               <p className="text-gray-500 truncate">{[p.entrega_cidade, p.entrega_estado].filter(c => c && !/^\*+$/.test(String(c))).join(', ') || '—'}</p>
@@ -1045,6 +1048,11 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
                   </div>
                 )
               })()}
+
+              {/* Destinatário Shopee: só em imagem (a Shopee não libera em texto). */}
+              {detalhe.marketplace_canais?.plataforma === 'shopee' && (
+                <DestinatarioShopee pedidoId={detalhe.id} statusExterno={detalhe.status_externo} />
+              )}
 
               {/* Cliente */}
               {detalhe.cliente_nome && (
@@ -1424,6 +1432,50 @@ function FP({ label, value, onChange, placeholder, type = 'text' }: {
       <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
       <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+    </div>
+  )
+}
+
+// Nome, telefone e endereço do comprador Shopee nas imagens que a Shopee dá
+// para a etiqueta. Busca só quando a pessoa pede; nada fica gravado.
+const ROTULOS_DESTINATARIO: [string, string][] = [
+  ['name', 'Nome'], ['phone', 'Telefone'], ['full_address', 'Endereço'], ['district', 'Bairro'],
+  ['city', 'Cidade'], ['state', 'Estado'], ['zipcode', 'CEP'],
+]
+function DestinatarioShopee({ pedidoId, statusExterno }: { pedidoId: string; statusExterno?: string | null }) {
+  const [estado, setEstado] = useState<{ carregando: boolean; erro?: string; imagens?: Record<string, string> }>({ carregando: false })
+  const antes = statusExterno === 'UNPAID'
+  async function ver() {
+    setEstado({ carregando: true })
+    const r = await fetch('/api/marketplace/shopee/destinatario', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pedidoId }),
+    }).then(x => x.json()).catch(() => ({ ok: false, erro: 'Falha de conexão' }))
+    setEstado(r.ok ? { carregando: false, imagens: r.imagens } : { carregando: false, erro: r.erro ?? 'Não foi possível buscar' })
+  }
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Destinatário (Shopee)</p>
+      {estado.imagens ? (
+        <dl className="space-y-1">
+          {ROTULOS_DESTINATARIO.filter(([k]) => estado.imagens![k]).map(([k, rotulo]) => (
+            <div key={k} className="flex items-center gap-2">
+              <dt className="w-16 shrink-0 text-[11px] text-gray-500">{rotulo}</dt>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <dd><img src={estado.imagens![k]} alt={rotulo} className="max-h-6 max-w-full" /></dd>
+            </div>
+          ))}
+          <p className="text-[10px] text-gray-400 pt-1">A Shopee só entrega estes dados como imagem (para a etiqueta) — não dá para copiar o texto.</p>
+        </dl>
+      ) : antes ? (
+        <p className="text-xs text-gray-500">A Shopee libera nome e endereço depois que o pagamento é aprovado.</p>
+      ) : (
+        <>
+          <button onClick={ver} disabled={estado.carregando} className="text-xs text-blue-600 hover:underline disabled:opacity-50">
+            {estado.carregando ? 'Buscando na Shopee…' : '👁 Ver nome, telefone e endereço'}
+          </button>
+          {estado.erro && <p className="text-xs text-red-600 mt-1">{estado.erro}</p>}
+        </>
+      )}
     </div>
   )
 }
