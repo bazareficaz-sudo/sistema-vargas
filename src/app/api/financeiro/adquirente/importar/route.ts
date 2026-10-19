@@ -26,6 +26,58 @@ import {
 
 export const maxDuration = 60
 
+/**
+ * O que já foi importado: as últimas importações e os totais por dia.
+ *
+ * Leitura separada da importação de propósito — a tela precisa mostrar o
+ * estado mesmo quando o token não está configurado, senão quem abre não
+ * descobre que já existe extrato guardado.
+ */
+export async function GET() {
+  const sb = await createClient()
+  const { data: { user } } = await sb.auth.getUser()
+  if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
+
+  const [{ data: importacoes }, { data: extrato }, { data: suspeitos }] = await Promise.all([
+    sb.from('adquirente_importacao')
+      .select('id, arquivo, periodo_de, periodo_ate, linhas_lidas, linhas_novas, linhas_descartadas, erro, cabecalho_recebido, created_at')
+      .order('created_at', { ascending: false }).limit(20),
+    // 90 dias: o relatório de Liberações olha para trás, e o crédito só
+    // aparece trinta dias depois da venda.
+    sb.from('adquirente_extrato')
+      .select('data, bruto, taxa, liquido, tipo, metodo')
+      .gte('data', new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10))
+      .order('data', { ascending: false }).limit(5000),
+    sb.from('adquirente_extrato_suspeito_v1').select('origem_id').limit(100),
+  ])
+
+  // Soma por dia aqui, e não no banco, porque a mesma soma já existe testada
+  // em `totaisPorDia` — duas somas em lugares diferentes divergem na primeira
+  // regra nova.
+  const porDia = new Map<string, { data: string; bruto: number; taxa: number; liquido: number; lancamentos: number }>()
+  for (const e of (extrato ?? []) as any[]) {
+    const t = porDia.get(e.data) ?? { data: e.data, bruto: 0, taxa: 0, liquido: 0, lancamentos: 0 }
+    t.bruto += Number(e.bruto); t.taxa += Number(e.taxa); t.liquido += Number(e.liquido)
+    t.lancamentos += 1
+    porDia.set(e.data, t)
+  }
+
+  return NextResponse.json({
+    ok: true,
+    tokenConfigurado: tokenDoAmbiente() !== '',
+    importacoes: importacoes ?? [],
+    dias: [...porDia.values()]
+      .map(t => ({
+        ...t,
+        bruto: Number(t.bruto.toFixed(2)),
+        taxa: Number(t.taxa.toFixed(2)),
+        liquido: Number(t.liquido.toFixed(2)),
+      }))
+      .sort((a, b) => (a.data < b.data ? 1 : -1)),
+    suspeitos: (suspeitos ?? []).length,
+  })
+}
+
 /** O caixa da adquirente onde o extrato entra. */
 async function caixaDaAdquirente(sb: any, empresaId: string, pedido?: string) {
   const q = sb.from('caixa').select('id, nome')

@@ -161,6 +161,7 @@ export const NAV: NavGroup[] = [
         label: 'Caixa',
         items: [
           { href: '/dashboard/financeiro/caixa', label: 'Saldos e Extrato', icon: '🧾', modulo: 'financeiro' },
+          { href: '/dashboard/financeiro/conciliacao', label: 'Conciliação da Adquirente', icon: '🔍', modulo: 'financeiro' },
         ],
       },
       {
