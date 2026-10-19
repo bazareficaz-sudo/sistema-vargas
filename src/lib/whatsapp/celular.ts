@@ -6,15 +6,23 @@ import { guardarMidia } from './midias'
 // conversa para ela ficar completa. Nunca duplica o que o próprio sistema
 // enviou: a Z-API também avisa essas, com o mesmo messageId.
 
-type Admin = { from: (t: string) => any; storage: { from: (b: string) => any } } // eslint-disable-line @typescript-eslint/no-explicit-any
+type Admin = { from: (t: string) => any; storage: { from: (b: string) => any }; rpc: (fn: string, args: Record<string, unknown>) => any } // eslint-disable-line @typescript-eslint/no-explicit-any
 const pausa = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-export async function registrarEnviadaPeloCelular(admin: Admin, empresaId: string, dados: { telefone: string; texto: string; messageId: string | null; midiaUrl?: string | null; respostaA?: string | null }) {
+export async function registrarEnviadaPeloCelular(admin: Admin, empresaId: string, dados: { telefone: string; texto: string; messageId: string | null; midiaUrl?: string | null; respostaA?: string | null; lid?: string | null }) {
   // Só conversa com contato (cliente procurou a loja): resposta para o dono,
   // fornecedor ou grupo não entra.
   const chave = chaveTelefone(dados.telefone) ?? `x${dados.telefone.replace(/\D/g, '')}`
-  const { data: contato } = await admin.from('whatsapp_contatos').select('id').eq('empresa_id', empresaId).eq('chave', chave).maybeSingle()
+  let { data: contato } = await admin.from('whatsapp_contatos').select('id').eq('empresa_id', empresaId).eq('chave', chave).maybeSingle()
+  // Mandada para o código oculto de quem já tem contato pelo número: é esse.
+  // (18/10/2026: as respostas pelo celular para a Fatima Brandao caíam numa
+  // segunda conversa, "7674…@lid".)
+  if (!contato && dados.lid) {
+    ({ data: contato } = await admin.from('whatsapp_contatos').select('id').eq('empresa_id', empresaId).eq('lid', dados.lid).maybeSingle())
+  }
   if (!contato) return
+  // Número e código na mesma mensagem: liga os dois.
+  if (dados.lid && chaveTelefone(dados.telefone)) await admin.rpc('whatsapp_ligar_lid', { p_contato: contato.id, p_lid: dados.lid })
 
   // O envio pelo sistema grava o messageId logo depois da resposta da Z-API;
   // o aviso pode chegar antes. Espera um pouco e confere.

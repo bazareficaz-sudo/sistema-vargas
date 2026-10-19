@@ -16,6 +16,8 @@ export type Conversa = {
   etapa: string; retorno_em: string | null; retorno_nota: string | null; retorno_vencido: boolean; orcamento_parado: boolean
   /** Código da publicação do Vargas Marketing que trouxe o contato. */
   origem_codigo: string | null; origem_em: string | null
+  /** Foto do perfil no WhatsApp (link que vence; some se der erro). */
+  foto_url?: string | null; foto_em?: string | null
   /** Última mensagem (prévia na lista). */
   ultima?: { tipo: string; conteudo: string; status: string; status_entrega: string | null } | null
 }
@@ -119,7 +121,11 @@ const FILTROS: Record<string, string> = { todas: 'Tudo', nao_lidas: 'Não lidas'
 
 // ── Visual do WhatsApp ──────────────────────────────────────────────────
 const CORES_AVATAR = ['bg-emerald-500', 'bg-sky-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500', 'bg-indigo-500', 'bg-orange-500']
-function Avatar({ nome, tamanho = 'w-12 h-12 text-base' }: { nome: string; tamanho?: string }) {
+function Avatar({ nome, foto, tamanho = 'w-12 h-12 text-base' }: { nome: string; foto?: string | null; tamanho?: string }) {
+  // Guarda QUAL link falhou: link novo tenta de novo sem efeito para zerar.
+  const [falhou, setFalhou] = useState<string | null>(null)
+  // eslint-disable-next-line @next/next/no-img-element
+  if (foto && falhou !== foto) return <img src={foto} alt="" referrerPolicy="no-referrer" onError={() => setFalhou(foto)} className={`${tamanho} rounded-full shrink-0 object-cover bg-gray-200`} />
   const iniciais = nome.replace(/[^\p{L}\p{N} ]/gu, '').trim().split(/\s+/).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || '?'
   const cor = CORES_AVATAR[[...nome].reduce((t, ch) => t + ch.charCodeAt(0), 0) % CORES_AVATAR.length]
   return <span className={`${tamanho} ${cor} rounded-full shrink-0 flex items-center justify-center text-white font-medium`}>{iniciais}</span>
@@ -410,13 +416,76 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
     }
   }
 
+  const oculto = aberta ? numeroOculto(aberta.telefone) : false
+
+  // FOTO DO PERFIL: a mensagem do cliente já traz; sem ela (ou velha — o link
+  // do WhatsApp vence), pergunta à Z-API ao abrir. Uma vez por conversa aberta.
+  const [fotoNova, setFotoNova] = useState<Record<string, string>>({})
+  const fotoPedida = useRef(new Set<string>())
+  const fotoAberta = aberta ? fotoNova[aberta.id] ?? aberta.foto_url ?? null : null
+  useEffect(() => {
+    if (!aberta || fotoPedida.current.has(aberta.id)) return
+    const velha = !aberta.foto_em || Date.now() - new Date(aberta.foto_em).getTime() > 3 * 86_400_000
+    if (!velha) return
+    const id = aberta.id
+    fotoPedida.current.add(id)
+    fetch('/api/whatsapp/conversas/foto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contatoId: id }) })
+      .then(r => r.json()).then(d => { if (d?.ok && d.foto_url) setFotoNova(f => ({ ...f, [id]: d.foto_url })) }).catch(() => undefined)
+  }, [aberta])
+
+  // JUNTAR CONVERSAS da mesma pessoa: o WhatsApp manda umas mensagens com o
+  // número e outras com um código no lugar dele, e cada forma virava uma
+  // conversa. O sistema junta sozinho quando a Z-API manda os dois juntos;
+  // este é o caminho manual para as que já se separaram.
+  // Aberto para UMA conversa: trocar de conversa fecha sozinho.
+  const [juntarEm, setJuntarEm] = useState<string | null>(null)
+  const juntar = Boolean(aberta && juntarEm === aberta.id)
+  const setJuntar = (f: (j: boolean) => boolean) => setJuntarEm(f(juntar) && aberta ? aberta.id : null)
+  const [buscaJuntar, setBuscaJuntar] = useState('')
+  const [juntando, setJuntando] = useState(false)
+  const candidatasJuntar = !aberta ? [] : conversas
+    .filter(c => c.id !== aberta.id && (oculto || numeroOculto(c.telefone)))
+    .filter(c => !buscaJuntar.trim() || nomeDe(c).toLowerCase().includes(buscaJuntar.trim().toLowerCase()) || c.telefone.includes(buscaJuntar.replace(/\D/g, '') || '§'))
+    .slice(0, 8)
+  async function juntarCom(alvo: Conversa) {
+    if (!aberta) return
+    if (!confirm(`Juntar esta conversa com "${nomeDe(alvo)}"? As mensagens das duas ficam numa conversa só. Não dá para desfazer.`)) return
+    setJuntando(true)
+    const r = await fetch('/api/whatsapp/conversas/juntar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ a: aberta.id, b: alvo.id }) })
+      .then(x => x.json()).catch(() => ({ error: 'Falha de conexão' }))
+    setJuntando(false)
+    if (!r.ok) { alert(r.error ?? 'Não foi possível juntar'); return }
+    setJuntarEm(null)
+    ir({ c: r.para })
+  }
+  const painelJuntar = !aberta ? null : (
+    <div className="px-4 py-3 border-b-8 border-[#f0f2f5] space-y-2">
+      <p className="text-xs text-gray-600">{oculto
+        ? 'Escolha a conversa com o número desta pessoa. Tudo passa para lá.'
+        : 'Escolha a conversa sem número (código do WhatsApp) desta mesma pessoa. Tudo vem para cá.'}</p>
+      <input autoFocus value={buscaJuntar} onChange={e => setBuscaJuntar(e.target.value)} placeholder="Nome ou telefone…"
+        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm" />
+      {candidatasJuntar.length === 0
+        ? <p className="text-xs text-gray-400">Nenhuma conversa {oculto ? '' : 'sem número '}com esse nome na lista.</p>
+        : candidatasJuntar.map(c => (
+          <button key={c.id} disabled={juntando} onClick={() => juntarCom(c)}
+            className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded-lg hover:bg-[#f5f6f6] disabled:opacity-50">
+            <Avatar nome={nomeDe(c)} foto={c.foto_url} tamanho="w-8 h-8 text-xs" />
+            <span className="min-w-0">
+              <span className="block text-sm text-gray-900 truncate">{nomeDe(c)}</span>
+              <span className="block text-[11px] text-gray-500">{numeroOculto(c.telefone) ? 'número oculto' : formatarTelefone(c.telefone)}</span>
+            </span>
+          </button>
+        ))}
+    </div>
+  )
+
   if (indisponivel) return (
     <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm">
       A caixa de entrada ainda não foi ativada no banco. Peça para aplicar as migrações <code>20261015200000_whatsapp_conversas.sql</code> e <code>20261016120000_whatsapp_funil.sql</code>.
     </div>
   )
 
-  const oculto = aberta ? numeroOculto(aberta.telefone) : false
   const telDigitado = telefoneParaWhatsapp(buscaContato)
   const dias = mensagens.map(m => diaLocal(m.enviado_em ?? m.created_at))
 
@@ -507,10 +576,13 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
               return (
                 <button key={c.id} onClick={() => { setLembrete(null); setSugestao(null); setMenu(false); ir({ c: c.id }) }}
                   className={`w-full text-left flex items-center gap-3 pl-3 hover:bg-[#f5f6f6] ${aberta?.id === c.id ? 'bg-[#f0f2f5]' : ''}`}>
-                  <Avatar nome={nome} />
+                  <Avatar nome={nome} foto={c.foto_url} />
                   <span className="min-w-0 flex-1 border-b border-gray-100 py-2.5 pr-3">
                     <span className="flex items-baseline justify-between gap-2">
-                      <span className={`truncate text-[15px] ${c.nao_lida ? 'font-semibold text-gray-900' : 'text-gray-900'}`}>{nome}</span>
+                      <span className="min-w-0 flex items-baseline gap-1.5">
+                        <span className={`truncate text-[15px] ${c.nao_lida ? 'font-semibold text-gray-900' : 'text-gray-900'}`}>{nome}</span>
+                        {c.cliente_id && <span title="Cliente cadastrado" className="shrink-0 text-[10px] leading-4 px-1.5 rounded-full bg-emerald-100 text-emerald-800">cliente</span>}
+                      </span>
                       {c.ultima_atividade && <span className={`text-xs whitespace-nowrap ${c.nao_lida ? 'text-[#00a884] font-medium' : 'text-gray-500'}`}>{quandoNaLista(c.ultima_atividade)}</span>}
                     </span>
                     <span className="flex items-center gap-1.5 mt-0.5">
@@ -546,9 +618,12 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
           {/* Cabeçalho */}
           <div className="bg-[#f0f2f5] px-4 h-14 flex items-center gap-3 shrink-0 border-l border-gray-200">
             <button onClick={() => setFichaAberta(v => !v)} className="flex items-center gap-3 min-w-0 flex-1 text-left" title="Dados do contato">
-              <Avatar nome={nomeDe(aberta)} tamanho="w-10 h-10 text-sm" />
+              <Avatar nome={nomeDe(aberta)} foto={fotoAberta} tamanho="w-10 h-10 text-sm" />
               <span className="min-w-0">
-                <span className="block text-[15px] text-gray-900 truncate">{nomeDe(aberta)}</span>
+                <span className="flex items-center gap-1.5 text-[15px] text-gray-900 min-w-0">
+                  <span className="truncate">{nomeDe(aberta)}</span>
+                  {aberta.cliente_id && <span title="Cliente cadastrado" className="shrink-0 text-[10px] leading-4 px-1.5 rounded-full bg-emerald-100 text-emerald-800">cliente</span>}
+                </span>
                 <span className="block text-xs text-gray-500 truncate">
                   {oculto ? 'Número oculto pelo WhatsApp' : formatarTelefone(aberta.telefone)}
                   {aberta.origem_codigo ? ` · 📣 post ${aberta.origem_codigo}` : ''}
@@ -634,7 +709,11 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
           {/* Rodapé: respostas rápidas, painéis e a barra de digitação */}
           <div className="bg-[#f0f2f5] shrink-0">
             {oculto ? (
-              <p className="px-4 py-3 text-xs text-gray-600">O WhatsApp escondeu o número desta pessoa: responda pelo celular. Ao pedir o telefone dela, cadastre como cliente.</p>
+              <div className="px-4 py-3 text-xs text-gray-600">
+                <p>O WhatsApp escondeu o número desta pessoa: responda pelo celular. Ao pedir o telefone dela, cadastre como cliente.
+                  {' '}<button onClick={() => { setJuntar(j => !j); setBuscaJuntar('') }} className="text-[#008069] hover:underline">É a mesma pessoa de outra conversa? Juntar</button></p>
+                {juntar && <div className="mt-2 bg-white rounded-lg border border-gray-200">{painelJuntar}</div>}
+              </div>
             ) : <>
               {(painel || sugestao || anexo) && (
                 <div className="px-4 pt-3 space-y-2 max-h-[45vh] overflow-y-auto">
@@ -794,13 +873,15 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
           </div>
           <div className="flex-1 overflow-y-auto">
             <div className="flex flex-col items-center py-5 border-b-8 border-[#f0f2f5]">
-              <Avatar nome={nomeDe(aberta)} tamanho="w-24 h-24 text-3xl" />
+              <Avatar nome={nomeDe(aberta)} foto={fotoAberta} tamanho="w-24 h-24 text-3xl" />
               <p className="mt-3 text-lg text-gray-900 text-center px-3">{nomeDe(aberta)}</p>
               <p className="text-sm text-gray-500">{oculto ? 'Número oculto' : formatarTelefone(aberta.telefone)}</p>
               {aberta.cliente_nome && aberta.nome_whatsapp && <p className="text-xs text-gray-400 mt-0.5">no WhatsApp: {aberta.nome_whatsapp}</p>}
               {aberta.origem_codigo && <p className="mt-2 text-xs px-2.5 py-0.5 rounded-full bg-violet-100 text-violet-800">📣 Veio da publicação {aberta.origem_codigo}{aberta.origem_em ? ` · ${dia(aberta.origem_em)}` : ''}</p>}
               {aberta.retorno_em && <p className={`mt-1.5 text-xs ${aberta.retorno_vencido ? 'text-orange-700' : 'text-gray-500'}`}>🔔 Retornar {rotuloRetorno(aberta.retorno_em)}{aberta.retorno_nota ? ` · ${aberta.retorno_nota}` : ''}</p>}
+              <button onClick={() => { setJuntar(j => !j); setBuscaJuntar('') }} className="mt-2 text-xs text-[#008069] hover:underline">⤵ É a mesma pessoa de outra conversa? Juntar</button>
             </div>
+            {juntar && painelJuntar}
             <FichaCliente aberta={aberta} ficha={ficha} orcamentos={listaOrcamentos} />
           </div>
         </aside>

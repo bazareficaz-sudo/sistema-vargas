@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { chaveConfere } from '@/lib/getulio/webhook'
 import { getulioAtendeNumero, responderMensagem } from '@/lib/getulio/conversa'
 import { receberFotoProduto } from '@/lib/getulio/foto'
-import { idDaMensagem, midiaDaMensagem, nomeDoRemetente, respostaDe, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
+import { fotoDaMensagem, idDaMensagem, lidDaMensagem, midiaDaMensagem, nomeDoRemetente, respostaDe, telefoneDoRemetente, textoDaMensagem } from '@/lib/whatsapp/contatos'
 import { guardarMidia } from '@/lib/whatsapp/midias'
 import { responderForaDoHorario } from '@/lib/whatsapp/foraHorarioEnvio'
 import { codigoDeOrigem, gravarOrigem } from '@/lib/whatsapp/origem'
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
       if (body.fromMe) {
         const para = telefoneDoRemetente({ ...body, fromMe: false })
         if (para && chaveConfere(instanceId, request.nextUrl.searchParams.get('k'))) {
-          const dados = { telefone: para, texto: textoDaMensagem(body), messageId: idDaMensagem(body), midiaUrl: midiaDaMensagem(body)?.url ?? null, respostaA: respostaDe(body) }
+          const dados = { telefone: para, texto: textoDaMensagem(body), messageId: idDaMensagem(body), midiaUrl: midiaDaMensagem(body)?.url ?? null, respostaA: respostaDe(body), lid: lidDaMensagem(body) }
           after(() => registrarEnviadaPeloCelular(supabase, empresaId, dados))
         }
         return NextResponse.json({ ok: true })
@@ -93,6 +93,8 @@ export async function POST(request: NextRequest) {
         if (chaveOk && remetente) {
           const { data, error } = await supabase.rpc('whatsapp_registrar_contato', {
             p_empresa: empresaId, p_telefone: remetente, p_nome: nomeDoRemetente(body), p_texto: textoDaMensagem(body),
+            // Código oculto junto do número: liga os dois e junta as conversas.
+            p_lid: lidDaMensagem(body), p_foto: fotoDaMensagem(body),
           })
           if (error) console.error('Contato WhatsApp:', error.message)
           else contato = data?.[0] ?? null
