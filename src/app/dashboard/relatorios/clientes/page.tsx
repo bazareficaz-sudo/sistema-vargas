@@ -2,12 +2,17 @@ import { createClient } from '@/lib/supabase/server'
 import ClientesBIClient from '@/components/relatorios/ClientesBIClient'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { buscarTudo } from '@/lib/supabase/paginar'
+import { corValida, emOrdem } from '@/lib/clientes/categorias'
 
 export const dynamic = 'force-dynamic'
 
 type VendaRFM = { id: string; total: number | null; status: string; created_at: string; cliente_id: string | null }
 
-export default async function RelatorioClientesPage() {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export default async function RelatorioClientesPage({ searchParams }: { searchParams: Promise<{ cat?: string }> }) {
+  const { cat: catBruta } = await searchParams
+  const cat = catBruta && UUID.test(catBruta) ? catBruta : null
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const profile = await perfilDaSessao(supabase, user!.id)
@@ -16,7 +21,7 @@ export default async function RelatorioClientesPage() {
   const hoje = new Date()
   const inicio90 = new Date(hoje); inicio90.setDate(inicio90.getDate() - 90)
 
-  const [clientesRes, vendasRes] = await Promise.all([
+  const [clientesRes, vendasRes, categoriasRes, vinculos] = await Promise.all([
     supabase.from('clientes').select('id, nome, telefone, created_at').eq('empresa_id', empresaId).is('mesclado_em', null),
     // Paginado: o RFM classifica cliente por quanto e quando comprou, e as
     // 2.120 vendas nao cabem numa resposta do PostgREST (teto de 1.000). Com
@@ -33,6 +38,13 @@ export default async function RelatorioClientesPage() {
         .range(de, ate),
       { rotulo: 'vendas (RFM de clientes)' },
     ),
+    supabase.from('cliente_categorias').select('id, nome, cor').eq('empresa_id', empresaId),
+    // Sem a tabela de categorias (migração não aplicada) vem vazio.
+    buscarTudo<{ cliente_id: string; categoria_id: string }>(
+      (de, ate) => supabase.from('cliente_categoria_vinculos').select('cliente_id, categoria_id')
+        .eq('empresa_id', empresaId).order('cliente_id').order('categoria_id').range(de, ate),
+      { rotulo: 'categorias de cliente' },
+    ).catch(() => []),
   ])
 
   const clientes = clientesRes.data ?? []
@@ -62,7 +74,7 @@ export default async function RelatorioClientesPage() {
   }
 
   // Calcula dias sem comprar
-  const lista = Object.values(rfm).map(c => {
+  let lista = Object.values(rfm).map(c => {
     const diasSemComprar = c.ultimaCompra
       ? Math.floor((hoje.getTime() - new Date(c.ultimaCompra).getTime()) / 86400000)
       : null
@@ -78,6 +90,30 @@ export default async function RelatorioClientesPage() {
 
     return { ...c, diasSemComprar, score, segmento }
   })
+
+  // Por categoria (Eletricista, Pedreiro…): quantos, quantos compraram e quanto.
+  const categoriasDe = new Map<string, Set<string>>()
+  for (const v of vinculos) {
+    if (!categoriasDe.has(v.categoria_id)) categoriasDe.set(v.categoria_id, new Set())
+    categoriasDe.get(v.categoria_id)!.add(v.cliente_id)
+  }
+  const porCategoria = emOrdem((categoriasRes.data ?? []).map(k => {
+    const membros = lista.filter(c => categoriasDe.get(k.id)?.has(c.id))
+    const compraram = membros.filter(c => c.qtdCompras > 0)
+    return {
+      id: k.id, nome: k.nome, cor: corValida(k.cor),
+      clientes: membros.length, compraram: compraram.length,
+      totalGasto: compraram.reduce((t, c) => t + c.totalGasto, 0),
+      compras: compraram.reduce((t, c) => t + c.qtdCompras, 0),
+    }
+  }))
+  const catAtual = cat ? porCategoria.find(k => k.id === cat) ?? null : null
+  // Filtrando uma categoria: o resto da tela olha só para os clientes dela
+  // (a nota RFM continua comparando com todos).
+  if (catAtual) {
+    const membros = categoriasDe.get(catAtual.id) ?? new Set<string>()
+    lista = lista.filter(c => membros.has(c.id))
+  }
 
   const segmentos = {
     vip: lista.filter(c => c.segmento === 'VIP').length,
@@ -103,7 +139,9 @@ export default async function RelatorioClientesPage() {
       topClientes={topClientes}
       inativos90={inativos90}
       segmentos={segmentos}
-      totalClientes={clientes.length}
+      totalClientes={catAtual ? lista.length : clientes.length}
+      porCategoria={porCategoria}
+      catAtual={catAtual ? { id: catAtual.id, nome: catAtual.nome } : null}
     />
   )
 }

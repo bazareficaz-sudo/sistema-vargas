@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
+import { CORES, type CorCategoria } from '@/lib/clientes/categorias'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -22,9 +24,13 @@ type Cliente = {
   score: number; segmento: string
 }
 
+type PorCategoria = { id: string; nome: string; cor: CorCategoria; clientes: number; compraram: number; totalGasto: number; compras: number }
+
 export default function ClientesBIClient({
-  lista, topClientes, inativos90, segmentos, totalClientes,
+  lista, topClientes, inativos90, segmentos, totalClientes, porCategoria = [], catAtual = null,
 }: {
+  porCategoria?: PorCategoria[]
+  catAtual?: { id: string; nome: string } | null
   lista: Cliente[]
   topClientes: Cliente[]
   inativos90: Cliente[]
@@ -58,8 +64,49 @@ export default function ClientesBIClient({
 
       <div className="mb-6">
         <h1 className="text-gray-900 text-xl font-semibold">Inteligência de Clientes</h1>
-        <p className="text-gray-500 text-sm mt-0.5">{totalClientes} clientes cadastrados — análise RFM (Recência, Frequência, Valor)</p>
+        <p className="text-gray-500 text-sm mt-0.5">{totalClientes} clientes {catAtual ? `em ${catAtual.nome}` : 'cadastrados'} — análise RFM (Recência, Frequência, Valor)</p>
+        {catAtual && (
+          <p className="mt-2 inline-flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 text-blue-800 rounded-full px-3 py-1">
+            Filtrando a categoria {catAtual.nome}
+            <Link href="/dashboard/relatorios/clientes" className="text-blue-600 hover:underline">✕ ver todos</Link>
+          </p>
+        )}
       </div>
+
+      {porCategoria.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-6">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">Por categoria de cliente <span className="font-normal text-gray-400">— desde o primeiro registro; clique para filtrar</span></h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-gray-500 border-b border-gray-100">
+                  <th className="text-left pb-2 font-medium">Categoria</th>
+                  <th className="text-right pb-2 font-medium">Clientes</th>
+                  <th className="text-right pb-2 font-medium">Compraram</th>
+                  <th className="text-right pb-2 font-medium">Compras</th>
+                  <th className="text-right pb-2 font-medium">Total gasto</th>
+                  <th className="text-right pb-2 font-medium">Ticket médio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {porCategoria.map(k => (
+                  <tr key={k.id} className={`hover:bg-gray-50 ${catAtual?.id === k.id ? 'bg-blue-50/60' : ''}`}>
+                    <td className="py-2">
+                      <Link href={catAtual?.id === k.id ? '/dashboard/relatorios/clientes' : `/dashboard/relatorios/clientes?cat=${k.id}`}
+                        className={`text-xs px-2 py-0.5 rounded-full border ${CORES[k.cor].chip}`}>{k.nome}</Link>
+                    </td>
+                    <td className="py-2 text-right text-gray-700">{k.clientes}</td>
+                    <td className="py-2 text-right text-gray-500">{k.compraram}</td>
+                    <td className="py-2 text-right text-gray-500">{k.compras}</td>
+                    <td className="py-2 text-right font-semibold text-gray-900">{brl(k.totalGasto)}</td>
+                    <td className="py-2 text-right text-gray-600">{k.compras ? brl(k.totalGasto / k.compras) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
