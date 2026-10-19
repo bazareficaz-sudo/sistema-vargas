@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { createClient } from '@/lib/supabase/server'
 import GraficoMesAMes from './GraficoMesAMes'
+import { chaveDoFornecedor, type EmpresaPagar } from '@/lib/contas/empresasPagar'
 import {
   painelDoPagar, mesAMes, semanasAFrente, faixasDeAtraso, situacaoDaConta, somarMeses,
   rotuloDoMes, nomeDoMes, diaMes, ultimoDiaDoMes,
@@ -14,16 +15,18 @@ function fmt(v: number) { return v.toLocaleString('pt-BR', { style: 'currency', 
 const maiuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
 
 type Linha = {
-  valor: number; vencimento: string; status: string; fornecedor_id: string | null; tipo_despesa_id: string | null
-  fornecedores: { razao_social: string; nome_fantasia: string | null } | null
+  empresa_id: string; valor: number; vencimento: string; status: string; fornecedor_id: string | null; tipo_despesa_id: string | null
+  fornecedores: { razao_social: string; nome_fantasia: string | null; cnpj: string | null } | null
 }
 
 const linkLista = (de: string, ate: string, situacao = 'todos') =>
   `/dashboard/contas-pagar?situacao=${situacao}&periodo=personalizado&de=${de}&ate=${ate}`
 
-export default async function VisaoGeralPagar({ supabase, empresaId, hojeIso }: {
+export default async function VisaoGeralPagar({ supabase, empresaIds, empresas, hojeIso }: {
   supabase: Awaited<ReturnType<typeof createClient>>
-  empresaId: string
+  /** As empresas escolhidas no seletor (uma ou várias). */
+  empresaIds: string[]
+  empresas: EmpresaPagar[]
   hojeIso: string
 }) {
   const ANTES = 6, DEPOIS = 6
@@ -31,8 +34,8 @@ export default async function VisaoGeralPagar({ supabase, empresaId, hojeIso }: 
   const contas: Linha[] = []
   for (let de = 0; ; de += 1000) {
     const { data } = await supabase.from('contas_pagar')
-      .select('valor, vencimento, status, fornecedor_id, tipo_despesa_id, fornecedores(razao_social, nome_fantasia)')
-      .eq('empresa_id', empresaId)
+      .select('empresa_id, valor, vencimento, status, fornecedor_id, tipo_despesa_id, fornecedores(razao_social, nome_fantasia, cnpj)')
+      .in('empresa_id', empresaIds)
       .neq('status', 'cancelado')
       .or(`status.in.(pendente,vencido),vencimento.gte.${desde}`)
       .order('id', { ascending: true })
@@ -40,7 +43,7 @@ export default async function VisaoGeralPagar({ supabase, empresaId, hojeIso }: 
     contas.push(...((data ?? []) as unknown as Linha[]))
     if (!data || data.length < 1000) break
   }
-  const { data: tipos } = await supabase.from('tipos_despesa').select('id, nome, cor').eq('empresa_id', empresaId)
+  const { data: tipos } = await supabase.from('tipos_despesa').select('id, nome, cor').in('empresa_id', empresaIds)
   const infoTipo = new Map((tipos ?? []).map(t => [t.id, t as { id: string; nome: string; cor: string | null }]))
 
   const painel = painelDoPagar(contas, hojeIso)
@@ -59,7 +62,8 @@ export default async function VisaoGeralPagar({ supabase, empresaId, hojeIso }: 
   type PorForn = { nome: string; vencido: number; mes: number; proximo: number; depois: number; total: number; qtd: number }
   const porForn = new Map<string, PorForn>()
   for (const c of abertas) {
-    const k = c.fornecedor_id ?? '__sem__'
+    // O mesmo fornecedor nas duas empresas são dois cadastros com o mesmo CNPJ.
+    const k = chaveDoFornecedor(c.fornecedor_id, c.fornecedores?.cnpj)
     const nome = c.fornecedores?.nome_fantasia || c.fornecedores?.razao_social || 'Sem fornecedor'
     const at = porForn.get(k) ?? { nome, vencido: 0, mes: 0, proximo: 0, depois: 0, total: 0, qtd: 0 }
     const v = Number(c.valor)
@@ -77,13 +81,19 @@ export default async function VisaoGeralPagar({ supabase, empresaId, hojeIso }: 
   const porTipo = new Map<string, { nome: string; cor: string; total: number; vencido: number; qtd: number }>()
   for (const c of abertas) {
     const t = c.tipo_despesa_id ? infoTipo.get(c.tipo_despesa_id) : null
-    const k = t?.id ?? '__sem__'
+    // Cada empresa tem seus tipos; somados pelo nome.
+    const k = t ? t.nome.trim().toLowerCase() : '__sem__'
     const at = porTipo.get(k) ?? { nome: t?.nome ?? 'Sem tipo', cor: t?.cor ?? '#d1d5db', total: 0, vencido: 0, qtd: 0 }
     at.total += Number(c.valor); at.qtd += 1
     if (situacaoDaConta(c, hojeIso) === 'vencido') at.vencido += Number(c.valor)
     porTipo.set(k, at)
   }
   const rankTipo = [...porTipo.values()].sort((a, b) => b.total - a.total)
+
+  // ── Por empresa (só com mais de uma escolhida) ──
+  const porEmpresa = empresaIds.length > 1
+    ? empresas.filter(e => empresaIds.includes(e.id)).map(e => ({ empresa: e, p: painelDoPagar(contas.filter(c => c.empresa_id === e.id), hojeIso) }))
+    : []
 
   const maxSemana = Math.max(1, ...semanas.map(s => s.total))
   const maxAtraso = Math.max(1, ...atraso.map(a => a.total))
@@ -113,6 +123,45 @@ export default async function VisaoGeralPagar({ supabase, empresaId, hojeIso }: 
           </div>
         ))}
       </div>
+
+      {porEmpresa.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-800">Por empresa</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Quanto cada empresa tem vencido, nesta semana, no mês e no próximo.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-[11px] text-gray-500 uppercase">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium">Empresa</th>
+                  <th className="px-3 py-2 text-right font-medium">Vencido</th>
+                  <th className="px-3 py-2 text-right font-medium">Esta semana</th>
+                  <th className="px-3 py-2 text-right font-medium">{nomeDoMes(mesAtual)} (falta)</th>
+                  <th className="px-3 py-2 text-right font-medium">{nomeDoMes(proximo)}</th>
+                  <th className="px-4 py-2 text-right font-medium">Total em aberto</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {porEmpresa.map(({ empresa: e, p }) => (
+                  <tr key={e.id}>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 text-gray-900">
+                        <span className="w-2 h-2 rounded-full" style={{ background: e.cor }} />{e.nome}
+                      </span>
+                    </td>
+                    <td className={`px-3 py-2 text-right whitespace-nowrap ${p.vencido.total ? 'text-red-600 font-medium' : 'text-gray-300'}`}>{p.vencido.total ? fmt(p.vencido.total) : '—'}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap text-gray-700">{p.semana.aberto.total ? fmt(p.semana.aberto.total) : '—'}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap text-gray-700">{p.mes.aberto.total ? fmt(p.mes.aberto.total) : '—'}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap text-gray-700">{p.proximoMes.total ? fmt(p.proximoMes.total) : '—'}</td>
+                    <td className="px-4 py-2 text-right whitespace-nowrap font-semibold text-gray-900">{fmt(p.totalAberto.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Mês a mês */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
