@@ -22,7 +22,7 @@ export default async function EnviosCategoriaPage({ searchParams }: { searchPara
 
   const [lotes, categorias, cfg, empresa, hoje, lote, itens] = await Promise.all([
     supabase.from('whatsapp_lotes_resumo').select('id, nome, categoria_nome, comprou_dias, status, total, criado_por_nome, created_at, pendentes, enviados, problemas, pulados, ultimo_envio')
-      .eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(20),
+      .eq('empresa_id', empresaId).gt('total', 0).order('created_at', { ascending: false }).limit(20),
     supabase.from('cliente_categorias_contagem').select('id, nome, cor, clientes').eq('empresa_id', empresaId),
     supabase.from('whatsapp_config').select('ativo').eq('empresa_id', empresaId).maybeSingle(),
     supabase.from('empresas').select('nome, nome_fantasia').eq('id', empresaId).maybeSingle(),

@@ -67,3 +67,22 @@ export async function registrarPedidoDeSaida(admin: Admin, empresaId: string, cl
     .eq('id', clienteId).eq('empresa_id', empresaId)
   return !error
 }
+
+/** Prévia da fila (whatsapp_lote_previa): quantos entram e por que os outros ficam de fora. */
+export type PreviaLote = {
+  na_categoria: number; entram: number; repetidos: number; cadastro: number; nao_quer: number
+  sem_celular: number; equipe: number; nao_comprou: number; recente: number
+}
+const MOTIVOS: [keyof PreviaLote, string, string][] = [
+  ['equipe', 'é número da equipe (destinatário da Betina)', 'são números da equipe (destinatários da Betina)'],
+  ['sem_celular', 'não tem celular válido no cadastro (fixo ou sem DDD)', 'não têm celular válido no cadastro (fixo ou sem DDD)'],
+  ['nao_quer', 'pediu para não receber WhatsApp', 'pediram para não receber WhatsApp'],
+  ['recente', 'recebeu um envio nos últimos 7 dias', 'receberam um envio nos últimos 7 dias'],
+  ['nao_comprou', 'não comprou no período escolhido', 'não compraram no período escolhido'],
+  ['cadastro', 'está com o cadastro unificado ou inativo', 'estão com o cadastro unificado ou inativo'],
+  ['repetidos', 'tem o mesmo número de outro cliente (vai uma mensagem só)', 'têm o mesmo número de outro cliente (vai uma mensagem só)'],
+]
+/** "2 são números da equipe…", só os motivos que aconteceram. */
+export function motivosDeFora(p: PreviaLote): string[] {
+  return MOTIVOS.filter(([k]) => Number(p[k]) > 0).map(([k, um, varios]) => `${p[k]} ${Number(p[k]) === 1 ? um : varios}`)
+}
