@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createHash } from 'node:crypto'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
-import { lerExtrato } from '@/lib/financeiro/extratoAdquirente'
+import { lerExtrato, ehReserva } from '@/lib/financeiro/extratoAdquirente'
 import {
   pedirRelatorio, listarRelatorios, baixarRelatorio, tokenDoAmbiente,
 } from '@/lib/financeiro/mercadoPagoRelatorio'
@@ -45,18 +45,21 @@ export async function GET() {
     // 90 dias: o relatório de Liberações olha para trás, e o crédito só
     // aparece trinta dias depois da venda.
     sb.from('adquirente_extrato')
-      .select('data, bruto, taxa, liquido, tipo, metodo')
+      .select('data, bruto, taxa, liquido, tipo, metodo, canal, metodo_tipo')
       .gte('data', new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10))
       .order('data', { ascending: false }).limit(5000),
     sb.from('adquirente_extrato_suspeito_v1').select('origem_id').limit(100),
   ])
 
-  // Soma por dia aqui, e não no banco, porque a mesma soma já existe testada
-  // em `totaisPorDia` — duas somas em lugares diferentes divergem na primeira
-  // regra nova.
-  const porDia = new Map<string, { data: string; bruto: number; taxa: number; liquido: number; lancamentos: number }>()
+  // Soma por dia FORA as reservas, pela mesma regra testada em
+  // `totaisPorDia`: reserva é a contrapartida contábil de uma operação que já
+  // está no arquivo como `payment` ou `payout`, e somar as duas conta o mesmo
+  // dinheiro duas vezes. No arquivo real eram 462 reservas contra 1.266
+  // pagamentos.
+  const porDia = new Map<string, { data: string; bruto: number; taxa: number; liquido: number; custo: number; lancamentos: number }>()
   for (const e of (extrato ?? []) as any[]) {
-    const t = porDia.get(e.data) ?? { data: e.data, bruto: 0, taxa: 0, liquido: 0, lancamentos: 0 }
+    if (ehReserva(String(e.tipo ?? ''))) continue
+    const t = porDia.get(e.data) ?? { data: e.data, bruto: 0, taxa: 0, liquido: 0, custo: 0, lancamentos: 0 }
     t.bruto += Number(e.bruto); t.taxa += Number(e.taxa); t.liquido += Number(e.liquido)
     t.lancamentos += 1
     porDia.set(e.data, t)
@@ -72,6 +75,10 @@ export async function GET() {
         bruto: Number(t.bruto.toFixed(2)),
         taxa: Number(t.taxa.toFixed(2)),
         liquido: Number(t.liquido.toFixed(2)),
+        // O custo de VERDADE: bruto menos liquido. Nao e o mesmo que a soma
+        // das colunas de tarifa -- no credito o arquivo declara menos de um
+        // quinto do que realmente desconta.
+        custo: Number((t.bruto - t.liquido).toFixed(2)),
       }))
       .sort((a, b) => (a.data < b.data ? 1 : -1)),
     suspeitos: (suspeitos ?? []).length,
@@ -225,6 +232,10 @@ async function importar(sb: any, empresaId: string, body: any, token: string) {
     liquido: l.liquido,
     parcelas: l.parcelas,
     metodo: l.metodo,
+    data_aprovacao: l.dataAprovacao,
+    canal: l.canal,
+    metodo_tipo: l.metodoTipo,
+    compra_id: l.compraId,
     linha_original: l.linhaOriginal,
     linha_hash: hashDaLinha(l.linhaOriginal),
   }))

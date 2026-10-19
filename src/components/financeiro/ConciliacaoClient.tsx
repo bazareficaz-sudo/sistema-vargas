@@ -18,7 +18,7 @@ type Importacao = {
   linhas_lidas: number; linhas_novas: number; linhas_descartadas: number
   erro: string | null; cabecalho_recebido: string[] | null; created_at: string
 }
-type Dia = { data: string; bruto: number; taxa: number; liquido: number; lancamentos: number }
+type Dia = { data: string; bruto: number; taxa: number; liquido: number; custo: number; lancamentos: number }
 type Relatorio = { nomeArquivo: string; status: string | null; de: string | null; ate: string | null }
 
 function brl(n: number) {
@@ -222,9 +222,16 @@ export default function ConciliacaoClient() {
         <div>
           <h2 className="text-sm font-semibold text-slate-700 mb-1">O que o Mercado Pago liberou</h2>
           <p className="text-xs text-slate-500 mb-2">
-            Por data de <strong>liberação</strong>, não de venda. Uma venda no crédito de hoje
-            aparece aqui daqui a cerca de trinta dias — é por isso que o total do dia não bate
-            com o do caixa, e não é erro.
+            Por data de <strong>liberação</strong>, não de venda. As linhas de{' '}
+            <strong>reserva</strong> ficam de fora: são a contrapartida contábil das mesmas
+            operações que já aparecem como pagamento, e somá-las contaria o mesmo dinheiro
+            duas vezes.
+          </p>
+          <p className="text-xs text-slate-500 mb-2">
+            O <strong>custo</strong> é bruto menos líquido — o que realmente deixou de entrar.
+            Ele costuma ser maior que a tarifa declarada no arquivo: numa venda no crédito de
+            R$ 30,00, o Mercado Pago declara R$ 0,17 de tarifa e credita R$ 29,08, custo real
+            de R$ 0,92. A diferença aparece em linhas separadas, de antecipação.
           </p>
           <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-50">
             {dias.slice(0, 60).map(d => (
@@ -235,8 +242,11 @@ export default function ConciliacaoClient() {
                 </span>
                 <span className="text-sm text-slate-600">
                   bruto <strong className="text-slate-800">{brl(d.bruto)}</strong>
-                  <span className="text-red-700"> − taxa {brl(d.taxa)}</span>
+                  <span className="text-red-700"> − custo {brl(d.custo)}</span>
                   <span className="text-emerald-700"> = {brl(d.liquido)}</span>
+                  {d.custo !== d.taxa && (
+                    <span className="text-slate-400"> (tarifa declarada {brl(d.taxa)})</span>
+                  )}
                 </span>
               </div>
             ))}
