@@ -14,14 +14,30 @@ const TODAS_FORMAS = ['pix', 'dinheiro', 'debito', 'credito', 'carteira', 'fiado
 
 function uid() { return Math.random().toString(36).slice(2, 9) }
 
-export default function SaudeVendaConfig({ empresaId, configInicial, faixasIniciais, role }: {
+// AS DUAS METADES DESTA TELA ATENDEM DOIS MENUS.
+//
+// As taxas de PIX, débito e cartão são dado financeiro: quem procura por elas
+// abre o Financeiro. As faixas de desconto são régua de venda: quem mexe nelas
+// está no Comercial. As duas gravam a mesma linha de `saude_config`, por isso
+// continuam no mesmo componente — mas cada menu entra pela sua metade.
+//
+// `abas` é o que separa: com uma aba só, a barra de abas desaparece e a tela
+// vira aquela metade. Sem o parâmetro, as duas aparecem, que é a tela de
+// sempre.
+export default function SaudeVendaConfig({
+  empresaId, configInicial, faixasIniciais, role,
+  abas = ['taxas', 'faixas'], titulo, subtitulo,
+}: {
   empresaId: string
   configInicial: any | null
   faixasIniciais: any[]
   role: string
+  abas?: Tab[]
+  titulo?: string
+  subtitulo?: string
 }) {
   const sb = createClient()
-  const [tab, setTab] = useState<Tab>('taxas')
+  const [tab, setTab] = useState<Tab>(abas[0] ?? 'taxas')
   const [salvando, setSalvando] = useState(false)
   const [ok, setOk] = useState('')
   const [erro, setErro] = useState('')
@@ -92,19 +108,26 @@ export default function SaudeVendaConfig({ empresaId, configInicial, faixasInici
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Saúde da Venda</h1>
-        <p className="text-slate-500 text-sm mt-1">Configure taxas, custos e faixas de lucratividade para proteger a margem da empresa.</p>
+        <h1 className="text-2xl font-bold text-slate-900">{titulo ?? 'Saúde da Venda'}</h1>
+        <p className="text-slate-500 text-sm mt-1">
+          {subtitulo ?? 'Configure taxas, custos e faixas de lucratividade para proteger a margem da empresa.'}
+        </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
-        {([['taxas','💲 Taxas & Custos'],['faixas','📊 Faixas de Saúde']] as [Tab,string][]).map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${tab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            {l}
-          </button>
-        ))}
-      </div>
+      {/* Tabs — escondidas quando só uma metade foi pedida: uma aba sozinha
+          não é escolha, é ruído. */}
+      {abas.length > 1 && (
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+          {([['taxas','💲 Taxas & Custos'],['faixas','📊 Faixas de Saúde']] as [Tab,string][])
+            .filter(([k]) => abas.includes(k))
+            .map(([k, l]) => (
+              <button key={k} onClick={() => setTab(k)}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${tab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                {l}
+              </button>
+            ))}
+        </div>
+      )}
 
       {/* ── TAB TAXAS ──────────────────────────────────────────────── */}
       {tab === 'taxas' && (
