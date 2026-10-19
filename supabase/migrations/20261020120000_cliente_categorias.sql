@@ -107,7 +107,8 @@ CREATE POLICY cliente_categoria_vinculos_empresa ON cliente_categoria_vinculos
   FOR ALL USING (empresa_do_meu_grupo(empresa_id) OR is_system_admin())
   WITH CHECK (empresa_do_meu_grupo(empresa_id) OR is_system_admin());
 
-REVOKE ALL ON cliente_categorias, cliente_categoria_vinculos FROM anon;
+-- O Supabase dá tudo a anon e authenticated em tabela nova: tira e devolve só o necessário.
+REVOKE ALL ON cliente_categorias, cliente_categoria_vinculos FROM anon, authenticated;
 GRANT SELECT, INSERT, DELETE ON cliente_categorias, cliente_categoria_vinculos TO authenticated;
 GRANT UPDATE (nome, cor, updated_at) ON cliente_categorias TO authenticated;
 GRANT ALL ON cliente_categorias, cliente_categoria_vinculos TO service_role;
@@ -121,7 +122,7 @@ SELECT k.id, k.empresa_id, k.nome, k.cor,
   LEFT JOIN clientes c ON c.id = v.cliente_id AND c.mesclado_em IS NULL
  GROUP BY k.id, k.empresa_id, k.nome, k.cor;
 
-REVOKE ALL ON cliente_categorias_contagem FROM anon;
+REVOKE ALL ON cliente_categorias_contagem FROM anon, authenticated;
 GRANT SELECT ON cliente_categorias_contagem TO authenticated;
 
 -- ── View das conversas: categorias do cliente no fim ─────────────────────
