@@ -127,6 +127,7 @@ describe('o Financeiro reúne o que é financeiro', () => {
   // obriga a decisão a ser explícita.
   for (const href of [
     '/dashboard/financeiro',
+    '/dashboard/financeiro/caixa',
     '/dashboard/contas-receber',
     '/dashboard/carteira-clientes',
     '/dashboard/cobranca',
@@ -141,6 +142,14 @@ describe('o Financeiro reúne o que é financeiro', () => {
       assert.ok(hrefs.includes(href), `${href} não está no menu Financeiro`)
     })
   }
+
+  test('o Caixa tem subgrupo proprio, antes de Receber', () => {
+    // Saldo e extrato não são "um relatório": é onde se olha o dinheiro todo
+    // dia. Enterrado dentro de Receber, ninguém acharia.
+    const labels = (financeiro.subGroups ?? []).map(sg => sg.label)
+    assert.ok(labels.includes('Caixa'), `subgrupos=${labels.join(', ')}`)
+    assert.ok(labels.indexOf('Caixa') < labels.indexOf('Receber'))
+  })
 
   test('Tipos de Despesa está em Pagar, junto do que ela classifica', () => {
     const pagar = (financeiro.subGroups ?? []).find(sg => sg.label === 'Pagar')
