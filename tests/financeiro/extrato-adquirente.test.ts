@@ -251,6 +251,118 @@ describe('os totais do dia', () => {
   })
 })
 
+describe('O ARQUIVO REAL DO BAZAR EFICAZ, lido em 19/10/2026', () => {
+  // Linhas copiadas do arquivo que o Mercado Pago gerou de verdade. A primeira
+  // versão deste leitor importou 1.941 delas e mostrou na tela
+  // "R$ 1.259,41 − R$ 8,46 = R$ 1.512,58" — conta que não fecha.
+  //
+  // Duas causas, as duas corrigidas aqui:
+  //   1. NET_DEBIT_AMOUNT era ignorada: saída de dinheiro virava zero no
+  //      liquido, enquanto o bruto carregava o negativo
+  //   2. as reservas eram somadas junto com os pagamentos, contando o mesmo
+  //      dinheiro duas vezes
+  const REAL = [
+    'DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT;GROSS_AMOUNT;MP_FEE_AMOUNT;TAXES_AMOUNT;PAYMENT_METHOD;TRANSACTION_APPROVAL_DATE;BUSINESS_UNIT;SUB_UNIT;BALANCE_AMOUNT;PAYMENT_METHOD_TYPE;PURCHASE_ID',
+    '2026-10-19T08:49:46.000-03:00;184959657662;payment;60.50;0.00;60.80;-0.30;0.00;pix;2026-10-19T08:49:46.000-03:00;Mercado Pago;QR;99.53;bank_transfer;',
+    '2026-10-19T08:48:38.000-03:00;183927157371;payment;29.08;0.00;30.00;-0.17;0.00;elo;2026-10-19T08:48:38.000-03:00;Mercado Pago;Point;39.03;credit_card;',
+    '2026-10-19T07:20:49.000-03:00;184951342350;payment;0.00;13.29;-13.29;0.00;0.00;available_money;2026-10-19T07:20:49.000-03:00;;;0.00;account_money;',
+    '2026-10-19T07:00:00.000-03:00;184951342399;reserve_for_payment;60.50;0.00;0.00;0.00;0.00;pix;2026-10-19T07:00:00.000-03:00;Mercado Pago;QR;0.00;bank_transfer;',
+  ].join('\n')
+
+  const { linhas, cabecalho, descartadas } = lerExtrato(REAL)
+
+  test('o cabeçalho real é reconhecido por inteiro', () => {
+    assert.deepEqual(cabecalho.faltando, [])
+    assert.deepEqual(descartadas, [])
+    assert.equal(linhas.length, 4)
+  })
+
+  test('no pix a tarifa declarada fecha exata', () => {
+    const l = linhas[0]
+    assert.equal(l.bruto, 60.80)
+    assert.equal(l.taxa, 0.30)
+    assert.equal(l.liquido, 60.50)
+    assert.equal(Number((l.bruto - l.taxa).toFixed(2)), l.liquido)
+  })
+
+  test('NO CRÉDITO NÃO FECHA, e é por isso que `custo` existe', () => {
+    // Venda de R$ 30,00 no elo: o arquivo declara MP_FEE de 0,17 e credita
+    // 29,08. O custo real foi 0,92 — 3,07%, que bate com a taxa contratada de
+    // 3,04%. A tarifa declarada mostra menos de um quinto disso.
+    //
+    // No pix a conta fecha exata, então não é arredondamento: no crédito há
+    // desconto que a coluna de tarifa não declara, provavelmente antecipação
+    // (o arquivo real tem linhas `fee-release_in_advance`).
+    //
+    // Conferir pela coluna de tarifa diria que o Mercado Pago cobrou 0,57% num
+    // cartão de 3%. Vale o `custo`, que é bruto menos liquido.
+    const elo = linhas.find(l => l.metodo === 'elo')!
+    assert.equal(elo.bruto, 30.00)
+    assert.equal(elo.liquido, 29.08)
+    assert.equal(elo.taxa, 0.17, 'o que o arquivo DECLARA')
+    assert.equal(Number((elo.bruto - elo.liquido).toFixed(2)), 0.92, 'o que REALMENTE custou')
+    assert.notEqual(elo.taxa, 0.92)
+  })
+
+  test('A SAÍDA, que antes virava zero', () => {
+    // NET_DEBIT_AMOUNT = 13,29 e NET_CREDIT = 0. Lendo só o crédito, o líquido
+    // ficava 0 enquanto o bruto ficava −13,29 — e o total do dia mentia.
+    const saida = linhas.find(l => l.metodoTipo === 'account_money')!
+    assert.equal(saida.bruto, -13.29)
+    assert.equal(saida.liquido, -13.29)
+  })
+
+  test('a data de APROVAÇÃO é lida, e é a da venda', () => {
+    // É o que torna possível conferir crédito por dia: os dois lados passam a
+    // ter a data da venda, em vez de a liberação trinta dias depois.
+    assert.equal(linhas[0].dataAprovacao, '2026-10-19')
+  })
+
+  test('o canal e o tipo do método vêm junto', () => {
+    assert.equal(linhas[0].canal, 'QR')
+    assert.equal(linhas[0].metodoTipo, 'bank_transfer')
+    assert.equal(linhas[1].canal, 'Point')
+    assert.equal(linhas[1].metodoTipo, 'credit_card')
+    assert.equal(linhas[1].metodo, 'elo')
+  })
+
+  test('A RESERVA FICA FORA DO TOTAL', () => {
+    // No arquivo real eram 462 reservas somadas a 1.266 pagamentos: o mesmo
+    // dinheiro contado duas vezes.
+    const t = totaisPorDia(linhas)
+    assert.equal(t.length, 1)
+    assert.equal(t[0].lancamentos, 3, 'tres pagamentos, a reserva de fora')
+    assert.equal(t[0].bruto, 77.51)   // 60,80 + 30,00 − 13,29
+    assert.equal(t[0].taxa, 0.47)     // 0,30 + 0,17, o que o arquivo declara
+    assert.equal(t[0].liquido, 76.29) // 60,50 + 29,08 − 13,29
+  })
+
+  test('o CUSTO do dia é bruto menos líquido, e supera a tarifa declarada', () => {
+    // 77,51 − 76,29 = 1,22 de custo real, contra 0,47 declarados em tarifa.
+    // A diferença é o crédito, como mostrado acima.
+    const t = totaisPorDia(linhas)[0]
+    assert.equal(t.custo, 1.22)
+    assert.ok(t.custo > t.taxa, 'o custo real é maior que a tarifa declarada')
+  })
+
+  test('quem quiser auditar o arquivo inteiro pede as reservas', () => {
+    const t = totaisPorDia(linhas, { incluirReservas: true })
+    assert.equal(t[0].lancamentos, 4)
+  })
+
+  test('imposto entra na taxa, somado à tarifa', () => {
+    // TAXES_AMOUNT é coluna própria. Ignorá-la subestima o custo, e
+    // subestimar custo infla margem.
+    const comImposto = [
+      'DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT;GROSS_AMOUNT;MP_FEE_AMOUNT;TAXES_AMOUNT',
+      '2026-10-19;X1;payment;90.00;0.00;100.00;-8.00;-2.00',
+    ].join('\n')
+    const { linhas: l } = lerExtrato(comImposto)
+    assert.equal(l[0].taxa, 10)
+    assert.equal(l[0].liquido, 90)
+  })
+})
+
 describe('a conferência do dia', () => {
   const deles = totaisPorDia(lerExtrato([
     'DATE;SOURCE_ID;GROSS_AMOUNT;MP_FEE_AMOUNT',

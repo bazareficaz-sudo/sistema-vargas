@@ -16,19 +16,46 @@
 // token, sem conta e sem internet.
 
 export type LinhaExtrato = {
-  /** `YYYY-MM-DD` no fuso do arquivo. */
+  /** `YYYY-MM-DD` no fuso do arquivo. Data em que o dinheiro foi LIBERADO. */
   data: string
+  /**
+   * A data em que a transação foi APROVADA — a data da venda.
+   *
+   * Descoberta no primeiro arquivo real, em 19/10/2026, e muda o que a
+   * conciliação consegue fazer: eu havia escrito que crédito não dava para
+   * conferir por dia, porque a venda entra no caixa hoje e a liberação só
+   * aparece trinta dias depois. Com esta coluna, os dois lados têm a data da
+   * venda, e a conferência fecha sem depender de referência externa.
+   */
+  dataAprovacao: string | null
   /** Identificador do lançamento na adquirente. */
   origemId: string
   /** O que o lojista mandou junto da cobrança, quando manda. */
   referenciaExterna: string | null
-  /** `release`, `refund`, `dispute`, `settlement`… como vem no arquivo. */
+  /** `payment`, `payout`, `refund`, `reserve_for_payment`… como vem. */
   tipo: string
+  /** GROSS_AMOUNT, com o sinal do arquivo: negativo quando sai. */
   bruto: number
+  /** Custo total: tarifa do Mercado Pago MAIS impostos, sempre positivo. */
   taxa: number
+  /**
+   * Crédito menos débito, COM SINAL.
+   *
+   * O arquivo tem duas colunas separadas — NET_CREDIT_AMOUNT e
+   * NET_DEBIT_AMOUNT —, e a primeira versão deste leitor só lia a de crédito.
+   * O resultado foi líquido somado MAIOR que o bruto somado, porque o bruto
+   * carregava os negativos das saídas e o líquido só contava as entradas.
+   * Apareceu na tela como "R$ 1.259,41 − R$ 8,46 = R$ 1.512,58".
+   */
   liquido: number
   parcelas: number | null
   metodo: string | null
+  /** `Point`, `QR`… de onde a cobrança veio. */
+  canal: string | null
+  /** `credit_card`, `debit_card`, `bank_transfer`, `account_money`. */
+  metodoTipo: string | null
+  /** PURCHASE_ID, quando existe. */
+  compraId: string | null
   /**
    * A linha do arquivo, exatamente como veio.
    *
@@ -42,17 +69,46 @@ export type LinhaExtrato = {
   linhaOriginal: string
 }
 
-/** O que precisa existir no cabeçalho, com os nomes que já vi em uso. */
+// O que precisa existir no cabeçalho, com os nomes já vistos em uso.
+//
+// O arquivo real do Bazar Eficaz, lido em 19/10/2026, trouxe:
+//
+//   DATE · SOURCE_ID · DESCRIPTION · NET_CREDIT_AMOUNT · NET_DEBIT_AMOUNT ·
+//   GROSS_AMOUNT · MP_FEE_AMOUNT · TAXES_AMOUNT · PAYMENT_METHOD ·
+//   TRANSACTION_APPROVAL_DATE · BUSINESS_UNIT · SUB_UNIT · BALANCE_AMOUNT ·
+//   PAYMENT_METHOD_TYPE · PURCHASE_ID
 const COLUNAS: Record<string, string[]> = {
   data: ['date', 'data', 'release_date', 'date_created', 'money_release_date'],
+  dataAprovacao: ['transaction_approval_date', 'data_aprovacao', 'approval_date'],
   origemId: ['source_id', 'transaction_id', 'operation_id', 'id', 'payment_id'],
   referenciaExterna: ['external_reference', 'referencia_externa'],
   tipo: ['record_type', 'transaction_type', 'tipo', 'description', 'descricao'],
   bruto: ['transaction_amount', 'gross_amount', 'valor_bruto', 'transaction_gross_amount'],
   taxa: ['mp_fee_amount', 'fee_amount', 'taxa', 'mercadopago_fee', 'commission'],
-  liquido: ['net_credit_amount', 'net_amount', 'valor_liquido', 'settlement_net_amount'],
+  // Impostos vêm numa coluna PRÓPRIA, somada à tarifa. Ignorá-la subestima o
+  // custo — e subestimar custo é inflar margem.
+  impostos: ['taxes_amount', 'impostos', 'tax_amount'],
+  credito: ['net_credit_amount', 'net_amount', 'valor_liquido', 'settlement_net_amount'],
+  // A coluna que faltava na primeira versão, e que produziu líquido maior que
+  // bruto. Sem ela, saída de dinheiro vira zero.
+  debito: ['net_debit_amount', 'valor_debito'],
   parcelas: ['installments', 'parcelas'],
-  metodo: ['payment_method', 'payment_method_type', 'metodo', 'forma'],
+  metodo: ['payment_method', 'metodo', 'forma'],
+  canal: ['sub_unit', 'canal'],
+  metodoTipo: ['payment_method_type', 'tipo_metodo'],
+  compraId: ['purchase_id', 'compra_id'],
+}
+
+/**
+ * Linha de reserva, e não de dinheiro mexendo.
+ *
+ * O arquivo real trouxe 462 `reserve_for_payment`, 100 `reserve_for_payout` e
+ * 20 `reserve_for_debt_payment` — a contrapartida contábil das MESMAS
+ * operações que já aparecem como `payment` e `payout`. Somar as duas pontas
+ * conta o mesmo dinheiro duas vezes, e foi o que a primeira tela fez.
+ */
+export function ehReserva(tipo: string): boolean {
+  return /^reserve/i.test(tipo.trim())
 }
 
 /** As quatro sem as quais não há conferência possível. */
@@ -226,28 +282,42 @@ export function lerExtrato(csv: string): LeituraExtrato {
     if (!origemId) { descartadas.push({ linha: i + 1, motivo: 'sem identificador de origem' }); continue }
 
     const bruto = valorMonetario(pegar(campos, 'bruto'))
-    // A taxa vem negativa no arquivo (é um débito). Guardamos positiva, porque
-    // no ledger ela já é uma SAÍDA — o sinal estaria contado duas vezes.
+    // Tarifa e imposto vêm negativos no arquivo (são débitos) e em colunas
+    // separadas. Guardamos a SOMA, positiva: no ledger a taxa já é uma SAÍDA,
+    // e manter o sinal a contaria duas vezes.
     const taxa = Math.abs(valorMonetario(pegar(campos, 'taxa')))
-    const liquidoLido = pegar(campos, 'liquido')
+                 + Math.abs(valorMonetario(pegar(campos, 'impostos')))
+    const creditoLido = pegar(campos, 'credito')
+    const debitoLido = pegar(campos, 'debito')
     const parcelasLidas = pegar(campos, 'parcelas')
+
+    const temCredito = creditoLido !== undefined && String(creditoLido).trim() !== ''
+    const temDebito = debitoLido !== undefined && String(debitoLido).trim() !== ''
 
     linhas.push({
       data,
+      dataAprovacao: dataDoExtrato(pegar(campos, 'dataAprovacao')),
       origemId,
       referenciaExterna: (pegar(campos, 'referenciaExterna') ?? '').trim() || null,
       tipo: (pegar(campos, 'tipo') ?? '').trim() || 'desconhecido',
       bruto,
       taxa,
-      // Se o arquivo não trouxer o líquido, ele é bruto menos taxa — e não
-      // zero, que faria a conferência acusar que nada caiu.
-      liquido: liquidoLido !== undefined && String(liquidoLido).trim() !== ''
-        ? valorMonetario(liquidoLido)
+      // CRÉDITO MENOS DÉBITO, com sinal. As duas colunas são separadas no
+      // arquivo, e ler só a de crédito faz saída de dinheiro virar zero.
+      //
+      // Sem nenhuma das duas, cai em bruto menos taxa — que é a identidade que
+      // o arquivo real respeita: 60,80 − 0,30 = 60,50. Nunca zero, que faria a
+      // conferência concluir que nada caiu.
+      liquido: temCredito || temDebito
+        ? Number((valorMonetario(creditoLido) - Math.abs(valorMonetario(debitoLido))).toFixed(2))
         : Number((bruto - taxa).toFixed(2)),
       parcelas: parcelasLidas && Number.isFinite(Number(parcelasLidas))
         ? Math.max(1, Math.floor(Number(parcelasLidas)))
         : null,
       metodo: (pegar(campos, 'metodo') ?? '').trim() || null,
+      canal: (pegar(campos, 'canal') ?? '').trim() || null,
+      metodoTipo: (pegar(campos, 'metodoTipo') ?? '').trim() || null,
+      compraId: (pegar(campos, 'compraId') ?? '').trim() || null,
       linhaOriginal: todas[i],
     })
   }
@@ -255,12 +325,50 @@ export function lerExtrato(csv: string): LeituraExtrato {
   return { linhas, cabecalho, descartadas }
 }
 
-export type TotaisDoDia = { data: string; bruto: number; taxa: number; liquido: number; lancamentos: number }
+export type TotaisDoDia = {
+  data: string
+  bruto: number
+  /** A soma das colunas de tarifa e imposto, como o arquivo as traz. */
+  taxa: number
+  liquido: number
+  /**
+   * O CUSTO DE VERDADE: bruto menos líquido.
+   *
+   * Não é o mesmo que `taxa`, e a diferença foi medida no arquivo real de
+   * 19/10/2026. Numa venda no crédito de R$ 30,00, o arquivo traz
+   * `MP_FEE_AMOUNT = -0,17` e credita R$ 29,08 — custo real de R$ 0,92, que é
+   * 3,07% e bate com a taxa contratada de 3,04%. A tarifa declarada mostra
+   * menos de um quinto disso.
+   *
+   * No pix a conta fecha exata (60,80 − 0,30 = 60,50), então a diferença não é
+   * arredondamento: no crédito há desconto que a coluna de tarifa não declara
+   * — provavelmente antecipação, já que o arquivo tem linhas
+   * `fee-release_in_advance`.
+   *
+   * Para conferir contra o nosso ledger vale ESTE número, porque é o que
+   * realmente deixou de entrar na conta.
+   */
+  custo: number
+  lancamentos: number
+}
 
-export function totaisPorDia(linhas: LinhaExtrato[]): TotaisDoDia[] {
+/**
+ * Soma por dia, FORA as reservas.
+ *
+ * `incluirReservas` existe só para quem quiser auditar o arquivo inteiro. O
+ * padrão é excluir, porque reserva é a contrapartida contábil de uma operação
+ * que já está no arquivo como `payment` ou `payout`: somar as duas conta o
+ * mesmo dinheiro duas vezes — e foi exatamente o que a primeira versão desta
+ * tela mostrou, com 462 reservas somadas a 1.266 pagamentos.
+ */
+export function totaisPorDia(
+  todasAsLinhas: LinhaExtrato[],
+  { incluirReservas = false } = {},
+): TotaisDoDia[] {
+  const linhas = incluirReservas ? todasAsLinhas : todasAsLinhas.filter(l => !ehReserva(l.tipo))
   const mapa = new Map<string, TotaisDoDia>()
   for (const l of linhas) {
-    const t = mapa.get(l.data) ?? { data: l.data, bruto: 0, taxa: 0, liquido: 0, lancamentos: 0 }
+    const t = mapa.get(l.data) ?? { data: l.data, bruto: 0, taxa: 0, liquido: 0, custo: 0, lancamentos: 0 }
     t.bruto += l.bruto
     t.taxa += l.taxa
     t.liquido += l.liquido
@@ -273,6 +381,9 @@ export function totaisPorDia(linhas: LinhaExtrato[]): TotaisDoDia[] {
       bruto: Number(t.bruto.toFixed(2)),
       taxa: Number(t.taxa.toFixed(2)),
       liquido: Number(t.liquido.toFixed(2)),
+      // Derivado no fim, e não somado linha a linha, para não acumular
+      // arredondamento de centavo em mil transações.
+      custo: Number((t.bruto - t.liquido).toFixed(2)),
     }))
     .sort((a, b) => (a.data < b.data ? 1 : -1))
 }
