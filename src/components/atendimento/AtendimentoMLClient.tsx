@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  avisoDeContato, horasAte, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA, ROTULO_ACAO, ROTULO_ETAPA, tempoDesde,
+  anuncioAceitaResposta, avisoDeContato, horasAte, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA, ROTULO_ACAO, ROTULO_ETAPA, tempoDesde,
   type ConversaML, type PerguntaML, type ReclamacaoML,
 } from '@/lib/mercadolivre/atendimentoRegras'
 
@@ -17,6 +17,13 @@ type Envio = { tipo: 'pergunta' | 'reclamacao' | 'conversa'; canalId: string; id
 
 const quando = (iso: string) => iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }) : ''
 const brl = (v: number | null) => v == null ? '' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+// Cada conta com a sua cor — a etiqueta diz de qual conta é a pergunta.
+const CORES_CONTA = ['bg-yellow-100 text-yellow-900 border-yellow-300', 'bg-sky-100 text-sky-900 border-sky-300', 'bg-violet-100 text-violet-900 border-violet-300', 'bg-emerald-100 text-emerald-900 border-emerald-300']
+function Conta({ nome, contas }: { nome: string; contas: string[] }) {
+  const cor = CORES_CONTA[Math.max(0, contas.indexOf(nome)) % CORES_CONTA.length]
+  return <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${cor}`}>{nome}</span>
+}
 
 function Resposta({ envio, limite, sugestao, onEnviado }: {
   envio: Envio; limite: number
@@ -75,10 +82,14 @@ function Resposta({ envio, limite, sugestao, onEnviado }: {
   )
 }
 
-export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, conversas, erros }: {
+export default function AtendimentoMLClient({ contas, perguntas: todasPerguntas, reclamacoes, conversas, erros }: {
   contas: string[]; perguntas: PerguntaML[]; reclamacoes: ReclamacaoML[]; conversas: ConversaML[]; erros: string[]
 }) {
   const router = useRouter()
+  // Pergunta de anúncio pausado/encerrado/em revisão o ML não deixa responder:
+  // fica oculta (volta sozinha quando o anúncio for reativado).
+  const perguntas = todasPerguntas.filter(p => anuncioAceitaResposta(p.item?.status))
+  const ocultas = todasPerguntas.length - perguntas.length
   const urgentes = reclamacoes.filter(r => r.prazo && horasAte(r.prazo) < 24)
   const [aba, setAba] = useState<Aba>(urgentes.length ? 'reclamacoes' : perguntas.length ? 'perguntas' : 'conversas')
   const recarregar = () => setTimeout(() => router.refresh(), 1500)
@@ -119,6 +130,11 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
       {aba === 'perguntas' && (
         <div className="space-y-3">
           {perguntas.length === 0 && <p className="text-sm text-gray-500 py-6 text-center">Nenhuma pergunta esperando resposta. 👏</p>}
+          {ocultas > 0 && (
+            <p className="text-[11px] text-gray-400">
+              {ocultas} pergunta(s) de anúncios pausados ou encerrados não aparecem — o Mercado Livre não deixa responder. Voltam para cá se o anúncio for reativado.
+            </p>
+          )}
           {perguntas.map(p => (
             <div key={p.id} className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
               <div className="flex gap-3">
@@ -126,8 +142,11 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
                 {p.item?.foto ? <img src={p.item.foto} alt="" className="w-14 h-14 rounded-lg object-cover border border-gray-100 shrink-0" />
                   : <div className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-200 shrink-0" />}
                 <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <Conta nome={p.canalNome} contas={contas} />
+                  </div>
                   <p className="text-xs text-gray-500 truncate">
-                    {p.canalNome} · {p.item?.link ? <a href={p.item.link} target="_blank" rel="noreferrer" className="hover:underline">{p.item.titulo}</a> : (p.item?.titulo ?? p.itemId)}
+                    {p.item?.link ? <a href={p.item.link} target="_blank" rel="noreferrer" className="hover:underline">{p.item.titulo}</a> : (p.item?.titulo ?? p.itemId)}
                     {p.item?.preco != null && ` · ${brl(p.item.preco)}`}
                     {p.item?.estoque != null && ` · ${p.item.estoque > 0 ? 'com estoque' : 'sem estoque'}`}
                   </p>
@@ -136,7 +155,7 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
                 </div>
               </div>
               <Resposta envio={{ tipo: 'pergunta', canalId: p.canalId, id: p.id }} limite={LIMITE_RESPOSTA_PERGUNTA} onEnviado={recarregar}
-                sugestao={{ pergunta: p.texto, produtoId: p.produtoId, anuncio: p.item ? { titulo: p.item.titulo, preco: p.item.preco, estoque: p.item.estoque } : null }} />
+                  sugestao={{ pergunta: p.texto, produtoId: p.produtoId, canalId: p.canalId, itemId: p.itemId, anuncio: p.item ? { titulo: p.item.titulo, preco: p.item.preco, estoque: p.item.estoque } : null }} />
             </div>
           ))}
         </div>
@@ -152,9 +171,9 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
               <div key={r.id} className={`bg-white border rounded-xl p-3 space-y-2 ${faltam != null && faltam < 24 ? 'border-red-300' : 'border-gray-200'}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{r.motivo}</p>
-                    <p className="text-xs text-gray-500">
-                      {r.canalNome} · {ROTULO_ETAPA[r.etapa] ?? r.etapa} · aberta em {quando(r.criadaEm)}
+                    <div className="flex items-center gap-2"><Conta nome={r.canalNome} contas={contas} /><p className="text-sm font-medium text-gray-900">{r.motivo}</p></div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {ROTULO_ETAPA[r.etapa] ?? r.etapa} · aberta em {quando(r.criadaEm)}
                       {r.pedidoExterno && <> · pedido {r.pedidoId
                         ? <Link href={`/dashboard/pedidos-ecommerce?q=${r.pedidoExterno}`} className="text-blue-600 hover:underline">{r.pedidoExterno}</Link>
                         : r.pedidoExterno}</>}
@@ -196,7 +215,7 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
           {conversas.length === 0 && <p className="text-sm text-gray-500 py-6 text-center">Nenhuma mensagem não lida. 👏</p>}
           {conversas.map(c => (
             <div key={c.packId} className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
-              <p className="text-xs text-gray-500">{c.canalNome} · venda {c.packId} · {c.naoLidas} não lida(s){c.temReclamacao && ' · tem reclamação (responda pela aba Reclamações)'}</p>
+              <p className="text-xs text-gray-500"><Conta nome={c.canalNome} contas={contas} /> venda {c.packId} · {c.naoLidas} não lida(s){c.temReclamacao && ' · tem reclamação (responda pela aba Reclamações)'}</p>
               <div className="bg-gray-50 rounded-lg p-2 space-y-1.5 max-h-60 overflow-y-auto">
                 {c.mensagens.map((m, i) => (
                   <div key={i} className={`text-xs ${m.daLoja ? 'text-right' : ''}`}>

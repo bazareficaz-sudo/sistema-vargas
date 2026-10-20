@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
 import { canaisDeAtendimento, mensagemNaReclamacao, responderConversa, responderPergunta } from '@/lib/mercadolivre/atendimento'
-import { avisoDeContato, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA } from '@/lib/mercadolivre/atendimentoRegras'
+import { avisoDeContato, erroDoMLEmPortugues, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA } from '@/lib/mercadolivre/atendimentoRegras'
 
 // Envia a resposta escrita na tela de Atendimento para o Mercado Livre:
 // pergunta, mensagem na reclamação ou mensagem pós-venda. Só o que a pessoa
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       await responderConversa(canal, String(id), compradorId, texto)
     }
   } catch (e: unknown) {
-    return NextResponse.json({ ok: false, erro: e instanceof Error ? e.message : 'O Mercado Livre recusou.' }, { status: 400 })
+    return NextResponse.json({ ok: false, erro: erroDoMLEmPortugues(e instanceof Error ? e.message : 'O Mercado Livre recusou.') }, { status: 400 })
   }
 
   await sb.from('marketplace_sync_log').insert({

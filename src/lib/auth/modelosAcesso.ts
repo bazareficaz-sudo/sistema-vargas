@@ -24,7 +24,7 @@ export const MODELOS_ACESSO: ModeloAcesso[] = [
     id: 'vendedor',
     nome: 'Vendedor',
     icone: '🛍️',
-    descricao: 'Início do vendedor, WhatsApp, orçamentos, anúncios, pedidos da internet, atendimento do Mercado Livre, produtos, clientes e PDV.',
+    descricao: 'Início do vendedor, WhatsApp, orçamentos, anúncios, pedidos da internet, atendimento do Mercado Livre e da Shopee, produtos, clientes e PDV.',
     telas: [
       '/dashboard/inicio',
       '/pdv',
@@ -34,6 +34,7 @@ export const MODELOS_ACESSO: ModeloAcesso[] = [
       '/dashboard/marketplaces/anuncios',
       '/dashboard/pedidos-ecommerce',
       '/dashboard/atendimento-ml',
+      '/dashboard/atendimento-shopee',
       '/dashboard/produtos',
       '/dashboard/clientes',
     ],

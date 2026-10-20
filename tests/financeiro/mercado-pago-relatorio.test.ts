@@ -223,6 +223,63 @@ describe('ler um pagamento', () => {
       ['collector', 'description', 'id', 'operation_type', 'transaction_amount'])
   })
 
+  test('A PRIMEIRA BUSCA REAL devolveu o BANCO, não quem recebeu', () => {
+    // 20/10/2026, pagamento de R$ 905,84: veio "Banco do Brasil S.A." como
+    // recebedor. É o banco de DESTINO do pix, não o fornecedor. Saber que o
+    // dinheiro foi para o Banco do Brasil não diz se foi combustível ou
+    // embalagem — e era exatamente a pergunta.
+    //
+    // Por isso `textos` existe: em vez de eu adivinhar qual é o próximo campo
+    // a tentar, a resposta mostra TODOS, com o caminho de onde vieram.
+    // A resposta de verdade, como veio: tipo de operação, método, valor e o
+    // banco. Nenhum campo de nome de fornecedor nos lugares que eu tentei.
+    const r = resumoDoPagamento({
+      id: 183568656269,
+      operation_type: 'regular_payment',
+      payment_method_id: 'wallet',
+      transaction_amount: 905.84,
+      point_of_interaction: { business_info: { unit: 'Banco do Brasil S.A.' } },
+    })
+
+    assert.equal(r.recebedor, 'Banco do Brasil S.A.')
+    assert.equal(r.tipo, 'regular_payment')
+    assert.equal(r.valor, 905.84)
+
+    // E `textos` mostra DE ONDE isso veio, que é o que permite concluir que
+    // não é o fornecedor: `business_info.unit` é a instituição de destino.
+    const banco = r.textos.find(x => x.valor === 'Banco do Brasil S.A.')
+    assert.ok(banco)
+    assert.equal(banco!.caminho, 'point_of_interaction.business_info.unit')
+
+    // Nenhum outro texto nessa resposta — é por isso que a categorização
+    // automática ainda não dá para ser construída com este endpoint.
+    assert.deepEqual(
+      r.textos.map(x => x.valor).sort(),
+      ['Banco do Brasil S.A.', 'regular_payment', 'wallet'],
+    )
+  })
+
+  test('os textos não despejam id, hash nem token', () => {
+    // É diagnóstico para achar nome de fornecedor, não dump do objeto.
+    const r = resumoDoPagamento({
+      hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+      token: 'APP_USR-123456-abcdef',
+      nome: 'Posto Ipiranga',
+      n: 42,
+    })
+    const valores = r.textos.map(x => x.valor)
+    assert.ok(valores.includes('Posto Ipiranga'))
+    assert.ok(!valores.some(v => v.includes('APP_USR')))
+    assert.ok(!valores.some(v => /^[0-9a-f]{16,}$/i.test(v)))
+  })
+
+  test('objeto fundo e circular não trava', () => {
+    const a: any = { nome: 'Fornecedor' }
+    a.ele_mesmo = a
+    const r = resumoDoPagamento(a)
+    assert.ok(r.textos.some(x => x.valor === 'Fornecedor'))
+  })
+
   test('resposta vazia não quebra o resumo', () => {
     const r = resumoDoPagamento(null)
     assert.equal(r.recebedor, null)

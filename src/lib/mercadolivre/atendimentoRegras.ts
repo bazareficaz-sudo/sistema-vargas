@@ -13,7 +13,11 @@ export type PerguntaML = {
   texto: string
   criadaEm: string
   itemId: string
-  item: { titulo: string; foto: string | null; preco: number | null; estoque: number | null; link: string | null } | null
+  item: {
+    titulo: string; foto: string | null; preco: number | null; estoque: number | null; link: string | null
+    /** "active", "paused", "closed"… — o ML só aceita resposta com o anúncio ativo. */
+    status?: string | null
+  } | null
   /** Produto do sistema ligado ao anúncio (para a IA e para o atendente). */
   produtoId: string | null
 }
@@ -74,6 +78,26 @@ export const ROTULO_ACAO: Record<string, string> = {
 }
 
 export const ROTULO_ETAPA: Record<string, string> = { claim: 'reclamação', dispute: 'em mediação', recontact: 'recontato', none: '' }
+
+/**
+ * O ML recusa resposta em pergunta de anúncio que não está ativo ("Item must
+ * be active" — medido em 20/10/2026, num anúncio pausado sem estoque).
+ */
+export function anuncioAceitaResposta(status: string | null | undefined): boolean {
+  return !status || status === 'active'
+}
+
+export const ROTULO_STATUS_ANUNCIO: Record<string, string> = {
+  paused: 'pausado', closed: 'encerrado', under_review: 'em revisão', inactive: 'inativo', payment_required: 'aguardando pagamento',
+}
+
+/** Erro do ML em português, quando é um dos conhecidos. */
+export function erroDoMLEmPortugues(mensagem: string): string {
+  if (/item must be active|not_active_item/i.test(mensagem)) return 'O anúncio não está ativo (pausado ou encerrado): o Mercado Livre só aceita resposta com o anúncio ativo. Reative o anúncio (ou reponha o estoque) e responda de novo.'
+  if (/question.*(answered|already)/i.test(mensagem)) return 'Esta pergunta já foi respondida (talvez pelo celular). Atualize a tela.'
+  if (/deleted|not_found/i.test(mensagem)) return 'A pergunta não existe mais no Mercado Livre (o comprador apagou). Atualize a tela.'
+  return mensagem
+}
 
 /** "3 h", "2 d" — quanto tempo desde `iso`. */
 export function tempoDesde(iso: string, agora: Date = new Date()): string {

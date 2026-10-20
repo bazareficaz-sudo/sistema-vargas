@@ -233,6 +233,18 @@ export function resumoDoPagamento(p: any): {
   tipo: string | null
   valor: number | null
   camposPresentes: string[]
+  /**
+   * TODO texto curto que a resposta carrega, com o caminho de onde veio.
+   *
+   * Existe porque a primeira busca real, em 20/10/2026, devolveu
+   * "Banco do Brasil S.A." como recebedor -- o banco de DESTINO, nao quem
+   * recebeu. Saber que o pix foi para o Banco do Brasil nao diz se foi
+   * combustivel ou embalagem.
+   *
+   * Em vez de eu adivinhar o proximo campo, a resposta mostra TODOS, com o
+   * caminho. O nome do fornecedor, se estiver ali, aparece nesta lista.
+   */
+  textos: { caminho: string; valor: string }[]
 } {
   const primeiro = (...valores: unknown[]): string | null => {
     for (const v of valores) {
@@ -251,7 +263,47 @@ export function resumoDoPagamento(p: any): {
     tipo: primeiro(p?.operation_type, p?.payment_type_id, p?.status_detail),
     valor: typeof p?.transaction_amount === 'number' ? p.transaction_amount : null,
     camposPresentes: p && typeof p === 'object' ? Object.keys(p).sort() : [],
+    textos: textosDoObjeto(p),
   }
+}
+
+/**
+ * Todo texto curto da resposta, com o caminho de onde veio.
+ *
+ * Limites deliberados:
+ *   - so string de 2 a 80 caracteres: id, data e hash nao sao nome de ninguem
+ *   - profundidade 4: fundo o bastante para `additional_info.payer.first_name`
+ *   - 80 entradas: e diagnostico, nao despejo do objeto inteiro
+ *   - descarta o que parece token ou chave, pelo mesmo motivo de `resumir`
+ */
+function textosDoObjeto(raiz: any): { caminho: string; valor: string }[] {
+  const achados: { caminho: string; valor: string }[] = []
+  const vistos = new Set<any>()
+
+  const andar = (no: any, caminho: string, nivel: number) => {
+    if (achados.length >= 80 || nivel > 4 || no === null || no === undefined) return
+    if (typeof no === 'string') {
+      const v = no.trim()
+      if (v.length >= 2 && v.length <= 80 && !/^[0-9a-f]{16,}$/i.test(v)
+          && !/(APP_USR|TEST)-/.test(v)) {
+        achados.push({ caminho, valor: v })
+      }
+      return
+    }
+    if (typeof no !== 'object') return
+    if (vistos.has(no)) return
+    vistos.add(no)
+    if (Array.isArray(no)) {
+      no.slice(0, 5).forEach((item, i) => andar(item, `${caminho}[${i}]`, nivel + 1))
+      return
+    }
+    for (const [k, v] of Object.entries(no)) {
+      andar(v, caminho ? `${caminho}.${k}` : k, nivel + 1)
+    }
+  }
+
+  andar(raiz, '', 0)
+  return achados
 }
 
 /**
