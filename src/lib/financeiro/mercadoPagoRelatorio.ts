@@ -43,6 +43,25 @@ const CAMINHOS_PERMITIDOS: { metodo: 'GET' | 'POST'; padrao: RegExp }[] = [
   // O nome do arquivo que o próprio Mercado Pago devolveu. Sem barra, ponto
   // duplo ou query: só nome de arquivo.
   { metodo: 'GET',  padrao: /^\/v1\/account\/release_report\/[A-Za-z0-9._-]+$/ },
+
+  // ── O CAMINHO ACRESCENTADO EM 19/10/2026, E POR QUÊ ─────────────────────
+  //
+  // O extrato mostra 231 saídas da conta em 30 dias, R$ 29.421,07 — o pix do
+  // posto, a embalagem, o mercado. Dessas, UMA está lançada em Contas a
+  // Pagar. São R$ 28.889 por mês que o sistema não enxerga.
+  //
+  // Mas o relatório não diz PARA QUEM foi: traz data, valor e identificador.
+  // Sem o nome não há categoria, e 231 linhas de "saiu R$ 200,00" não são
+  // controle de despesa.
+  //
+  // `GET /v1/payments/:id` é leitura pura: devolve o detalhe de um pagamento
+  // que já existe. Só dígitos no id, porque o id do Mercado Pago é numérico —
+  // e qualquer outra coisa ali seria tentativa de sair deste endpoint.
+  //
+  // O que ele NÃO abre continua fechado, e há teste para cada um:
+  // `POST /v1/payments` (criar cobrança), `/v1/payments/:id/refunds`
+  // (estornar), `/v1/account/withdrawals` (sacar), `/v1/money_transfers`.
+  { metodo: 'GET',  padrao: /^\/v1\/payments\/\d+$/ },
 ]
 
 export class RecusadoPelaTrava extends Error {}
@@ -178,6 +197,61 @@ export function resumir(texto: string): string {
     .replace(/(APP_USR|TEST)-[A-Za-z0-9_-]+/g, '[token omitido]')
     .replace(/"?access_token"?\s*[:=]\s*"?[A-Za-z0-9._-]+"?/gi, 'access_token=[omitido]')
     .slice(0, 300)
+}
+
+/**
+ * O detalhe de um pagamento que ja existe. Leitura pura.
+ *
+ * Devolve o JSON cru porque a forma dele ainda nao e conhecida: a primeira
+ * coisa a fazer com isto e OLHAR, nao supor. Hoje ja aconteceu tres vezes de o
+ * arquivo real contradizer o que a documentacao sugeria -- a coluna de debito
+ * que eu ignorava, as reservas somadas em dobro, a tarifa declarada que nao
+ * era o custo. Construir categorizacao antes de ver a resposta seria o quarto.
+ */
+export async function buscarPagamento(id: string, opcoes: Opcoes): Promise<any> {
+  if (!/^\d+$/.test(id)) {
+    throw new RecusadoPelaTrava(`Identificador de pagamento invalido: ${id}`)
+  }
+  const { status, texto } = await chamar('GET', `/v1/payments/${id}`, opcoes)
+  if (status !== 200) {
+    throw new Error(`Nao foi possivel ler o pagamento ${id} (${status}): ${resumir(texto)}`)
+  }
+  try { return JSON.parse(texto) } catch { throw new Error('A resposta do pagamento nao veio em JSON.') }
+}
+
+/**
+ * De um pagamento, so o que interessa para classificar a despesa.
+ *
+ * Os nomes sao procurados em varios lugares plausiveis porque a resposta muda
+ * de forma conforme o tipo de operacao, e eu ainda nao vi uma de verdade.
+ * `camposPresentes` existe para a primeira olhada: diz o que CHEGOU, em vez de
+ * eu adivinhar.
+ */
+export function resumoDoPagamento(p: any): {
+  recebedor: string | null
+  descricao: string | null
+  tipo: string | null
+  valor: number | null
+  camposPresentes: string[]
+} {
+  const primeiro = (...valores: unknown[]): string | null => {
+    for (const v of valores) {
+      if (typeof v === 'string' && v.trim() !== '') return v.trim()
+    }
+    return null
+  }
+  return {
+    recebedor: primeiro(
+      p?.collector?.nickname, p?.collector?.first_name,
+      p?.additional_info?.payer?.first_name,
+      p?.point_of_interaction?.business_info?.unit,
+      p?.counterpart?.name, p?.receiver?.name,
+    ),
+    descricao: primeiro(p?.description, p?.statement_descriptor, p?.reason),
+    tipo: primeiro(p?.operation_type, p?.payment_type_id, p?.status_detail),
+    valor: typeof p?.transaction_amount === 'number' ? p.transaction_amount : null,
+    camposPresentes: p && typeof p === 'object' ? Object.keys(p).sort() : [],
+  }
 }
 
 /**
