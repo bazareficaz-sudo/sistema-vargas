@@ -30,7 +30,7 @@ const CLIENTE_VAZIO = {
   cep: '', logradouro: '', numero: '', complemento: '', bairro: '', cidade: '', estado: '',
   permite_fiado: false, limite_credito: 0, bloqueado_fiado: false, motivo_bloqueio: '',
   observacoes_financeiras: '', cobranca_whatsapp_ativa: true,
-  alerta_pedido_whatsapp: false, alerta_pedido_telefone: '',
+  alerta_pedido_whatsapp: false, alerta_pedido_telefone: '', alerta_pagamento_whatsapp: false,
 }
 
 type Aba = 'dados' | 'endereco' | 'contatos' | 'entrega' | 'financeiro'
@@ -93,6 +93,7 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
         cobranca_whatsapp_ativa: cli.cobranca_whatsapp_ativa !== false,
         alerta_pedido_whatsapp: !!cli.alerta_pedido_whatsapp,
         alerta_pedido_telefone: cli.alerta_pedido_telefone ?? '',
+        alerta_pagamento_whatsapp: !!cli.alerta_pagamento_whatsapp,
         ...trocas,
       })
     }
@@ -189,6 +190,7 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
         cobranca_whatsapp_ativa: form.cobranca_whatsapp_ativa,
         alerta_pedido_whatsapp: form.alerta_pedido_whatsapp,
         alerta_pedido_telefone: soDigitos(form.alerta_pedido_telefone) || null,
+        alerta_pagamento_whatsapp: form.alerta_pagamento_whatsapp,
         status_credito: form.bloqueado_fiado ? 'bloqueado' : form.permite_fiado ? 'liberado' : 'restrito',
         updated_at: new Date().toISOString(),
       }
@@ -445,14 +447,14 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
 
           {aba === 'financeiro' && (
             <>
-              <Toggle label="Permite Fiado" ajuda="Habilitar compras sem pagamento imediato"
+              <Toggle label="Permite comprar na Carteira" ajuda="Compras para pagar depois (fiado)"
                 ligado={form.permite_fiado} onChange={v => set('permite_fiado', v)} />
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Limite de Crédito (R$)</label>
                 <input type="number" value={form.limite_credito} onChange={e => set('limite_credito', parseFloat(e.target.value) || 0)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
               </div>
-              <Toggle label="Bloqueado para Fiado" ajuda="Impede novas compras fiadas" cor="red"
+              <Toggle label="Bloqueado para a Carteira" ajuda="Impede novas compras para pagar depois" cor="red"
                 ligado={form.bloqueado_fiado} onChange={v => set('bloqueado_fiado', v)} />
               {form.bloqueado_fiado && (
                 <Field label="Motivo do bloqueio" value={form.motivo_bloqueio} onChange={v => set('motivo_bloqueio', v)} />
@@ -466,6 +468,9 @@ export default function ClienteFormDrawer({ empresaId, clienteId, aberto, onFech
                 <Field label="Número que recebe o aviso (opcional)" value={formatarTelefone(form.alerta_pedido_telefone)}
                   onChange={v => set('alerta_pedido_telefone', v)} placeholder="Vazio usa o telefone do cadastro" />
               )}
+              <Toggle label="Avisar cada pagamento por WhatsApp" cor="emerald"
+                ajuda="Quando der baixa na carteira (no PDV ou no sistema), manda o valor pago e o saldo que ficou. Na baixa pelo sistema dá para escolher na hora."
+                ligado={form.alerta_pagamento_whatsapp} onChange={v => set('alerta_pagamento_whatsapp', v)} />
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Observações financeiras</label>
                 <textarea value={form.observacoes_financeiras} rows={3}

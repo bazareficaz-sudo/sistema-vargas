@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { calcularRateio } from '@/lib/financeiro/pagamento'
 import { botao } from '@/components/ui/botao'
@@ -55,6 +55,26 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
   const [desconto, setDesconto] = useState('0')
   const [descontoUnidade, setDescontoUnidade] = useState<'reais' | 'percentual'>('reais')
   const [observacao, setObservacao] = useState('')
+
+  // Aviso de pagamento por WhatsApp — uma mensagem com o total do lote
+  // (a rotina junta os recebimentos pelo lote_id). Começa marcado quando o
+  // cadastro do cliente pede aviso de pagamento.
+  const clienteId = contas[0]?.cliente_id ?? null
+  const [avisar, setAvisar] = useState(false)
+  const [temWhats, setTemWhats] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!clienteId) return
+    let vivo = true
+    createClient().from('clientes').select('alerta_pagamento_whatsapp, telefone, whatsapp, telefone_whatsapp, opt_out_whatsapp')
+      .eq('id', clienteId).maybeSingle()
+      .then(({ data }) => {
+        if (!vivo) return
+        const tem = !!data && !data.opt_out_whatsapp && !!(data.telefone_whatsapp || data.whatsapp || data.telefone)
+        setTemWhats(tem)
+        setAvisar(tem && !!data?.alerta_pagamento_whatsapp)
+      })
+    return () => { vivo = false }
+  }, [clienteId])
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
@@ -156,6 +176,10 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
         }]
       })
 
+      // A RPC não conhece o aviso; a escolha vai depois, pelo lote. A rotina
+      // só lê recebimentos com mais de 1 minuto, então chega antes dela.
+      await sb.from('recebimentos').update({ avisar_cliente: avisar }).eq('lote_id', loteRef.current)
+
       onConcluido(atualizadas)
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : 'Falha ao registrar os recebimentos')
@@ -210,6 +234,19 @@ export default function ReceberEmMassaModal({ contas, empresaId, operador, onFec
               placeholder="Ex.: acerto do mês"
               className="w-full border border-gray-300 rounded-lg px-3 h-10 text-sm focus:outline-none focus:border-blue-500" />
           </div>
+
+          {clienteId && (
+            <label className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${temWhats === false ? 'border-gray-200 bg-gray-50 text-gray-400' : 'border-emerald-200 bg-emerald-50 text-emerald-900 cursor-pointer'}`}>
+              <input type="checkbox" checked={avisar} disabled={!temWhats}
+                onChange={e => setAvisar(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-600" />
+              <span>
+                📲 Avisar o cliente por WhatsApp
+                <span className="block text-[11px] opacity-80">
+                  {temWhats === false ? 'Cliente sem WhatsApp no cadastro (ou pediu para não receber).' : 'Uma mensagem com o total pago e o saldo que ficou, em até 5 minutos.'}
+                </span>
+              </span>
+            </label>
+          )}
 
           <div className="border border-gray-200 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
