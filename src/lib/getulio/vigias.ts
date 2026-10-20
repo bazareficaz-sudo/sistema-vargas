@@ -11,8 +11,7 @@ import {
   type LinhaGiro, type LinhaVendasCanal,
 } from './regras'
 import type { Sinal, VigiaId } from './tipos'
-import { canaisDeAtendimento, reclamacoesAbertas } from '@/lib/mercadolivre/atendimento'
-import { mlGet } from '@/lib/mercadolivre/client'
+import { canaisDeAtendimento, perguntasRespondiveis, reclamacoesAbertas } from '@/lib/mercadolivre/atendimento'
 import { horasAte, ROTULO_ETAPA } from '@/lib/mercadolivre/atendimentoRegras'
 
 type Ctx = { sb: any; empresaId: string; agora: Date }
@@ -208,13 +207,10 @@ async function atendimentoML({ sb, empresaId, agora }: Ctx): Promise<Sinal[]> {
         valor: null, link: ATENDIMENTO_ML, dados: { reclamacao: r.id, prazo: r.prazo },
       })
     }
-    const p = await mlGet('/questions/search', {
-      seller_id: canal.sellerId, status: 'UNANSWERED', api_version: 4, limit: 50, sort_fields: 'date_created', sort_types: 'DESC',
-    }, canal.accessToken)
-    const paradas = ((p?.questions ?? []) as { id: number; date_created: string; deleted_from_listing?: boolean }[])
-      .filter(q => !q.deleted_from_listing && horasAte(q.date_created, agora) < -24)
+    // Só as que dá para responder (anúncio ativo) — as outras não têm o que fazer.
+    const paradas = (await perguntasRespondiveis(canal)).filter(q => horasAte(q.criadaEm, agora) < -24)
     if (paradas.length) {
-      const novas = paradas.filter(q => horasAte(q.date_created, agora) > -24 * 7).length
+      const novas = paradas.filter(q => horasAte(q.criadaEm, agora) > -24 * 7).length
       sinais.push({
         vigia: 'atendimento_ml', chave: `ml:perguntas:${canal.id}`, gravidade: 'atencao',
         titulo: `${paradas.length} pergunta(s) sem resposta no ${canal.nome}`,

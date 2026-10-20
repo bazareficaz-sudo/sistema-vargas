@@ -20,7 +20,7 @@
 import { mlGet, mlPost, refreshAccessTokenIfNeeded } from './client'
 import type { MLChannel } from './types'
 import {
-  acoesDoVendedor, prazoDaReclamacao, resumirAtendimento, type ResumoAtendimentoML,
+  acoesDoVendedor, anuncioAceitaResposta, prazoDaReclamacao, resumirAtendimento, type ResumoAtendimentoML,
   type ConversaML, type MensagemReclamacao, type PerguntaML, type ReclamacaoML,
 } from './atendimentoRegras'
 
@@ -81,6 +81,30 @@ export async function perguntasSemResposta(sb: any, canal: CanalAtendimento): Pr
 
 export async function responderPergunta(canal: CanalAtendimento, perguntaId: number, texto: string) {
   return mlPost('/answers', { question_id: perguntaId, text: texto }, canal.accessToken)
+}
+
+/**
+ * Só as perguntas que ainda dá para responder: a de anúncio pausado,
+ * encerrado ou em revisão o ML recusa ("Item must be active") — medido em
+ * 20/10/2026, 20 de 31. Ficam fora da lista, das contagens e dos avisos;
+ * voltam sozinhas quando o anúncio volta a ficar ativo. Versão leve (sem
+ * foto, preço…), para o Início e a Betina.
+ */
+export async function perguntasRespondiveis(canal: CanalAtendimento): Promise<{ id: number; criadaEm: string }[]> {
+  const r = await mlGet('/questions/search', {
+    seller_id: canal.sellerId, status: 'UNANSWERED', api_version: 4, limit: 50,
+    sort_fields: 'date_created', sort_types: 'DESC',
+  }, canal.accessToken)
+  const lista: any[] = (r?.questions ?? []).filter((q: any) => !q.deleted_from_listing)
+  const ids = [...new Set(lista.map(q => String(q.item_id)))]
+  const status = new Map<string, string | null>()
+  for (let i = 0; i < ids.length; i += 20) {
+    const resp = await mlGet('/items', { ids: ids.slice(i, i + 20).join(','), attributes: 'id,status' }, canal.accessToken).catch(() => [])
+    for (const x of Array.isArray(resp) ? resp : []) if (x?.code === 200 && x.body?.id) status.set(String(x.body.id), x.body.status ?? null)
+  }
+  return lista
+    .filter(q => anuncioAceitaResposta(status.get(String(q.item_id))))
+    .map(q => ({ id: Number(q.id), criadaEm: String(q.date_created) }))
 }
 
 // ── Reclamações ─────────────────────────────────────────────────────────
@@ -161,8 +185,8 @@ export async function responderConversa(canal: CanalAtendimento, packId: string,
 
 // ── Resumo para o Início do vendedor ────────────────────────────────────
 /**
- * Quantas perguntas e reclamações esperam, em todas as contas — DUAS
- * consultas leves por conta (o total das perguntas e a lista de reclamações).
+ * Quantas perguntas (das que dá para responder) e reclamações esperam, em
+ * todas as contas — poucas consultas leves por conta.
  * Passou de `limiteMs`, devolve nulo: o Início abre sem o cartão em vez de
  * esperar o Mercado Livre.
  */
@@ -172,10 +196,10 @@ export async function resumoParaInicio(sb: any, empresaId: string, limiteMs = 60
     if (!canais.length) return null
     const contas = await Promise.all(canais.map(async canal => {
       const [p, r] = await Promise.all([
-        mlGet('/questions/search', { seller_id: canal.sellerId, status: 'UNANSWERED', api_version: 4, limit: 1 }, canal.accessToken),
+        perguntasRespondiveis(canal),
         mlGet('/post-purchase/v1/claims/search', { status: 'opened', limit: 50 }, canal.accessToken),
       ])
-      return { perguntas: Number(p?.total ?? 0), reclamacoes: (r?.data ?? []) as { players?: any[] }[] }
+      return { perguntas: p.length, reclamacoes: (r?.data ?? []) as { players?: any[] }[] }
     }))
     return resumirAtendimento(contas)
   })()

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  anuncioAceitaResposta, avisoDeContato, horasAte, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA, ROTULO_ACAO, ROTULO_ETAPA, ROTULO_STATUS_ANUNCIO, tempoDesde,
+  anuncioAceitaResposta, avisoDeContato, horasAte, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA, ROTULO_ACAO, ROTULO_ETAPA, tempoDesde,
   type ConversaML, type PerguntaML, type ReclamacaoML,
 } from '@/lib/mercadolivre/atendimentoRegras'
 
@@ -82,10 +82,14 @@ function Resposta({ envio, limite, sugestao, onEnviado }: {
   )
 }
 
-export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, conversas, erros }: {
+export default function AtendimentoMLClient({ contas, perguntas: todasPerguntas, reclamacoes, conversas, erros }: {
   contas: string[]; perguntas: PerguntaML[]; reclamacoes: ReclamacaoML[]; conversas: ConversaML[]; erros: string[]
 }) {
   const router = useRouter()
+  // Pergunta de anúncio pausado/encerrado/em revisão o ML não deixa responder:
+  // fica oculta (volta sozinha quando o anúncio for reativado).
+  const perguntas = todasPerguntas.filter(p => anuncioAceitaResposta(p.item?.status))
+  const ocultas = todasPerguntas.length - perguntas.length
   const urgentes = reclamacoes.filter(r => r.prazo && horasAte(r.prazo) < 24)
   const [aba, setAba] = useState<Aba>(urgentes.length ? 'reclamacoes' : perguntas.length ? 'perguntas' : 'conversas')
   const recarregar = () => setTimeout(() => router.refresh(), 1500)
@@ -126,6 +130,11 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
       {aba === 'perguntas' && (
         <div className="space-y-3">
           {perguntas.length === 0 && <p className="text-sm text-gray-500 py-6 text-center">Nenhuma pergunta esperando resposta. 👏</p>}
+          {ocultas > 0 && (
+            <p className="text-[11px] text-gray-400">
+              {ocultas} pergunta(s) de anúncios pausados ou encerrados não aparecem — o Mercado Livre não deixa responder. Voltam para cá se o anúncio for reativado.
+            </p>
+          )}
           {perguntas.map(p => (
             <div key={p.id} className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
               <div className="flex gap-3">
@@ -135,9 +144,6 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-0.5">
                     <Conta nome={p.canalNome} contas={contas} />
-                    {!anuncioAceitaResposta(p.item?.status) && (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">anúncio {ROTULO_STATUS_ANUNCIO[p.item!.status!] ?? p.item!.status}</span>
-                    )}
                   </div>
                   <p className="text-xs text-gray-500 truncate">
                     {p.item?.link ? <a href={p.item.link} target="_blank" rel="noreferrer" className="hover:underline">{p.item.titulo}</a> : (p.item?.titulo ?? p.itemId)}
@@ -148,15 +154,8 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
                   <p className={`text-[11px] mt-0.5 ${horasAte(p.criadaEm) < -24 ? 'text-red-600' : 'text-gray-400'}`}>perguntou há {tempoDesde(p.criadaEm)} · {quando(p.criadaEm)}</p>
                 </div>
               </div>
-              {anuncioAceitaResposta(p.item?.status) ? (
-                <Resposta envio={{ tipo: 'pergunta', canalId: p.canalId, id: p.id }} limite={LIMITE_RESPOSTA_PERGUNTA} onEnviado={recarregar}
+              <Resposta envio={{ tipo: 'pergunta', canalId: p.canalId, id: p.id }} limite={LIMITE_RESPOSTA_PERGUNTA} onEnviado={recarregar}
                   sugestao={{ pergunta: p.texto, produtoId: p.produtoId, canalId: p.canalId, itemId: p.itemId, anuncio: p.item ? { titulo: p.item.titulo, preco: p.item.preco, estoque: p.item.estoque } : null }} />
-              ) : (
-                <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                  O Mercado Livre só aceita resposta com o anúncio <strong>ativo</strong>. Este está {ROTULO_STATUS_ANUNCIO[p.item!.status!] ?? p.item!.status}
-                  {p.item?.estoque === 0 ? ' (sem estoque)' : ''}: reponha o estoque ou reative o anúncio e a pergunta volta a poder ser respondida.
-                </p>
-              )}
             </div>
           ))}
         </div>
