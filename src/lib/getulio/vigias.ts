@@ -11,6 +11,9 @@ import {
   type LinhaGiro, type LinhaVendasCanal,
 } from './regras'
 import type { Sinal, VigiaId } from './tipos'
+import { canaisDeAtendimento, reclamacoesAbertas } from '@/lib/mercadolivre/atendimento'
+import { mlGet } from '@/lib/mercadolivre/client'
+import { horasAte, ROTULO_ETAPA } from '@/lib/mercadolivre/atendimentoRegras'
 
 type Ctx = { sb: any; empresaId: string; agora: Date }
 
@@ -183,6 +186,47 @@ async function zeradoAVenda({ sb, empresaId }: Ctx): Promise<Sinal[]> {
   }]
 }
 
+// ── Atendimento no Mercado Livre ────────────────────────────────────────
+// Lido ao vivo na API do ML (a tela de Atendimento faz o mesmo). Reclamação
+// com prazo em até 48 h: um sinal URGENTE por reclamação (alerta na hora).
+// Perguntas sem resposta há mais de 24 h: um sinal por conta, que só volta a
+// avisar quando entra pergunta nova no grupo. Medido em 20/10/2026: 33
+// perguntas paradas e uma reclamação vencendo no dia, sem ninguém saber.
+const ATENDIMENTO_ML = '/dashboard/atendimento-ml'
+const quandoSP = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+
+async function atendimentoML({ sb, empresaId, agora }: Ctx): Promise<Sinal[]> {
+  const sinais: Sinal[] = []
+  for (const canal of await canaisDeAtendimento(sb, empresaId)) {
+    for (const r of await reclamacoesAbertas(sb, canal)) {
+      if (!r.prazo || horasAte(r.prazo, agora) > 48) continue
+      const vencida = horasAte(r.prazo, agora) < 0
+      sinais.push({
+        vigia: 'atendimento_ml', chave: `ml:reclamacao:${r.id}`, gravidade: 'urgente',
+        titulo: `Reclamação no ${canal.nome} ${vencida ? 'com prazo VENCIDO' : `vence ${quandoSP(r.prazo)}`}`,
+        detalhe: `Motivo: ${r.motivo}${ROTULO_ETAPA[r.etapa] ? ` (${ROTULO_ETAPA[r.etapa]})` : ''}. Sem resposta no prazo, o Mercado Livre decide a favor do comprador e a reputação cai.`,
+        valor: null, link: ATENDIMENTO_ML, dados: { reclamacao: r.id, prazo: r.prazo },
+      })
+    }
+    const p = await mlGet('/questions/search', {
+      seller_id: canal.sellerId, status: 'UNANSWERED', api_version: 4, limit: 50, sort_fields: 'date_created', sort_types: 'DESC',
+    }, canal.accessToken)
+    const paradas = ((p?.questions ?? []) as { id: number; date_created: string; deleted_from_listing?: boolean }[])
+      .filter(q => !q.deleted_from_listing && horasAte(q.date_created, agora) < -24)
+    if (paradas.length) {
+      const novas = paradas.filter(q => horasAte(q.date_created, agora) > -24 * 7).length
+      sinais.push({
+        vigia: 'atendimento_ml', chave: `ml:perguntas:${canal.id}`, gravidade: 'atencao',
+        titulo: `${paradas.length} pergunta(s) sem resposta no ${canal.nome}`,
+        detalhe: `Há mais de 24 h${novas ? `; ${novas} desta semana` : ''}. Quem pergunta está decidindo a compra — e o tempo de resposta conta na reputação.`,
+        valor: null, link: ATENDIMENTO_ML,
+        dados: { quantidade: paradas.length, assinatura: assinar(paradas.map(q => String(q.id))) },
+      })
+    }
+  }
+  return sinais
+}
+
 // ── Pedidos atrasados ───────────────────────────────────────────────────
 async function pedidosAtrasados({ sb, empresaId, agora }: Ctx): Promise<Sinal[]> {
   const { data } = await sb.from('marketplace_pedidos')
@@ -312,6 +356,7 @@ export async function rodarVigias(
     ['vendas_canal', vendasCanal],
     ['estoque_negativo', estoqueNegativo],
     ['financeiro', financeiro],
+    ['atendimento_ml', atendimentoML],
   ]
   for (const [id, fn] of simples) {
     if (!ligado(id)) continue

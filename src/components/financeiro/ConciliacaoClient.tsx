@@ -23,6 +23,20 @@ type Dia = {
   recebimento: number; saida: number; saque: number; ajuste: number
 }
 type Relatorio = { nomeArquivo: string; status: string | null; de: string | null; ate: string | null }
+type Forma = { unidade: string; metodo: string; linhas: number; bruto: number; custo: number; pct: number }
+type Saida = { id: string; origemId: string; data: string; valor: number }
+type Resumo = {
+  recebedor: string | null; descricao: string | null; tipo: string | null
+  valor: number | null; camposPresentes: string[]
+}
+
+const METODO_LABEL: Record<string, string> = {
+  bank_transfer: 'PIX',
+  credit_card: 'Crédito',
+  debit_card: 'Débito',
+  prepaid_card: 'Pré-pago',
+  account_money: 'Saldo Mercado Pago',
+}
 
 function brl(n: number) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -42,6 +56,9 @@ export default function ConciliacaoClient() {
   const [importacoes, setImportacoes] = useState<Importacao[]>([])
   const [dias, setDias] = useState<Dia[]>([])
   const [suspeitos, setSuspeitos] = useState(0)
+  const [formas, setFormas] = useState<Forma[]>([])
+  const [saidas, setSaidas] = useState<Saida[]>([])
+  const [quemRecebeu, setQuemRecebeu] = useState<Record<string, Resumo>>({})
   const [relatorios, setRelatorios] = useState<Relatorio[] | null>(null)
   const [cabecalho, setCabecalho] = useState<string[] | null>(null)
 
@@ -59,6 +76,7 @@ export default function ConciliacaoClient() {
       if (!j.ok) throw new Error(j.erro)
       setTokenOk(j.tokenConfigurado)
       setImportacoes(j.importacoes); setDias(j.dias); setSuspeitos(j.suspeitos)
+      setFormas(j.formas ?? []); setSaidas(j.saidas ?? [])
     } catch (e: any) { setErro(e?.message ?? 'Erro ao carregar.') }
     finally { setCarregando(false) }
   }
@@ -83,6 +101,11 @@ export default function ConciliacaoClient() {
       setErro(e?.message ?? 'Erro.')
       return null
     } finally { setOcupado('') }
+  }
+
+  async function descobrir(origemId: string) {
+    const j = await acao({ acao: 'quem_recebeu', origemId }, origemId)
+    if (j) setQuemRecebeu(p => ({ ...p, [origemId]: j.resumo }))
   }
 
   async function pedir() {
@@ -221,6 +244,43 @@ export default function ConciliacaoClient() {
         </div>
       )}
 
+      {formas.length > 0 && (
+        // O QUADRO QUE RESPONDE "a adquirente cobrou o combinado?".
+        //
+        // Separado por unidade de negocio porque a mesma conta recebe a loja e
+        // o marketplace: juntando os dois, o pix mediu 3,57% contra 0,49%
+        // contratados, e a conclusao teria sido cobrar explicacao de quem
+        // estava cumprindo o contrato.
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700 mb-1">Custo medido por forma</h2>
+          <p className="text-xs text-slate-500 mb-2">
+            O que o Mercado Pago realmente descontou, sobre o que realmente passou. Compare com
+            o que está em <strong>Formas de Pagamento</strong>.
+          </p>
+          {[...new Set(formas.map(f => f.unidade))].map(unidade => (
+            <div key={unidade} className="mb-3">
+              <p className="text-xs font-medium text-slate-600 mb-1">{unidade}</p>
+              <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-50">
+                {formas.filter(f => f.unidade === unidade).map(f => (
+                  <div key={f.metodo} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                    <span className="text-sm text-slate-700">
+                      {METODO_LABEL[f.metodo] ?? f.metodo}
+                      <span className="text-slate-400"> · {f.linhas} venda(s) · {brl(f.bruto)}</span>
+                    </span>
+                    <span className="text-sm">
+                      <strong className={f.pct >= 10 ? 'text-amber-700' : 'text-slate-800'}>
+                        {f.pct.toFixed(2).replace('.', ',')}%
+                      </strong>
+                      <span className="text-slate-400"> · {brl(f.custo)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {dias.length > 0 && (
         <div>
           <h2 className="text-sm font-semibold text-slate-700 mb-1">O que o Mercado Pago liberou</h2>
@@ -273,6 +333,61 @@ export default function ConciliacaoClient() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {saidas.length > 0 && (
+        // AS SAIDAS DA CONTA -- o pix do posto, a embalagem, o mercado.
+        //
+        // Medido em 19/10/2026: 231 em 30 dias, R$ 29.421,07, das quais UMA
+        // esta lancada em Contas a Pagar. Sao quase vinte e nove mil reais por
+        // mes que o sistema nao enxerga.
+        //
+        // O relatorio nao diz para quem foi. "Quem recebeu?" busca o detalhe
+        // do pagamento, que e leitura pura.
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700 mb-1">Pagamentos feitos pela conta</h2>
+          <p className="text-xs text-slate-500 mb-2">
+            Dinheiro saindo do Mercado Pago. O relatório traz valor e data, mas não o nome de
+            quem recebeu — clique para buscar.
+          </p>
+          <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-50">
+            {saidas.slice(0, 30).map(s => {
+              const r = quemRecebeu[s.origemId]
+              return (
+                <div key={s.id} className="px-4 py-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-slate-700">
+                      {dataBR(s.data)}
+                      <span className="text-slate-400"> · {s.origemId}</span>
+                    </span>
+                    <span className="flex items-center gap-3 flex-shrink-0">
+                      <span className="text-sm text-red-700">{brl(-s.valor)}</span>
+                      {!r && (
+                        <button onClick={() => descobrir(s.origemId)} disabled={!!ocupado || !tokenOk}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50">
+                          {ocupado === s.origemId ? 'buscando…' : 'quem recebeu?'}
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                  {r && (
+                    <div className="text-xs text-slate-600 mt-1">
+                      {r.recebedor && <p><strong>{r.recebedor}</strong></p>}
+                      {r.descricao && <p>{r.descricao}</p>}
+                      {r.tipo && <p className="text-slate-400">{r.tipo}</p>}
+                      {!r.recebedor && !r.descricao && (
+                        <p className="text-amber-700">
+                          Não veio nome nem descrição. Campos presentes:{' '}
+                          <span className="font-mono">{r.camposPresentes.join(', ') || '(nenhum)'}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

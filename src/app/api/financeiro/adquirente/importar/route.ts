@@ -5,6 +5,7 @@ import { exigirPermissao } from '@/lib/auth/permissoes'
 import { lerExtrato, ehReserva, grupoDaLinha } from '@/lib/financeiro/extratoAdquirente'
 import {
   pedirRelatorio, listarRelatorios, baixarRelatorio, tokenDoAmbiente,
+  buscarPagamento, resumoDoPagamento,
 } from '@/lib/financeiro/mercadoPagoRelatorio'
 
 // A IMPORTAÇÃO DO EXTRATO DA ADQUIRENTE, EM TRÊS AÇÕES SEPARADAS.
@@ -38,17 +39,23 @@ export async function GET() {
   const { data: { user } } = await sb.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, erro: 'Não autenticado' }, { status: 401 })
 
-  const [{ data: importacoes }, { data: extrato }, { data: suspeitos }] = await Promise.all([
+  const [{ data: importacoes }, { data: extrato }, { data: suspeitos }, { data: saidas }] = await Promise.all([
     sb.from('adquirente_importacao')
       .select('id, arquivo, periodo_de, periodo_ate, linhas_lidas, linhas_novas, linhas_descartadas, erro, cabecalho_recebido, created_at')
       .order('created_at', { ascending: false }).limit(20),
     // 90 dias: o relatório de Liberações olha para trás, e o crédito só
     // aparece trinta dias depois da venda.
     sb.from('adquirente_extrato')
-      .select('data, bruto, taxa, liquido, tipo, metodo, canal, metodo_tipo')
+      .select('data, bruto, taxa, liquido, tipo, metodo, canal, metodo_tipo, unidade')
       .gte('data', new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10))
       .order('data', { ascending: false }).limit(5000),
     sb.from('adquirente_extrato_suspeito_v1').select('origem_id').limit(100),
+    // AS SAIDAS DA CONTA: o pix do posto, a embalagem, o mercado. Sao 231 em
+    // 30 dias, R$ 29.421 -- e uma unica esta lancada em Contas a Pagar.
+    sb.from('adquirente_extrato')
+      .select('id, origem_id, data, liquido')
+      .eq('tipo', 'payment').eq('metodo_tipo', 'account_money').lt('liquido', 0)
+      .order('data', { ascending: false }).limit(60),
   ])
 
   // Soma por dia FORA as reservas, pela mesma regra testada em
@@ -78,9 +85,45 @@ export async function GET() {
     porDia.set(e.data, t)
   }
 
+  // O CUSTO MEDIDO POR FORMA, separado por unidade de negocio.
+  //
+  // E o numero que responde "a adquirente cobrou o que prometeu?" -- e a
+  // separacao e o que o torna confiavel: juntando loja e marketplace, o pix
+  // media 3,57% contra 0,49% contratados, porque a comissao de marketplace
+  // (~37%) entrava na conta.
+  //
+  // So vendas: `payment` com bruto positivo. Saque, estorno e disputa nao tem
+  // "taxa" a conferir.
+  const porForma = new Map<string, {
+    unidade: string; metodo: string; linhas: number; bruto: number; custo: number; pct: number
+  }>()
+  for (const e of (extrato ?? []) as any[]) {
+    if (String(e.tipo) !== 'payment') continue
+    const bruto = Number(e.bruto)
+    if (!(bruto > 0)) continue
+    const unidade = e.unidade ?? 'sem unidade'
+    const metodo = e.metodo_tipo ?? 'sem metodo'
+    const k = `${unidade}|${metodo}`
+    const f = porForma.get(k) ?? { unidade, metodo, linhas: 0, bruto: 0, custo: 0, pct: 0 }
+    f.linhas += 1
+    f.bruto += bruto
+    f.custo += bruto - Number(e.liquido)
+    porForma.set(k, f)
+  }
+
   return NextResponse.json({
     ok: true,
     tokenConfigurado: tokenDoAmbiente() !== '',
+    formas: [...porForma.values()]
+      .map(f => ({
+        ...f,
+        bruto: Number(f.bruto.toFixed(2)),
+        custo: Number(f.custo.toFixed(2)),
+        // Percentual do TOTAL, nao a media dos percentuais: venda de R$ 5 e
+        // venda de R$ 500 nao pesam igual.
+        pct: Number((f.custo / f.bruto * 100).toFixed(2)),
+      }))
+      .sort((a, b) => b.bruto - a.bruto),
     importacoes: importacoes ?? [],
     dias: [...porDia.values()]
       .map(t => ({
@@ -99,6 +142,9 @@ export async function GET() {
       }))
       .sort((a, b) => (a.data < b.data ? 1 : -1)),
     suspeitos: (suspeitos ?? []).length,
+    saidas: ((saidas ?? []) as any[]).map(s => ({
+      id: s.id, origemId: s.origem_id, data: s.data, valor: Math.abs(Number(s.liquido)),
+    })),
   })
 }
 
@@ -142,10 +188,37 @@ export async function POST(req: Request) {
   if (acao === 'pedir') return pedir(body, token)
   if (acao === 'listar') return listar(token)
   if (acao === 'importar') return importar(sb, guarda.empresaId, body, token)
+  if (acao === 'quem_recebeu') return quemRecebeu(body, token)
 
   return NextResponse.json({
-    ok: false, erro: 'Acao desconhecida. Use pedir, listar ou importar.',
+    ok: false, erro: 'Acao desconhecida. Use pedir, listar, importar ou quem_recebeu.',
   }, { status: 400 })
+}
+
+/**
+ * PARA QUEM FOI ESTE PAGAMENTO.
+ *
+ * O relatorio de Liberacoes traz data, valor e identificador das 231 saidas da
+ * conta -- R$ 29.421 em 30 dias --, mas NAO o nome de quem recebeu. Sem o nome
+ * nao ha categoria, e 231 linhas de "saiu R$ 200,00" nao sao controle de
+ * despesa.
+ *
+ * Esta acao le UM pagamento pelo id, e devolve tambem `camposPresentes`: a
+ * lista do que a resposta trouxe. E deliberado -- a forma da resposta ainda
+ * nao foi vista, e hoje ja aconteceu tres vezes de o dado real contradizer a
+ * documentacao. Olhar primeiro, construir depois.
+ */
+async function quemRecebeu(body: any, token: string) {
+  const id = String(body.origemId ?? '').trim()
+  if (!/^\d+$/.test(id)) {
+    return NextResponse.json({ ok: false, erro: 'Identificador invalido.' }, { status: 400 })
+  }
+  try {
+    const p = await buscarPagamento(id, { token })
+    return NextResponse.json({ ok: true, origemId: id, resumo: resumoDoPagamento(p) })
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, erro: e?.message ?? 'Falha ao ler o pagamento.' }, { status: 502 })
+  }
 }
 
 function dataValida(v: unknown): v is string {
@@ -250,6 +323,7 @@ async function importar(sb: any, empresaId: string, body: any, token: string) {
     parcelas: l.parcelas,
     metodo: l.metodo,
     data_aprovacao: l.dataAprovacao,
+    unidade: l.unidade,
     canal: l.canal,
     metodo_tipo: l.metodoTipo,
     compra_id: l.compraId,
