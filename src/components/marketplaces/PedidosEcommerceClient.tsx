@@ -49,7 +49,7 @@ function fmtData(v: string | null) {
 }
 
 
-export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, empresaEstoqueNome, empresaFiscalNome, emissorPorCanal, qInicial, canalIdInicial, operador }: {
+export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciais, totalReal, empresaId, empresaEstoqueNome, empresaFiscalNome, emissorPorCanal, qInicial, canalIdInicial, janelaInicial = '', operador }: {
   canais: any[]; pedidos: any[]; totalReal: number; empresaId: string
   // Config da conta (Empresas → Estoque/Fiscal) — igual em toda linha hoje,
   // já que não existe override por canal ainda.
@@ -57,6 +57,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   // Empresa que emite a nota de cada canal (Configurar → canal).
   emissorPorCanal: Record<string, string>
   qInicial: string; canalIdInicial: string; operador: string
+  janelaInicial?: '' | 'hoje' | 'atrasado' | 'futuro'
 }) {
   const router = useRouter()
   const [pedidos, setPedidos] = useState(pedidosIniciais)
@@ -72,7 +73,7 @@ export default function PedidosEcommerceClient({ canais, pedidos: pedidosIniciai
   const [meioFiltro, setMeioFiltro] = useState('')
   const [soNfEmitida, setSoNfEmitida] = useState(false)
   const [soImpressa, setSoImpressa] = useState(false)
-  const [janela, setJanela] = useState<'' | 'hoje' | 'atrasado' | 'futuro'>('')
+  const [janela, setJanela] = useState<'' | 'hoje' | 'atrasado' | 'futuro'>(janelaInicial)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [romaneio, setRomaneio] = useState<{ fonte: string; id: string }[] | null>(null)
   const [marcandoImpressao, setMarcandoImpressao] = useState(false)

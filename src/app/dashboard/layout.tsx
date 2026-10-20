@@ -128,9 +128,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <p className="text-xs text-slate-500 mt-3">
                 Quem libera é um administrador, em Configurações → Usuários → Permissões.
               </p>
-              <Link href="/dashboard"
+              {/* Quem não vê a Visão Geral volta para o próprio Início. */}
+              <Link href={podeAbrirTela('/dashboard', excecoes) ? '/dashboard' : '/dashboard/inicio'}
                 className="inline-block mt-4 px-4 py-2 rounded-lg bg-slate-800 text-white text-sm hover:bg-slate-700">
-                Voltar para a Visão Geral
+                {podeAbrirTela('/dashboard', excecoes) ? 'Voltar para a Visão Geral' : 'Ir para o meu Início'}
               </Link>
             </div>
           </div>

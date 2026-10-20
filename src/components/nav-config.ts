@@ -29,6 +29,10 @@ export const NAV: NavGroup[] = [
     defaultOpen: true,
     items: [
       { href: '/dashboard',                        label: 'Visão Geral',          icon: '🏠' },
+      // Entrada de quem não vê a Visão Geral (vendedor): botões grandes para
+      // as telas do dia a dia e o que está esperando hoje. Sem `modulo`: cada
+      // botão some sozinho se a tela dele não estiver no plano.
+      { href: '/dashboard/inicio',                 label: 'Meu Início',           icon: '⭐' },
       // O agente que vigia o negócio e avisa pelo WhatsApp. Sem `modulo`: a
       // rota exige permissão de configuração, e a tela diz isso a quem não tem.
       { href: '/dashboard/betina',                label: 'Betina',               icon: '👩🏻‍💼' },

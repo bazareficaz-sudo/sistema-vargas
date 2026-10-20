@@ -23,6 +23,7 @@ export default async function SemAcessoPage({
   const { data: { user } } = await sb.auth.getUser()
   const excecoes = user ? await buscarExcecoes(sb, user.id) : {}
   const podeVoltarAoInicio = podeAbrirTela('/dashboard', excecoes)
+  const podeIrAoMeuInicio = podeAbrirTela('/dashboard/inicio', excecoes)
 
   return (
     <div className="p-6 max-w-lg">
@@ -41,6 +42,11 @@ export default async function SemAcessoPage({
           <Link href="/dashboard"
             className="inline-block mt-4 px-4 py-2 rounded-lg bg-slate-800 text-white text-sm hover:bg-slate-700">
             Voltar para a Visão Geral
+          </Link>
+        ) : podeIrAoMeuInicio ? (
+          <Link href="/dashboard/inicio"
+            className="inline-block mt-4 px-4 py-2 rounded-lg bg-slate-800 text-white text-sm hover:bg-slate-700">
+            Ir para o meu Início
           </Link>
         ) : (
           <p className="text-xs text-slate-500 mt-4">

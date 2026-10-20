@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { GRUPOS_PERMISSAO, PAPEIS, codigoDaTela, ehPermissaoDeTela, type PermissaoCodigo } from '@/lib/auth/permissoesBase'
 import { telasPorGrupo } from '@/lib/auth/telas'
+import { MODELOS_ACESSO, aplicarModelo, type ModeloAcesso } from '@/lib/auth/modelosAcesso'
 
 // Calculado uma vez: a lista de telas é estática (vem do menu).
 const TELAS = telasPorGrupo()
@@ -19,6 +20,13 @@ export default function PermissoesUsuarioModal({ usuarioId, usuarioNome, onClose
   const [papel, setPapel] = useState<string>('')
   const [padrao, setPadrao] = useState<Set<string>>(new Set())
   const [valores, setValores] = useState<Record<string, boolean>>({})
+  const [modeloAplicado, setModeloAplicado] = useState<string | null>(null)
+
+  function usarModelo(m: ModeloAcesso) {
+    if (!confirm(`Aplicar o modelo "${m.nome}"? As telas serão marcadas conforme o modelo. Nada é gravado até clicar em Salvar.`)) return
+    setValores(v => aplicarModelo(v, m, TELAS.flatMap(g => g.telas.map(t => t.href))))
+    setModeloAplicado(m.nome)
+  }
 
   useEffect(() => {
     ;(async () => {
@@ -76,6 +84,23 @@ export default function PermissoesUsuarioModal({ usuarioId, usuarioNome, onClose
           <p className="p-6 text-sm text-gray-400">Carregando...</p>
         ) : (
           <div className="p-5 space-y-5">
+            {/* Modelo: um clique em vez de marcar dezenas de telas. */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-1">Modelo de acesso</p>
+              <p className="text-xs text-blue-900/80 mb-2">Marca de uma vez as telas e permissões do perfil. Depois dá para ajustar uma a uma antes de salvar.</p>
+              <div className="flex flex-wrap gap-2">
+                {MODELOS_ACESSO.map(m => (
+                  <button key={m.id} type="button" onClick={() => usarModelo(m)} title={m.descricao}
+                    className="px-3 py-1.5 text-sm rounded-lg border border-blue-300 bg-white text-blue-800 hover:bg-blue-100">
+                    {m.icone} {m.nome}
+                  </button>
+                ))}
+              </div>
+              {modeloAplicado && (
+                <p className="text-xs text-blue-900 mt-2">✓ Modelo <strong>{modeloAplicado}</strong> aplicado. Revise abaixo e clique em <strong>Salvar permissões</strong>.</p>
+              )}
+            </div>
+
             {GRUPOS_PERMISSAO.map(g => (
               <div key={g.grupo}>
                 <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">{g.grupo}</p>
