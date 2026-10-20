@@ -27,6 +27,7 @@ export const ATALHOS_VENDEDOR: AtalhoInicio[] = [
   { href: '/dashboard/orcamentos', titulo: 'Orçamentos', descricao: 'Criar e acompanhar orçamentos', icone: '📋', cor: 'bg-amber-100' },
   { href: '/dashboard/marketplaces/anuncios', titulo: 'Anúncios', descricao: 'Anúncios dos marketplaces', icone: '🏷️', cor: 'bg-violet-100' },
   { href: '/dashboard/pedidos-ecommerce', titulo: 'Pedidos da Internet', descricao: 'Separar, emitir e despachar', icone: '📦', cor: 'bg-blue-100' },
+  { href: '/dashboard/atendimento-ml', titulo: 'Atendimento ML', descricao: 'Perguntas e reclamações do Mercado Livre', icone: '🙋', cor: 'bg-yellow-100' },
   { href: '/dashboard/produtos', titulo: 'Consultar produto', descricao: 'Preço, estoque e código', icone: '🔎', cor: 'bg-sky-100' },
   { href: '/dashboard/clientes', titulo: 'Clientes', descricao: 'Cadastro e histórico', icone: '👥', cor: 'bg-rose-100' },
 ]

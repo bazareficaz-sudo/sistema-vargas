@@ -20,7 +20,7 @@
 import { mlGet, mlPost, refreshAccessTokenIfNeeded } from './client'
 import type { MLChannel } from './types'
 import {
-  acoesDoVendedor, prazoDaReclamacao,
+  acoesDoVendedor, prazoDaReclamacao, resumirAtendimento, type ResumoAtendimentoML,
   type ConversaML, type MensagemReclamacao, type PerguntaML, type ReclamacaoML,
 } from './atendimentoRegras'
 
@@ -157,4 +157,28 @@ export async function responderConversa(canal: CanalAtendimento, packId: string,
   return mlPost(`/messages/packs/${packId}/sellers/${canal.sellerId}?tag=post_sale`, {
     from: { user_id: String(canal.sellerId) }, to: { user_id: String(compradorId) }, text: texto,
   }, canal.accessToken)
+}
+
+// ── Resumo para o Início do vendedor ────────────────────────────────────
+/**
+ * Quantas perguntas e reclamações esperam, em todas as contas — DUAS
+ * consultas leves por conta (o total das perguntas e a lista de reclamações).
+ * Passou de `limiteMs`, devolve nulo: o Início abre sem o cartão em vez de
+ * esperar o Mercado Livre.
+ */
+export async function resumoParaInicio(sb: any, empresaId: string, limiteMs = 6000): Promise<ResumoAtendimentoML | null> {
+  const trabalho = (async () => {
+    const canais = await canaisDeAtendimento(sb, empresaId)
+    if (!canais.length) return null
+    const contas = await Promise.all(canais.map(async canal => {
+      const [p, r] = await Promise.all([
+        mlGet('/questions/search', { seller_id: canal.sellerId, status: 'UNANSWERED', api_version: 4, limit: 1 }, canal.accessToken),
+        mlGet('/post-purchase/v1/claims/search', { status: 'opened', limit: 50 }, canal.accessToken),
+      ])
+      return { perguntas: Number(p?.total ?? 0), reclamacoes: (r?.data ?? []) as { players?: any[] }[] }
+    }))
+    return resumirAtendimento(contas)
+  })()
+  const tempo = new Promise<null>(res => setTimeout(() => res(null), limiteMs))
+  return Promise.race([trabalho.catch(() => null), tempo])
 }

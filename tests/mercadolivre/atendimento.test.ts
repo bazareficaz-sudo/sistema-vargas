@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { acoesDoVendedor, avisoDeContato, horasAte, prazoDaReclamacao, tempoDesde } from '../../src/lib/mercadolivre/atendimentoRegras'
+import { acoesDoVendedor, avisoDeContato, horasAte, prazoDaReclamacao, resumirAtendimento, tempoDesde } from '../../src/lib/mercadolivre/atendimentoRegras'
 
 describe('reclamação do Mercado Livre', () => {
   // Formato real (20/10/2026): o vendedor é o "respondent"; cada ação tem prazo.
@@ -47,5 +47,20 @@ describe('dado de contato (proibido pelo ML)', () => {
   test('resposta normal passa', () => {
     assert.equal(avisoDeContato('Olá! Sim, o disjuntor é de 32A, bivolt. Obrigado pela pergunta!'), null)
     assert.equal(avisoDeContato('Olá! Temos sim, 10 metros. Agradecemos o contato.'), null)
+  })
+})
+
+describe('cartão do Início do vendedor', () => {
+  const agora = new Date('2026-10-20T15:00:00Z')
+  const comPrazo = (iso: string) => ({ players: [{ role: 'respondent', available_actions: [{ action: 'refund', due_date: iso }] }] })
+  test('soma as contas e conta as reclamações vencendo em 24 h', () => {
+    const r = resumirAtendimento([
+      { perguntas: 13, reclamacoes: [comPrazo('2026-10-25T10:00:00Z'), { players: [] }] },
+      { perguntas: 18, reclamacoes: [comPrazo('2026-10-21T01:48:00Z')] },
+    ], agora)
+    assert.deepEqual(r, { perguntas: 31, reclamacoes: 3, urgentes: 1, proximoPrazo: '2026-10-21T01:48:00Z' })
+  })
+  test('nada aberto', () => {
+    assert.deepEqual(resumirAtendimento([{ perguntas: 0, reclamacoes: [] }], agora), { perguntas: 0, reclamacoes: 0, urgentes: 0, proximoPrazo: null })
   })
 })

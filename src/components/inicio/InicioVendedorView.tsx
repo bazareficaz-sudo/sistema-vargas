@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { saudacao, type AtalhoInicio } from '@/lib/inicio/inicioVendedor'
+import type { ResumoAtendimentoML } from '@/lib/mercadolivre/atendimentoRegras'
 
 // O desenho da tela de Início do vendedor. Os dados vêm prontos da página
 // (src/app/dashboard/inicio/page.tsx), que decide o que a pessoa pode ver.
@@ -7,6 +8,8 @@ import { saudacao, type AtalhoInicio } from '@/lib/inicio/inicioVendedor'
 const URL_CONVERSAS = '/dashboard/integracoes/whatsapp/conversas'
 const URL_PEDIDOS = '/dashboard/pedidos-ecommerce'
 const URL_ORCAMENTOS = '/dashboard/orcamentos'
+const URL_ATENDIMENTO_ML = '/dashboard/atendimento-ml'
+const horaSP = (iso: string) => new Date(iso).toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
 
 export type DadosInicio = {
   agora: Date
@@ -16,9 +19,11 @@ export type DadosInicio = {
   pedidos: { saemHoje: number; atrasados: number } | null
   conversas: number | null
   orcamentos: { abertos: number; vencemHoje: number } | null
+  /** Perguntas e reclamações do Mercado Livre; nulo = sem acesso, sem conta ou o ML não respondeu a tempo. */
+  mercadoLivre?: ResumoAtendimentoML | null
 }
 
-export default function InicioVendedorView({ agora, nome, nomeEmpresa, atalhos, pedidos, conversas, orcamentos }: DadosInicio) {
+export default function InicioVendedorView({ agora, nome, nomeEmpresa, atalhos, pedidos, conversas, orcamentos, mercadoLivre }: DadosInicio) {
   const primeiroNome = String(nome ?? '').trim().split(/\s+/)[0] || ''
   const dataExtenso = agora.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: 'numeric', month: 'long' })
 
@@ -26,10 +31,13 @@ export default function InicioVendedorView({ agora, nome, nomeEmpresa, atalhos, 
   if (pedidos) contador[URL_PEDIDOS] = pedidos.saemHoje + pedidos.atrasados
   if (conversas != null) contador[URL_CONVERSAS] = conversas
   if (orcamentos) contador[URL_ORCAMENTOS] = orcamentos.abertos
+  if (mercadoLivre) contador[URL_ATENDIMENTO_ML] = mercadoLivre.perguntas + mercadoLivre.reclamacoes
 
   const tudoEmDia = (!pedidos || pedidos.saemHoje + pedidos.atrasados === 0)
     && (conversas == null || conversas === 0)
     && (!orcamentos || orcamentos.vencemHoje === 0)
+    && (!mercadoLivre || mercadoLivre.perguntas + mercadoLivre.reclamacoes === 0)
+  const qtdCartoes = [pedidos, conversas != null ? true : null, orcamentos, mercadoLivre].filter(Boolean).length
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5">
@@ -39,8 +47,15 @@ export default function InicioVendedorView({ agora, nome, nomeEmpresa, atalhos, 
       </div>
 
       {/* O que está esperando hoje */}
-      {(pedidos || conversas != null || orcamentos) && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Reclamação perto do prazo: o ML decide pelo comprador se ninguém responder. */}
+      {mercadoLivre && mercadoLivre.urgentes > 0 && (
+        <Link href={URL_ATENDIMENTO_ML} className="block rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 hover:border-red-400">
+          ⏰ <strong>{mercadoLivre.urgentes} reclamação(ões) no Mercado Livre vencendo{mercadoLivre.proximoPrazo ? ` — prazo ${horaSP(mercadoLivre.proximoPrazo)}` : ''}.</strong> Sem resposta, o Mercado Livre decide a favor do comprador. Toque para responder.
+        </Link>
+      )}
+
+      {(pedidos || conversas != null || orcamentos || mercadoLivre) && (
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${qtdCartoes >= 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
           {pedidos && (
             // Com atraso, abre a lista de abertos (os atrasados vêm no topo);
             // sem atraso, já filtrada no que sai hoje.
@@ -71,9 +86,21 @@ export default function InicioVendedorView({ agora, nome, nomeEmpresa, atalhos, 
                 : <p className="text-xs text-gray-400 mt-0.5">nenhum vence hoje</p>}
             </Link>
           )}
+          {mercadoLivre && (
+            <Link href={URL_ATENDIMENTO_ML}
+              className={`rounded-2xl border p-4 transition-colors ${mercadoLivre.urgentes ? 'bg-red-50 border-red-200 hover:border-red-300' : mercadoLivre.perguntas + mercadoLivre.reclamacoes ? 'bg-yellow-50 border-yellow-200 hover:border-yellow-300' : 'bg-white border-gray-200 hover:border-blue-300'}`}>
+              <p className="text-sm text-gray-600">🙋 Mercado Livre</p>
+              <p className="text-3xl font-bold text-gray-900 mt-1">{mercadoLivre.perguntas} <span className="text-base font-medium text-gray-500">pergunta(s)</span></p>
+              {mercadoLivre.reclamacoes > 0
+                ? <p className={`text-sm font-semibold mt-0.5 ${mercadoLivre.urgentes ? 'text-red-600' : 'text-amber-700'}`}>
+                    {mercadoLivre.reclamacoes} reclamação(ões){mercadoLivre.urgentes ? ` · ${mercadoLivre.urgentes} vencendo` : ''}
+                  </p>
+                : <p className="text-xs text-gray-400 mt-0.5">nenhuma reclamação</p>}
+            </Link>
+          )}
         </div>
       )}
-      {tudoEmDia && (pedidos || conversas != null || orcamentos) && (
+      {tudoEmDia && (pedidos || conversas != null || orcamentos || mercadoLivre) && (
         <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2">✓ Tudo em dia por aqui.</p>
       )}
 

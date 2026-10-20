@@ -5,6 +5,7 @@ import { loadPlanData } from '@/lib/plans/access'
 import { temModulo } from '@/components/nav-config'
 import { ATALHOS_VENDEDOR, atalhosVisiveis, resumoDespacho, resumoOrcamentos } from '@/lib/inicio/inicioVendedor'
 import InicioVendedorView from '@/components/inicio/InicioVendedorView'
+import { resumoParaInicio } from '@/lib/mercadolivre/atendimento'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +16,7 @@ export const dynamic = 'force-dynamic'
 const URL_CONVERSAS = '/dashboard/integracoes/whatsapp/conversas'
 const URL_PEDIDOS = '/dashboard/pedidos-ecommerce'
 const URL_ORCAMENTOS = '/dashboard/orcamentos'
+const URL_ATENDIMENTO_ML = '/dashboard/atendimento-ml'
 
 // Mesmo recorte da tela de pedidos: em aberto, dos últimos 45 dias.
 const FINALIZADOS_STATUS = '(enviado,entregue,cancelado,devolvido)'
@@ -41,7 +43,7 @@ export default async function InicioPage() {
 
   // Só consulta o que a pessoa pode abrir: número de uma tela bloqueada não
   // aparece, nem custa consulta.
-  const [pedidos, conversas, orcamentos] = await Promise.all([
+  const [pedidos, conversas, orcamentos, mercadoLivre] = await Promise.all([
     ve(URL_PEDIDOS)
       ? supabase.from('marketplace_pedidos')
           .select('status, status_externo, etapa_interna, envio_substatus, prazo_postagem')
@@ -62,6 +64,8 @@ export default async function InicioPage() {
       ? supabase.from('orcamentos').select('status, validade').eq('empresa_id', empresaId).eq('status', 'aberto').limit(5000)
           .then(r => resumoOrcamentos(r.data ?? [], hoje))
       : null,
+    // Ao vivo na API do ML, com limite de tempo: lento, o cartão some.
+    ve(URL_ATENDIMENTO_ML) ? resumoParaInicio(supabase, empresaId) : null,
   ])
 
   return (
@@ -73,6 +77,7 @@ export default async function InicioPage() {
       pedidos={pedidos}
       conversas={conversas}
       orcamentos={orcamentos}
+      mercadoLivre={mercadoLivre}
     />
   )
 }

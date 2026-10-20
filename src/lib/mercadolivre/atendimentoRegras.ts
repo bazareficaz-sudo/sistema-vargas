@@ -101,3 +101,26 @@ export function avisoDeContato(texto: string): string | null {
   if (/whats\s?app|wpp|zap\b|instagram|insta\b/.test(t)) return 'cita WhatsApp ou rede social'
   return null
 }
+
+export type ResumoAtendimentoML = {
+  perguntas: number
+  reclamacoes: number
+  /** Reclamações com prazo do vendedor em menos de 24 h (ou vencido). */
+  urgentes: number
+  /** O prazo mais próximo entre as reclamações abertas. */
+  proximoPrazo: string | null
+}
+
+/** O cartão do Início: soma das contas, a partir do que a API devolveu. */
+export function resumirAtendimento(
+  contas: { perguntas: number; reclamacoes: { players?: Parameters<typeof prazoDaReclamacao>[0] }[] }[],
+  agora: Date = new Date(),
+): ResumoAtendimentoML {
+  const prazos = contas.flatMap(c => c.reclamacoes.map(r => prazoDaReclamacao(r.players))).filter((p): p is string => Boolean(p)).sort()
+  return {
+    perguntas: contas.reduce((s, c) => s + c.perguntas, 0),
+    reclamacoes: contas.reduce((s, c) => s + c.reclamacoes.length, 0),
+    urgentes: prazos.filter(p => horasAte(p, agora) < 24).length,
+    proximoPrazo: prazos[0] ?? null,
+  }
+}
