@@ -237,6 +237,8 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/anuncios-rascunhos', label: 'Anúncios Rascunhos', icon: '🧩', modulo: 'marketplace' },
       { href: '/dashboard/precificacao', label: 'Precificação', icon: '🎯', modulo: 'marketplace' },
       { href: '/dashboard/pedidos-ecommerce', label: 'Pedidos', icon: '📦', modulo: 'marketplace' },
+      // Perguntas, reclamações e mensagens do Mercado Livre, respondidas daqui.
+      { href: '/dashboard/atendimento-ml', label: 'Atendimento ML', icon: '🙋', modulo: 'marketplace' },
     ],
   },
   {

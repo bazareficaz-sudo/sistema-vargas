@@ -35,6 +35,7 @@ export const VIGIAS = [
   { id: 'estoque_parado', nome: 'Dinheiro parado em estoque', ajuda: 'Valor a custo de produtos sem venda há mais de 60 dias.' },
   { id: 'estoque_negativo', nome: 'Estoque negativo', ajuda: 'Produto com estoque abaixo de zero — venda sem entrada lançada ou contagem errada.' },
   { id: 'financeiro', nome: 'Contas a pagar e a receber', ajuda: 'Contas vencidas e o que vence nos próximos 7 dias; clientes em atraso.' },
+  { id: 'atendimento_ml', nome: 'Atendimento no Mercado Livre', ajuda: 'Reclamação com prazo de resposta nas próximas 48 h (aviso na hora) e perguntas sem resposta há mais de 24 h — demora em responder derruba a reputação.' },
   { id: 'atendimento_whatsapp', nome: 'Atendimento no WhatsApp', ajuda: 'No resumo da manhã: retornos marcados para hoje ou atrasados, orçamentos sem resposta há 3 dias e conversas esperando resposta há mais de 2 h — com o link de cada conversa.' },
 ] as const
 
@@ -48,7 +49,7 @@ export const ORDEM_GRAVIDADE: Record<Gravidade, number> = { urgente: 0, atencao:
  * conta vencida, que vem antes de repor estoque.
  */
 export const PRIORIDADE_VIGIA: Record<string, number> = {
-  integracoes: 0, zerado_a_venda: 1, pedidos_atrasados: 2, financeiro: 3, vai_faltar: 4,
+  integracoes: 0, atendimento_ml: 1, zerado_a_venda: 1, pedidos_atrasados: 2, financeiro: 3, vai_faltar: 4,
   vendas_canal: 5, anuncios_bloqueados: 6, estoque_parado: 7, estoque_negativo: 8,
 }
 
