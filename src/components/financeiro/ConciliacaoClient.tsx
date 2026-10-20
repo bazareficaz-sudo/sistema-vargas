@@ -28,6 +28,7 @@ type Saida = { id: string; origemId: string; data: string; valor: number }
 type Resumo = {
   recebedor: string | null; descricao: string | null; tipo: string | null
   valor: number | null; camposPresentes: string[]
+  textos: { caminho: string; valor: string }[]
 }
 
 const METODO_LABEL: Record<string, string> = {
@@ -377,12 +378,29 @@ export default function ConciliacaoClient() {
                       {r.recebedor && <p><strong>{r.recebedor}</strong></p>}
                       {r.descricao && <p>{r.descricao}</p>}
                       {r.tipo && <p className="text-slate-400">{r.tipo}</p>}
-                      {!r.recebedor && !r.descricao && (
-                        <p className="text-amber-700">
-                          Não veio nome nem descrição. Campos presentes:{' '}
-                          <span className="font-mono">{r.camposPresentes.join(', ') || '(nenhum)'}</span>
-                        </p>
-                      )}
+                      {/* TUDO que a resposta trouxe, sempre.
+                          A primeira busca real devolveu "Banco do Brasil S.A."
+                          como recebedor -- o banco de DESTINO, nao quem
+                          recebeu. E a tela escondia a lista de campos justo
+                          quando achava algo, que era quando mais precisava
+                          aparecer. */}
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-slate-400 hover:text-slate-600">
+                          o que a resposta trouxe ({r.textos?.length ?? 0} textos)
+                        </summary>
+                        <div className="mt-1 border-l-2 border-slate-100 pl-2 space-y-0.5">
+                          {(r.textos ?? []).map((x, i) => (
+                            <p key={i} className="font-mono text-[11px] text-slate-500">
+                              <span className="text-slate-400">{x.caminho}:</span> {x.valor}
+                            </p>
+                          ))}
+                          {(r.textos ?? []).length === 0 && (
+                            <p className="text-amber-700">
+                              Nenhum texto. Campos: {r.camposPresentes.join(', ') || '(nenhum)'}
+                            </p>
+                          )}
+                        </div>
+                      </details>
                     </div>
                   )}
                 </div>
