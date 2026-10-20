@@ -81,7 +81,12 @@ export function calcularPrecoEstoquePorRegra(
     if (!produto) return { aplicavel: false, motivo: 'Sem produto vinculado' }
     estoqueNovo = kitInfo ? kitInfo.estoque : (contexto.estoquePorDeposito ?? 0)
   }
-  if (estoqueNovo !== undefined && complementar !== 0) estoqueNovo = estoqueNovo + complementar
+  // O estoque complementar (buffer) só entra quando HÁ estoque real. Com
+  // estoque real 0, envia 0 (e deixa o anúncio cair/pausar) — somar o buffer
+  // aqui mandaria "0 + 1000 = 1000" e venderia item que não existe.
+  if (estoqueNovo !== undefined && complementar !== 0 && estoqueNovo > 0) {
+    estoqueNovo = estoqueNovo + complementar
+  }
 
   if (precoNovo === undefined && estoqueNovo === undefined) return { aplicavel: false, motivo: 'Regra sem alteração de preço nem estoque' }
 

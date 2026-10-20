@@ -561,7 +561,9 @@ export default function AnunciosClient({ canal, canais = [], anuncios: anunciosI
         if (!a.produtos) { pulados.push({ anuncio: a, motivo: 'Sem produto vinculado (necessário para "Depósito")' }); continue }
         estoqueNovo = kitInfo ? kitInfo.estoque : (estoquePorDeposito.get(a.produtos.id) ?? 0)
       }
-      if (estoqueNovo !== undefined && complementar !== 0) estoqueNovo = estoqueNovo + complementar
+      // O complemento (buffer) só entra quando HÁ estoque real. Com 0, envia 0
+      // — senão "0 + 1000" venderia item que não existe.
+      if (estoqueNovo !== undefined && complementar !== 0 && estoqueNovo > 0) estoqueNovo = estoqueNovo + complementar
 
       if (precoNovo === undefined && estoqueNovo === undefined) { pulados.push({ anuncio: a, motivo: 'Nenhuma alteração selecionada' }); continue }
       const paraPausar = estoqueNovo !== undefined && risco !== null && estoqueNovo <= risco

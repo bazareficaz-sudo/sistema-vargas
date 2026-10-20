@@ -57,38 +57,33 @@ export function explicarRegraEstoque(params: {
     : Number(params.risco)
   const saldo = Number(params.saldoExemplo ?? 10)
 
-  const envia = saldo + complementar
+  // O complemento só entra quando HÁ estoque real. Com 0, envia 0 (o anúncio
+  // sai de venda), em vez de "0 + complemento".
+  const envia = saldo > 0 ? saldo + complementar : 0
 
   if (risco === null || Number.isNaN(risco)) {
     return {
       envia,
-      pausaComSaldoReal: null,
+      pausaComSaldoReal: 0,
       nuncaPausa: false,
-      frase: complementar !== 0
-        ? `Com ${saldo} em estoque, envia ${envia} ao canal. Sem estoque de risco, o anúncio não pausa sozinho.`
-        : `Com ${saldo} em estoque, envia ${envia} ao canal. Sem estoque de risco, o anúncio não pausa sozinho.`,
+      frase: `Com ${saldo} em estoque, envia ${envia} ao canal. `
+        + `Ao zerar o estoque real, envia 0 e o anúncio sai de venda.`,
     }
   }
 
-  // `saldo + complementar <= risco`  ⇔  `saldo <= risco - complementar`
+  // `saldo + complementar <= risco`  ⇔  `saldo <= risco - complementar`.
+  // No pior caso (limiar <= 0), o anúncio ainda sai de venda ao zerar, porque
+  // com estoque 0 o envio é 0.
   const limiar = risco - complementar
-  const nuncaPausa = limiar < 0
+  const pausaComSaldoReal = limiar >= 1 ? limiar : 0
 
   const inicio = `Com ${saldo} em estoque, envia ${envia} ao canal.`
-
-  if (nuncaPausa) {
-    return {
-      envia, pausaComSaldoReal: limiar, nuncaPausa,
-      frase: `${inicio} ATENÇÃO: com complemento ${complementar} e risco ${risco}, o anúncio só pausaria com `
-        + `saldo ${limiar} — ou seja, NUNCA pausa. O risco é comparado com o valor já somado ao complemento.`,
-    }
-  }
-
   return {
-    envia, pausaComSaldoReal: limiar, nuncaPausa,
-    frase: complementar !== 0
-      ? `${inicio} Pausa quando o estoque REAL chegar a ${limiar} `
-        + `(o risco ${risco} é comparado com o valor já somado ao complemento ${complementar}).`
-      : `${inicio} Pausa quando o estoque chegar a ${limiar}.`,
+    envia,
+    pausaComSaldoReal,
+    nuncaPausa: false,
+    frase: pausaComSaldoReal > 0
+      ? `${inicio} Pausa quando o estoque real chegar a ${pausaComSaldoReal}.`
+      : `${inicio} Pausa quando o estoque real zerar.`,
   }
 }
