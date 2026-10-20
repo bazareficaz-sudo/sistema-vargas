@@ -121,7 +121,9 @@ export default function Sidebar({ empresa, empresas = [], empresaAtivaId = '' }:
 
   async function logout() {
     const sb = createClient()
-    await sb.auth.signOut()
+    // Sair do site não desconecta o app do celular (o padrão do signOut é
+    // global). Sair de todos: Configurações → Sessão e Segurança.
+    await sb.auth.signOut({ scope: 'local' })
     router.push('/login')
     router.refresh()
   }

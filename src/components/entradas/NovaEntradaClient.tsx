@@ -746,12 +746,15 @@ export default function NovaEntradaClient({
       }
       if (field === 'preco_promocional') {
         r.promo_base = 'valor'
-        r.promo_markup = r.preco_custo_novo > 0 ? markupDoPreco(r.preco_custo_novo, r.preco_promocional) : 0
+        // Campo apagado = sem promoção: o markup volta a vazio, e não a -100%.
+        r.promo_markup = r.preco_custo_novo > 0 && r.preco_promocional > 0 ? markupDoPreco(r.preco_custo_novo, r.preco_promocional) : 0
         if (r.preco_promocional > 0) r.promocao_ativa = true
       }
       if (field === 'promo_markup') {
         r.promo_base = 'markup'
-        r.preco_promocional = r.preco_custo_novo > 0 ? precoDoMarkup(r.preco_custo_novo, r.promo_markup) : 0
+        // Markup apagado (0) = sem promoção, e não "promoção pelo preço de
+        // custo": o campo vazio é como a pessoa tira a promoção.
+        r.preco_promocional = r.preco_custo_novo > 0 && r.promo_markup !== 0 ? precoDoMarkup(r.preco_custo_novo, r.promo_markup) : 0
         if (r.preco_promocional > 0) r.promocao_ativa = true
       }
       next[idx] = r
@@ -2194,7 +2197,8 @@ function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
             <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Markup %</th>
             <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Preço anterior</th>
             <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Preço novo</th>
-            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-36">Promoção</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24" title="Markup da promoção sobre o custo">Markup promo %</th>
+            <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Preço promo</th>
             <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-20">Variação</th>
             <th className="text-center px-4 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Atualizar</th>
           </tr>
@@ -2247,29 +2251,21 @@ function TabelaReajuste({ itens, todos, onUpdate, custoNota, isKit = false }: {
                   <CampoNum value={item.preco_venda_novo} onCommit={v => onUpdate(idx, 'preco_venda_novo', v)} forte />
                 </td>
 
-                {/* PROMOÇÃO POR VALOR OU POR MARKUP.
-                    O botão R$/% troca o que o campo significa; os dois são a
-                    mesma grandeza e um recalcula o outro. */}
-                <td data-label="Promoção" className="px-3 py-2.5 max-md:flex-wrap max-md:[&>p]:basis-full">
-                  <div className="flex items-center justify-end gap-1 max-md:[&>.relative]:w-32">
-                    <button type="button" tabIndex={-1}
-                      onClick={() => onUpdate(idx, 'promo_base', item.promo_base === 'valor' ? 'markup' : 'valor')}
-                      title="Alternar entre preço promocional e markup da promoção"
-                      className="w-7 shrink-0 rounded border border-gray-300 bg-gray-50 py-0.5 text-[10px] font-semibold text-gray-500 hover:bg-gray-100">
-                      {item.promo_base === 'valor' ? 'R$' : '%'}
-                    </button>
-                    <CampoNum
-                      value={item.promo_base === 'valor' ? item.preco_promocional : item.promo_markup}
-                      onCommit={v => onUpdate(idx, item.promo_base === 'valor' ? 'preco_promocional' : 'promo_markup', v)}
-                      sufixo={item.promo_base === 'valor' ? '' : '%'}
-                      placeholder="—"
-                    />
-                  </div>
-                  {promoValendo && (
-                    <p className="text-[10px] text-right mt-0.5 font-mono text-gray-400">
-                      {item.promo_base === 'valor'
-                        ? `${item.promo_markup.toFixed(1)}% sobre o custo`
-                        : fmt(item.preco_promocional)}
+                {/* PROMOÇÃO: MARKUP E PREÇO, como o preço normal ao lado.
+                    Antes era um campo só com um botãozinho R$/% para trocar o
+                    que ele significava — ninguém achava o %. Agora são dois
+                    campos sempre visíveis; digitar um recalcula o outro, e
+                    `promo_base` guarda qual foi digitado para que trocar o
+                    custo depois recalcule o certo. */}
+                <td data-label="Markup promo %" className="px-3 py-2.5 max-md:[&>.relative]:w-32">
+                  <CampoNum value={item.promo_markup} onCommit={v => onUpdate(idx, 'promo_markup', v)} sufixo="%" placeholder="—" />
+                </td>
+
+                <td data-label="Preço promo" className="px-3 py-2.5 max-md:flex-wrap max-md:[&>p]:basis-full max-md:[&>.relative]:w-32">
+                  <CampoNum value={item.preco_promocional} onCommit={v => onUpdate(idx, 'preco_promocional', v)} placeholder="—" />
+                  {promoValendo && !promoAbaixoDoCusto && !promoNaoDesconta && item.preco_venda_novo > 0 && (
+                    <p className="text-[10px] text-right mt-0.5 text-gray-400">
+                      {Math.round((1 - item.preco_promocional / item.preco_venda_novo) * 100)}% de desconto
                     </p>
                   )}
                   {promoAbaixoDoCusto && (

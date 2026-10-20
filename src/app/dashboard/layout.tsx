@@ -33,7 +33,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Usuário bloqueado/inativado por um admin perde acesso na hora — não
   // basta esconder menu, tem que deslogar de verdade.
   if (profile?.status === 'inativo' || profile?.status === 'bloqueado') {
-    await supabase.auth.signOut()
+    // Global de propósito: bloqueado sai de todo aparelho, app incluído.
+    await supabase.auth.signOut({ scope: 'global' })
     redirect('/login?erro=acesso_bloqueado')
   }
 
@@ -75,7 +76,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (suporteRow?.status === 'ativa') {
     if (new Date(suporteRow.expira_em) < new Date()) {
       await supabase.from('suporte_acessos').update({ status: 'expirada' }).eq('id', suporteRow.id)
-      await supabase.auth.signOut()
+      // Global de propósito: acesso de suporte vencido não sobrevive em lugar nenhum.
+      await supabase.auth.signOut({ scope: 'global' })
       redirect('/login')
     }
     const empresaSuporte = suporteRow.empresas as unknown as { nome: string; nome_fantasia: string | null } | null

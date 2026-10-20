@@ -8,6 +8,7 @@ import EditarProdutoModal from './EditarProdutoModal'
 import SeloCanais, { type ContagemCanais, type EnvioMensagem } from '@/components/marketplaces/SeloCanais'
 import DuplicarProdutoModal from './DuplicarProdutoModal'
 import AcoesEmMassaModal from './AcoesEmMassaModal'
+import GrupoSimilaresModal from './GrupoSimilaresModal'
 import AdicionarImagemMassaModal from './AdicionarImagemMassaModal'
 import CriarKitModal from './CriarKitModal'
 import NovoProdutoModal from './NovoProdutoModal'
@@ -45,6 +46,8 @@ type Produto = {
   ibs_aliquota?: number | null
   cbs_aliquota?: number | null
   tags?: string[] | null
+  /** Grupo de similares (o mesmo item de marcas diferentes). */
+  grupo_similar?: string | null
 }
 
 type Categoria = { id: string; nome: string; pai_id: string | null }
@@ -89,6 +92,7 @@ type Props = {
   ncmFiltro: string
   tagFiltro: string
   entradaFiltro: string
+  similarFiltro?: string
   entradasCasadas?: { rotulo: string; origem: 'manual' | 'xml' }[]
   /** Kits listados junto por usarem algum produto da entrada filtrada. */
   kitsDaEntrada?: number
@@ -142,7 +146,7 @@ export default function ProdutosClient({
   categoriasRaiz, categoriasTodas, marcas,
   marcaFiltro: marcaInicial, categoriaFiltro: categoriaInicial, subcategoriaFiltro: subcategoriaInicial,
   estoqueFiltro: estoqueInicial, imagemFiltro: imagemInicial, ncmFiltro: ncmInicial,
-  tagFiltro: tagInicial, entradaFiltro: entradaInicial, entradasCasadas = [], kitsDaEntrada = 0, tagsDisponiveis, temLoja = false,
+  tagFiltro: tagInicial, entradaFiltro: entradaInicial, similarFiltro = '', entradasCasadas = [], kitsDaEntrada = 0, tagsDisponiveis, temLoja = false,
   envioMensagem,
 }: Props) {
   const router = useRouter()
@@ -264,6 +268,7 @@ export default function ProdutosClient({
   const [criandoNovo, setCriandoNovo] = useState(false)
   const [importandoUrl, setImportandoUrl] = useState(false)
   const [acoesEmMassa, setAcoesEmMassa] = useState(false)
+  const [grupoSimilares, setGrupoSimilares] = useState(false)
   const [imagemEmMassa, setImagemEmMassa] = useState(false)
   const [nomeEditando, setNomeEditando] = useState<string | null>(null)
   const [nomeValor, setNomeValor] = useState('')
@@ -313,7 +318,7 @@ export default function ProdutosClient({
     const sp = new URLSearchParams({
       q, aba, pagina: String(pagina), promo: promo ? '1' : '', ativos: ATIVOS_PARAM[situacao],
       marca: marcaF, categoria: categoriaF, subcategoria: subcategoriaF, estoque: estoqueF, imagem: imagemF, ncm: ncmF,
-      tag: tagF, entrada: entradaF,
+      tag: tagF, entrada: entradaF, similar: similarFiltro,
       ...params,
     })
     router.push(`/dashboard/produtos?${sp.toString()}`)
@@ -321,7 +326,7 @@ export default function ProdutosClient({
 
   function limparFiltrosAvancados() {
     setMarcaF(''); setCategoriaF(''); setSubcategoriaF(''); setEstoqueF(''); setImagemF(''); setNcmF(''); setTagF(''); setEntradaF('')
-    navegar({ marca: '', categoria: '', subcategoria: '', estoque: '', imagem: '', ncm: '', tag: '', entrada: '', pagina: '1' })
+    navegar({ marca: '', categoria: '', subcategoria: '', estoque: '', imagem: '', ncm: '', tag: '', entrada: '', similar: '', pagina: '1' })
   }
 
   function buscar(e: React.FormEvent) {
@@ -481,6 +486,14 @@ export default function ProdutosClient({
           onAplicado={() => { setAcoesEmMassa(false); setSelecionados(new Set()); router.refresh() }}
         />
       )}
+      {grupoSimilares && (
+        <GrupoSimilaresModal
+          produtos={produtos.filter(p => selecionados.has(p.id))}
+          empresaId={empresaId}
+          onClose={() => setGrupoSimilares(false)}
+          onAplicado={() => { setGrupoSimilares(false); setSelecionados(new Set()); router.refresh() }}
+        />
+      )}
       {imagemEmMassa && (
         <AdicionarImagemMassaModal
           ids={[...selecionados]}
@@ -579,6 +592,12 @@ export default function ProdutosClient({
           <button onClick={() => setGerenciandoTags(true)} className={botao('secundario', 'sm')}>
             Gerenciar tags
           </button>
+          {podeEditarProdutos && (
+            <button onClick={() => setGrupoSimilares(true)} className={botao('secundario', 'sm')}
+              title="Juntar o mesmo item de marcas diferentes — o PDV mostra as opções ao vendedor">
+              🔗 Grupo de similares
+            </button>
+          )}
 
           <span className={SEPARADOR} />
 
@@ -614,6 +633,13 @@ export default function ProdutosClient({
             className={botao('sutil', 'sm', 'ml-auto')}>
             Limpar seleção
           </button>
+        </div>
+      )}
+
+      {similarFiltro && (
+        <div className="flex items-center gap-2 mb-3 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 text-sm text-sky-900">
+          <span>🔗 Grupo de similares <strong>{similarFiltro}</strong></span>
+          <button onClick={() => navegar({ similar: '', pagina: '1' })} className="ml-auto text-xs text-sky-700 hover:underline">ver todos os produtos ✕</button>
         </div>
       )}
 
@@ -900,6 +926,13 @@ export default function ProdutosClient({
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${situacao.cls}`}>{situacao.texto}</span>
                       {p.promocao_ativa && <span className="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600">Promoção</span>}
+                        {p.grupo_similar && (
+                          <button type="button" onClick={() => navegar({ similar: p.grupo_similar!, pagina: '1' })}
+                            title="Ver os produtos deste grupo de similares"
+                            className="rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 hover:bg-sky-100">
+                            🔗 {p.grupo_similar}
+                          </button>
+                        )}
                       {!p.disponivel_pdv && <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Oculto no PDV</span>}
                       {(p.tags ?? []).map(t => <span key={t} className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700">{t}</span>)}
                       <SeloCanais contagem={anunciosMap?.[p.id]}
@@ -970,6 +1003,13 @@ export default function ProdutosClient({
                           envio={envioMensagem}
                           onZapi={(msg) => { setZapiMensagem(msg); setZapiErro('') }} />
                         {p.promocao_ativa && <span className="rounded-md border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600">Promoção</span>}
+                        {p.grupo_similar && (
+                          <button type="button" onClick={() => navegar({ similar: p.grupo_similar!, pagina: '1' })}
+                            title="Ver os produtos deste grupo de similares"
+                            className="rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 hover:bg-sky-100">
+                            🔗 {p.grupo_similar}
+                          </button>
+                        )}
                         {!p.disponivel_pdv && <span className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Oculto no PDV</span>}
                         {(p.tags ?? []).map(t => <span key={t} className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700">{t}</span>)}
                       </div>

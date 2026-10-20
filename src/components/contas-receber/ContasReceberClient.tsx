@@ -247,8 +247,24 @@ export default function ContasReceberClient({
   }
 
   // ── Receber conta ─────────────────────────────────────────────
+  // Aviso de pagamento por WhatsApp: começa marcado se o cadastro do
+  // cliente pede aviso de pagamento; quem dá a baixa decide na hora. O envio
+  // é da rotina de 5 em 5 minutos (src/lib/alertas/pagamentoCliente.ts).
+  const [avisarPag, setAvisarPag] = useState(false)
+  const [whatsCliente, setWhatsCliente] = useState<boolean | null>(null)
+
   function abrirRecebimento(c: Conta) {
     setContaReceber(c)
+    setAvisarPag(false); setWhatsCliente(null)
+    if (c.cliente_id) {
+      sb.from('clientes').select('alerta_pagamento_whatsapp, telefone, whatsapp, telefone_whatsapp, opt_out_whatsapp')
+        .eq('id', c.cliente_id).maybeSingle()
+        .then(({ data }) => {
+          const tem = !!data && !data.opt_out_whatsapp && !!(data.telefone_whatsapp || data.whatsapp || data.telefone)
+          setWhatsCliente(tem)
+          setAvisarPag(tem && !!data?.alerta_pagamento_whatsapp)
+        })
+    }
     setReceb({
       valor: c.valor_aberto.toFixed(2).replace('.',','),
       desconto: '0', juros: '0', multa: '0',
@@ -284,6 +300,7 @@ export default function ContasReceberClient({
         conta_destino: receb.conta_destino || null,
         observacao: receb.observacao || null,
         operador_nome: operador,
+        avisar_cliente: avisarPag,
       })
 
       // Se usou crédito: debitar do saldo de créditos
@@ -845,6 +862,19 @@ export default function ContasReceberClient({
                 <input value={receb.observacao} onChange={e => setReceb(p=>({...p, observacao:e.target.value}))}
                   className="w-full mt-1 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-sm" />
               </div>
+
+              {contaReceber.cliente_id && (
+                <label className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm ${whatsCliente === false ? 'border-slate-200 bg-slate-50 text-slate-400' : 'border-emerald-200 bg-emerald-50 text-emerald-900 cursor-pointer'}`}>
+                  <input type="checkbox" checked={avisarPag} disabled={!whatsCliente}
+                    onChange={e => setAvisarPag(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-600" />
+                  <span>
+                    📲 Avisar o cliente por WhatsApp
+                    <span className="block text-[11px] opacity-80">
+                      {whatsCliente === false ? 'Cliente sem WhatsApp no cadastro (ou pediu para não receber).' : 'Manda o valor pago e o saldo que ficou na carteira, em até 5 minutos.'}
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
             <div className="flex justify-end gap-2 px-5 py-4 border-t border-slate-100">
               <button onClick={() => setContaReceber(null)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-sm hover:bg-slate-200">Cancelar</button>

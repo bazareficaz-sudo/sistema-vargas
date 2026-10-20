@@ -25,7 +25,8 @@ export default function SupportModeBanner() {
         body: JSON.stringify({ sessionId: suporte!.sessionId }),
       })
       const supabase = createClient()
-      await supabase.auth.signOut()
+      // Global de propósito: o acesso de suporte termina em todo lugar.
+      await supabase.auth.signOut({ scope: 'global' })
       window.location.href = '/login'
     }
     return (

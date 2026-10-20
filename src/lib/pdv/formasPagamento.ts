@@ -20,13 +20,19 @@ export const FORMAS_PAGAMENTO: FormaPagamento[] = [
   { id: 'credito',  label: 'Crédito',  tecla: '3', icon: '💳' },
   { id: 'pix',      label: 'PIX',      tecla: '4', icon: '📱' },
   { id: 'carteira', label: 'Carteira', tecla: '5', icon: '👛' },
-  { id: 'fiado',    label: 'Fiado',    tecla: '6', icon: '📒' },
+  // "Fiado" saiu (20/10/2026): a loja usa a Carteira como fiado — vende
+  // agora, o cliente paga depois — e as duas opções lado a lado eram a mesma
+  // coisa com dois nomes. Nos últimos 60 dias foram 176 vendas na Carteira e
+  // nenhuma no Fiado. O rótulo continua em ROTULOS_ANTIGOS para as vendas
+  // antigas que ainda dizem 'fiado'.
 ]
+
+const ROTULOS_ANTIGOS: Record<string, string> = { fiado: 'Fiado' }
 
 export const FORMAS_PAGAMENTO_VALIDAS: string[] = FORMAS_PAGAMENTO.map(f => f.id)
 
 export function rotuloDaForma(tipo: string): string {
-  return FORMAS_PAGAMENTO.find(f => f.id === tipo)?.label ?? tipo
+  return FORMAS_PAGAMENTO.find(f => f.id === tipo)?.label ?? ROTULOS_ANTIGOS[tipo] ?? tipo
 }
 
 // SELO CURTO — o rótulo cabe na tela, mas não numa etiqueta de 63 mm.

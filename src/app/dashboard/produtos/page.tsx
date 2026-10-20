@@ -1,3 +1,4 @@
+import { normalizarGrupoSimilar } from '@/lib/produtos/similares'
 import { createClient } from '@/lib/supabase/server'
 import { produtosDaEntrada } from '@/lib/produtos/filtroEntrada'
 import { aplicarBuscaPorTermos } from '@/lib/busca/termos'
@@ -15,6 +16,8 @@ export default async function ProdutosPage({
     q?: string; pagina?: string; aba?: string; promo?: string; ativos?: string
     marca?: string; categoria?: string; subcategoria?: string
     estoque?: string; imagem?: string; ncm?: string; tag?: string; entrada?: string
+    /** Mostra só os produtos de um grupo de similares. */
+    similar?: string
     // Abre o cadastro de um produto direto, sem obrigar a procurá-lo na
     // lista. Usado por quem chega de outra tela com um problema apontado —
     // a venda cuja nota foi recusada por falta de dado fiscal, por exemplo.
@@ -24,8 +27,9 @@ export default async function ProdutosPage({
   const {
     q = '', pagina = '1', aba = 'todos', promo = '', ativos = '1',
     marca = '', categoria = '', subcategoria = '', estoque = '', imagem = '', ncm = '',
-    tag = '', entrada = '', editar = '', abaProduto = '',
+    tag = '', entrada = '', editar = '', abaProduto = '', similar = '',
   } = await searchParams
+  const similarFiltro = normalizarGrupoSimilar(similar)
   const promoFiltro = promo === '1'
   // Situação do cadastro: ativos (padrão), só os inativos, ou todos.
   // `ativos=0` é o "todos" que já circulava em links salvos.
@@ -128,6 +132,7 @@ export default async function ProdutosPage({
     if (ncm === 'com') out = out.not('ncm', 'is', null)
     if (ncm === 'sem') out = out.is('ncm', null)
     if (tag) out = out.contains('tags', [tag])
+    if (similarFiltro) out = out.eq('grupo_similar', similarFiltro)
     if (idsComImagem !== null) {
       if (imagem === 'com') out = out.in('id', idsComImagem.length ? idsComImagem : ['00000000-0000-0000-0000-000000000000'])
       if (imagem === 'sem') out = idsComImagem.length ? out.not('id', 'in', `(${idsComImagem.map(id => `"${id}"`).join(',')})`) : out
@@ -138,7 +143,7 @@ export default async function ProdutosPage({
 
   let query = supabase
     .from('produtos')
-    .select('id, nome, sku, ean, preco_venda, preco_custo, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, unidade, categoria, marca, estoque, estoque_minimo, ativo, disponivel_pdv, permite_fracao, ncm, cest, tipo, ibs_cst, ibs_cclasstrib, ibs_aliquota, cbs_aliquota, tags', { count: 'exact' })
+    .select('id, nome, sku, ean, preco_venda, preco_custo, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, unidade, categoria, marca, estoque, estoque_minimo, ativo, disponivel_pdv, permite_fracao, ncm, cest, tipo, ibs_cst, ibs_cclasstrib, ibs_aliquota, cbs_aliquota, tags, grupo_similar', { count: 'exact' })
     .eq('empresa_id', empresaId)
     .order('nome')
     .range(offset, offset + POR_PAGINA - 1)
@@ -320,6 +325,7 @@ export default async function ProdutosPage({
       ncmFiltro={ncm}
       tagFiltro={tag}
       entradaFiltro={entrada}
+      similarFiltro={similarFiltro ?? ''}
       entradasCasadas={entradasCasadas}
       kitsDaEntrada={kitsDaEntrada}
       tagsDisponiveis={tagsDisponiveis}

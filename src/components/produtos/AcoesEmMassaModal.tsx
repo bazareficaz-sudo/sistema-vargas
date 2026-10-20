@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { minimosPorValor } from '@/lib/estoque/minimoEmMassa'
 
 const UNIDADES = ['UN', 'KG', 'LT', 'MT', 'CX', 'PC', 'PR', 'DZ', 'CT', 'M2', 'M3', 'GR', 'ML', 'CM']
 
@@ -44,6 +45,33 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
       .then(({ data }) => setPerfisFiscais(data ?? []))
   }, [])
 
+  // ESTOQUE MÍNIMO: a mesma quantidade para todos, ou N dias de venda de
+  // cada produto (média diária da rotina de reposição). É o mínimo que
+  // alimenta a Lista de Compra, os alertas e o "abaixo do mínimo".
+  const [aplicarMinimo, setAplicarMinimo] = useState(false)
+  const [modoMinimo, setModoMinimo] = useState<'fixo' | 'dias'>('fixo')
+  const [minimoFixo, setMinimoFixo] = useState('')
+  const [diasCobertura, setDiasCobertura] = useState('30')
+  const [semVendaFixo, setSemVendaFixo] = useState('')
+  const [medias, setMedias] = useState<Map<string, number> | null>(null)
+  useEffect(() => {
+    if (!aplicarMinimo || modoMinimo !== 'dias' || medias) return
+    let vivo = true
+    ;(async () => {
+      const sb = createClient()
+      const m = new Map<string, number>()
+      for (let i = 0; i < ids.length; i += 150) {
+        const { data } = await sb.from('reposicao_metricas').select('produto_id, media_diaria').in('produto_id', ids.slice(i, i + 150))
+        for (const r of (data ?? []) as { produto_id: string; media_diaria: number | null }[]) m.set(r.produto_id, Number(r.media_diaria ?? 0))
+      }
+      if (vivo) setMedias(m)
+    })()
+    return () => { vivo = false }
+  }, [aplicarMinimo, modoMinimo, medias, ids])
+  const nDias = Number(diasCobertura) || 0
+  const semVendaNum = semVendaFixo.trim() === '' ? null : Math.max(0, Number(semVendaFixo.replace(',', '.')) || 0)
+  const previaDias = medias ? minimosPorValor(ids, medias, nDias, semVendaNum) : null
+
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
 
@@ -51,7 +79,7 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
     ? categoriasTodas.filter(c => c.pai_id && categoriasTodas.find(r => r.id === c.pai_id)?.nome === categoria)
     : []
 
-  const nenhumCampoSelecionado = !aplicarCategoria && !aplicarMarca && !aplicarNcm && !aplicarUnidade && !aplicarPdv && !aplicarPerfil
+  const nenhumCampoSelecionado = !aplicarCategoria && !aplicarMarca && !aplicarNcm && !aplicarUnidade && !aplicarPdv && !aplicarPerfil && !aplicarMinimo
 
   async function aplicar() {
     if (nenhumCampoSelecionado) { setErro('Marque ao menos um campo para aplicar.'); return }
@@ -64,10 +92,27 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
     if (aplicarUnidade) payload.unidade = unidade
     if (aplicarPdv) payload.disponivel_pdv = disponivelPdv
     if (aplicarPerfil) payload.perfil_fiscal_id = perfilFiscal || null
+    if (aplicarMinimo && modoMinimo === 'fixo') {
+      const n = Number(minimoFixo.replace(',', '.'))
+      if (minimoFixo.trim() === '' || !(n >= 0)) { setSalvando(false); setErro('Informe a quantidade mínima (0 para tirar o mínimo).'); return }
+      payload.estoque_minimo = n
+    }
+    if (aplicarMinimo && modoMinimo === 'dias' && (!previaDias || !(nDias > 0))) {
+      setSalvando(false); setErro('Informe os dias de venda e aguarde o cálculo.'); return
+    }
 
     const sb = createClient()
     const { error } = await sb.from('produtos').update(payload).in('id', ids)
     if (error) { setSalvando(false); setErro(error.message); return }
+
+    // Por dias de venda cada produto tem o seu mínimo: uma gravação por
+    // valor, com todos os produtos que caíram nele.
+    if (aplicarMinimo && modoMinimo === 'dias' && previaDias) {
+      for (const [valor, grupo] of previaDias.porValor) {
+        const { error: e } = await sb.from('produtos').update({ estoque_minimo: valor }).in('id', grupo)
+        if (e) { setSalvando(false); setErro(e.message); return }
+      }
+    }
 
     // Propaga categoria/marca (os únicos campos de identidade desta tela)
     // pros produtos vinculados numa empresa parceira, se houver.
@@ -199,6 +244,53 @@ export default function AcoesEmMassaModal({ ids, categoriasRaiz, categoriasTodas
               )}
             </div>
           )}
+
+          <div className="border border-gray-200 rounded-lg px-3 py-3">
+            <label className="flex items-center gap-2.5 cursor-pointer mb-2">
+              <input type="checkbox" checked={aplicarMinimo} onChange={e => setAplicarMinimo(e.target.checked)}
+                className="w-4 h-4 accent-blue-600" />
+              <span className="text-sm font-medium text-gray-700">Estoque mínimo</span>
+            </label>
+            {aplicarMinimo && (
+              <div className="ml-6 space-y-2">
+                <div className="flex gap-2">
+                  {([['fixo', 'Mesma quantidade'], ['dias', 'Por dias de venda']] as const).map(([m, l]) => (
+                    <button key={m} type="button" onClick={() => setModoMinimo(m)}
+                      className={`px-3 py-1.5 text-xs rounded-full border ${modoMinimo === m ? 'border-blue-500 text-blue-700 bg-blue-50 font-medium' : 'border-gray-300 text-gray-500 bg-white'}`}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                {modoMinimo === 'fixo' ? (
+                  <div className="flex items-center gap-2">
+                    <input value={minimoFixo} onChange={e => setMinimoFixo(e.target.value)} inputMode="decimal" placeholder="Ex.: 5"
+                      className="w-24 border border-gray-300 rounded-lg px-2.5 py-1.5 text-base sm:text-xs focus:outline-none focus:border-blue-500" />
+                    <span className="text-[11px] text-gray-500">unidades em todos os selecionados (0 tira o mínimo)</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-gray-600">Cobrir</span>
+                      <input value={diasCobertura} onChange={e => setDiasCobertura(e.target.value.replace(/\D/g, ''))} inputMode="numeric"
+                        className="w-16 border border-gray-300 rounded-lg px-2.5 py-1.5 text-base sm:text-xs focus:outline-none focus:border-blue-500" />
+                      <span className="text-xs text-gray-600">dias de venda de cada produto</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-gray-600">Quem não vendeu:</span>
+                      <input value={semVendaFixo} onChange={e => setSemVendaFixo(e.target.value)} inputMode="decimal" placeholder="manter"
+                        className="w-20 border border-gray-300 rounded-lg px-2.5 py-1.5 text-base sm:text-xs focus:outline-none focus:border-blue-500" />
+                      <span className="text-[11px] text-gray-400">vazio = mantém o mínimo atual</span>
+                    </div>
+                    <p className="text-[11px] text-gray-500">
+                      {!previaDias ? 'Calculando pela média de venda…'
+                        : <>{previaDias.comVenda} produto(s) com venda recebem média diária × {nDias || 0} dias (arredondado para cima)
+                            {previaDias.semVendaQtd > 0 && <>; {previaDias.semVendaQtd} sem venda {semVendaNum === null ? 'ficam como estão' : `recebem ${semVendaNum}`}</>}.</>}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {erro && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{erro}</p>}
         </div>
