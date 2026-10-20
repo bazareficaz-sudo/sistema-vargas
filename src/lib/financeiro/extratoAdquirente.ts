@@ -50,6 +50,15 @@ export type LinhaExtrato = {
   liquido: number
   parcelas: number | null
   metodo: string | null
+  /**
+   * BUSINESS_UNIT: de qual negócio é a linha.
+   *
+   * `Mercado Pago` é a loja física; `Mercado Libre` é o marketplace. A mesma
+   * conta recebe os dois, e misturá-los mediu o custo do pix em 3,57% quando
+   * o contratado é 0,49% — a conclusão teria sido cobrar explicação de uma
+   * adquirente que estava cumprindo o combinado.
+   */
+  unidade: string | null
   /** `Point`, `QR`… de onde a cobrança veio. */
   canal: string | null
   /** `credit_card`, `debit_card`, `bank_transfer`, `account_money`. */
@@ -94,6 +103,10 @@ const COLUNAS: Record<string, string[]> = {
   debito: ['net_debit_amount', 'valor_debito'],
   parcelas: ['installments', 'parcelas'],
   metodo: ['payment_method', 'metodo', 'forma'],
+  // BUSINESS_UNIT: 'Mercado Pago' e a loja, 'Mercado Libre' e o marketplace.
+  // Sem separar, a comissao de marketplace (~37%) entra na media e faz a taxa
+  // da maquininha parecer sete vezes maior do que e.
+  unidade: ['business_unit', 'unidade'],
   canal: ['sub_unit', 'canal'],
   metodoTipo: ['payment_method_type', 'tipo_metodo'],
   compraId: ['purchase_id', 'compra_id'],
@@ -347,6 +360,7 @@ export function lerExtrato(csv: string): LeituraExtrato {
         ? Math.max(1, Math.floor(Number(parcelasLidas)))
         : null,
       metodo: (pegar(campos, 'metodo') ?? '').trim() || null,
+      unidade: (pegar(campos, 'unidade') ?? '').trim() || null,
       canal: (pegar(campos, 'canal') ?? '').trim() || null,
       metodoTipo: (pegar(campos, 'metodoTipo') ?? '').trim() || null,
       compraId: (pegar(campos, 'compraId') ?? '').trim() || null,

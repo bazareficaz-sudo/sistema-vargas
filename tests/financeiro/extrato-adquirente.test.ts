@@ -318,6 +318,29 @@ describe('O ARQUIVO REAL DO BAZAR EFICAZ, lido em 19/10/2026', () => {
     assert.equal(linhas[0].dataAprovacao, '2026-10-19')
   })
 
+  test('A UNIDADE DE NEGÓCIO, que separa a loja do marketplace', () => {
+    // Sem ela, a conferência mediu o custo do pix em 3,57% contra 0,49%
+    // contratados — e a conclusão teria sido cobrar explicação de uma
+    // adquirente que estava cumprindo o combinado. Eram 17 linhas de pix do
+    // Mercado Livre, com comissão de marketplace de ~37%, puxando a média.
+    assert.equal(linhas[0].unidade, 'Mercado Pago')
+
+    const comMarketplace = [
+      'DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT;GROSS_AMOUNT;MP_FEE_AMOUNT;TAXES_AMOUNT;PAYMENT_METHOD;TRANSACTION_APPROVAL_DATE;BUSINESS_UNIT;SUB_UNIT',
+      '2026-10-14;182205314893;payment;183.65;0.00;307.93;-32.33;0.00;pix;2026-10-09;Mercado Libre; ',
+      '2026-10-14;184959657662;payment;60.50;0.00;60.80;-0.30;0.00;pix;2026-10-14;Mercado Pago;QR',
+    ].join('\n')
+    const { linhas: l } = lerExtrato(comMarketplace)
+
+    const loja = l.find(x => x.unidade === 'Mercado Pago')!
+    const market = l.find(x => x.unidade === 'Mercado Libre')!
+
+    // A da loja custa 0,49%; a do marketplace, 40%. São a MESMA forma de
+    // pagamento, e somá-las não diz nada sobre nenhuma das duas.
+    assert.equal(Number(((loja.bruto - loja.liquido) / loja.bruto * 100).toFixed(2)), 0.49)
+    assert.equal(Number(((market.bruto - market.liquido) / market.bruto * 100).toFixed(2)), 40.36)
+  })
+
   test('o canal e o tipo do método vêm junto', () => {
     assert.equal(linhas[0].canal, 'QR')
     assert.equal(linhas[0].metodoTipo, 'bank_transfer')

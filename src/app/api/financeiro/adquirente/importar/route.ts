@@ -45,7 +45,7 @@ export async function GET() {
     // 90 dias: o relatório de Liberações olha para trás, e o crédito só
     // aparece trinta dias depois da venda.
     sb.from('adquirente_extrato')
-      .select('data, bruto, taxa, liquido, tipo, metodo, canal, metodo_tipo')
+      .select('data, bruto, taxa, liquido, tipo, metodo, canal, metodo_tipo, unidade')
       .gte('data', new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10))
       .order('data', { ascending: false }).limit(5000),
     sb.from('adquirente_extrato_suspeito_v1').select('origem_id').limit(100),
@@ -78,9 +78,45 @@ export async function GET() {
     porDia.set(e.data, t)
   }
 
+  // O CUSTO MEDIDO POR FORMA, separado por unidade de negocio.
+  //
+  // E o numero que responde "a adquirente cobrou o que prometeu?" -- e a
+  // separacao e o que o torna confiavel: juntando loja e marketplace, o pix
+  // media 3,57% contra 0,49% contratados, porque a comissao de marketplace
+  // (~37%) entrava na conta.
+  //
+  // So vendas: `payment` com bruto positivo. Saque, estorno e disputa nao tem
+  // "taxa" a conferir.
+  const porForma = new Map<string, {
+    unidade: string; metodo: string; linhas: number; bruto: number; custo: number; pct: number
+  }>()
+  for (const e of (extrato ?? []) as any[]) {
+    if (String(e.tipo) !== 'payment') continue
+    const bruto = Number(e.bruto)
+    if (!(bruto > 0)) continue
+    const unidade = e.unidade ?? 'sem unidade'
+    const metodo = e.metodo_tipo ?? 'sem metodo'
+    const k = `${unidade}|${metodo}`
+    const f = porForma.get(k) ?? { unidade, metodo, linhas: 0, bruto: 0, custo: 0, pct: 0 }
+    f.linhas += 1
+    f.bruto += bruto
+    f.custo += bruto - Number(e.liquido)
+    porForma.set(k, f)
+  }
+
   return NextResponse.json({
     ok: true,
     tokenConfigurado: tokenDoAmbiente() !== '',
+    formas: [...porForma.values()]
+      .map(f => ({
+        ...f,
+        bruto: Number(f.bruto.toFixed(2)),
+        custo: Number(f.custo.toFixed(2)),
+        // Percentual do TOTAL, nao a media dos percentuais: venda de R$ 5 e
+        // venda de R$ 500 nao pesam igual.
+        pct: Number((f.custo / f.bruto * 100).toFixed(2)),
+      }))
+      .sort((a, b) => b.bruto - a.bruto),
     importacoes: importacoes ?? [],
     dias: [...porDia.values()]
       .map(t => ({
@@ -250,6 +286,7 @@ async function importar(sb: any, empresaId: string, body: any, token: string) {
     parcelas: l.parcelas,
     metodo: l.metodo,
     data_aprovacao: l.dataAprovacao,
+    unidade: l.unidade,
     canal: l.canal,
     metodo_tipo: l.metodoTipo,
     compra_id: l.compraId,
