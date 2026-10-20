@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  avisoDeContato, horasAte, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA, ROTULO_ACAO, ROTULO_ETAPA, tempoDesde,
+  anuncioAceitaResposta, avisoDeContato, horasAte, LIMITE_MENSAGEM_POS_VENDA, LIMITE_RESPOSTA_PERGUNTA, ROTULO_ACAO, ROTULO_ETAPA, ROTULO_STATUS_ANUNCIO, tempoDesde,
   type ConversaML, type PerguntaML, type ReclamacaoML,
 } from '@/lib/mercadolivre/atendimentoRegras'
 
@@ -17,6 +17,13 @@ type Envio = { tipo: 'pergunta' | 'reclamacao' | 'conversa'; canalId: string; id
 
 const quando = (iso: string) => iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }) : ''
 const brl = (v: number | null) => v == null ? '' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+// Cada conta com a sua cor — a etiqueta diz de qual conta é a pergunta.
+const CORES_CONTA = ['bg-yellow-100 text-yellow-900 border-yellow-300', 'bg-sky-100 text-sky-900 border-sky-300', 'bg-violet-100 text-violet-900 border-violet-300', 'bg-emerald-100 text-emerald-900 border-emerald-300']
+function Conta({ nome, contas }: { nome: string; contas: string[] }) {
+  const cor = CORES_CONTA[Math.max(0, contas.indexOf(nome)) % CORES_CONTA.length]
+  return <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border ${cor}`}>{nome}</span>
+}
 
 function Resposta({ envio, limite, sugestao, onEnviado }: {
   envio: Envio; limite: number
@@ -126,8 +133,14 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
                 {p.item?.foto ? <img src={p.item.foto} alt="" className="w-14 h-14 rounded-lg object-cover border border-gray-100 shrink-0" />
                   : <div className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-200 shrink-0" />}
                 <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <Conta nome={p.canalNome} contas={contas} />
+                    {!anuncioAceitaResposta(p.item?.status) && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-200 text-gray-700">anúncio {ROTULO_STATUS_ANUNCIO[p.item!.status!] ?? p.item!.status}</span>
+                    )}
+                  </div>
                   <p className="text-xs text-gray-500 truncate">
-                    {p.canalNome} · {p.item?.link ? <a href={p.item.link} target="_blank" rel="noreferrer" className="hover:underline">{p.item.titulo}</a> : (p.item?.titulo ?? p.itemId)}
+                    {p.item?.link ? <a href={p.item.link} target="_blank" rel="noreferrer" className="hover:underline">{p.item.titulo}</a> : (p.item?.titulo ?? p.itemId)}
                     {p.item?.preco != null && ` · ${brl(p.item.preco)}`}
                     {p.item?.estoque != null && ` · ${p.item.estoque > 0 ? 'com estoque' : 'sem estoque'}`}
                   </p>
@@ -135,8 +148,15 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
                   <p className={`text-[11px] mt-0.5 ${horasAte(p.criadaEm) < -24 ? 'text-red-600' : 'text-gray-400'}`}>perguntou há {tempoDesde(p.criadaEm)} · {quando(p.criadaEm)}</p>
                 </div>
               </div>
-              <Resposta envio={{ tipo: 'pergunta', canalId: p.canalId, id: p.id }} limite={LIMITE_RESPOSTA_PERGUNTA} onEnviado={recarregar}
-                sugestao={{ pergunta: p.texto, produtoId: p.produtoId, anuncio: p.item ? { titulo: p.item.titulo, preco: p.item.preco, estoque: p.item.estoque } : null }} />
+              {anuncioAceitaResposta(p.item?.status) ? (
+                <Resposta envio={{ tipo: 'pergunta', canalId: p.canalId, id: p.id }} limite={LIMITE_RESPOSTA_PERGUNTA} onEnviado={recarregar}
+                  sugestao={{ pergunta: p.texto, produtoId: p.produtoId, canalId: p.canalId, itemId: p.itemId, anuncio: p.item ? { titulo: p.item.titulo, preco: p.item.preco, estoque: p.item.estoque } : null }} />
+              ) : (
+                <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  O Mercado Livre só aceita resposta com o anúncio <strong>ativo</strong>. Este está {ROTULO_STATUS_ANUNCIO[p.item!.status!] ?? p.item!.status}
+                  {p.item?.estoque === 0 ? ' (sem estoque)' : ''}: reponha o estoque ou reative o anúncio e a pergunta volta a poder ser respondida.
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -152,9 +172,9 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
               <div key={r.id} className={`bg-white border rounded-xl p-3 space-y-2 ${faltam != null && faltam < 24 ? 'border-red-300' : 'border-gray-200'}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{r.motivo}</p>
-                    <p className="text-xs text-gray-500">
-                      {r.canalNome} · {ROTULO_ETAPA[r.etapa] ?? r.etapa} · aberta em {quando(r.criadaEm)}
+                    <div className="flex items-center gap-2"><Conta nome={r.canalNome} contas={contas} /><p className="text-sm font-medium text-gray-900">{r.motivo}</p></div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {ROTULO_ETAPA[r.etapa] ?? r.etapa} · aberta em {quando(r.criadaEm)}
                       {r.pedidoExterno && <> · pedido {r.pedidoId
                         ? <Link href={`/dashboard/pedidos-ecommerce?q=${r.pedidoExterno}`} className="text-blue-600 hover:underline">{r.pedidoExterno}</Link>
                         : r.pedidoExterno}</>}
@@ -196,7 +216,7 @@ export default function AtendimentoMLClient({ contas, perguntas, reclamacoes, co
           {conversas.length === 0 && <p className="text-sm text-gray-500 py-6 text-center">Nenhuma mensagem não lida. 👏</p>}
           {conversas.map(c => (
             <div key={c.packId} className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
-              <p className="text-xs text-gray-500">{c.canalNome} · venda {c.packId} · {c.naoLidas} não lida(s){c.temReclamacao && ' · tem reclamação (responda pela aba Reclamações)'}</p>
+              <p className="text-xs text-gray-500"><Conta nome={c.canalNome} contas={contas} /> venda {c.packId} · {c.naoLidas} não lida(s){c.temReclamacao && ' · tem reclamação (responda pela aba Reclamações)'}</p>
               <div className="bg-gray-50 rounded-lg p-2 space-y-1.5 max-h-60 overflow-y-auto">
                 {c.mensagens.map((m, i) => (
                   <div key={i} className={`text-xs ${m.daLoja ? 'text-right' : ''}`}>

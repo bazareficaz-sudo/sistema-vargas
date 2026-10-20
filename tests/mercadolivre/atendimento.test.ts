@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { acoesDoVendedor, avisoDeContato, horasAte, prazoDaReclamacao, resumirAtendimento, tempoDesde } from '../../src/lib/mercadolivre/atendimentoRegras'
+import { acoesDoVendedor, anuncioAceitaResposta, avisoDeContato, erroDoMLEmPortugues, horasAte, prazoDaReclamacao, resumirAtendimento, tempoDesde } from '../../src/lib/mercadolivre/atendimentoRegras'
 
 describe('reclamação do Mercado Livre', () => {
   // Formato real (20/10/2026): o vendedor é o "respondent"; cada ação tem prazo.
@@ -62,5 +62,17 @@ describe('cartão do Início do vendedor', () => {
   })
   test('nada aberto', () => {
     assert.deepEqual(resumirAtendimento([{ perguntas: 0, reclamacoes: [] }], agora), { perguntas: 0, reclamacoes: 0, urgentes: 0, proximoPrazo: null })
+  })
+})
+
+describe('pergunta em anúncio não ativo', () => {
+  test('só anúncio ativo aceita resposta', () => {
+    assert.equal(anuncioAceitaResposta('active'), true)
+    assert.equal(anuncioAceitaResposta('paused'), false)
+    assert.equal(anuncioAceitaResposta(null), true) // sem a informação, deixa tentar
+  })
+  test('o erro do ML vira explicação', () => {
+    assert.match(erroDoMLEmPortugues('Item must be active [detalhe bruto: {"error":"not_active_item"}]'), /anúncio não está ativo/)
+    assert.equal(erroDoMLEmPortugues('outro erro'), 'outro erro')
   })
 })

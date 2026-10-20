@@ -56,12 +56,12 @@ export async function perguntasSemResposta(sb: any, canal: CanalAtendimento): Pr
   const itens = new Map<string, PerguntaML['item']>()
   for (let i = 0; i < itensIds.length; i += 20) {
     const lote = itensIds.slice(i, i + 20)
-    const resp = await mlGet('/items', { ids: lote.join(','), attributes: 'id,title,thumbnail,permalink,price,available_quantity' }, canal.accessToken).catch(() => [])
+    const resp = await mlGet('/items', { ids: lote.join(','), attributes: 'id,title,thumbnail,permalink,price,available_quantity,status' }, canal.accessToken).catch(() => [])
     for (const x of Array.isArray(resp) ? resp : []) {
       const b = x?.body
       if (x?.code === 200 && b?.id) itens.set(String(b.id), {
         titulo: b.title ?? '', foto: b.thumbnail ? String(b.thumbnail).replace(/^http:/, 'https:') : null,
-        preco: b.price ?? null, estoque: b.available_quantity ?? null, link: b.permalink ?? null,
+        preco: b.price ?? null, estoque: b.available_quantity ?? null, link: b.permalink ?? null, status: b.status ?? null,
       })
     }
   }
@@ -181,4 +181,12 @@ export async function resumoParaInicio(sb: any, empresaId: string, limiteMs = 60
   })()
   const tempo = new Promise<null>(res => setTimeout(() => res(null), limiteMs))
   return Promise.race([trabalho.catch(() => null), tempo])
+}
+
+/** Descrição do anúncio no ML (texto), para a IA responder com o que o anúncio diz. */
+export async function descricaoDoAnuncio(canal: CanalAtendimento, itemId: string): Promise<string | null> {
+  if (!/^MLB\d+$/i.test(itemId)) return null
+  const d = await mlGet(`/items/${itemId}/description`, {}, canal.accessToken).catch(() => null)
+  const texto = String(d?.plain_text ?? '').trim()
+  return texto ? texto.slice(0, 4000) : null
 }
