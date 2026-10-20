@@ -48,3 +48,21 @@ export function filtroNomeOuMarca(termo: string): string | null {
   if (!t) return null
   return `nome.ilike."%${t}%",marca.ilike."%${t}%"`
 }
+
+/**
+ * Nome sugerido para um grupo novo: as palavras que todos os nomes têm em
+ * comum no começo ("DISJUNTOR MONO 32A STECK" + "DISJUNTOR MONO 32A WEG" →
+ * "DISJUNTOR MONO 32A"). Sem nada em comum, o nome do primeiro produto.
+ */
+export function sugerirNomeGrupo(nomes: string[]): string | null {
+  const listas = nomes.map(n => (normalizarGrupoSimilar(n) ?? '').split(' ').filter(Boolean)).filter(l => l.length)
+  if (!listas.length) return null
+  const comum: string[] = []
+  for (let i = 0; i < listas[0].length; i++) {
+    const palavra = listas[0][i]
+    if (listas.every(l => l[i] === palavra)) comum.push(palavra)
+    else break
+  }
+  // Uma palavra só ("CABO") agruparia coisa demais; aí vale o nome inteiro.
+  return comum.length >= 2 ? comum.join(' ') : listas[0].join(' ')
+}
