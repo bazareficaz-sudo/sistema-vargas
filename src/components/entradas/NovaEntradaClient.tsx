@@ -20,7 +20,8 @@ import {
   aplicarPolitica, ehPolitica, POLITICA_PADRAO, POLITICA_LABEL, POLITICA_AJUDA,
   markupDoPreco, precoDoMarkup, type PoliticaPreco,
 } from '@/lib/entradas/politicaPreco'
-import { paraNumeroBr, formatarNumeroBr, paraEdicaoBr } from '@/lib/entradas/numeroBr'
+import { paraNumeroBr } from '@/lib/entradas/numeroBr'
+import CampoNum from '@/components/ui/CampoNum'
 import { avisarChegada } from '@/lib/getulio/avisarChegada'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
@@ -2328,62 +2329,6 @@ function F({ label, value, onChange, placeholder, type = 'text' }: {
 // cada tecla pelo `toFixed` do valor confirmado — o numero so volta a ser
 // formatado quando o campo perde o foco. Enter confirma e sai; Esc devolve o
 // valor anterior; TAB confirma e ja esta no proximo campo.
-function CampoNum({ value, onCommit, decimais = 2, sufixo = '', forte = false, placeholder = '', compacto = true }: {
-  value: number
-  onCommit: (v: number) => void
-  decimais?: number
-  sufixo?: string
-  forte?: boolean
-  placeholder?: string
-  /**
-   * true = celula de tabela; false = campo de formulario.
-   *
-   * Duas variantes explicitas em vez de sobrepor classe por fora: o Tailwind
-   * v4 mudou o modificador `!` de prefixo para sufixo, e um override que
-   * silenciosamente nao aplica deixa o campo minusculo sem erro nenhum.
-   */
-  compacto?: boolean
-}) {
-  const [rascunho, setRascunho] = useState<string | null>(null)
-  // Parado: 1.234,50. Em edição: 1234,50 — sem o separador de milhar que a
-  // própria tela escreveria e depois teria de reinterpretar.
-  const texto = rascunho ?? (value ? formatarNumeroBr(value, decimais) : '')
-
-  function confirmar(t: string) {
-    setRascunho(null)
-    const limpo = Math.round(paraNumeroBr(t) * 10000) / 10000
-    if (limpo !== value) onCommit(limpo)
-  }
-
-  return (
-    <div className="relative">
-      <input
-        value={texto}
-        inputMode="decimal"
-        placeholder={placeholder}
-        onChange={e => setRascunho(e.target.value)}
-        onFocus={e => { setRascunho(value ? paraEdicaoBr(value, decimais) : ''); e.target.select() }}
-        onBlur={e => confirmar(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() }
-          if (e.key === 'Escape') { setRascunho(null); (e.target as HTMLInputElement).blur() }
-        }}
-        className={`w-full border bg-white text-right font-mono
-          hover:border-gray-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-200
-          ${compacto
-            ? 'rounded border-gray-200 px-1.5 py-1 text-xs'
-            : 'rounded-lg border-gray-300 px-2.5 py-1.5 text-sm'}
-          ${forte ? 'font-semibold text-gray-900' : 'text-gray-700'} ${sufixo ? 'pr-4' : ''}`}
-      />
-      {sufixo && (
-        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400">
-          {sufixo}
-        </span>
-      )}
-    </div>
-  )
-}
-
 function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
     <div className="flex justify-between text-sm">

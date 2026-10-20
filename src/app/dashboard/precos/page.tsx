@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import PrecosClient from '@/components/precos/PrecosClient'
 import { produtosDaEntrada } from '@/lib/produtos/filtroEntrada'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
+import { aplicarBuscaPorTermos } from '@/lib/busca/termos'
 
 export const dynamic = 'force-dynamic'
 const POR_PAGINA = 100
@@ -85,9 +86,11 @@ export default async function PrecosPage({
     query = query.in('id', idList).order('nome')
   } else {
     query = aplicarFiltros(query).eq('ativo', true).order('nome').range(offset, offset + POR_PAGINA - 1)
-    // EAN entra na busca junto com nome/SKU — mesma tríade da tela de
-    // Produtos, para quem chega com o código de barras em mãos.
-    if (q) query = query.or(`nome.ilike.%${q}%,sku.ilike.%${q}%,ean.ilike.%${q}%`)
+    // Busca por PALAVRAS, em qualquer ordem — a mesma da tela de Produtos.
+    // Antes era a frase inteira num ilike só: "disjuntor 10a" não achava
+    // "DISJUNTOR DIN MONOPOLAR C.C 3KA - 10A". Marca entra junto: com tantos
+    // nomes parecidos, "disjuntor 10a steck" é como se separa um do outro.
+    if (q) query = aplicarBuscaPorTermos(query, q, ['nome', 'sku', 'ean', 'marca'])
   }
 
   const { data: produtos, count } = await query
