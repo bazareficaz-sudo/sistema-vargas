@@ -5,7 +5,7 @@ import { buscarConfigUnificacao, estoqueUnificadoDeProdutos } from '@/lib/produt
 import { calcularPrecoEstoquePorRegra } from '@/lib/shopee/aplicarRegra'
 import { enviarParaAnuncio, sleep, THROTTLE_ENVIO_MS, type AlvoVariacao, type CanalEnvio } from './envio'
 import { precisaEnviar } from './precisaEnviar'
-import { PLATAFORMAS_CONFERIVEIS, conferencia, lerEstoqueNoCanal } from './conferirEstoque'
+import { conferencia, deveConferir, lerEstoqueNoCanal } from './conferirEstoque'
 import { canalAceitaEnvio, type CanalComInterruptores } from './canais'
 import {
   variacoesElegiveis, decidirPausaComVariacoes, rotuloDaVariacao, resumoDosAlvos,
@@ -533,14 +533,14 @@ export async function processarFilaDaEmpresa(
           // até lá o mesmo número seria mandado a cada rodada. Ver
           // conferirEstoque.ts.
           let medidoAgora: number | null = null
-          if (r.ok && decisaoEnvio.espelhoDivergente && estoqueNovo !== undefined
-            && PLATAFORMAS_CONFERIVEIS.has(canal.plataforma)) {
+          // E sempre que o envio zera o anúncio (ver deveConferir).
+          if (r.ok && deveConferir({ espelhoDivergente: decisaoEnvio.espelhoDivergente, estoqueNovo, plataforma: canal.plataforma })) {
             try {
               await sleep(1000)
               medidoAgora = await lerEstoqueNoCanal(sb, canal, String(a.id_externo))
             } catch { /* sem leitura agora: a sincronização de catálogo confere depois */ }
           }
-          const conf = medidoAgora != null && estoqueNovo !== undefined ? conferencia(estoqueNovo, medidoAgora) : null
+          const conf = medidoAgora != null && estoqueNovo !== undefined ? conferencia(estoqueNovo, medidoAgora, canal.plataforma) : null
 
           if (r.ok && conf && !conf.confirmado) {
             // Aceito e não aplicado. O espelho NÃO recebe o número: ele não

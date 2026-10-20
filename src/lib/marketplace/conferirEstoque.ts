@@ -18,10 +18,19 @@ import { getDetalheProduto } from '@/lib/tiktok/catalog'
 import { refreshAccessTokenIfNeeded as refreshTiktok } from '@/lib/tiktok/client'
 import { COLUNAS_CANAL as COLUNAS_CANAL_TIKTOK, montarCanal as montarCanalTiktok } from '@/lib/tiktok/canal'
 import { estoqueDoProduto } from '@/lib/tiktok/sync'
+import { getIntegracaoCredentials, refreshAccessTokenIfNeeded as refreshShopee, shopeeGet } from '@/lib/shopee/client'
+import type { ShopeeChannel } from '@/lib/shopee/types'
 import type { CanalEnvio } from './envio'
 
-/** Plataformas em que dá para ler o estoque de um anúncio simples na hora. */
-export const PLATAFORMAS_CONFERIVEIS = new Set(['mercadolivre', 'tiktok'])
+/**
+ * Plataformas em que dá para ler o estoque de um anúncio simples na hora.
+ *
+ * SHOPEE ENTROU EM 20/10/2026: em anúncio sem GTIN (EAN) ou sem medidas da
+ * embalagem, ela responde o update_stock como aceito e NÃO aplica — três
+ * torneiras Acquabios ficaram com 1000 depois de a fila "enviar" 0 (a mesma
+ * Shopee recusou pausar esses itens com "The GTIN code is mandatory").
+ */
+export const PLATAFORMAS_CONFERIVEIS = new Set(['mercadolivre', 'tiktok', 'shopee'])
 
 /**
  * Estoque do anúncio (simples) como a plataforma devolve agora.
@@ -37,6 +46,17 @@ export async function lerEstoqueNoCanal(sb: any, canal: CanalEnvio, idExterno: s
     const item = await mlGet(`/items/${idExterno}`, { attributes: 'available_quantity' }, c.accessToken)
     return typeof item?.available_quantity === 'number' ? item.available_quantity : null
   }
+  if (canal.plataforma === 'shopee') {
+    const c = await refreshShopee(sb, {
+      id: canal.id, empresaId: canal.empresa_id, sellerId: canal.seller_id,
+      accessToken: canal.access_token, refreshToken: canal.refresh_token, tokenExpiraEm: canal.token_expira_em,
+    } as ShopeeChannel)
+    const { partnerId, partnerKey } = await getIntegracaoCredentials(sb)
+    const r = await shopeeGet('/api/v2/product/get_item_base_info', { item_id_list: idExterno },
+      { partnerId, partnerKey, accessToken: c.accessToken, shopId: String(c.sellerId) })
+    const n = r?.response?.item_list?.[0]?.stock_info_v2?.summary_info?.total_available_stock
+    return typeof n === 'number' ? n : null
+  }
   if (canal.plataforma === 'tiktok') {
     const { data: canalRow } = await sb.from('marketplace_canais').select(COLUNAS_CANAL_TIKTOK).eq('id', canal.id).single()
     if (!canalRow?.shop_cipher) return null
@@ -50,11 +70,23 @@ export async function lerEstoqueNoCanal(sb: any, canal: CanalEnvio, idExterno: s
 export type Conferencia = { confirmado: boolean; detalhe: string }
 
 /** O que a leitura logo depois do envio diz sobre ele. */
-export function conferencia(enviado: number, medido: number): Conferencia {
+export function conferencia(enviado: number, medido: number, plataforma?: string): Conferencia {
   if (medido === enviado) return { confirmado: true, detalhe: `conferido na plataforma: ${medido}` }
   return {
     confirmado: false,
     detalhe: `a plataforma aceitou o envio de ${enviado}, mas a leitura logo depois ainda mostra ${medido} — ` +
-      'o número não está sendo aplicado nesse anúncio (confira no painel do canal)',
+      (plataforma === 'shopee'
+        ? 'a Shopee não aplica alteração em anúncio com cadastro incompleto: confira GTIN (EAN) e medidas da embalagem no Seller Centre'
+        : 'o número não está sendo aplicado nesse anúncio (confira no painel do canal)'),
   }
+}
+
+/**
+ * Conferir logo depois do envio? No REENVIO (a medida contradizia o espelho)
+ * e sempre que o envio ZERA o anúncio — é o caso em que um "aceito e não
+ * aplicado" vende o que a loja não tem.
+ */
+export function deveConferir(p: { espelhoDivergente: boolean; estoqueNovo: number | undefined; plataforma: string }): boolean {
+  if (p.estoqueNovo === undefined || !PLATAFORMAS_CONFERIVEIS.has(p.plataforma)) return false
+  return p.espelhoDivergente || p.estoqueNovo <= 0
 }
