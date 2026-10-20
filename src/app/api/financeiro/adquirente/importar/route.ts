@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createHash } from 'node:crypto'
 import { createClient } from '@/lib/supabase/server'
 import { exigirPermissao } from '@/lib/auth/permissoes'
-import { lerExtrato, ehReserva } from '@/lib/financeiro/extratoAdquirente'
+import { lerExtrato, ehReserva, grupoDaLinha } from '@/lib/financeiro/extratoAdquirente'
 import {
   pedirRelatorio, listarRelatorios, baixarRelatorio, tokenDoAmbiente,
 } from '@/lib/financeiro/mercadoPagoRelatorio'
@@ -56,12 +56,25 @@ export async function GET() {
   // está no arquivo como `payment` ou `payout`, e somar as duas conta o mesmo
   // dinheiro duas vezes. No arquivo real eram 462 reservas contra 1.266
   // pagamentos.
-  const porDia = new Map<string, { data: string; bruto: number; taxa: number; liquido: number; custo: number; lancamentos: number }>()
+  const porDia = new Map<string, { data: string; bruto: number; taxa: number; liquido: number; custo: number; lancamentos: number; recebimento: number; saida: number; saque: number; ajuste: number }>()
   for (const e of (extrato ?? []) as any[]) {
     if (ehReserva(String(e.tipo ?? ''))) continue
-    const t = porDia.get(e.data) ?? { data: e.data, bruto: 0, taxa: 0, liquido: 0, custo: 0, lancamentos: 0 }
+    const t = porDia.get(e.data) ?? {
+      data: e.data, bruto: 0, taxa: 0, liquido: 0, custo: 0, lancamentos: 0,
+      recebimento: 0, saida: 0, saque: 0, ajuste: 0,
+    }
     t.bruto += Number(e.bruto); t.taxa += Number(e.taxa); t.liquido += Number(e.liquido)
     t.lancamentos += 1
+    // Mesma regra de grupo do leitor, para a tela e o arquivo nunca
+    // discordarem sobre o que e venda, despesa ou saque.
+    const g = grupoDaLinha({
+      tipo: String(e.tipo ?? ''), metodoTipo: e.metodo_tipo ?? null,
+      liquido: Number(e.liquido), bruto: Number(e.bruto),
+    })
+    if (g === 'recebimento') t.recebimento += Number(e.liquido)
+    else if (g === 'saida') t.saida += Number(e.liquido)
+    else if (g === 'saque') t.saque += Number(e.liquido)
+    else if (g === 'ajuste') t.ajuste += Number(e.liquido)
     porDia.set(e.data, t)
   }
 
@@ -79,6 +92,10 @@ export async function GET() {
         // das colunas de tarifa -- no credito o arquivo declara menos de um
         // quinto do que realmente desconta.
         custo: Number((t.bruto - t.liquido).toFixed(2)),
+        recebimento: Number(t.recebimento.toFixed(2)),
+        saida: Number(t.saida.toFixed(2)),
+        saque: Number(t.saque.toFixed(2)),
+        ajuste: Number(t.ajuste.toFixed(2)),
       }))
       .sort((a, b) => (a.data < b.data ? 1 : -1)),
     suspeitos: (suspeitos ?? []).length,
@@ -242,33 +259,42 @@ async function importar(sb: any, empresaId: string, body: any, token: string) {
 
   // Em lotes: um INSERT com milhares de linhas estoura o limite da requisição,
   // e falharia justamente no mês que mais tem o que conferir.
-  let novas = 0
   for (let i = 0; i < registros.length; i += 500) {
     const lote = registros.slice(i, i + 500)
-    const { data, error } = await sb.from('adquirente_extrato')
+    const { error } = await sb.from('adquirente_extrato')
       .upsert(lote, { onConflict: 'caixa_id,linha_hash', ignoreDuplicates: true })
-      .select('id')
     if (error) {
       await sb.from('adquirente_importacao').update({
-        linhas_novas: novas,
         erro: `Falha ao gravar a partir da linha ${i + 1}: ${error.message}`,
       }).eq('id', imp.id)
       return NextResponse.json({ ok: false, erro: error.message, importacaoId: imp.id }, { status: 500 })
     }
-    novas += (data ?? []).length
   }
 
-  await sb.from('adquirente_importacao').update({ linhas_novas: novas }).eq('id', imp.id)
+  // QUANTAS ENTRARAM DE VERDADE, contadas no banco.
+  //
+  // Antes eu contava pelas linhas que o `upsert` devolvia no `select`. Com
+  // `ignoreDuplicates`, ele não devolve nada — e a tela dizia "1941 lidas,
+  // 0 novas" numa importação em que as 1941 entraram. Quem lesse concluiria
+  // que a importação não fez nada.
+  //
+  // Contar por `importacao_id` é exato: linha ignorada por já existir mantém
+  // o id da importação que a trouxe primeiro.
+  const { count: novas } = await sb.from('adquirente_extrato')
+    .select('id', { count: 'exact', head: true })
+    .eq('importacao_id', imp.id)
+
+  await sb.from('adquirente_importacao').update({ linhas_novas: novas ?? 0 }).eq('id', imp.id)
 
   return NextResponse.json({
     ok: true,
     importacaoId: imp.id,
     caixa: caixa.nome,
     lidas: linhas.length,
-    novas,
+    novas: novas ?? 0,
     // Repetidas não é erro: é o resultado esperado de reimportar o mesmo
     // arquivo, e mostrar o número evita a dúvida "importou ou não?".
-    repetidas: linhas.length - novas,
+    repetidas: linhas.length - (novas ?? 0),
     descartadas,
     cabecalhoRecebido: cabecalho.recebido,
   })
