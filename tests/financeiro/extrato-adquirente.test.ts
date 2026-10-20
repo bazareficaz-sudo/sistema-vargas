@@ -337,6 +337,33 @@ describe('O ARQUIVO REAL DO BAZAR EFICAZ, lido em 19/10/2026', () => {
     assert.equal(t[0].liquido, 76.29) // 60,50 + 29,08 − 13,29
   })
 
+  test('A DIREÇÃO DO DINHEIRO separa o que o total misturava', () => {
+    // No arquivo real, dias com saque apareciam com bruto NEGATIVO — "bruto
+    // −R$ 2.074,36" num dia de 73 lançamentos —, como se a loja não tivesse
+    // vendido. Somar venda, despesa e saque num número só não significa nada.
+    const t = totaisPorDia(linhas)[0]
+    assert.equal(t.recebimento, 89.58, 'as duas vendas: 60,50 + 29,08')
+    assert.equal(t.saida, -13.29, 'o pagamento feito pela conta')
+    assert.equal(t.saque, 0)
+    assert.equal(Number((t.recebimento + t.saida + t.saque + t.ajuste).toFixed(2)), t.liquido,
+      'as quatro direcoes somadas reconstroem o liquido')
+  })
+
+  test('saque é saque, e não despesa', () => {
+    // Transferência da conta Mercado Pago para o banco: o dinheiro não sumiu,
+    // mudou de lugar. Misturar com despesa faria o gasto do mês parecer o
+    // dobro — no arquivo real foram R$ 10.924,60 de saque contra R$ 17.999,30
+    // de pagamentos de verdade.
+    const comSaque = [
+      'DATE;SOURCE_ID;DESCRIPTION;NET_CREDIT_AMOUNT;NET_DEBIT_AMOUNT;GROSS_AMOUNT;MP_FEE_AMOUNT;TAXES_AMOUNT;PAYMENT_METHOD',
+      '2026-10-19;P1;payout;0.00;500.00;-500.00;0.00;0.00;',
+      '2026-10-19;P2;payment;0.00;80.00;-80.00;0.00;0.00;available_money',
+    ].join('\n')
+    const t = totaisPorDia(lerExtrato(comSaque).linhas)[0]
+    assert.equal(t.saque, -500)
+    assert.equal(t.saida, -80)
+  })
+
   test('o CUSTO do dia é bruto menos líquido, e supera a tarifa declarada', () => {
     // 77,51 − 76,29 = 1,22 de custo real, contra 0,47 declarados em tarifa.
     // A diferença é o crédito, como mostrado acima.

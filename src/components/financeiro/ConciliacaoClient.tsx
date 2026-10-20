@@ -18,7 +18,10 @@ type Importacao = {
   linhas_lidas: number; linhas_novas: number; linhas_descartadas: number
   erro: string | null; cabecalho_recebido: string[] | null; created_at: string
 }
-type Dia = { data: string; bruto: number; taxa: number; liquido: number; custo: number; lancamentos: number }
+type Dia = {
+  data: string; bruto: number; taxa: number; liquido: number; custo: number; lancamentos: number
+  recebimento: number; saida: number; saque: number; ajuste: number
+}
 type Relatorio = { nomeArquivo: string; status: string | null; de: string | null; ate: string | null }
 
 function brl(n: number) {
@@ -228,6 +231,11 @@ export default function ConciliacaoClient() {
             duas vezes.
           </p>
           <p className="text-xs text-slate-500 mb-2">
+            Separado pela <strong>direção do dinheiro</strong>: venda que entrou, pagamento
+            feito pela conta, e saque para o banco. Somar os três num número só faz o dia de
+            saque parecer prejuízo.
+          </p>
+          <p className="text-xs text-slate-500 mb-2">
             O <strong>custo</strong> é bruto menos líquido — o que realmente deixou de entrar.
             Ele costuma ser maior que a tarifa declarada no arquivo: numa venda no crédito de
             R$ 30,00, o Mercado Pago declara R$ 0,17 de tarifa e credita R$ 29,08, custo real
@@ -235,19 +243,34 @@ export default function ConciliacaoClient() {
           </p>
           <div className="bg-white border border-slate-100 rounded-xl divide-y divide-slate-50">
             {dias.slice(0, 60).map(d => (
-              <div key={d.data} className="px-4 py-2.5 flex items-center justify-between gap-3">
-                <span className="text-sm text-slate-700">
-                  {dataBR(d.data)}
-                  <span className="text-slate-400"> · {d.lancamentos} lançamento(s)</span>
-                </span>
-                <span className="text-sm text-slate-600">
-                  bruto <strong className="text-slate-800">{brl(d.bruto)}</strong>
-                  <span className="text-red-700"> − custo {brl(d.custo)}</span>
-                  <span className="text-emerald-700"> = {brl(d.liquido)}</span>
-                  {d.custo !== d.taxa && (
-                    <span className="text-slate-400"> (tarifa declarada {brl(d.taxa)})</span>
+              <div key={d.data} className="px-4 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-slate-700">
+                    {dataBR(d.data)}
+                    <span className="text-slate-400"> · {d.lancamentos} lançamento(s)</span>
+                  </span>
+                  <span className="text-sm">
+                    <span className="text-emerald-700 font-semibold">{brl(d.recebimento)}</span>
+                    <span className="text-slate-400"> entrou de venda</span>
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-x-4">
+                  {d.saida !== 0 && (
+                    <span className="text-red-700">pagamentos pela conta {brl(d.saida)}</span>
                   )}
-                </span>
+                  {d.saque !== 0 && (
+                    <span>saque para o banco {brl(d.saque)}</span>
+                  )}
+                  {d.ajuste !== 0 && (
+                    <span>ajustes {brl(d.ajuste)}</span>
+                  )}
+                  {d.custo !== 0 && (
+                    <span>
+                      custo {brl(d.custo)}
+                      {d.custo !== d.taxa && <span className="text-slate-400"> (tarifa declarada {brl(d.taxa)})</span>}
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
           </div>
