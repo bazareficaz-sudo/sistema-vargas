@@ -2,7 +2,8 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   permitido, pedirRelatorio, listarRelatorios, baixarRelatorio,
-  nomeDoArquivo, resumir, RecusadoPelaTrava, type Buscador,
+  nomeDoArquivo, resumir, RecusadoPelaTrava, buscarPagamento, resumoDoPagamento,
+  type Buscador,
 } from '../../src/lib/financeiro/mercadoPagoRelatorio'
 
 // A TRAVA QUE IMPEDE ESTE MÓDULO DE MOVER DINHEIRO.
@@ -37,8 +38,31 @@ describe('a lista de caminhos permitidos', () => {
     assert.ok(permitido('GET', '/v1/account/release_report/arquivo-2026-10.csv'))
   })
 
-  test('RECUSA estorno de pagamento', () => {
+  test('deixa passar LER um pagamento, acrescentado em 19/10/2026', () => {
+    // Para descobrir PARA QUEM foram as 231 saidas da conta — R$ 29.421 em 30
+    // dias, das quais uma unica esta lancada em Contas a Pagar. O relatorio
+    // traz data, valor e id, mas nao o nome.
+    assert.ok(permitido('GET', '/v1/payments/184959657662'))
+  })
+
+  test('mas RECUSA estorno de pagamento, que e o vizinho de porta', () => {
+    // O caminho de leitura e `/v1/payments/:id`. Um `/refunds` no fim muda
+    // tudo: deixa de ser ler e passa a ser devolver dinheiro. A ancora `$` na
+    // expressao e o que separa os dois.
     assert.equal(permitido('POST', '/v1/payments/123/refunds'), false)
+    assert.equal(permitido('GET', '/v1/payments/123/refunds'), false)
+  })
+
+  test('RECUSA criar pagamento, que e o mesmo caminho com outro metodo', () => {
+    assert.equal(permitido('POST', '/v1/payments'), false)
+    assert.equal(permitido('POST', '/v1/payments/123'), false)
+  })
+
+  test('RECUSA id que nao seja numero', () => {
+    // So digitos. Qualquer outra coisa ali e tentativa de sair deste endpoint.
+    assert.equal(permitido('GET', '/v1/payments/abc'), false)
+    assert.equal(permitido('GET', '/v1/payments/123?x=1'), false)
+    assert.equal(permitido('GET', '/v1/payments/..'), false)
   })
 
   test('RECUSA criar saque', () => {
@@ -161,6 +185,48 @@ describe('achar o nome do arquivo na listagem', () => {
     })
     const r = await listarRelatorios({ token: 't', buscar })
     assert.equal(r.length, 1)
+  })
+})
+
+describe('ler um pagamento', () => {
+  test('id com barra é recusado antes de virar requisição', async () => {
+    const { buscar, chamadas } = buscadorFalso({})
+    await assert.rejects(
+      () => buscarPagamento('123/refunds', { token: 't', buscar }),
+      RecusadoPelaTrava,
+    )
+    assert.equal(chamadas.length, 0, 'nenhuma requisicao saiu')
+  })
+
+  test('id válido chama o GET certo', async () => {
+    const url = 'https://api.mercadopago.com/v1/payments/184959657662'
+    const { buscar, chamadas } = buscadorFalso({
+      [url]: { status: 200, corpo: '{"id":184959657662,"description":"Posto Ipiranga","transaction_amount":200.5}' },
+    })
+    const p = await buscarPagamento('184959657662', { token: 't', buscar })
+    assert.equal(chamadas[0].metodo, 'GET')
+    assert.equal(p.description, 'Posto Ipiranga')
+  })
+
+  test('o resumo diz o que CHEGOU, em vez de supor', () => {
+    // A forma da resposta ainda não foi vista. `camposPresentes` é o mapa
+    // para ajustar o resto depois da primeira olhada — hoje já aconteceu três
+    // vezes de o dado real contradizer o que a documentação sugeria.
+    const r = resumoDoPagamento({
+      id: 1, description: 'Posto Ipiranga', transaction_amount: 200.5,
+      operation_type: 'money_transfer', collector: { nickname: 'POSTOIPIRANGA' },
+    })
+    assert.equal(r.descricao, 'Posto Ipiranga')
+    assert.equal(r.recebedor, 'POSTOIPIRANGA')
+    assert.equal(r.valor, 200.5)
+    assert.deepEqual(r.camposPresentes,
+      ['collector', 'description', 'id', 'operation_type', 'transaction_amount'])
+  })
+
+  test('resposta vazia não quebra o resumo', () => {
+    const r = resumoDoPagamento(null)
+    assert.equal(r.recebedor, null)
+    assert.deepEqual(r.camposPresentes, [])
   })
 })
 
