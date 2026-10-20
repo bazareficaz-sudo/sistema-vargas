@@ -73,8 +73,13 @@ export default function SessaoVigia({ config = CONFIG_SESSAO_PADRAO, loginEm = n
       // Sinal pras outras abas — o valor em si não importa, só o disparo
       // do evento `storage` nelas.
       localStorage.setItem(CHAVE_LOGOUT, String(Date.now()))
+      // SÓ ESTE NAVEGADOR. O `signOut()` sem opção é global: revoga a sessão
+      // do usuário em todo aparelho — e cada logout por inatividade aqui
+      // derrubava também o app Android do mesmo usuário, que então pedia
+      // login "toda hora". A regra de inatividade é do site; o app tem a
+      // sessão dele.
       const sb = createClient()
-      await sb.auth.signOut()
+      await sb.auth.signOut({ scope: 'local' })
       const sufixo = motivo === 'inatividade' ? `&min=${configRef.current.inatividadeMin}` : ''
       router.push(`/login?erro=${motivo}${sufixo}`)
       router.refresh()

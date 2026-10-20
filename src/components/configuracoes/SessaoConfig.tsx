@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import {
   descreverMinutos, minutosValidos, INATIVIDADE_MIN_MINIMO, INATIVIDADE_MIN_MAXIMO, type ConfigSessao,
 } from '@/lib/auth/configSessao'
@@ -15,6 +16,34 @@ function Interruptor({ ligado, onClick, desabilitado }: { ligado: boolean; onCli
       className={`shrink-0 w-11 h-6 rounded-full transition-colors relative disabled:cursor-not-allowed ${ligado ? 'bg-blue-600' : 'bg-slate-300'}`}>
       <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${ligado ? 'translate-x-6' : 'translate-x-1'}`} />
     </button>
+  )
+}
+
+// O único logout que derruba TODOS os aparelhos do usuário (site, app do
+// celular, outro computador). Para celular perdido ou senha que vazou; o
+// logout comum, manual ou automático, é só do navegador em que acontece.
+function SairDeTodos() {
+  const [saindo, setSaindo] = useState(false)
+  async function sair() {
+    if (!confirm('Sair de todos os aparelhos? Você precisará entrar de novo no site, no app do celular e em qualquer outro computador.')) return
+    setSaindo(true)
+    await createClient().auth.signOut({ scope: 'global' })
+    window.location.href = '/login'
+  }
+  return (
+    <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex items-start justify-between gap-4">
+      <div>
+        <h2 className="text-slate-800 font-medium">Sair de todos os aparelhos</h2>
+        <p className="text-slate-500 text-sm mt-1">
+          Encerra a sua sessão em todo lugar: este navegador, o app do celular e outros computadores.
+          Use se perder o celular ou desconfiar que alguém entrou com a sua senha.
+        </p>
+      </div>
+      <button onClick={sair} disabled={saindo}
+        className="shrink-0 px-3 py-2 border border-red-300 text-red-700 hover:bg-red-50 rounded-lg text-sm disabled:opacity-50">
+        {saindo ? 'Saindo...' : 'Sair de todos'}
+      </button>
+    </div>
   )
 }
 
@@ -67,7 +96,8 @@ export default function SessaoConfig({ configInicial, podeEditar }: {
         <h1 className="text-2xl font-bold text-slate-900">Sessão e Segurança</h1>
         <p className="text-slate-500 text-sm mt-1">
           Quando o sistema deve encerrar sozinho a sessão de quem está logado no painel. Vale para
-          todos os usuários desta empresa. O PDV tem sessão própria e não é afetado.
+          todos os usuários desta empresa. O PDV tem sessão própria e não é afetado, e o app do
+          celular também não: sair do site encerra só aquele navegador.
         </p>
       </div>
 
@@ -144,6 +174,8 @@ export default function SessaoConfig({ configInicial, podeEditar }: {
 
       {ok && <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-3 py-2 text-sm">{ok}</div>}
       {erro && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-sm">{erro}</div>}
+
+      <SairDeTodos />
 
       {podeEditar && (
         <div className="flex justify-end">
