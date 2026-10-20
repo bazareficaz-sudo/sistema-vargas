@@ -111,6 +111,38 @@ export function ehReserva(tipo: string): boolean {
   return /^reserve/i.test(tipo.trim())
 }
 
+export type GrupoDoExtrato = 'recebimento' | 'saida' | 'saque' | 'ajuste' | 'reserva'
+
+/**
+ * A DIREÇÃO DO DINHEIRO, que é o que faz o total significar alguma coisa.
+ *
+ * Medido no arquivo real de 19/10/2026, fora as reservas:
+ *
+ *   recebimento  venda que entrou           +R$ 33.093  (pix, débito, crédito)
+ *   saida        pagamento feito pela conta −R$ 17.999  (328 lançamentos)
+ *   saque        transferência para o banco −R$ 10.925
+ *   ajuste       antecipação, estorno, disputa
+ *
+ * Somar os quatro num "bruto do dia" produz número sem significado: dias em
+ * que houve saque apareciam com bruto NEGATIVO, como se a loja não tivesse
+ * vendido. Era o que a tela mostrava — "bruto −R$ 2.074,36" num dia de 73
+ * lançamentos.
+ *
+ * `saida` é a descoberta que interessa ao controle de despesa: é o pix que o
+ * funcionário faz no posto, a embalagem, o mercado. Sai da mesma conta e
+ * estava no mesmo arquivo o tempo todo.
+ */
+export function grupoDaLinha(l: Pick<LinhaExtrato, 'tipo' | 'metodoTipo' | 'liquido' | 'bruto'>): GrupoDoExtrato {
+  const tipo = l.tipo.trim().toLowerCase()
+  if (ehReserva(tipo)) return 'reserva'
+  // Saque é transferência da conta Mercado Pago para o banco: o dinheiro não
+  // sumiu, mudou de lugar. Misturar com despesa faria o gasto do mês parecer
+  // o dobro.
+  if (tipo === 'payout' || tipo.startsWith('withdraw')) return 'saque'
+  if (tipo === 'payment') return l.liquido < 0 ? 'saida' : 'recebimento'
+  return 'ajuste'
+}
+
 /** As quatro sem as quais não há conferência possível. */
 const OBRIGATORIAS = ['data', 'origemId', 'bruto', 'taxa'] as const
 
@@ -350,6 +382,11 @@ export type TotaisDoDia = {
    */
   custo: number
   lancamentos: number
+  /** O mesmo dia, separado pela direção do dinheiro. */
+  recebimento: number
+  saida: number
+  saque: number
+  ajuste: number
 }
 
 /**
@@ -368,11 +405,19 @@ export function totaisPorDia(
   const linhas = incluirReservas ? todasAsLinhas : todasAsLinhas.filter(l => !ehReserva(l.tipo))
   const mapa = new Map<string, TotaisDoDia>()
   for (const l of linhas) {
-    const t = mapa.get(l.data) ?? { data: l.data, bruto: 0, taxa: 0, liquido: 0, custo: 0, lancamentos: 0 }
+    const t = mapa.get(l.data) ?? {
+      data: l.data, bruto: 0, taxa: 0, liquido: 0, custo: 0, lancamentos: 0,
+      recebimento: 0, saida: 0, saque: 0, ajuste: 0,
+    }
     t.bruto += l.bruto
     t.taxa += l.taxa
     t.liquido += l.liquido
     t.lancamentos += 1
+    const g = grupoDaLinha(l)
+    if (g === 'recebimento') t.recebimento += l.liquido
+    else if (g === 'saida') t.saida += l.liquido
+    else if (g === 'saque') t.saque += l.liquido
+    else if (g === 'ajuste') t.ajuste += l.liquido
     mapa.set(l.data, t)
   }
   return [...mapa.values()]
@@ -384,6 +429,10 @@ export function totaisPorDia(
       // Derivado no fim, e não somado linha a linha, para não acumular
       // arredondamento de centavo em mil transações.
       custo: Number((t.bruto - t.liquido).toFixed(2)),
+      recebimento: Number(t.recebimento.toFixed(2)),
+      saida: Number(t.saida.toFixed(2)),
+      saque: Number(t.saque.toFixed(2)),
+      ajuste: Number(t.ajuste.toFixed(2)),
     }))
     .sort((a, b) => (a.data < b.data ? 1 : -1))
 }
