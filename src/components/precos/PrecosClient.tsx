@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import CampoNum from '@/components/ui/CampoNum'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recalcularKitsQueUsam, reprecificarKitsQueUsam, type KitReprecificado } from '@/lib/produtos/kit'
@@ -122,6 +123,14 @@ export default function PrecosClient({
   useEffect(() => { setProdutos(inicial) }, [inicial])
   useEffect(() => { setAba(abaInicial) }, [abaInicial])
   useEffect(() => { setQ(qInicial) }, [qInicial])
+  // Busca enquanto digita: parou de digitar por um instante, procura. Sem
+  // precisar apertar Buscar a cada tentativa.
+  useEffect(() => {
+    if (q.trim() === qInicial.trim()) return
+    const t = setTimeout(() => navegar({ q, pagina: '1' }), 450)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q])
   useEffect(() => { setCategoriaF(categoriaFiltro) }, [categoriaFiltro])
   useEffect(() => { setMarcaF(marcaFiltro) }, [marcaFiltro])
   useEffect(() => { setSubcategoriaF(subcategoriaFiltro) }, [subcategoriaFiltro])
@@ -212,31 +221,14 @@ export default function PrecosClient({
     return lista
   }
 
-  // Edição inline: { id, campo }
+  // EDIÇÃO DIRETO NA TABELA. Antes cada número era um botão: clicar,
+  // digitar, clicar no próximo. Agora são campos sempre abertos (CampoNum,
+  // o mesmo da revisão de preços da entrada manual): digita, TAB vai para o
+  // próximo, e cada campo grava ao sair dele.
   type CampoEdit = 'custo' | 'markup' | 'venda' | 'markup_promo' | 'promo'
-  const [editando, setEditando] = useState<{ id: string; campo: CampoEdit } | null>(null)
-  const [editValor, setEditValor] = useState('')
 
-  function iniciarEdicao(produto: Produto, campo: CampoEdit) {
-    const markupAtual = produto.markup ?? calcMarkup(produto.preco_custo, produto.preco_venda)
-    const val = campo === 'custo' ? produto.preco_custo
-      : campo === 'markup' ? markupAtual
-      : campo === 'venda' ? produto.preco_venda
-      : campo === 'markup_promo'
-        ? (produto.preco_promocional && produto.preco_custo > 0
-            ? calcMarkup(produto.preco_custo, produto.preco_promocional)
-            // Sem promoção ainda: parte do markup normal, que é o ponto de
-            // referência de quem vai baixar a margem para promover.
-            : markupAtual)
-        : (produto.preco_promocional ?? produto.preco_venda)
-    setEditando({ id: produto.id, campo })
-    setEditValor(Number(val).toFixed(2))
-  }
-
-  async function salvarEdicaoInline(produto: Produto) {
-    if (!editando) return
-    const val = parseFloat(editValor.replace(',', '.'))
-    if (isNaN(val) || val < 0) { setEditando(null); return }
+  async function salvarCampo(produto: Produto, campo: CampoEdit, val: number) {
+    if (isNaN(val) || val < 0) return
 
     // ── Promoção: caminho próprio ─────────────────────────────────────────
     //
@@ -244,12 +236,15 @@ export default function PrecosClient({
     // outras colunas e, principalmente, porque pode mudar o preço COBRADO do
     // cliente — a tela de Orçamentos usa preco_promocional quando
     // promocao_ativa está ligada.
-    if (editando.campo === 'markup_promo' || editando.campo === 'promo') {
+    if (campo === 'markup_promo' || campo === 'promo') {
       const sbP = createClient()
 
-      const novoPrecoPromo = editando.campo === 'promo'
+      // Campo apagado (0) = sem promoção, nos dois campos — e não "promoção
+      // pelo preço de custo" quando o markup é que foi apagado.
+      const novoPrecoPromo = campo === 'promo'
         ? val
-        : (produto.preco_custo > 0 ? parseFloat((produto.preco_custo * (1 + val / 100)).toFixed(2)) : 0)
+        : (produto.preco_custo > 0 && val !== 0 ? parseFloat((produto.preco_custo * (1 + val / 100)).toFixed(2)) : 0)
+      if (novoPrecoPromo <= 0 && !(produto.preco_promocional && produto.preco_promocional > 0)) return
 
       // Zerar é a forma de encerrar a promoção — sem isso não haveria como
       // desfazer sem sair da tela.
@@ -263,6 +258,14 @@ export default function PrecosClient({
       const tinhaPreco = (produto.preco_promocional ?? 0) > 0
       const ativa = limpando ? false : (tinhaPreco ? produto.promocao_ativa : true)
 
+      const mudancaPromo = {
+        preco_promocional: limpando ? null : novoPrecoPromo,
+        promocao_ativa: ativa,
+        ...(limpando ? { promocao_inicio: null, promocao_fim: null } : {}),
+      }
+      // Na tela na hora; se o banco recusar, volta ao que era.
+      setProdutos(prev => prev.map(x => x.id === produto.id ? { ...x, ...mudancaPromo } : x))
+
       const { error } = await sbP.from('produtos').update({
         preco_promocional: limpando ? null : novoPrecoPromo,
         promocao_ativa: ativa,
@@ -270,7 +273,12 @@ export default function PrecosClient({
         updated_at: new Date().toISOString(),
       }).eq('id', produto.id)
 
-      if (error) { showMsg(`Erro ao salvar promoção: ${error.message}`); setEditando(null); return }
+      if (error) {
+        setProdutos(prev => prev.map(x => x.id === produto.id
+          ? { ...x, preco_promocional: produto.preco_promocional, promocao_ativa: produto.promocao_ativa, promocao_inicio: produto.promocao_inicio, promocao_fim: produto.promocao_fim }
+          : x))
+        showMsg(`Erro ao salvar promoção: ${error.message}`); return
+      }
 
       // Promoção é o preço que o cliente paga quando ativa — propaga junto
       // com o preço normal pro produto vinculado (ver vinculo.ts).
@@ -288,7 +296,6 @@ export default function PrecosClient({
             ...(limpando ? { promocao_inicio: null, promocao_fim: null } : {}),
           }
         : x))
-      setEditando(null)
 
       // A mensagem diz o efeito real, não só "salvo": ligar promoção muda o
       // que o cliente paga, e isso não pode acontecer em silêncio.
@@ -306,10 +313,10 @@ export default function PrecosClient({
     let novoMarkup = produto.markup ?? calcMarkup(produto.preco_custo, produto.preco_venda)
     let novoPreco = produto.preco_venda
 
-    if (editando.campo === 'custo') {
+    if (campo === 'custo') {
       novoCusto = val
       novoPreco = novoMarkup > 0 ? parseFloat((novoCusto * (1 + novoMarkup / 100)).toFixed(2)) : novoPreco
-    } else if (editando.campo === 'markup') {
+    } else if (campo === 'markup') {
       novoMarkup = val
       novoPreco = novoCusto > 0 ? parseFloat((novoCusto * (1 + val / 100)).toFixed(2)) : novoPreco
     } else {
@@ -317,19 +324,28 @@ export default function PrecosClient({
       novoMarkup = novoCusto > 0 ? calcMarkup(novoCusto, val) : novoMarkup
     }
 
+    if (novoCusto === produto.preco_custo && novoPreco === produto.preco_venda) return
+
+    // A tela mostra o número novo na hora; o banco grava em seguida.
+    setProdutos(prev => prev.map(p => p.id === produto.id
+      ? { ...p, preco_custo: novoCusto, preco_venda: novoPreco, markup: novoMarkup }
+      : p))
+
     const sb = createClient()
-    await sb.from('produtos').update({
+    const { error: erroPreco } = await sb.from('produtos').update({
       preco_custo: novoCusto,
       preco_venda: novoPreco,
       markup: novoMarkup,
       updated_at: new Date().toISOString(),
       preco_atualizado_em: new Date().toISOString(),
     }).eq('id', produto.id)
-
-    setProdutos(prev => prev.map(p => p.id === produto.id
-      ? { ...p, preco_custo: novoCusto, preco_venda: novoPreco, markup: novoMarkup }
-      : p))
-    setEditando(null)
+    if (erroPreco) {
+      setProdutos(prev => prev.map(p => p.id === produto.id
+        ? { ...p, preco_custo: produto.preco_custo, preco_venda: produto.preco_venda, markup: produto.markup }
+        : p))
+      showMsg(`Erro ao salvar o preço: ${erroPreco.message}`)
+      return
+    }
 
     // Propaga preço/custo pro produto vinculado, só se a parceria tiver
     // sincronizar_preco ligado (ver vinculo.ts) — desligado, não faz nada.
@@ -343,41 +359,6 @@ export default function PrecosClient({
     showMsg(kits.length > 0
       ? `Preço atualizado. ${kits.length} kit(s) reprecificado(s).`
       : 'Preço atualizado.')
-  }
-
-  function CelulaEditavel({ produto, campo, valor, prefix = '' }: {
-    produto: Produto
-    campo: CampoEdit
-    valor: string
-    prefix?: string
-  }) {
-    const ativo = editando?.id === produto.id && editando?.campo === campo
-    if (ativo) {
-      return (
-        <div className="flex items-center justify-end gap-1">
-          <input
-            value={editValor}
-            onChange={e => setEditValor(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') salvarEdicaoInline(produto)
-              if (e.key === 'Escape') setEditando(null)
-            }}
-            className="w-24 border border-blue-400 rounded px-2 py-1 text-sm text-right focus:outline-none bg-white"
-            autoFocus
-            onBlur={() => salvarEdicaoInline(produto)}
-          />
-        </div>
-      )
-    }
-    return (
-      <button
-        onClick={() => iniciarEdicao(produto, campo)}
-        className="w-full text-right hover:text-blue-600 hover:underline transition-colors cursor-pointer"
-        title={`Clique para editar ${campo}`}
-      >
-        {prefix}{valor}
-      </button>
-    )
   }
 
   // Alteração em massa por markup
@@ -610,8 +591,8 @@ export default function PrecosClient({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input value={q} onChange={e => setQ(e.target.value)}
-                  placeholder="Buscar produto..."
-                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white" />
+                  placeholder="Nome, marca, SKU ou código de barras — várias palavras, em qualquer ordem"
+                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-base sm:text-sm focus:outline-none focus:border-blue-500 bg-white" />
               </div>
               <button type="submit" className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 bg-white">Buscar</button>
             </form>
@@ -862,8 +843,8 @@ export default function PrecosClient({
 
       {/* Tabela Preços */}
       {aba === 'precos' && (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[980px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 <th className="w-10 px-4 py-3">
@@ -873,90 +854,68 @@ export default function PrecosClient({
                     className="w-4 h-4 accent-blue-600" />
                 </th>
                 <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Produto</th>
+                <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Marca</th>
                 <th className="text-left px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Categoria</th>
-                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Custo</th>
-                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Markup</th>
-                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Preço venda</th>
-                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Markup Promo</th>
-                <th className="text-center px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide">Promoção</th>
+                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Custo</th>
+                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24">Markup %</th>
+                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Preço venda</th>
+                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-24" title="Markup da promoção sobre o custo">Markup promo %</th>
+                <th className="text-right px-3 py-3 text-xs font-medium text-gray-600 uppercase tracking-wide w-28">Preço promo</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {produtos.map(p => {
                 const markup = p.markup ?? (p.preco_custo > 0 ? calcMarkup(p.preco_custo, p.preco_venda) : 0)
                 const markupPromo = p.preco_promocional && p.preco_custo > 0 ? calcMarkup(p.preco_custo, p.preco_promocional) : 0
+                const temPromo = (p.preco_promocional ?? 0) > 0
+                const promoAbaixoCusto = temPromo && p.preco_custo > 0 && p.preco_promocional! < p.preco_custo
+                const descontoPromo = temPromo && p.preco_venda > 0 ? Math.round((1 - p.preco_promocional! / p.preco_venda) * 100) : 0
                 return (
-                  <tr key={p.id} className={`hover:bg-blue-50/30 transition-colors group ${selecionados.has(p.id) ? 'bg-blue-50/50' : ''}`}>
-                    <td className="px-4 py-2.5">
+                  <tr key={p.id} className={`hover:bg-blue-50/30 transition-colors ${selecionados.has(p.id) ? 'bg-blue-50/50' : ''}`}>
+                    <td className="px-4 py-2">
                       <input type="checkbox" checked={selecionados.has(p.id)} onChange={() => toggleOne(p.id)}
-                        className="w-4 h-4 accent-blue-600" />
+                        tabIndex={-1} className="w-4 h-4 accent-blue-600" />
                     </td>
-                    <td className="px-3 py-2.5">
-                      <p className="text-gray-900 font-medium truncate max-w-xs">{p.nome}</p>
+                    <td className="px-3 py-2 max-w-[22rem]">
+                      <p className="text-gray-900 font-medium truncate" title={p.nome}>{p.nome}</p>
                       {p.sku && <p className="text-xs text-gray-400 font-mono">{p.sku}</p>}
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-gray-500">{p.categoria ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-600 text-xs">
-                      <CelulaEditavel produto={p} campo="custo"
-                        valor={p.preco_custo > 0 ? fmt(p.preco_custo) : '—'} />
+                    <td className="px-3 py-2 text-xs text-gray-700 font-medium">{p.marca || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-2 text-xs text-gray-500">{p.categoria ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      <CampoNum value={p.preco_custo} onCommit={v => salvarCampo(p, 'custo', v)} placeholder="—" />
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      {editando?.id === p.id && editando?.campo === 'markup' ? (
-                        <CelulaEditavel produto={p} campo="markup" valor={`${markup.toFixed(1)}%`} />
-                      ) : (
-                        <button
-                          onClick={() => iniciarEdicao(p, 'markup')}
-                          className={`text-xs font-medium px-1.5 py-0.5 rounded cursor-pointer hover:ring-2 hover:ring-blue-300 transition-all ${markup >= 30 ? 'bg-green-50 text-green-700' : markup > 0 ? 'bg-yellow-50 text-yellow-700' : 'bg-gray-100 text-gray-400'}`}
-                          title="Clique para editar markup">
-                          {markup > 0 ? `${markup.toFixed(1)}%` : '—'}
-                        </button>
-                      )}
+                    <td className="px-3 py-2">
+                      <CampoNum value={markup} onCommit={v => salvarCampo(p, 'markup', v)} sufixo="%" placeholder="—" />
                     </td>
-                    <td className="px-3 py-2.5 text-right font-medium text-gray-900">
-                      <CelulaEditavel produto={p} campo="venda"
-                        valor={p.preco_venda > 0 ? fmt(p.preco_venda) : '—'} />
+                    <td className="px-3 py-2">
+                      <CampoNum value={p.preco_venda} onCommit={v => salvarCampo(p, 'venda', v)} forte placeholder="—" />
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      {editando?.id === p.id && editando?.campo === 'markup_promo' ? (
-                        <CelulaEditavel produto={p} campo="markup_promo" valor={`${markupPromo.toFixed(1)}%`} />
-                      ) : (
-                        <button
-                          onClick={() => iniciarEdicao(p, 'markup_promo')}
-                          disabled={p.preco_custo <= 0}
-                          className={`text-xs font-medium px-1.5 py-0.5 rounded cursor-pointer hover:ring-2 hover:ring-orange-300 transition-all disabled:cursor-not-allowed disabled:hover:ring-0 ${markupPromo >= 30 ? 'bg-green-50 text-green-700' : markupPromo > 0 ? 'bg-yellow-50 text-yellow-700' : 'bg-gray-100 text-gray-400'}`}
-                          title={p.preco_custo > 0
-                            ? 'Clique para definir a margem da promoção — o preço promocional é calculado a partir do custo'
-                            : 'Sem preço de custo não dá para calcular margem'}>
-                          {markupPromo > 0 ? `${markupPromo.toFixed(1)}%` : '—'}
-                        </button>
-                      )}
+                    <td className="px-3 py-2">
+                      {p.preco_custo > 0
+                        ? <CampoNum value={markupPromo} onCommit={v => salvarCampo(p, 'markup_promo', v)} sufixo="%" placeholder="—" />
+                        : <span className="block text-right text-[11px] text-gray-300" title="Sem custo não dá para calcular a margem">sem custo</span>}
                     </td>
-                    <td className="px-3 py-2.5 text-center">
-                      {editando?.id === p.id && editando?.campo === 'promo' ? (
-                        <CelulaEditavel produto={p} campo="promo"
-                          valor={p.preco_promocional ? fmt(p.preco_promocional) : '—'} />
-                      ) : (
-                        <button
-                          onClick={() => iniciarEdicao(p, 'promo')}
-                          className="cursor-pointer hover:ring-2 hover:ring-orange-300 rounded-full transition-all"
-                          title={p.preco_promocional
-                            ? 'Clique para alterar o preço promocional (zero remove a promoção)'
-                            : 'Clique para criar uma promoção'}>
-                          {p.preco_promocional ? (
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${p.promocao_ativa ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
-                              {fmt(p.preco_promocional)}{!p.promocao_ativa && ' (desligada)'}
-                            </span>
-                          ) : (
-                            <span className="text-gray-300 text-xs hover:text-orange-500">+ promo</span>
-                          )}
-                        </button>
+                    <td className="px-3 py-2">
+                      <CampoNum value={p.preco_promocional ?? 0} onCommit={v => salvarCampo(p, 'promo', v)} placeholder="—" />
+                      {temPromo && (
+                        <div className="flex items-center justify-end gap-1.5 mt-0.5 text-[10px]">
+                          {promoAbaixoCusto
+                            ? <span className="text-red-500 font-medium whitespace-nowrap">abaixo do custo</span>
+                            : descontoPromo > 0 && <span className="text-gray-400">{descontoPromo}% off</span>}
+                          <button type="button" tabIndex={-1} onClick={() => togglePromocao(p)}
+                            title={p.promocao_ativa ? 'Promoção valendo — clique para desligar' : 'Promoção desligada — clique para ligar'}
+                            className={`px-1.5 rounded-full font-medium ${p.promocao_ativa ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {p.promocao_ativa ? 'ativa' : 'desligada'}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
                 )
               })}
               {produtos.length === 0 && (
-                <tr><td colSpan={8} className="py-12 text-center text-gray-400">Nenhum produto encontrado.</td></tr>
+                <tr><td colSpan={9} className="py-12 text-center text-gray-400">Nenhum produto encontrado.</td></tr>
               )}
             </tbody>
           </table>
@@ -1017,15 +976,14 @@ export default function PrecosClient({
                         className="w-4 h-4 accent-orange-500" />
                     </td>
                     <td className="px-3 py-2.5">
-                      <p className="text-gray-900 font-medium truncate max-w-xs">{p.nome}</p>
-                      <p className="text-xs text-gray-400">{p.categoria ?? ''}</p>
+                      <p className="text-gray-900 font-medium truncate max-w-xs" title={p.nome}>{p.nome}</p>
+                      <p className="text-xs text-gray-400">{[p.marca, p.categoria, p.sku].filter(Boolean).join(' · ')}</p>
                     </td>
                     <td className="px-3 py-2.5 text-right text-gray-500 text-xs line-through">
                       {fmt(p.preco_venda)}
                     </td>
                     <td className="px-3 py-2.5 text-right font-semibold text-orange-600">
-                      <CelulaEditavel produto={p} campo="promo"
-                        valor={p.preco_promocional ? fmt(p.preco_promocional) : '—'} />
+                      <div className="w-28 ml-auto"><CampoNum value={p.preco_promocional ?? 0} onCommit={v => salvarCampo(p, 'promo', v)} forte placeholder="—" /></div>
                     </td>
                     <td className="px-3 py-2.5 text-right">
                       <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">
