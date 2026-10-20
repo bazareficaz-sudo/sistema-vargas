@@ -13,6 +13,8 @@ import {
 import type { Sinal, VigiaId } from './tipos'
 import { canaisDeAtendimento, perguntasRespondiveis, reclamacoesAbertas } from '@/lib/mercadolivre/atendimento'
 import { horasAte, ROTULO_ETAPA } from '@/lib/mercadolivre/atendimentoRegras'
+import { avaliacoesSemResposta, devolucoesAbertas, lojasDeAtendimento } from '@/lib/shopee/atendimento'
+import { STATUS_DEVOLUCAO } from '@/lib/shopee/atendimentoRegras'
 
 type Ctx = { sb: any; empresaId: string; agora: Date }
 
@@ -223,6 +225,41 @@ async function atendimentoML({ sb, empresaId, agora }: Ctx): Promise<Sinal[]> {
   return sinais
 }
 
+// ── Atendimento na Shopee ───────────────────────────────────────────────
+// Devolução com prazo da loja em até 48 h: urgente, um sinal por devolução.
+// Avaliação de nota ≤ 3 sem resposta: um sinal por loja, que volta a avisar
+// quando entra avaliação nova no grupo. Medido em 20/10/2026: 75 das 100
+// avaliações mais recentes sem resposta, algumas de 1 e 3 estrelas.
+const ATENDIMENTO_SHOPEE = '/dashboard/atendimento-shopee'
+
+async function atendimentoShopee({ sb, empresaId, agora }: Ctx): Promise<Sinal[]> {
+  const sinais: Sinal[] = []
+  for (const loja of await lojasDeAtendimento(sb, empresaId)) {
+    for (const d of await devolucoesAbertas(sb, loja)) {
+      // Prazo vencido há mais de 3 dias já é assunto encerrado pela Shopee.
+      if (!d.prazoLoja || horasAte(d.prazoLoja, agora) > 48 || horasAte(d.prazoLoja, agora) < -72) continue
+      const vencida = horasAte(d.prazoLoja, agora) < 0
+      sinais.push({
+        vigia: 'atendimento_shopee', chave: `shopee:devolucao:${d.returnSn}`, gravidade: 'urgente',
+        titulo: `Devolução na ${loja.nome} ${vencida ? 'com prazo VENCIDO' : `vence ${quandoSP(d.prazoLoja)}`}`,
+        detalhe: `Motivo: ${d.motivo} (${STATUS_DEVOLUCAO[d.status] ?? d.status})${d.valor != null ? `, reembolso ${fmtMoeda(d.valor)}` : ''}. Responda no Seller Centre da Shopee antes do prazo.`,
+        valor: d.valor != null ? Math.round(d.valor) : null, link: ATENDIMENTO_SHOPEE, dados: { devolucao: d.returnSn, prazo: d.prazoLoja },
+      })
+    }
+    const baixas = (await avaliacoesSemResposta(sb, loja)).filter(a => a.nota <= 3)
+    if (baixas.length) {
+      sinais.push({
+        vigia: 'atendimento_shopee', chave: `shopee:avaliacoes:${loja.id}`, gravidade: 'atencao',
+        titulo: `${baixas.length} avaliação(ões) de nota baixa sem resposta na ${loja.nome}`,
+        detalhe: `Nota 3 ou menos, sem resposta da loja. A resposta é pública — quem vai comprar lê.`,
+        valor: null, link: ATENDIMENTO_SHOPEE,
+        dados: { quantidade: baixas.length, assinatura: assinar(baixas.map(a => String(a.commentId))) },
+      })
+    }
+  }
+  return sinais
+}
+
 // ── Pedidos atrasados ───────────────────────────────────────────────────
 async function pedidosAtrasados({ sb, empresaId, agora }: Ctx): Promise<Sinal[]> {
   const { data } = await sb.from('marketplace_pedidos')
@@ -353,6 +390,7 @@ export async function rodarVigias(
     ['estoque_negativo', estoqueNegativo],
     ['financeiro', financeiro],
     ['atendimento_ml', atendimentoML],
+    ['atendimento_shopee', atendimentoShopee],
   ]
   for (const [id, fn] of simples) {
     if (!ligado(id)) continue

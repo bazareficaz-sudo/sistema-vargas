@@ -35,6 +35,10 @@ export async function GET(req: Request) {
 
   for (const cfg of (configs ?? []) as ConfigFila[]) {
     try {
+      // Produto zerado no sistema com anúncio à venda no canal volta para a
+      // fila — o estoque do canal pode ter mudado por fora (ver a migração
+      // 20261020200000_fila_reenfileirar_zerados.sql). Falhar aqui não para a rodada.
+      await sb.rpc('reenfileirar_zerados_a_venda', { p_empresa: cfg.empresa_id })
       resultados.push(await processarFilaDaEmpresa(sb, cfg))
     } catch (e: any) {
       const erro = e?.message ?? 'Erro ao processar a fila'

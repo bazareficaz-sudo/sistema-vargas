@@ -265,7 +265,7 @@ export function montarMensagem(cabecalho: string, corpo: string, restantes: numb
 // máximo 4 por dia.
 
 // Reclamação do ML com prazo perto: sem resposta, o ML decide pelo comprador.
-export const VIGIAS_ALERTA_IMEDIATO = new Set(['integracoes', 'zerado_a_venda', 'pedidos_atrasados', 'atendimento_ml'])
+export const VIGIAS_ALERTA_IMEDIATO = new Set(['integracoes', 'zerado_a_venda', 'pedidos_atrasados', 'atendimento_ml', 'atendimento_shopee'])
 export const MAX_ALERTAS_DIA = 4
 export const JANELA_NOVIDADE_H = 3
 /** Das 7h às 21h, horário de Brasília. */
