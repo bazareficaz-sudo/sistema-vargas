@@ -36,9 +36,9 @@ const LIMITE_ABERTOS = 1000
 const LIMITE_HISTORICO = 150
 
 export default async function PedidosEcommercePage({ searchParams }: {
-  searchParams: Promise<{ q?: string; canalId?: string }>
+  searchParams: Promise<{ q?: string; canalId?: string; janela?: string }>
 }) {
-  const { q = '', canalId = '' } = await searchParams
+  const { q = '', canalId = '', janela = '' } = await searchParams
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   const profile = await perfilDaSessao(supabase, user!.id)
@@ -111,6 +111,8 @@ export default async function PedidosEcommercePage({ searchParams }: {
       emissorPorCanal={emissorPorCanal}
       qInicial={q}
       canalIdInicial={canalId}
+      // Vindo do Início ("despachar hoje", "atrasados"): abre já filtrado.
+      janelaInicial={janela === 'hoje' || janela === 'atrasado' || janela === 'futuro' ? janela : ''}
       operador={user?.email ?? ''}
     />
   )

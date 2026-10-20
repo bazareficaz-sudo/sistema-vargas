@@ -11,6 +11,7 @@ import {
   diaMes, diasEntre, nomeDoMes, linhaCsv,
   type Situacao, type Periodo, type Agrupamento,
 } from '@/lib/contas/agendaPagar'
+import { lerValor, patchDaEdicao } from '@/lib/contas/editarConta'
 import { chaveDoFornecedor, type EmpresaPagar } from '@/lib/contas/empresasPagar'
 import SeletorEmpresasPagar, { gravarEscolha, EtiquetaEmpresa } from '@/components/contas-pagar/SeletorEmpresasPagar'
 
@@ -19,6 +20,7 @@ export type ContaPagar = {
   status: string; data_pagamento: string | null; forma_pagamento: string | null
   parcela: number; total_parcelas: number; observacoes: string | null
   valor_pago: number | null; juros: number | null; multa: number | null
+  valor_original?: number | null; vencimento_original?: string | null
   tipo_despesa_id: string | null; competencia: string | null
   fornecedor_id: string | null
   fornecedores: { id?: string; razao_social: string; nome_fantasia: string | null; cnpj?: string | null } | null
@@ -291,6 +293,74 @@ export default function ContasPagarClient({
     setEditandoObs(null)
   }
 
+  // VALOR E VENCIMENTO EDITÁVEIS NA LINHA — boleto prorrogado ou com valor
+  // corrigido não precisa mais ser cancelado e lançado de novo (o que perdia
+  // a NF de origem, a parcela e a OBS). Clica no valor ou na data, digita,
+  // Enter grava; Esc desiste. As regras (as duas colunas de vencimento, a
+  // situação que acompanha a data, o original guardado) estão em
+  // editarConta.ts.
+  const [edicao, setEdicao] = useState<{ id: string; campo: 'valor' | 'vencimento' } | null>(null)
+  const [rascunhoEd, setRascunhoEd] = useState('')
+  const [salvandoEd, setSalvandoEd] = useState(false)
+
+  function abrirEdicao(c: Conta, campo: 'valor' | 'vencimento') {
+    if (!podePagar(c)) return
+    setEdicao({ id: c.id, campo })
+    setRascunhoEd(campo === 'valor'
+      ? Number(c.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : String(c.vencimento ?? '').slice(0, 10))
+  }
+
+  async function salvarEdicao(c: Conta) {
+    if (!edicao || salvandoEd) return
+    const mudanca = edicao.campo === 'valor' ? { valor: lerValor(rascunhoEd) } : { vencimento: rascunhoEd }
+    const { patch, erro } = patchDaEdicao(c, mudanca, hojeIso)
+    if (erro) { alert(erro); return }
+    if (!patch) { setEdicao(null); return }
+    setSalvandoEd(true)
+    const { error } = await createClient().from('contas_pagar').update(patch).eq('id', c.id)
+    setSalvandoEd(false)
+    if (error) { alert(`Não foi possível salvar: ${error.message}`); return }
+    setContas(prev => prev.map(x => x.id === c.id ? { ...x, ...patch } : x))
+    setEdicao(null)
+  }
+
+  function campoEdicao(c: Conta, campo: 'valor' | 'vencimento', classe: string) {
+    return (
+      <input autoFocus type={campo === 'vencimento' ? 'date' : 'text'} inputMode={campo === 'valor' ? 'decimal' : undefined}
+        value={rascunhoEd} disabled={salvandoEd}
+        onChange={e => setRascunhoEd(e.target.value)}
+        onBlur={() => void salvarEdicao(c)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); void salvarEdicao(c) }
+          if (e.key === 'Escape') setEdicao(null)
+        }}
+        onFocus={e => { if (campo === 'valor') e.target.select() }}
+        className={`border border-blue-400 rounded px-1.5 py-1 text-base sm:text-xs focus:outline-none bg-white ${classe}`} />
+    )
+  }
+
+  const editando = (c: Conta, campo: 'valor' | 'vencimento') => edicao?.id === c.id && edicao.campo === campo
+
+  /** Valor da linha: clicável quando a conta está em aberto. */
+  function valorDaConta(c: Conta, classe: string) {
+    if (editando(c, 'valor')) return campoEdicao(c, 'valor', 'w-28 text-right')
+    const alterado = c.valor_original != null && Math.abs(Number(c.valor_original) - Number(c.valor)) >= 0.005
+    const texto = (
+      <>
+        <span className={classe}>{fmt(Number(c.valor))}</span>
+        {alterado && <span className="block text-[10px] text-gray-400 font-normal" title="Valor original da conta">era {fmt(Number(c.valor_original))}</span>}
+      </>
+    )
+    if (!podePagar(c)) return texto
+    return (
+      <button type="button" onClick={() => abrirEdicao(c, 'valor')} title="Clique para alterar o valor"
+        className="text-right rounded hover:bg-blue-50 hover:ring-1 hover:ring-blue-200 px-1 -mx-1 cursor-text">
+        {texto}
+      </button>
+    )
+  }
+
   async function cancelar(id: string) {
     if (!confirm('Cancelar esta conta?')) return
     await createClient().from('contas_pagar').update({ status: 'cancelado' }).eq('id', id)
@@ -323,9 +393,12 @@ export default function ContasPagarClient({
 
   // ── Pedaços da linha, usados na tabela e no cartão do celular ──
   function vencimento(c: Conta) {
+    if (editando(c, 'vencimento')) return campoEdicao(c, 'vencimento', 'w-36')
     const s = situacaoDaConta(c, hojeIso)
     const dias = diasEntre(hojeIso, c.vencimento)
-    return (
+    const original = c.vencimento_original && c.vencimento_original.slice(0, 10) !== String(c.vencimento).slice(0, 10)
+      ? c.vencimento_original : null
+    const conteudo = (
       <>
         <span className="text-xs text-gray-700">{dataBr(c.vencimento)}</span>
         {(s === 'vencido' || s === 'a_vencer') && (
@@ -333,7 +406,15 @@ export default function ContasPagarClient({
             {dias < 0 ? `${-dias}d de atraso` : dias === 0 ? 'vence hoje' : dias === 1 ? 'amanhã' : `em ${dias}d`}
           </span>
         )}
+        {original && <span className="block text-[10px] text-gray-400" title="Vencimento original da conta">era {dataBr(original)}</span>}
       </>
+    )
+    if (!podePagar(c)) return conteudo
+    return (
+      <button type="button" onClick={() => abrirEdicao(c, 'vencimento')} title="Clique para alterar o vencimento"
+        className="text-left rounded hover:bg-blue-50 hover:ring-1 hover:ring-blue-200 px-1 -mx-1 cursor-text">
+        {conteudo}
+      </button>
     )
   }
 
@@ -584,6 +665,11 @@ export default function ContasPagarClient({
           <span className="text-xs text-gray-500">em aberto {fmt(abertoFiltrado)} · pago {fmt(pagoFiltrado)}</span>
         )}
         {selecionaveis.length > 0 && (
+          <span className="w-full sm:w-auto text-[11px] text-gray-400">
+            ✏️ <span className="sm:hidden">toque</span><span className="hidden sm:inline">clique</span> no valor ou no vencimento de uma conta em aberto para alterar
+          </span>
+        )}
+        {selecionaveis.length > 0 && (
           <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" className="w-4 h-4 accent-blue-600"
               checked={marcadas.length === selecionaveis.length}
@@ -615,7 +701,7 @@ export default function ContasPagarClient({
                       <div className="flex-1 min-w-0 space-y-0.5">
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-sm font-medium text-gray-900 break-words">{nomeForn(c) || c.descricao}</p>
-                          <p className="text-sm font-semibold text-gray-900 shrink-0">{fmt(Number(c.valor))}</p>
+                          <div className="shrink-0 text-right">{valorDaConta(c, 'text-sm font-semibold text-gray-900')}</div>
                         </div>
                         {nomeForn(c) && <p className="text-xs text-gray-500 break-words">{c.descricao}</p>}
                         <div className="flex flex-wrap items-center gap-x-2">
@@ -683,7 +769,7 @@ export default function ContasPagarClient({
                       </td>
                       <td className="px-3 py-2.5">{origem(c)}{!c.origemDoc && !c.pedidoDoc && <span className="text-xs text-gray-300">—</span>}</td>
                       <td className="px-3 py-2.5 whitespace-nowrap">{vencimento(c)}</td>
-                      <td className="px-3 py-2.5 text-right font-medium text-gray-900 whitespace-nowrap">{fmt(Number(c.valor))}</td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">{valorDaConta(c, 'font-medium text-gray-900')}</td>
                       <td className="px-3 py-2.5 text-center">{situ(c)}</td>
                       <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
                         {c.data_pagamento && (

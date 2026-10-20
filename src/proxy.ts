@@ -199,6 +199,12 @@ export async function proxy(request: NextRequest) {
         // então bloquear a Visão Geral bloqueava o sistema inteiro.
         const tela = telaDoPathname(pathname)
         if (tela && hrefsBloqueados.has(tela.href)) {
+          // Visão Geral bloqueada é o caso do vendedor: a entrada dele é o
+          // Início (botões das telas dele), e não uma página de recusa logo
+          // depois do login.
+          if (tela.href === '/dashboard' && !hrefsBloqueados.has('/dashboard/inicio')) {
+            return NextResponse.redirect(new URL('/dashboard/inicio', request.url))
+          }
           const destino = new URL('/dashboard/sem-acesso', request.url)
           destino.searchParams.set('de', pathname)
           return NextResponse.redirect(destino)

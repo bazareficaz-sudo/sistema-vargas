@@ -7,6 +7,7 @@ import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { ajustarEstoquePelaEntrada, reverterEstoqueDaEntrada } from '@/lib/entradas/reverterEntrada'
 import { recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import RevisarKitsEntradaModal from './RevisarKitsEntradaModal'
+import { patchDaEdicao } from '@/lib/contas/editarConta'
 
 type Fornecedor = { id: string; razao_social: string; nome_fantasia: string | null }
 
@@ -39,6 +40,7 @@ const rateioUnit = (i: ItemEntrada) => Number(i.rateio_unitario ?? 0) || 0
 type ContaPagar = {
   id: string; descricao: string; valor: number; vencimento: string
   parcela: number; total_parcelas: number; forma_pagamento: string; status: string
+  valor_original?: number | null; vencimento_original?: string | null
 }
 
 type ProdutoInfo = { preco_venda: number; preco_custo: number; categoria: string | null; marca: string | null; tipo: string }
@@ -383,17 +385,24 @@ export default function EditarEntradaClient({
 
   async function salvarConta(c: ContaPagar) {
     setSalvando(true); setErro('')
+    // Mesma regra da lista do Contas a Pagar (editarConta.ts): as duas
+    // colunas de vencimento juntas, a situação acompanhando a data e o
+    // original guardado na primeira edição.
+    const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+    const { patch, erro: invalido } = c.status === 'pago' || c.status === 'cancelado'
+      ? { patch: null, erro: undefined }
+      : patchDaEdicao(c, {
+          valor: parseFloat(String(contaForm.valor).replace(',', '.')) || c.valor,
+          vencimento: contaForm.vencimento || c.vencimento,
+        }, hoje)
+    if (invalido) { setSalvando(false); setErro(invalido); return }
+    const forma = contaForm.forma_pagamento || c.forma_pagamento
+    const gravar = { ...(patch ?? {}), forma_pagamento: forma }
     const sb = createClient()
-    const { error } = await sb.from('contas_pagar').update({
-      valor: parseFloat(String(contaForm.valor).replace(',', '.')) || c.valor,
-      vencimento: contaForm.vencimento || c.vencimento,
-      forma_pagamento: contaForm.forma_pagamento || c.forma_pagamento,
-    }).eq('id', c.id)
+    const { error } = await sb.from('contas_pagar').update(gravar).eq('id', c.id)
     setSalvando(false)
     if (error) { setErro(error.message); return }
-    setContas(prev => prev.map(x => x.id === c.id
-      ? { ...x, valor: parseFloat(String(contaForm.valor)) || x.valor, vencimento: contaForm.vencimento || x.vencimento, forma_pagamento: contaForm.forma_pagamento || x.forma_pagamento }
-      : x))
+    setContas(prev => prev.map(x => x.id === c.id ? { ...x, ...gravar } : x))
     setEditandoConta(null)
     flash('Conta atualizada.')
   }
