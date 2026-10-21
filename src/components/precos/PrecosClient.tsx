@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import CampoNum from '@/components/ui/CampoNum'
+import ImprimirEtiquetaModal from '@/components/etiquetas/ImprimirEtiquetaModal'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recalcularKitsQueUsam, reprecificarKitsQueUsam, type KitReprecificado } from '@/lib/produtos/kit'
@@ -22,6 +23,8 @@ type Produto = {
   id: string
   nome: string
   sku: string | null
+  ean?: string | null
+  estoque?: number | null
   categoria: string | null
   marca: string | null
   preco_custo: number
@@ -95,6 +98,9 @@ export default function PrecosClient({
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState('')
   const [mostrarFiltros, setMostrarFiltros] = useState(false)
+  // Etiquetas dos selecionados, com o preço que está NA TELA — quem acabou de
+  // reajustar imprime a etiqueta nova sem sair daqui.
+  const [imprimindoEtiquetas, setImprimindoEtiquetas] = useState(false)
   const [categoriaF, setCategoriaF] = useState(categoriaFiltro)
   const [marcaF, setMarcaF] = useState(marcaFiltro)
   const [subcategoriaF, setSubcategoriaF] = useState(subcategoriaFiltro)
@@ -701,6 +707,20 @@ export default function PrecosClient({
         </>
       )}
 
+      {imprimindoEtiquetas && (
+        <ImprimirEtiquetaModal
+          produtos={produtos.filter(p => selecionados.has(p.id)).map(p => ({
+            id: p.id, nome: p.nome, sku: p.sku, ean: p.ean ?? null,
+            preco_venda: p.preco_venda, preco_promocional: p.preco_promocional ?? null,
+            promocao_ativa: p.promocao_ativa, promocao_inicio: p.promocao_inicio, promocao_fim: p.promocao_fim,
+            marca: p.marca, unidade: p.unidade, categoria: p.categoria,
+            estoque: Number(p.estoque ?? 0),
+          }))}
+          empresaId={empresaId}
+          onClose={() => setImprimindoEtiquetas(false)}
+        />
+      )}
+
       {/* Barra de ações em massa */}
       {selecionados.size > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-3 flex-wrap">
@@ -730,6 +750,10 @@ export default function PrecosClient({
               Remover promoção
             </button>
           </>}
+          <button onClick={() => setImprimindoEtiquetas(true)}
+            className="text-sm px-3 py-1.5 rounded-lg border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 transition-colors">
+            🏷️ Imprimir etiquetas
+          </button>
           <button onClick={() => { setSelecionados(new Set()); setPainelMassa(null); setPainelPromocao(false) }}
             className="ml-auto text-xs text-gray-500 hover:text-gray-700">
             Cancelar
