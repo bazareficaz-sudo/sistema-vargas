@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 
 type Deposito = { id: string; nome: string; principal: boolean }
-type SugestaoEndereco = { id: string; codigoLegivel: string; quantidadeAtual: number }
+type SugestaoEndereco = { id: string; codigoLegivel: string; quantidadeAtual: number; saldoDeposito: number }
 type Item = {
   produtoId: string; produto: { nome: string; sku: string | null } | null
   estoqueTotal: number; enderecado: number; naoEnderecado: number

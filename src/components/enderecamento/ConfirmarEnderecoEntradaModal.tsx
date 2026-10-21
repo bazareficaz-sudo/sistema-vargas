@@ -9,7 +9,7 @@ export type ItemEntradaParaGuardar = {
   quantidadeRecebida: number
 }
 
-type SugestaoEndereco = { id: string; codigoLegivel: string; quantidadeAtual: number }
+type SugestaoEndereco = { id: string; codigoLegivel: string; quantidadeAtual: number; saldoDeposito: number }
 type Endereco = { id: string; codigo_legivel: string }
 
 /**
@@ -138,12 +138,27 @@ export default function ConfirmarEnderecoEntradaModal({ depositoId, itens, onFec
                 <p className="text-sm font-medium text-slate-800">{item.produtoNome}</p>
                 <p className="text-xs text-slate-400 font-mono mb-2">{item.sku} — chegaram {item.quantidadeRecebida}</p>
 
-                {sugestao && !editando && (
-                  <p className="text-sm text-slate-600 mb-2">
-                    Endereço atual: <span className="font-mono font-medium text-slate-800">{sugestao.codigoLegivel}</span>, com {sugestao.quantidadeAtual} unidade(s).
-                    {' '}Guardar aqui? Ficará com {sugestao.quantidadeAtual + item.quantidadeRecebida}.
-                  </p>
-                )}
+                {sugestao && !editando && (() => {
+                  // O endereço pode marcar mais do que o depósito tem (venda
+                  // não baixa endereço): ao guardar, o servidor acerta para
+                  // o saldo do depósito — ver acertoAoGuardar.
+                  const somado = sugestao.quantidadeAtual + item.quantidadeRecebida
+                  const ficara = Math.min(somado, Math.max(0, sugestao.saldoDeposito))
+                  return (
+                    <>
+                      <p className="text-sm text-slate-600 mb-2">
+                        Endereço atual: <span className="font-mono font-medium text-slate-800">{sugestao.codigoLegivel}</span>, com {sugestao.quantidadeAtual} unidade(s).
+                        {' '}Guardar aqui? Ficará com {ficara}.
+                      </p>
+                      {ficara < somado && (
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2">
+                          O endereço marcava {sugestao.quantidadeAtual}, mas o depósito tem {sugestao.saldoDeposito} já contando o que chegou —
+                          {' '}o que foi vendido não tinha sido baixado do endereço. Ao confirmar, ele fica com {ficara}.
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
                 {!sugestao && !editando && (
                   <p className="text-sm text-slate-500 mb-2">Sem endereço conhecido pra este produto neste depósito.</p>
                 )}
