@@ -1,5 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+
+type MidiaRecebida = { url: string; mime: string; caption?: string; kind: 'image' | 'audio' | 'video' | 'document' }
+
+// Extrai a mídia de um evento de mensagem recebida da Z-API (imagem, áudio,
+// vídeo ou documento). Retorna null quando é só texto.
+function extrairMidia(body: any): MidiaRecebida | null {
+  if (body?.image?.imageUrl) return { url: body.image.imageUrl, mime: body.image.mimeType || 'image/jpeg', caption: body.image.caption, kind: 'image' }
+  if (body?.audio?.audioUrl) return { url: body.audio.audioUrl, mime: body.audio.mimeType || 'audio/ogg', kind: 'audio' }
+  if (body?.video?.videoUrl) return { url: body.video.videoUrl, mime: body.video.mimeType || 'video/mp4', caption: body.video.caption, kind: 'video' }
+  if (body?.document?.documentUrl) return { url: body.document.documentUrl, mime: body.document.mimeType || 'application/pdf', caption: body.document.caption || body.document.fileName, kind: 'document' }
+  return null
+}
+
+function extDeMime(mime: string, kind: MidiaRecebida['kind']): string {
+  const m = (mime || '').split(';')[0].trim().toLowerCase()
+  const mapa: Record<string, string> = {
+    'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+    'audio/ogg': 'ogg', 'audio/opus': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/aac': 'aac',
+    'video/mp4': 'mp4', 'application/pdf': 'pdf',
+  }
+  return mapa[m] ?? (kind === 'image' ? 'jpg' : kind === 'audio' ? 'ogg' : kind === 'video' ? 'mp4' : 'bin')
+}
+
+function rotuloMidia(kind: MidiaRecebida['kind']): string {
+  return kind === 'image' ? '[imagem]' : kind === 'audio' ? '[áudio]' : kind === 'video' ? '[vídeo]' : '[documento]'
+}
+
+// Baixa a mídia (URL temporária da Z-API) e regrava no bucket privado
+// whatsapp-midias, pasta da empresa. Retorna o caminho salvo, ou null.
+async function armazenarMidia(empresaId: string, midia: MidiaRecebida): Promise<string | null> {
+  try {
+    const resp = await fetch(midia.url)
+    if (!resp.ok) return null
+    const bytes = new Uint8Array(await resp.arrayBuffer())
+    const ext = extDeMime(midia.mime, midia.kind)
+    const contentType = (midia.mime || '').split(';')[0].trim() || 'application/octet-stream'
+    const path = `${empresaId}/recebidas/${crypto.randomUUID()}.${ext}`
+    const admin = createAdminClient()
+    const up = await admin.storage.from('whatsapp-midias').upload(path, bytes, { contentType, upsert: false })
+    if (up.error) return null
+    return path
+  } catch {
+    return null
+  }
+}
 
 // Webhook da Z-API — recebe eventos de mensagens e status
 export async function POST(request: NextRequest) {
@@ -62,6 +108,17 @@ export async function POST(request: NextRequest) {
 
         const cliente = clientes?.[0]
 
+        // Mídia recebida (foto/áudio/documento/vídeo): baixa e regrava no bucket
+        // privado; a referência wamidia: é exibida pelo app e pelo CRM.
+        const midia = extrairMidia(body)
+        let conteudoPdfUrl: string | null = null
+        let conteudo = text || ''
+        if (midia) {
+          const path = await armazenarMidia(empresaId, midia)
+          if (path) conteudoPdfUrl = `wamidia:${path}`
+          if (!conteudo) conteudo = midia.caption || rotuloMidia(midia.kind)
+        }
+
         // Registra mensagem recebida
         await supabase.from('whatsapp_mensagens').insert({
           empresa_id: empresaId,
@@ -69,7 +126,8 @@ export async function POST(request: NextRequest) {
           cliente_nome: cliente?.nome ?? null,
           telefone: phone,
           tipo: 'recebida',
-          conteudo: text || '[mídia]',
+          conteudo: conteudo || '[mídia]',
+          conteudo_pdf_url: conteudoPdfUrl,
           status: 'recebida',
           enviado_em: new Date().toISOString(),
         })
