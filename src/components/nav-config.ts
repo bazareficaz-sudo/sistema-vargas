@@ -241,6 +241,8 @@ export const NAV: NavGroup[] = [
       { href: '/dashboard/atendimento-ml', label: 'Atendimento ML', icon: '🙋', modulo: 'marketplace' },
       // Devoluções e avaliações da Shopee (o chat ela não libera para o app).
       { href: '/dashboard/atendimento-shopee', label: 'Atendimento Shopee', icon: '🧡', modulo: 'marketplace' },
+      // Anúncio sem GTIN a Shopee não deixa alterar (nem o estoque).
+      { href: '/dashboard/gtin-shopee', label: 'GTIN na Shopee', icon: '🏷️', modulo: 'marketplace' },
     ],
   },
   {
