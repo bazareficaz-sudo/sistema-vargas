@@ -147,7 +147,8 @@ export default function ConfirmarEnderecoEntradaModal({ depositoId, itens, onFec
                   return (
                     <>
                       <p className="text-sm text-slate-600 mb-2">
-                        Endereço atual: <span className="font-mono font-medium text-slate-800">{sugestao.codigoLegivel}</span>, com {sugestao.quantidadeAtual} unidade(s).
+                        {sugestao.quantidadeAtual > 0 ? 'Endereço atual' : 'Lugar de sempre'}: <span className="font-mono font-medium text-slate-800">{sugestao.codigoLegivel}</span>
+                        {sugestao.quantidadeAtual > 0 ? `, com ${sugestao.quantidadeAtual} unidade(s).` : ' (estava vazio — o produto tinha esgotado).'}
                         {' '}Guardar aqui? Ficará com {ficara}.
                       </p>
                       {ficara < somado && (

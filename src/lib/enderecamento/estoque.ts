@@ -278,9 +278,9 @@ export async function adicionarQuantidadeEndereco(sb: any, params: ParamsEscrita
     await sb.from('produto_enderecos').update({ quantidade: c.para, ultima_movimentacao: agora, updated_at: agora }).eq('id', c.id)
     await sb.from('endereco_movimentacoes').insert({
       empresa_id: empresaId, deposito_id: depositoId,
-      endereco_destino_id: linha.endereco_id, produto_id: produtoId, produto_nome: params.produtoNome ?? null,
-      tipo: 'contagem', quantidade: c.de - c.para,
-      quantidade_anterior_destino: c.de, quantidade_nova_destino: c.para,
+      endereco_origem_id: linha.endereco_id, produto_id: produtoId, produto_nome: params.produtoNome ?? null,
+      tipo: 'baixa', quantidade: c.de - c.para,
+      quantidade_anterior_origem: c.de, quantidade_nova_origem: c.para,
       motivo: MOTIVO_ACERTO, referencia_tipo: params.referenciaTipo ?? null, referencia_id: params.referenciaId ?? null,
       usuario: params.usuario,
     })
@@ -307,7 +307,8 @@ export type SugestaoEndereco = {
 /**
  * Sugere, para cada produto, o endereço a usar num "guardar recebido" — só
  * quando existe exatamente UM endereço com saldo > 0 pra aquele produto
- * naquele depósito. Mais de um endereço distinto (split real entre locais)
+ * naquele depósito (ou, se nenhum tem saldo, exatamente um endereço já
+ * usado por ele). Mais de um endereço distinto (split real entre locais)
  * ou nenhum (produto ainda não endereçado ali) não tem sugestão segura:
  * `null` empurra a UI pra escolha manual. Usado tanto pelo painel pós-entrada
  * quanto pela tela "Produtos sem Endereço", pra nunca duplicar essa consulta.
@@ -318,9 +319,12 @@ export async function buscarSugestoesEndereco(
   const resultado = new Map<string, SugestaoEndereco | null>()
   if (produtoIds.length === 0) return resultado
 
+  // Sem o filtro de quantidade > 0: com a baixa automática (migração
+  // 20261022090000), o endereço de um produto que esgotou fica com 0 — e é
+  // justamente para lá que a reposição deve voltar.
   const { data: linhas } = await sb.from('produto_enderecos')
     .select('produto_id, quantidade, enderecos(id, codigo_legivel)')
-    .eq('deposito_id', depositoId).in('produto_id', produtoIds).gt('quantidade', 0)
+    .eq('deposito_id', depositoId).in('produto_id', produtoIds)
 
   const { data: saldos } = await sb.from('produto_estoque')
     .select('produto_id, quantidade').eq('deposito_id', depositoId).in('produto_id', produtoIds)
@@ -335,8 +339,12 @@ export async function buscarSugestoesEndereco(
   }
 
   for (const produtoId of produtoIds) {
-    const lista = porProduto.get(produtoId) ?? []
-    const distintos = new Set(lista.map(l => l.enderecos?.id).filter(Boolean))
+    const todas = (porProduto.get(produtoId) ?? []).filter(l => l.enderecos?.id)
+    // Onde o produto está hoje; se não está em lugar nenhum (esgotou), o
+    // lugar de sempre — desde que seja um só.
+    const comSaldo = todas.filter(l => Number(l.quantidade ?? 0) > 0)
+    const lista = comSaldo.length > 0 ? comSaldo : todas
+    const distintos = new Set(lista.map(l => l.enderecos.id))
     if (distintos.size === 1) {
       const l = lista[0]
       resultado.set(produtoId, {
