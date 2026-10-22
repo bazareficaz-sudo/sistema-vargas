@@ -117,8 +117,11 @@ export async function aplicarGtin(sb: any, loja: CanalShopeeAtendimento, itemIds
     if (!a.proposta) { resultados.push({ itemId: id, ok: false, erro: a.pendencia ?? 'sem proposta' }); continue }
     try {
       if (a.temVariacao) {
+        // O campo é `model` (não `model_list`): com o outro nome a Shopee
+        // recusou com "invalid UpdateModelRequest.Model: Model is required"
+        // (medido em 22/10/2026, anúncios Evidence Fame de variação única).
         await shopeePost('/api/v2/product/update_model', {
-          item_id: Number(id), model_list: a.modelos.map(m => ({ model_id: Number(m.modelId), gtin_code: m.proposta!.gtin })),
+          item_id: Number(id), model: a.modelos.map(m => ({ model_id: Number(m.modelId), gtin_code: m.proposta!.gtin })),
         }, loja.opts)
       } else {
         await shopeePost('/api/v2/product/update_item', { item_id: Number(id), gtin_code: a.proposta.gtin }, loja.opts)
