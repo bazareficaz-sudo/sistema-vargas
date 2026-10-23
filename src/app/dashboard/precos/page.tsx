@@ -76,7 +76,7 @@ export default async function PrecosPage({
 
   let query = supabase
     .from('produtos')
-    .select('id, nome, sku, categoria, marca, preco_custo, preco_venda, markup, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, ativo, unidade, preco_atualizado_em', { count: 'exact' })
+    .select('id, nome, sku, ean, estoque, categoria, marca, preco_custo, preco_venda, markup, preco_promocional, promocao_ativa, promocao_inicio, promocao_fim, ativo, unidade, preco_atualizado_em', { count: 'exact' })
     .eq('empresa_id', empresaId)
 
   // Modo "produtos de uma seleção" (veio de Entrada por XML ou da tela de

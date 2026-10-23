@@ -80,7 +80,8 @@ describe('texto do boletim', () => {
       item({ produtoId: 'b', nome: 'TRENA 5M', classe: 'voltou', clientesEsperando: 2, faltas: 2 }),
     ]), { incluirReposicao: true })!
     assert.match(t, /Chegou mercadoria/)
-    assert.match(t, /NF 1234 · FORTLEV/)
+    assert.match(t, /^NF 1234$/m)
+    assert.doesNotMatch(t, /FORTLEV/)
     assert.match(t, /🆕 \*Novidades\* \(1\)/)
     assert.match(t, /ADAPTADOR 50MM — R\$\s?22,00 · 12 un · 📍 A3-02/)
     assert.match(t, /🔄 \*Voltaram ao estoque\* \(1\)/)
@@ -95,6 +96,15 @@ describe('texto do boletim', () => {
     ]), { incluirReposicao: true })!
     assert.doesNotMatch(t, /SEM PRECO/)
     assert.match(t, /COM PRECO/)
+  })
+
+  test('o fornecedor não vai para o grupo, mas vai no alerta do dono', () => {
+    const b = boletim([
+      item({ produtoId: 'a', nome: 'COM PRECO', classe: 'novidade' }),
+      item({ produtoId: 'b', nome: 'SEM PRECO', classe: 'novidade', preco: 0, semPreco: true }),
+    ])
+    assert.doesNotMatch(montarTextoChegada(b, { incluirReposicao: true })!, /FORTLEV/)
+    assert.match(montarAlertaSemPreco(b)!, /NF 1234 · FORTLEV/)
   })
 
   test('só sem preço = nada para o grupo; o alerta vai para o dono', () => {

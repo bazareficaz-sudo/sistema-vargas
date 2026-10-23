@@ -139,9 +139,11 @@ export function montarTextoChegada(b: BoletimChegada, opcoes: { incluirReposicao
   const { novidades, voltaram, repostos } = itensParaGrupo(b, opcoes.incluirReposicao)
   if (novidades.length + voltaram.length + repostos.length === 0) return null
 
-  const origem = [b.rotulo, b.fornecedor].filter(Boolean).join(' · ')
+  // Só o número da nota/entrada: o fornecedor fica de fora — de quem a loja
+  // compra não é assunto do grupo dos vendedores. O alerta de "sem preço",
+  // que vai só para o dono, continua com ele.
   const linhas = ['📦 *Chegou mercadoria na loja!*']
-  if (origem) linhas.push(origem)
+  if (b.rotulo) linhas.push(b.rotulo)
   linhas.push(...secao('🆕 *Novidades*', novidades))
   linhas.push(...secao('🔄 *Voltaram ao estoque*', voltaram))
   if (repostos.length > 0) {

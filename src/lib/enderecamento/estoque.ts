@@ -74,10 +74,22 @@ const STATUS_NAO_RECEBE = ['inativo', 'bloqueado', 'temp_bloqueado', 'em_inventa
 export type ResultadoOperacaoEndereco = {
   ok: boolean
   erro?: string
+  /** Guardar recebido: unidades tiradas dos endereços porque eles marcavam mais do que o depósito tem. */
+  acertoEnderecos?: number
   quantidadeAnteriorOrigem?: number
   quantidadeNovaOrigem?: number
   quantidadeAnteriorDestino?: number
   quantidadeNovaDestino?: number
+}
+
+function erroDoEnderecoParaReceber(endereco: { status: string; exclusivo: boolean | null; produto_exclusivo_id: string | null }, produtoId: string, novaQuantidade: number): string | null {
+  if (novaQuantidade > 0 && STATUS_NAO_RECEBE.includes(endereco.status)) {
+    return `Endereço está ${endereco.status.replace('_', ' ')} — não pode receber estoque.`
+  }
+  if (endereco.exclusivo && endereco.produto_exclusivo_id && endereco.produto_exclusivo_id !== produtoId) {
+    return 'Endereço exclusivo já ocupado por outro produto.'
+  }
+  return null
 }
 
 type ParamsEscritaEndereco = {
@@ -100,12 +112,8 @@ async function _escreverQuantidadeEndereco(
 ): Promise<ResultadoOperacaoEndereco> {
   const { empresaId, depositoId, enderecoId, produtoId, usuario } = params
 
-  if (novaQuantidade > 0 && STATUS_NAO_RECEBE.includes(endereco.status)) {
-    return { ok: false, erro: `Endereço está ${endereco.status.replace('_', ' ')} — não pode receber estoque.` }
-  }
-  if (endereco.exclusivo && endereco.produto_exclusivo_id && endereco.produto_exclusivo_id !== produtoId) {
-    return { ok: false, erro: 'Endereço exclusivo já ocupado por outro produto.' }
-  }
+  const erroEndereco = erroDoEnderecoParaReceber(endereco, produtoId, novaQuantidade)
+  if (erroEndereco) return { ok: false, erro: erroEndereco }
 
   // A soma endereçada TOTAL (todos os endereços deste produto no depósito),
   // trocando só a parte deste endereço, não pode superar o saldo do
@@ -180,6 +188,49 @@ export async function ajustarQuantidadeEndereco(sb: any, params: ParamsEscritaEn
 }
 
 /**
+ * Quanto fica em cada endereço ao guardar uma quantidade recebida, quando
+ * os endereços marcam mais do que o depósito tem.
+ *
+ * Isso acontece porque a venda baixa o saldo do depósito, mas não o do
+ * endereço: o endereço contado com 13 em agosto continua dizendo 13 depois
+ * de 5 vendas, e o depósito tem 8. Ao chegar mais 10, "13 + 10 = 23" passa
+ * dos 18 do depósito — e a tela recusava, sem ter o que o operador pudesse
+ * fazer ali.
+ *
+ * O que acabou de chegar foi contado agora e é real; o que sobra é saída
+ * que nunca foi baixada dos endereços. Então o excesso sai, nesta ordem:
+ *   1. do que o próprio endereço já marcava (é o mais provável de estar
+ *      velho — é dele que se vende);
+ *   2. dos outros endereços do produto, do mais cheio para o mais vazio;
+ *   3. por último, do próprio recebido (já vendeu parte depois da entrada).
+ */
+export function acertoAoGuardar(p: {
+  anterior: number; recebida: number; totalDeposito: number
+  outros: { id: string; quantidade: number }[]
+}): { nova: number; cortesOutros: { id: string; de: number; para: number }[]; acerto: number } {
+  const total = Math.max(0, p.totalDeposito)
+  const somaOutros = p.outros.reduce((s, o) => s + Math.max(0, o.quantidade), 0)
+  let excesso = p.anterior + p.recebida + somaOutros - total
+  if (excesso <= 0) return { nova: p.anterior + p.recebida, cortesOutros: [], acerto: 0 }
+
+  const acerto = excesso
+  const doProprio = Math.min(excesso, Math.max(0, p.anterior))
+  excesso -= doProprio
+
+  const cortesOutros: { id: string; de: number; para: number }[] = []
+  for (const o of [...p.outros].sort((a, b) => b.quantidade - a.quantidade)) {
+    if (excesso <= 0) break
+    if (o.quantidade <= 0) continue
+    const corte = Math.min(excesso, o.quantidade)
+    cortesOutros.push({ id: o.id, de: o.quantidade, para: o.quantidade - corte })
+    excesso -= corte
+  }
+
+  const nova = Math.max(0, p.anterior - doProprio + p.recebida - excesso)
+  return { nova, cortesOutros, acerto }
+}
+
+/**
  * Soma uma quantidade RECEBIDA ao que o endereço tiver no momento da
  * chamada — para "guardar a entrada num endereço já conhecido" (ver
  * ConfirmarEnderecoEntradaModal). Nunca recebe de fora um total já
@@ -188,33 +239,76 @@ export async function ajustarQuantidadeEndereco(sb: any, params: ParamsEscritaEn
  * movimento naquele endereço — usar um valor calculado antes sobrescreveria
  * isso. `ajustarQuantidadeEndereco` continua sendo o caminho certo para
  * quando o operador está DECLARANDO o total (contagem), não somando.
+ *
+ * Endereços que marcam mais do que o depósito tem são acertados aqui (ver
+ * acertoAoGuardar), com cada corte registrado no histórico do endereço.
  */
 export async function adicionarQuantidadeEndereco(sb: any, params: ParamsEscritaEndereco & {
   quantidadeRecebida: number
 }): Promise<ResultadoOperacaoEndereco> {
-  const { depositoId, enderecoId, produtoId, quantidadeRecebida } = params
+  const { empresaId, depositoId, enderecoId, produtoId, quantidadeRecebida } = params
   if (!(quantidadeRecebida > 0)) return { ok: false, erro: 'Quantidade recebida deve ser maior que zero.' }
 
   const endereco = await _buscarEnderecoOuFalhar(sb, enderecoId, depositoId)
   if (!endereco) return { ok: false, erro: 'Endereço não encontrado neste depósito.' }
 
-  const { data: linhaAtual } = await sb.from('produto_enderecos')
-    .select('id, quantidade').eq('endereco_id', enderecoId).eq('produto_id', produtoId).maybeSingle()
+  const [{ data: linhas }, totalDeposito] = await Promise.all([
+    sb.from('produto_enderecos').select('id, endereco_id, quantidade').eq('deposito_id', depositoId).eq('produto_id', produtoId),
+    saldoDeposito(sb, depositoId, produtoId),
+  ])
+  const todas = (linhas ?? []) as LinhaEndereco[]
+  const linhaAtual = todas.find(l => l.endereco_id === enderecoId)
   const quantidadeAnterior = Number(linhaAtual?.quantidade ?? 0)
-  const novaQuantidade = quantidadeAnterior + quantidadeRecebida
+  const outros = todas.filter(l => l.endereco_id !== enderecoId)
 
-  return _escreverQuantidadeEndereco(
-    sb, { ...params, motivo: params.motivo ?? 'Guardado após entrada de mercadoria' },
-    endereco, quantidadeAnterior, linhaAtual?.id, novaQuantidade,
+  const { nova, cortesOutros, acerto } = acertoAoGuardar({
+    anterior: quantidadeAnterior, recebida: quantidadeRecebida, totalDeposito,
+    outros: outros.map(l => ({ id: l.id, quantidade: Number(l.quantidade ?? 0) })),
+  })
+  if (nova <= 0) return { ok: false, erro: 'O depósito está sem saldo deste produto — não há o que guardar.' }
+
+  // Valida o endereço ANTES de mexer nos outros: se ele não pode receber,
+  // nada é tocado.
+  const erroEndereco = erroDoEnderecoParaReceber(endereco, produtoId, nova)
+  if (erroEndereco) return { ok: false, erro: erroEndereco }
+
+  const agora = new Date().toISOString()
+  for (const c of cortesOutros) {
+    const linha = outros.find(l => l.id === c.id)!
+    await sb.from('produto_enderecos').update({ quantidade: c.para, ultima_movimentacao: agora, updated_at: agora }).eq('id', c.id)
+    await sb.from('endereco_movimentacoes').insert({
+      empresa_id: empresaId, deposito_id: depositoId,
+      endereco_origem_id: linha.endereco_id, produto_id: produtoId, produto_nome: params.produtoNome ?? null,
+      tipo: 'baixa', quantidade: c.de - c.para,
+      quantidade_anterior_origem: c.de, quantidade_nova_origem: c.para,
+      motivo: MOTIVO_ACERTO, referencia_tipo: params.referenciaTipo ?? null, referencia_id: params.referenciaId ?? null,
+      usuario: params.usuario,
+    })
+  }
+
+  const motivo = params.motivo ?? 'Guardado após entrada de mercadoria'
+  const r = await _escreverQuantidadeEndereco(
+    sb, { ...params, motivo: acerto > 0 ? `${motivo} — ${MOTIVO_ACERTO.toLowerCase()}` : motivo },
+    endereco, quantidadeAnterior, linhaAtual?.id, nova,
   )
+  return r.ok ? { ...r, acertoEnderecos: acerto } : r
 }
 
-export type SugestaoEndereco = { id: string; codigoLegivel: string; quantidadeAtual: number }
+type LinhaEndereco = { id: string; endereco_id: string; quantidade: number | string | null }
+
+const MOTIVO_ACERTO = 'Acerto: o endereço marcava mais do que o depósito tem (saída não baixada do endereço)'
+
+export type SugestaoEndereco = {
+  id: string; codigoLegivel: string; quantidadeAtual: number
+  /** Saldo do produto no depósito — o endereço pode marcar mais (ver acertoAoGuardar). */
+  saldoDeposito: number
+}
 
 /**
  * Sugere, para cada produto, o endereço a usar num "guardar recebido" — só
  * quando existe exatamente UM endereço com saldo > 0 pra aquele produto
- * naquele depósito. Mais de um endereço distinto (split real entre locais)
+ * naquele depósito (ou, se nenhum tem saldo, exatamente um endereço já
+ * usado por ele). Mais de um endereço distinto (split real entre locais)
  * ou nenhum (produto ainda não endereçado ali) não tem sugestão segura:
  * `null` empurra a UI pra escolha manual. Usado tanto pelo painel pós-entrada
  * quanto pela tela "Produtos sem Endereço", pra nunca duplicar essa consulta.
@@ -225,9 +319,17 @@ export async function buscarSugestoesEndereco(
   const resultado = new Map<string, SugestaoEndereco | null>()
   if (produtoIds.length === 0) return resultado
 
+  // Sem o filtro de quantidade > 0: com a baixa automática (migração
+  // 20261022090000), o endereço de um produto que esgotou fica com 0 — e é
+  // justamente para lá que a reposição deve voltar.
   const { data: linhas } = await sb.from('produto_enderecos')
     .select('produto_id, quantidade, enderecos(id, codigo_legivel)')
-    .eq('deposito_id', depositoId).in('produto_id', produtoIds).gt('quantidade', 0)
+    .eq('deposito_id', depositoId).in('produto_id', produtoIds)
+
+  const { data: saldos } = await sb.from('produto_estoque')
+    .select('produto_id, quantidade').eq('deposito_id', depositoId).in('produto_id', produtoIds)
+  const saldoPorProduto = new Map<string, number>(((saldos ?? []) as { produto_id: string; quantidade: number | string | null }[])
+    .map(r => [r.produto_id, Number(r.quantidade ?? 0)]))
 
   const porProduto = new Map<string, any[]>()
   for (const l of linhas ?? []) {
@@ -237,11 +339,18 @@ export async function buscarSugestoesEndereco(
   }
 
   for (const produtoId of produtoIds) {
-    const lista = porProduto.get(produtoId) ?? []
-    const distintos = new Set(lista.map(l => l.enderecos?.id).filter(Boolean))
+    const todas = (porProduto.get(produtoId) ?? []).filter(l => l.enderecos?.id)
+    // Onde o produto está hoje; se não está em lugar nenhum (esgotou), o
+    // lugar de sempre — desde que seja um só.
+    const comSaldo = todas.filter(l => Number(l.quantidade ?? 0) > 0)
+    const lista = comSaldo.length > 0 ? comSaldo : todas
+    const distintos = new Set(lista.map(l => l.enderecos.id))
     if (distintos.size === 1) {
       const l = lista[0]
-      resultado.set(produtoId, { id: l.enderecos.id, codigoLegivel: l.enderecos.codigo_legivel, quantidadeAtual: Number(l.quantidade ?? 0) })
+      resultado.set(produtoId, {
+        id: l.enderecos.id, codigoLegivel: l.enderecos.codigo_legivel, quantidadeAtual: Number(l.quantidade ?? 0),
+        saldoDeposito: saldoPorProduto.get(produtoId) ?? 0,
+      })
     } else {
       resultado.set(produtoId, null)
     }
