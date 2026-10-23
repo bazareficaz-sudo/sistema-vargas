@@ -11,6 +11,7 @@ import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
 import { normalizarGrupoSimilar } from '@/lib/produtos/similares'
 import VisualizadorImagem from './VisualizadorImagem'
 import EnviarImagensWhatsappModal from './EnviarImagensWhatsappModal'
+import ImagemDoKitModal from './ImagemDoKitModal'
 import { botao } from '@/components/ui/botao'
 import { gerarEanInternoUnico } from '@/lib/produtos/ean'
 import { usePermissao } from '@/contexts/PlanContext'
@@ -116,6 +117,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
   const [gruposSimilares, setGruposSimilares] = useState<string[]>([])
   const [membrosGrupo, setMembrosGrupo] = useState<{ id: string; nome: string; marca: string | null }[]>([])
   const [kitItens, setKitItens] = useState<KitItem[]>([])
+  const [criandoImagemKit, setCriandoImagemKit] = useState(false)
   const [recalculandoKit, setRecalculandoKit] = useState(false)
   const [buscaKit, setBuscaKit] = useState('')
   const [resultadosKit, setResultadosKit] = useState<Produto[]>([])
@@ -1618,6 +1620,15 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
                   className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors">
                   🔗 Importar por URL
                 </button>
+                {form.tipo === 'kit' && kitItens.length > 0 && (
+                  <button
+                    onClick={() => setCriandoImagemKit(true)}
+                    disabled={uploadando}
+                    title="Junta as fotos dos componentes numa imagem só, com fundo branco"
+                    className="flex items-center gap-2 px-4 py-2 border border-purple-300 text-purple-700 text-sm font-medium rounded-lg hover:bg-purple-50 transition-colors">
+                    🖼️ Criar imagem do kit
+                  </button>
+                )}
               </div>
 
               {/* Input de URL */}
@@ -2205,6 +2216,14 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
         />
       )}
 
+      {criandoImagemKit && (
+        <ImagemDoKitModal
+          kitId={form.id}
+          componentes={kitItens.map(k => ({ produto_id: k.produto_id, nome: k.nome, quantidade: Number(k.quantidade) || 1 }))}
+          onClose={() => setCriandoImagemKit(false)}
+          onSalvo={() => { setCriandoImagemKit(false); carregarImagens(form.id) }}
+        />
+      )}
       {enviandoWhatsapp && (
         <EnviarImagensWhatsappModal
           imagens={imagens.filter(i => imgSelecionadas.has(i.id)).map(i => ({ id: i.id, url: i.url, titulo: tituloDe(i) }))}
