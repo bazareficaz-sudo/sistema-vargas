@@ -129,6 +129,7 @@ describe('o Financeiro reúne o que é financeiro', () => {
     '/dashboard/financeiro',
     '/dashboard/financeiro/caixa',
     '/dashboard/financeiro/conciliacao',
+    '/dashboard/financeiro/devolucoes',
     '/dashboard/contas-receber',
     '/dashboard/carteira-clientes',
     '/dashboard/cobranca',
