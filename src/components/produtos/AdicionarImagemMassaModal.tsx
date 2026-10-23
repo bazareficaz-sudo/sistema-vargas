@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { sincronizarFotosPrincipais } from '@/lib/produtos/fotoPrincipal'
 
 type Resultado = { sucesso: number; falhas: { id: string; erro: string }[] }
 
@@ -54,8 +55,10 @@ export default function AdicionarImagemMassaModal({ ids, empresaId, onClose, onA
         principal: (contagem.get(id) ?? 0) === 0,
       }))
       const { error } = await sb.from('produto_imagens').insert(linhas)
+      if (error) { setAplicando(false); setErro(error.message); return }
+      // Só quem acabou de ganhar a PRIMEIRA imagem muda de principal.
+      await sincronizarFotosPrincipais(sb, ids.filter(id => (contagem.get(id) ?? 0) === 0))
       setAplicando(false)
-      if (error) { setErro(error.message); return }
       setResultado({ sucesso: ids.length, falhas: [] })
       return
     }
@@ -108,6 +111,10 @@ export default function AdicionarImagemMassaModal({ ids, empresaId, onClose, onA
         setProgresso(i + 1)
       }
     }
+
+    const comPrimeiraImagem = ids.filter(id =>
+      (contagem.get(id) ?? 0) === 0 && !falhas.some(f => f.id === id))
+    await sincronizarFotosPrincipais(sb, comPrimeiraImagem)
 
     setAplicando(false)
     setResultado({ sucesso, falhas })
