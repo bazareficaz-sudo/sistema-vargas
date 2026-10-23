@@ -24,7 +24,7 @@ export type EnvioMensagem = {
 // marca de terceiros exige licença de uso, e um arquivo de imagem por
 // plataforma pesaria em cada linha de uma lista de 14 mil produtos. A cor
 // de cada marca é o suficiente para reconhecer de relance — amarelo é
-// Mercado Livre, laranja é Shopee.
+// Mercado Livre, laranja é Shopee, preto é TikTok.
 
 export type ContagemCanais = Record<string, {
   total: number
@@ -53,6 +53,9 @@ export type ContagemCanais = Record<string, {
 const CANAL: Record<string, { sigla: string; nome: string; cls: string }> = {
   mercadolivre: { sigla: 'ML', nome: 'Mercado Livre', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
   shopee:       { sigla: 'SP', nome: 'Shopee',        cls: 'bg-orange-100 text-orange-700 border-orange-300' },
+  // Preto e branco, as cores da TikTok; sem isso ela caía no "••" de outro canal.
+  tiktok:       { sigla: 'TT', nome: 'TikTok Shop',   cls: 'bg-gray-900 text-white border-gray-900' },
+  nuvemshop:    { sigla: 'NS', nome: 'Nuvemshop',     cls: 'bg-sky-100 text-sky-800 border-sky-300' },
   amazon:       { sigla: 'AZ', nome: 'Amazon',        cls: 'bg-slate-200 text-slate-700 border-slate-300' },
   magalu:       { sigla: 'MG', nome: 'Magalu',        cls: 'bg-blue-100 text-blue-700 border-blue-300' },
   outro:        { sigla: '••', nome: 'Outro canal',   cls: 'bg-gray-100 text-gray-600 border-gray-300' },

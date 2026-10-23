@@ -17,7 +17,10 @@ export default async function HomeLoja() {
   const ctx = await contextoAdmin()
   if (!ctx?.lojaId) return null
 
-  const [{ data: banners }, { data: blocos }, { data: tagsRows }, { data: marcasRows }, { data: categoriasRows }] = await Promise.all([
+  const [{ data: todosBanners }, { data: blocos }, { data: tagsRows }, { data: marcasRows }, { data: categoriasRows }, { data: categoriasLoja }] = await Promise.all([
+    // Todos de uma vez e separados abaixo: o carrossel da home lista só os de
+    // posição 'hero', e os de categoria têm a própria seção. Sem separar, um
+    // banner de categoria apareceria na lista do carrossel do topo.
     ctx.sb.from('loja_banners').select('*').eq('loja_id', ctx.lojaId).order('ordem'),
     ctx.sb.from('loja_blocos_home').select('*').eq('loja_id', ctx.lojaId).order('ordem'),
     // Mesma consulta que alimenta o filtro de tags em Dashboard → Produtos:
@@ -30,7 +33,13 @@ export default async function HomeLoja() {
     // `categorias` tem grafia duplicada (ver CONTINUIDADE.md) e escolher
     // por ela podia oferecer um valor que bate zero produto.
     ctx.sb.from('produtos').select('categoria, subcategoria').eq('empresa_id', ctx.empresaId).eq('ativo', true),
+    // Árvore da VITRINE (não a do ERP): é nela que o banner de categoria se
+    // amarra, e é ela que a página /c/... lê.
+    ctx.sb.from('loja_categorias').select('id, nome, pai_id').eq('loja_id', ctx.lojaId).eq('ativo', true).order('nome'),
   ])
+
+  const banners = (todosBanners ?? []).filter((b: any) => b.posicao === 'hero')
+  const bannersCategoria = (todosBanners ?? []).filter((b: any) => b.posicao === 'categoria')
 
   const tagsDisponiveis = Array.from(
     new Set<string>((tagsRows ?? []).flatMap((r: any) => (r.tags ?? []) as string[])),
@@ -76,7 +85,8 @@ export default async function HomeLoja() {
         </ul>
       </section>
 
-      <BannersClient lojaId={ctx.lojaId} banners={banners ?? []} />
+      <BannersClient lojaId={ctx.lojaId} banners={banners} />
+      <BannersClient lojaId={ctx.lojaId} banners={bannersCategoria} modo="categoria" categorias={categoriasLoja ?? []} />
       <BlocosHomeClient lojaId={ctx.lojaId} blocos={blocos ?? []} tagsDisponiveis={tagsDisponiveis} />
       <SecoesHomeClient
         lojaId={ctx.lojaId}

@@ -4,6 +4,8 @@ import { useState, useEffect, type ChangeEvent, type DragEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { fmt } from './utils'
 import { formatarTituloAnuncio } from '@/lib/texto/titulo'
+import { gerarEanInternoUnico } from '@/lib/produtos/ean'
+import { SEM_GTIN, ehCodigoInterno, gtinAceitoNaEdicao, gtinParaMarketplace } from '@/lib/shopee/gtinRegras'
 import PainelDimensoesImagens from './PainelDimensoesImagens'
 import { useDimensoes, CORES_NIVEL } from '@/lib/imagens/useDimensoes'
 import CampoAtributo, {
@@ -38,6 +40,7 @@ type Dados = {
   atributosML: { id: string; valor: string }[]
   tipoDescricao: string | null
   ficha: {
+    gtin?: string | null
     pesoKg: number | null; comprimentoCm: number | null; larguraCm: number | null; alturaCm: number | null
     condicao: string | null; marcaId: number | null; marcaNome: string | null; categoriaId: string | null; skuCanal: string | null
   }
@@ -118,6 +121,8 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
   const [buscaProd, setBuscaProd] = useState('')
   const [fotos, setFotos] = useState<Foto[]>([])
   const [peso, setPeso] = useState('')
+  const [gtin, setGtin] = useState('')
+  const [gerandoGtin, setGerandoGtin] = useState(false)
   const [comprimento, setComprimento] = useState('')
   const [largura, setLargura] = useState('')
   const [altura, setAltura] = useState('')
@@ -154,6 +159,7 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
         setBuscaProd(d.produto?.nome ?? '')
         setFotos(d.imagens ?? [])
         setPeso(d.ficha.pesoKg != null ? String(d.ficha.pesoKg) : '')
+        setGtin(d.ficha.gtin ?? '')
         setComprimento(d.ficha.comprimentoCm != null ? String(d.ficha.comprimentoCm) : '')
         setLargura(d.ficha.larguraCm != null ? String(d.ficha.larguraCm) : '')
         setAltura(d.ficha.alturaCm != null ? String(d.ficha.alturaCm) : '')
@@ -171,6 +177,7 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
           skuCanal: a.skuCanal ?? '', status: a.status ?? '',
           fotos: JSON.stringify((d.imagens ?? []).map((f: Foto) => f.url)),
           peso: d.ficha.pesoKg, comprimento: d.ficha.comprimentoCm, largura: d.ficha.larguraCm, altura: d.ficha.alturaCm,
+          gtin: d.ficha.gtin ?? '',
           marcaId: d.ficha.marcaId != null ? String(d.ficha.marcaId) : '',
           variacoes: vars,
         })
@@ -415,6 +422,12 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
       if (comprimento) campos.comprimentoCm = parseFloat(comprimento)
       if (largura) campos.larguraCm = parseFloat(largura)
       if (altura) campos.alturaCm = parseFloat(altura)
+    }
+    if (plataforma === 'shopee' && mudou('gtin', gtin) && gtin.trim()) {
+      if (!gtinAceitoNaEdicao(gtin)) {
+        setErro('GTIN inválido: use 8, 12, 13 ou 14 dígitos com o dígito verificador certo, ou "Marcar sem GTIN".'); setAba('ficha'); setSalvando(false); return
+      }
+      campos.gtin = gtin.trim() === SEM_GTIN ? SEM_GTIN : gtin.replace(/\D/g, '')
     }
     if (dados?.tipoDescricao) campos.tipoDescricao = dados.tipoDescricao
 
@@ -852,6 +865,59 @@ export default function EditarAnuncioModal({ anuncio, canal, empresaId, produtos
                         </div>
                       ))}
                       {atributosML.length === 0 && <p className="text-sm text-gray-400">Esta categoria não tem atributos editáveis.</p>}
+                    </div>
+                  )}
+
+                  {plataforma === 'shopee' && (
+                    <div className="pt-2 border-t border-gray-100">
+                      <p className="text-xs font-medium text-gray-600 mb-1">GTIN (EAN / código de barras)</p>
+                      <p className="text-[11px] text-gray-500 mb-2">Sem GTIN a Shopee recusa alterar o anúncio — até pausar ou mudar o estoque.</p>
+                      {dados.anuncio.temVariacao ? (
+                        <p className="text-xs text-gray-600">Anúncio com variações: o GTIN é de cada variação — corrija em <a href="/dashboard/gtin-shopee" className="text-blue-600 underline">Marketplaces → GTIN na Shopee</a>.</p>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input value={gtin} title='"00" = produto sem GTIN'
+                              onChange={e => setGtin(e.target.value.replace(/[^\d]/g, '').slice(0, 14))}
+                              placeholder="ex.: 7891234567895" inputMode="numeric"
+                              className="w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-blue-500" />
+                            {gtinParaMarketplace(dados.produto?.ean) && gtin !== gtinParaMarketplace(dados.produto?.ean) && (
+                              <button type="button" onClick={() => setGtin(gtinParaMarketplace(dados.produto?.ean)!)}
+                                className="text-xs px-2.5 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">
+                                Copiar do produto ({gtinParaMarketplace(dados.produto?.ean)})
+                              </button>
+                            )}
+                            <button type="button" onClick={() => setGtin(SEM_GTIN)}
+                              className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">
+                              Marcar sem GTIN
+                            </button>
+                            {dados.produto && !gtinParaMarketplace(dados.produto.ean) && (
+                              <button type="button" disabled={gerandoGtin}
+                                onClick={async () => {
+                                  // Código INTERNO (prefixo 2, circulação restrita): gravado no
+                                  // produto, que ainda não tem EAN. Não é um GTIN registrado.
+                                  setGerandoGtin(true)
+                                  try {
+                                    const sb = createClient()
+                                    const codigo = ehCodigoInterno(String(dados.produto.ean ?? '')) ? String(dados.produto.ean) : await gerarEanInternoUnico(sb, empresaId)
+                                    if (!dados.produto.ean) await sb.from('produtos').update({ ean: codigo }).eq('id', dados.produto.id).eq('empresa_id', empresaId)
+                                    setGtin(codigo)
+                                  } finally { setGerandoGtin(false) }
+                                }}
+                                className="text-xs px-2.5 py-1.5 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50">
+                                {gerandoGtin ? 'Gerando…' : ehCodigoInterno(String(dados.produto.ean ?? '')) ? 'Usar o código interno do produto' : 'Gerar código interno'}
+                              </button>
+                            )}
+                          </div>
+                          {gtin === SEM_GTIN && <p className="text-[11px] text-gray-500 mt-1">Vai como &quot;produto sem GTIN&quot; — a opção da Shopee para quem não tem código de barras.</p>}
+                          {gtin && gtin !== SEM_GTIN && !gtinAceitoNaEdicao(gtin) && <p className="text-[11px] text-red-600 mt-1">Código inválido (tamanho ou dígito verificador).</p>}
+                          {ehCodigoInterno(gtin) && (
+                            <p className="text-[11px] text-amber-700 mt-1">
+                              ⚠ Código interno da loja (prefixo 2): não é registrado na GS1, e a Shopee confere o GTIN na base dela — pode recusar. Se recusar, use &quot;Marcar sem GTIN&quot;.
+                            </p>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
 

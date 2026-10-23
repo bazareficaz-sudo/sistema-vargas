@@ -50,6 +50,8 @@ export type CamposEdicao = {
   larguraCm?: number
   alturaCm?: number
   skuCanal?: string
+  /** Shopee: GTIN do anúncio ("00" = sem GTIN). Validado na tela e na rota. */
+  gtin?: string
   preco?: number | null
   estoque?: number | null
   variacoes?: { modelId: string; preco?: number | null; estoque?: number | null }[]
@@ -124,6 +126,7 @@ async function enviarShopee(
     larguraCm: campos.larguraCm,
     alturaCm: campos.alturaCm,
     skuCanal: campos.skuCanal,
+    gtin: campos.gtin,
     tipoDescricao: campos.tipoDescricao,
   })
   if (!conteudo.ok) return { ok: false, erro: conteudo.erro, avisos, ressincronizado: false }

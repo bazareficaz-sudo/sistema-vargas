@@ -103,6 +103,9 @@ export const ETAPAS = [
   { id: 'atendimento', rotulo: 'Em atendimento', cor: 'bg-blue-100 text-blue-700' },
   { id: 'orcamento', rotulo: 'Orçamento enviado', cor: 'bg-amber-100 text-amber-800' },
   { id: 'comprou', rotulo: 'Comprou', cor: 'bg-green-100 text-green-700' },
+  // Só tirou uma dúvida: sai de "Aguardando" sem contar como venda perdida.
+  // Reabre sozinha quando o cliente volta (passada 1 h) ou a loja responde.
+  { id: 'finalizado', rotulo: 'Finalizado', cor: 'bg-slate-200 text-slate-700' },
   { id: 'perdido', rotulo: 'Perdido', cor: 'bg-red-100 text-red-700' },
 ] as const
 export type Etapa = (typeof ETAPAS)[number]['id']

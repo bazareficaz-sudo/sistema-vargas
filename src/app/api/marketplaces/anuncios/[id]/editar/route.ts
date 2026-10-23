@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { gtinAceitoNaEdicao } from '@/lib/shopee/gtinRegras'
 import { createClient } from '@/lib/supabase/server'
 import { perfilDaSessao } from '@/lib/auth/empresaAtiva'
 import { mlGet, refreshAccessTokenIfNeeded } from '@/lib/mercadolivre/client'
@@ -178,6 +179,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { sb, anuncio, canal } = ctx
 
   const local = corpo.local ?? {}
+  // GTIN só "00" ou código com dígito verificador certo — o resto a Shopee
+  // recusaria de qualquer jeito, e assim a pessoa sabe antes.
+  if (corpo.canal?.gtin != null && !gtinAceitoNaEdicao(String(corpo.canal.gtin))) {
+    return NextResponse.json({ ok: false, erro: 'GTIN inválido: use 8, 12, 13 ou 14 dígitos com o dígito verificador certo, ou "sem GTIN".' }, { status: 400 })
+  }
   if (local.titulo != null && !local.titulo.trim()) {
     return NextResponse.json({ ok: false, erro: 'O título não pode ficar vazio.' }, { status: 400 })
   }
