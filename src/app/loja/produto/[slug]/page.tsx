@@ -2,8 +2,9 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { lojaObrigatoria } from '@/lib/commerce/loja'
-import { compreJunto, produtoPorSlug, relacionados } from '@/lib/commerce/catalogo'
+import { compreJunto, produtoPorSlug, relacionados, variacoesDoProduto } from '@/lib/commerce/catalogo'
 import CardProduto from '@/components/loja/CardProduto'
+import OpcoesVariacao from '@/components/loja/OpcoesVariacao'
 import CompreJunto from '@/components/loja/CompreJunto'
 import ComprarProduto from '@/components/loja/ComprarProduto'
 import CompartilharProduto from '@/components/loja/CompartilharProduto'
@@ -60,9 +61,10 @@ export default async function PaginaProduto({ params }: Props) {
   // Em paralelo: nenhuma depende da outra. "Compre junto" só é consultado se o
   // próprio produto pode ser comprado — oferecer o acessório de algo que
   // acabou leva o cliente a um carrinho que não fecha.
-  const [similares, junto] = await Promise.all([
+  const [similares, junto, variacoes] = await Promise.all([
     relacionados(loja, p, 10),
     podeComprar ? compreJunto(loja, p, 3) : Promise.resolve([]),
+    variacoesDoProduto(loja, p.lojaProdutoId),
   ])
 
   // Dados estruturados: é o que faz preço e disponibilidade aparecerem no
@@ -136,6 +138,8 @@ export default async function PaginaProduto({ params }: Props) {
             {p.descricaoCurta && (
               <p className="text-[var(--tinta-media)]">{p.descricaoCurta}</p>
             )}
+
+            {variacoes && <OpcoesVariacao variacoes={variacoes} />}
 
             <ComprarProduto produto={p} permiteSemEstoque={loja.permitirVendaSemEstoque} />
 

@@ -138,6 +138,24 @@ export type ProdutoDetalhe = ProdutoCard & {
   disponivelAgora: number
 }
 
+/** Uma opção de uma família de variações (uma cor, uma medida). */
+export type OpcaoVariacao = {
+  slug: string
+  rotulo: string
+  /** `#rrggbb` da bolinha. `null` = a opção aparece só como texto. */
+  cor: string | null
+  /** Pelo cache da listagem: serve para riscar a opção, não para vender. */
+  disponivel: boolean
+  atual: boolean
+}
+
+export type VariacoesProduto = {
+  familia: string
+  /** Singular, como aparece na tela: "Cor", "Medida". */
+  tipoOpcao: string
+  opcoes: OpcaoVariacao[]
+}
+
 export type Categoria = {
   id: string
   nome: string

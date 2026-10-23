@@ -13,6 +13,7 @@ const ABAS = [
   { href: '/dashboard/loja-online',               label: 'Visão Geral',    exato: true },
   { href: '/dashboard/loja-online/produtos',      label: 'Produtos' },
   { href: '/dashboard/loja-online/categorias',    label: 'Categorias' },
+  { href: '/dashboard/loja-online/variacoes',     label: 'Variações' },
   { href: '/dashboard/loja-online/precos',        label: 'Preços' },
   { href: '/dashboard/loja-online/aparencia',     label: 'Aparência' },
   { href: '/dashboard/loja-online/home',          label: 'Banners / Home' },
