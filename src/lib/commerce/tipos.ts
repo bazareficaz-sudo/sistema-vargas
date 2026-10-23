@@ -168,6 +168,9 @@ export type Banner = {
   ctaTexto: string | null
 }
 
+/** Banner que aparece no topo da página de uma categoria ou subcategoria. */
+export type BannerCategoria = Banner & { categoriaId: string }
+
 export type Ordenacao = 'relevancia' | 'menor_preco' | 'maior_preco' | 'novidades' | 'nome'
 
 export type FiltrosBusca = {

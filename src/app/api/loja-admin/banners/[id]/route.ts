@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { contextoAdmin, invalidarVitrine, lojaDaSessao } from '@/lib/commerce/admin'
-import { validarBanner } from '@/lib/commerce/validarBanner'
+import { categoriaDaLoja, validarBanner } from '@/lib/commerce/validarBanner'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,11 +24,27 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const resultado = validarBanner(corpo)
   if ('erro' in resultado) return NextResponse.json({ erro: resultado.erro }, { status: 400 })
 
+  // Só banner que JÁ é de categoria pode trocar de categoria. A posição não
+  // muda por edição: um banner da home não vira de categoria (nem o contrário)
+  // por um campo a mais no corpo — o CHECK do banco recusaria o par
+  // inconsistente, mas o erro chegaria como "Não foi possível salvar".
+  const { data: existente } = await ctx.sb
+    .from('loja_banners').select('posicao')
+    .eq('id', id).eq('loja_id', corpo.lojaId).maybeSingle()
+  if (!existente) return NextResponse.json({ erro: 'Banner não encontrado' }, { status: 404 })
+
+  const valores: Record<string, unknown> = { ...resultado.valores }
+  if (existente.posicao === 'categoria' && corpo.categoriaId !== undefined) {
+    const cat = await categoriaDaLoja(ctx.sb, corpo.lojaId as string, corpo.categoriaId)
+    if ('erro' in cat) return NextResponse.json({ erro: cat.erro }, { status: 400 })
+    valores.loja_categoria_id = cat.categoriaId
+  }
+
   // `loja_id` no WHERE, não só no `id`: sem isso, um id de banner de outra
   // loja (adivinhado ou de outra aba aberta) seria editável por quem não é
   // dono dela — a mesma trava que toda rota de escrita da Loja Online usa.
   const { error } = await ctx.sb
-    .from('loja_banners').update(resultado.valores)
+    .from('loja_banners').update(valores)
     .eq('id', id).eq('loja_id', corpo.lojaId)
 
   if (error) {
