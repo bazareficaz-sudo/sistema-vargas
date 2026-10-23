@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 // Caixa de entrada do WhatsApp: conversas com quem procurou a loja (contatos),
 // com o histórico e a resposta pelo sistema. Os destinatários do Getúlio
 // (dono e equipe) não são contato e não aparecem aqui.
-const FILTROS = ['todas', 'aguardando', 'nao_lidas', 'hoje'] as const
+const FILTROS = ['todas', 'abertas', 'aguardando', 'nao_lidas', 'hoje'] as const
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const COLS_ORC = 'id, numero, created_at, total, validade, status'
 
@@ -36,6 +36,8 @@ export default async function WhatsAppConversasPage({
     let lista = supabase.from('whatsapp_conversas').select(cols)
       .eq('empresa_id', empresaId).neq('status', 'ignorado').not('ultima_atividade', 'is', null)
       .order('ultima_atividade', { ascending: false }).limit(80)
+    // Em aberto: tudo menos as finalizadas.
+    if (filtro === 'abertas') lista = lista.neq('etapa', 'finalizado')
     if (filtro === 'aguardando') lista = lista.eq('aguardando', true)
     if (filtro === 'nao_lidas') lista = lista.eq('nao_lida', true)
     // Para hoje: lembrete de hoje ou atrasado, e orçamento sem resposta há 3 dias.
@@ -142,6 +144,7 @@ export default async function WhatsAppConversasPage({
   type Marca = { etapa: string; aguardando: boolean; nao_lida: boolean; retorno_vencido: boolean; orcamento_parado: boolean }
   const linhas = (marcas.data ?? []) as Marca[]
   const contagem = {
+    abertas: linhas.filter(m => m.etapa !== 'finalizado').length,
     aguardando: linhas.filter(m => m.aguardando).length,
     naoLidas: linhas.filter(m => m.nao_lida).length,
     hoje: linhas.filter(m => m.retorno_vencido || m.orcamento_parado).length,

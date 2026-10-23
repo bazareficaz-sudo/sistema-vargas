@@ -82,5 +82,6 @@ describe('etapas e lembrete de retorno', () => {
   test('etapa desconhecida cai em Novo', () => {
     assert.equal(etapaDe('orcamento').rotulo, 'Orçamento enviado')
     assert.equal(etapaDe('xyz').id, 'novo')
+    assert.equal(etapaDe('finalizado').rotulo, 'Finalizado')
   })
 })
