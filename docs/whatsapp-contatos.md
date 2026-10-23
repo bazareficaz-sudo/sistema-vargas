@@ -245,6 +245,15 @@ Sem migração (usa `resposta_a`, de `20261017120000_whatsapp_resposta_citada.sq
 - **Endereço que o cliente mandou:** mensagem do cliente com CEP ou "rua/avenida … número" ganha o link **📍 Cadastrar cliente com este endereço** (ou **Atualizar endereço no cadastro**, se já é cliente); qualquer mensagem do cliente tem **Usar como endereço do cliente** no menu. Junta as mensagens seguidas do cliente (até 10 min, sem a loja no meio), lê rua, número, complemento, bairro, cidade/UF e CEP, e completa pelo ViaCEP. A gaveta do cadastro abre **na conversa**, na aba Endereço, com aviso e o texto original — **nada é salvo sem conferir e clicar em Salvar**. Cliente novo já vem com nome e WhatsApp; ao salvar, a conversa liga ao cadastro sozinha.
 - **Ficha:** mostra o último endereço que o cliente mandou, com o botão para usar; "Cadastrar cliente" abre a gaveta ali mesmo (antes ia para a tela de Contatos) e "Editar cadastro" para quem já é cliente.
 
+## Finalizar atendimento
+
+Migração `supabase/migrations/20261023120000_whatsapp_finalizar.sql`.
+
+- Botão **✓ Finalizar** no topo da conversa (e etapa **Finalizado** na lista): para quem só tirou uma dúvida. A conversa sai de "Aguardando" e de "Não lidas", o lembrete é concluído e **nada é enviado** (para se despedir, use a resposta rápida antes). **↺ Reabrir** volta para "Em atendimento".
+- Não conta como venda perdida nem como compra. Filtro **Em aberto** esconde as finalizadas; na lista, ✓ discreto.
+- **Reabre sozinha** em "Em atendimento": cliente escreve **1 hora ou mais** depois de finalizar (um "obrigado" logo depois só fica como não lida); a loja responde pelo sistema ou manda produto; a loja escreve pelo celular depois de 1 hora. Orçamento enviado → "Orçamento"; comprovante → "Comprou". Automações (fora do horário, envio por categoria) não reabrem.
+- A janela de 1 hora está em `whatsapp_janela_finalizado()`.
+
 ## Próximas etapas (planejado, não implementado)
 
 1. Avaliar a API oficial do WhatsApp (Meta) no lugar da Z-API.

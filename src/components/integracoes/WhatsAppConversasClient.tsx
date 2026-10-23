@@ -126,7 +126,7 @@ function Midia({ m }: { m: Mensagem }) {
 const nomeDe = (c: Conversa) => c.cliente_nome || c.nome_whatsapp || (numeroOculto(c.telefone) ? 'Número oculto' : formatarTelefone(c.telefone))
 const dia = (s: string) => new Date(s).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'America/Sao_Paulo' })
 const brl = (v: number | null | undefined) => Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const FILTROS: Record<string, string> = { todas: 'Tudo', nao_lidas: 'Não lidas', aguardando: 'Aguardando', hoje: 'Para hoje' }
+const FILTROS: Record<string, string> = { todas: 'Tudo', abertas: 'Em aberto', nao_lidas: 'Não lidas', aguardando: 'Aguardando', hoje: 'Para hoje' }
 
 // ── Visual do WhatsApp ──────────────────────────────────────────────────
 const CORES_AVATAR = ['bg-emerald-500', 'bg-sky-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500', 'bg-indigo-500', 'bg-orange-500']
@@ -199,7 +199,7 @@ type ClienteBusca = { id: string; nome: string; telefone: string | null; whatsap
 export default function WhatsAppConversasClient({ conversas, aberta, mensagens, contagem, filtros, indisponivel, ficha, orcamentos, respostas, loja, empresaId, categorias }: {
   conversas: Conversa[]; aberta: Conversa | null; mensagens: Mensagem[]
   ficha: Ficha | null; orcamentos: OrcamentoConversa[]; respostas: RespostaRapida[]; loja: string; empresaId: string
-  contagem: { aguardando: number; naoLidas: number; hoje: number; etapas: Record<string, number> }
+  contagem: { abertas: number; aguardando: number; naoLidas: number; hoje: number; etapas: Record<string, number> }
   filtros: { f: string; q: string; e: string | null; cat: string | null }
   indisponivel: boolean
   categorias: Categoria[]
@@ -406,8 +406,12 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
   // RLS limita à empresa). Lembrete é só aviso na tela; nada sai sozinho.
   async function mudarEtapa(etapa: string) {
     if (!aberta) return
-    const { error } = await createClient().from('whatsapp_contatos').update({ etapa }).eq('id', aberta.id)
+    // Finalizar: lida e sem lembrete (atendimento concluído). Nada é enviado.
+    const dados = etapa === 'finalizado' ? { etapa, lida_em: new Date().toISOString(), retorno_em: null, retorno_nota: null } : { etapa }
+    const { error } = await createClient().from('whatsapp_contatos').update(dados).eq('id', aberta.id)
     if (error) setErro('Não foi possível mudar a etapa.')
+    else if (etapa === 'finalizado') { setLembrete(null); setAviso('Atendimento finalizado. Se o cliente voltar a escrever (depois de 1 h), a conversa reabre sozinha.') }
+    else if (aberta.etapa === 'finalizado') setAviso('Atendimento reaberto.')
     router.refresh()
   }
 
@@ -654,7 +658,7 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
             </div>
             <div className="flex gap-1.5 overflow-x-auto pb-1 items-center">
               {Object.entries(FILTROS).map(([k, v]) => {
-                const n = k === 'hoje' ? contagem.hoje : k === 'aguardando' ? contagem.aguardando : k === 'nao_lidas' ? contagem.naoLidas : 0
+                const n = k === 'hoje' ? contagem.hoje : k === 'aguardando' ? contagem.aguardando : k === 'nao_lidas' ? contagem.naoLidas : k === 'abertas' ? contagem.abertas : 0
                 return (
                   <button key={k} onClick={() => ir({ f: k, c: null })}
                     className={`text-[13px] px-3 py-1 rounded-full whitespace-nowrap ${filtros.f === k ? 'bg-[#d9fdd3] text-[#008069]' : 'bg-[#f0f2f5] text-gray-600 hover:bg-[#e9edef]'}`}>
@@ -703,7 +707,8 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                       </span>
                       {c.retorno_vencido && <span title={`Retorno ${c.retorno_em ? rotuloRetorno(c.retorno_em) : ''}`} className="text-xs">🔔</span>}
                       {c.orcamento_parado && <span title="Orçamento sem resposta há 3 dias ou mais" className="text-xs">⏳</span>}
-                      {c.etapa !== 'novo' && <span title={etapaDe(c.etapa).rotulo} className={`w-2 h-2 rounded-full ${etapaDe(c.etapa).cor.split(' ')[0].replace('-100', '-400')}`} />}
+                      {c.etapa === 'finalizado' && <span title="Atendimento finalizado" className="text-xs text-slate-400">✓</span>}
+                      {c.etapa !== 'novo' && c.etapa !== 'finalizado' && <span title={etapaDe(c.etapa).rotulo} className={`w-2 h-2 rounded-full ${etapaDe(c.etapa).cor.split(' ')[0].replace('-100', '-400')}`} />}
                       {c.nao_lida
                         ? <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#25d366] text-white text-[11px] font-semibold flex items-center justify-center">1</span>
                         : c.aguardando && c.ultima_entrada_em && <span className="text-[11px] text-amber-700 whitespace-nowrap" title="Esperando resposta da loja">{tempoDeEspera(c.ultima_entrada_em)}</span>}
@@ -742,6 +747,11 @@ export default function WhatsAppConversasClient({ conversas, aberta, mensagens, 
                 </span>
               </span>
             </button>
+            {aberta.etapa === 'finalizado'
+              ? <button onClick={() => mudarEtapa('atendimento')} title="Voltar para Em atendimento"
+                  className="text-xs px-3 py-1 rounded-full border border-gray-300 text-gray-700 hover:bg-white whitespace-nowrap">↺ Reabrir</button>
+              : <button onClick={() => mudarEtapa('finalizado')} title="Atendimento concluído (ex.: só tirou uma dúvida). Sai de Aguardando; nada é enviado."
+                  className="text-xs px-3 py-1 rounded-full bg-[#008069] text-white hover:bg-[#017561] whitespace-nowrap">✓ Finalizar</button>}
             <select value={aberta.etapa} onChange={e => mudarEtapa(e.target.value)} title="Etapa do atendimento"
               className={`text-xs rounded-full px-2.5 py-1 border-0 cursor-pointer ${etapaDe(aberta.etapa).cor}`}>
               {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.rotulo}</option>)}
