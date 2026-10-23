@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
 import { botao } from '@/components/ui/botao'
+import { createClient } from '@/lib/supabase/client'
 
 // Formulário genérico das abas de configuração.
 //
@@ -18,7 +19,7 @@ import { botao } from '@/components/ui/botao'
 export type Campo = {
   nome: string
   rotulo: string
-  tipo?: 'texto' | 'area' | 'cor' | 'bool' | 'select' | 'numero'
+  tipo?: 'texto' | 'area' | 'cor' | 'bool' | 'select' | 'numero' | 'imagem'
   ajuda?: string
   opcoes?: { valor: string; rotulo: string }[]
   max?: number
@@ -136,6 +137,14 @@ export default function FormularioLoja({ lojaId, secoes, valores, previa }: {
                       placeholder={c.placeholder}
                       className="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm outline-none focus:border-blue-500"
                     />
+                  ) : c.tipo === 'imagem' ? (
+                    <CampoImagemUpload
+                      lojaId={lojaId}
+                      nome={c.nome}
+                      valor={valor == null ? '' : String(valor)}
+                      max={c.max}
+                      aoMudar={v => set(c.nome, v)}
+                    />
                   ) : c.tipo === 'cor' ? (
                     <div className="mt-1 flex items-center gap-2">
                       <input
@@ -204,6 +213,100 @@ export default function FormularioLoja({ lojaId, secoes, valores, previa }: {
           </span>
         )}
       </div>
+    </div>
+  )
+}
+
+
+// Imagem por upload OU por endereço. O upload cobre quem não tem a imagem
+// hospedada em lugar nenhum (o caso comum: um logotipo salvo no computador); o
+// endereço continua valendo para SVG e para imagem que já mora noutro site.
+//
+// Mesmo bucket e mesmo limite do cadastro de produto (`produto-imagens`, 5 MB,
+// PNG/JPG/WebP/GIF). SVG fica fora do upload DE PROPÓSITO: o bucket é público e
+// SVG pode carregar script — liberá-lo num bucket compartilhado com as fotos de
+// produto seria abrir um risco para ganhar um formato que o endereço já cobre.
+//
+// Enviar NÃO grava a configuração: só preenche o campo, e o "Salvar" do
+// formulário continua sendo o que publica. Sem isso, trocar de ideia depois do
+// upload deixaria a loja já alterada.
+const FORMATOS_UPLOAD = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const LIMITE_UPLOAD = 5 * 1024 * 1024
+
+function CampoImagemUpload({ lojaId, nome, valor, max, aoMudar }: {
+  lojaId: string
+  nome: string
+  valor: string
+  max?: number
+  aoMudar: (v: string) => void
+}) {
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [enviou, setEnviou] = useState(false)
+
+  async function enviar(arquivo: File) {
+    setErro(null)
+    setEnviou(false)
+    if (!FORMATOS_UPLOAD.includes(arquivo.type)) {
+      setErro('Formato não aceito no envio. Use PNG, JPG, WebP ou GIF — para SVG, cole o endereço abaixo.')
+      return
+    }
+    if (arquivo.size > LIMITE_UPLOAD) {
+      setErro('A imagem passa de 5 MB. Reduza e envie de novo.')
+      return
+    }
+    setEnviando(true)
+    try {
+      const sb = createClient()
+      const ext = (arquivo.name.split('.').pop() || 'png').toLowerCase()
+      const path = `loja/${lojaId}/${nome}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error } = await sb.storage.from('produto-imagens')
+        .upload(path, arquivo, { upsert: false, contentType: arquivo.type })
+      if (error) throw error
+      const { data } = sb.storage.from('produto-imagens').getPublicUrl(path)
+      aoMudar(data.publicUrl)
+      setEnviou(true)
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Falha no envio da imagem')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="mt-1 space-y-2">
+      <div className="flex items-center gap-3">
+        <div className="flex h-16 w-28 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-300 bg-gray-50">
+          {valor
+            /* eslint-disable-next-line @next/next/no-img-element */
+            ? <img src={valor} alt="" className="max-h-full max-w-full object-contain" />
+            : <span className="text-xs text-gray-400">sem imagem</span>}
+        </div>
+        <label className={`${botao('secundario', 'sm')} cursor-pointer`}>
+          {enviando ? 'Enviando…' : valor ? 'Trocar imagem' : 'Enviar imagem'}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            disabled={enviando}
+            onChange={e => { const a = e.target.files?.[0]; if (a) enviar(a); e.target.value = '' }}
+          />
+        </label>
+        {valor && (
+          <button type="button" onClick={() => { aoMudar(''); setEnviou(false) }} className={botao('sutil', 'sm')}>
+            Remover
+          </button>
+        )}
+      </div>
+      <input
+        value={valor}
+        onChange={e => { aoMudar(e.target.value); setEnviou(false) }}
+        maxLength={max}
+        placeholder="ou cole o endereço da imagem (aceita SVG)"
+        className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm outline-none focus:border-blue-500"
+      />
+      {enviou && <p className="text-xs text-green-700">Imagem enviada — clique em Salvar para publicar na loja.</p>}
+      {erro && <p className="text-xs text-red-700">{erro}</p>}
     </div>
   )
 }

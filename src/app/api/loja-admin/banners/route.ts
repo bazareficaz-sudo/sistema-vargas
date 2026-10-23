@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { contextoAdmin, invalidarVitrine, lojaDaSessao } from '@/lib/commerce/admin'
-import { validarBanner } from '@/lib/commerce/validarBanner'
+import { categoriaDaLoja, validarBanner } from '@/lib/commerce/validarBanner'
 
 // CRUD de `loja_banners` — criar aqui, editar/excluir em `[id]/route.ts`.
 //
@@ -28,10 +28,22 @@ export async function POST(req: Request) {
   const resultado = validarBanner(corpo)
   if ('erro' in resultado) return NextResponse.json({ erro: resultado.erro }, { status: 400 })
 
+  // A posição é decisão EXPLÍCITA de quem chama, não inferida de a categoria
+  // vir preenchida: se a tela de categoria mandasse a categoria vazia e a rota
+  // caísse em 'hero', o banner da categoria apareceria no carrossel da home.
+  const ehCategoria = corpo.posicao === 'categoria'
+  let categoriaId: string | null = null
+  if (ehCategoria) {
+    const cat = await categoriaDaLoja(ctx.sb, corpo.lojaId as string, corpo.categoriaId)
+    if ('erro' in cat) return NextResponse.json({ erro: cat.erro }, { status: 400 })
+    categoriaId = cat.categoriaId
+  }
+
   const { data, error } = await ctx.sb
     .from('loja_banners')
     .insert({
-      empresa_id: ctx.empresaId, loja_id: corpo.lojaId, posicao: 'hero',
+      empresa_id: ctx.empresaId, loja_id: corpo.lojaId,
+      posicao: ehCategoria ? 'categoria' : 'hero', loja_categoria_id: categoriaId,
       ...resultado.valores,
     })
     .select('id').single()

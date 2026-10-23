@@ -38,3 +38,22 @@ export function validarBanner(corpo: any): { erro: string } | { valores: Record<
     },
   }
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Confere que a categoria escolhida existe E é desta loja.
+ *
+ * Só o UUID bem formado não basta: sem a consulta, dá para amarrar o banner a
+ * uma categoria de outra loja, e ele ficaria salvo, sem aparecer em lugar
+ * nenhum, sem nenhum erro. Mesma trava de posse que as outras rotas de escrita.
+ */
+export async function categoriaDaLoja(
+  sb: any, lojaId: string, bruto: unknown,
+): Promise<{ erro: string } | { categoriaId: string }> {
+  if (typeof bruto !== 'string' || !UUID.test(bruto)) return { erro: 'Escolha a categoria do banner' }
+  const { data } = await sb.from('loja_categorias').select('id')
+    .eq('id', bruto).eq('loja_id', lojaId).maybeSingle()
+  if (!data) return { erro: 'Categoria não encontrada nesta loja' }
+  return { categoriaId: bruto }
+}

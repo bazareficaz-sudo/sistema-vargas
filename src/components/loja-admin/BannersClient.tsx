@@ -5,12 +5,20 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { botao } from '@/components/ui/botao'
 
-// Gestão de `loja_banners` (posição "hero", a única que a vitrine lê hoje —
-// ver src/lib/commerce/catalogo.ts). TODOS os banners ativos e dentro da
-// vigência entram no carrossel do topo, dividindo espaço com os destaques
-// por tag (ver BlocosHomeClient) — um só carrossel, não banner e depois uma
-// seção separada. `inicio_em`/`fim_em` continuam servindo para agendar: uma
-// campanha de amanhã pode ser cadastrada hoje sem aparecer antes da hora.
+// Gestão de `loja_banners`, em dois modos que dividem a mesma tela e o mesmo
+// formulário:
+//
+//   'hero'      → carrossel do topo da home. TODOS os banners ativos e dentro da
+//                 vigência entram, dividindo espaço com os destaques por tag
+//                 (ver BlocosHomeClient) — um só carrossel.
+//   'categoria' → banner no topo da página de uma categoria. Cada banner é
+//                 amarrado a UMA categoria; a subcategoria sem banner próprio
+//                 herda o da categoria-mãe (ver `bannersParaCategoria`).
+//
+// `inicio_em`/`fim_em` servem para agendar nos dois: uma campanha de amanhã
+// pode ser cadastrada hoje sem aparecer antes da hora.
+
+type CategoriaLoja = { id: string; nome: string; pai_id: string | null }
 
 type Banner = {
   id: string
@@ -24,11 +32,19 @@ type Banner = {
   ativo: boolean
   inicio_em: string | null
   fim_em: string | null
+  loja_categoria_id?: string | null
 }
 
 const vazio: Omit<Banner, 'id'> = {
   titulo: '', subtitulo: '', imagem_url: null, imagem_mobile_url: null,
   link_url: '', cta_texto: '', ordem: 0, ativo: true, inicio_em: null, fim_em: null,
+  loja_categoria_id: '',
+}
+
+/** "Material Elétrico › Lâmpadas" — a subcategoria sozinha ("Lâmpadas") não diz de onde é. */
+function rotuloCategoria(c: CategoriaLoja, todas: CategoriaLoja[]): string {
+  const pai = c.pai_id ? todas.find(x => x.id === c.pai_id) : null
+  return pai ? `${pai.nome} › ${c.nome}` : c.nome
 }
 
 function paraDatetimeLocal(iso: string | null): string {
@@ -46,8 +62,18 @@ function situacao(b: Banner): { texto: string; cor: string } {
   return { texto: 'No ar', cor: 'bg-green-100 text-green-700' }
 }
 
-export default function BannersClient({ lojaId, banners }: { lojaId: string; banners: Banner[] }) {
+export default function BannersClient({ lojaId, banners, modo = 'hero', categorias = [] }: {
+  lojaId: string
+  banners: Banner[]
+  modo?: 'hero' | 'categoria'
+  categorias?: CategoriaLoja[]
+}) {
   const router = useRouter()
+  const ehCategoria = modo === 'categoria'
+  // Ordenadas pelo rótulo completo, para a subcategoria ficar junto da mãe.
+  const opcoesCategoria = categorias
+    .map(c => ({ id: c.id, rotulo: rotuloCategoria(c, categorias) }))
+    .sort((a, b) => a.rotulo.localeCompare(b.rotulo, 'pt-BR'))
   const [editandoId, setEditandoId] = useState<string | null>(null)
   const [criando, setCriando] = useState(false)
 
@@ -62,10 +88,21 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
     <section className="rounded-xl border border-gray-200 bg-white">
       <div className="flex items-center justify-between border-b border-gray-200 p-4">
         <div>
-          <h2 className="font-semibold text-gray-900">Carrossel do topo — banners</h2>
+          <h2 className="font-semibold text-gray-900">
+            {ehCategoria ? 'Banners de categoria' : 'Carrossel do topo — banners'}
+          </h2>
           <p className="mt-0.5 text-sm text-gray-500">
-            Todo banner <strong>No ar</strong> (ativo, dentro da vigência) entra no carrossel do topo da
-            loja, dividindo espaço com os destaques por tag. A ordem decide a sequência.
+            {ehCategoria ? (
+              <>
+                Um banner no topo da página de uma categoria. Vale também para as subcategorias dela —
+                a menos que a subcategoria tenha um banner próprio, que aí ganha o lugar do da mãe.
+              </>
+            ) : (
+              <>
+                Todo banner <strong>No ar</strong> (ativo, dentro da vigência) entra no carrossel do topo da
+                loja, dividindo espaço com os destaques por tag. A ordem decide a sequência.
+              </>
+            )}
           </p>
         </div>
         {!criando && (
@@ -78,6 +115,8 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
           <div className="p-4">
             <BannerForm
               lojaId={lojaId}
+              modo={modo}
+              opcoesCategoria={opcoesCategoria}
               inicial={vazio}
               aoSalvar={() => { setCriando(false); router.refresh() }}
               aoCancelar={() => setCriando(false)}
@@ -86,7 +125,11 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
         )}
 
         {banners.length === 0 && !criando && (
-          <p className="p-4 text-sm text-gray-500">Nenhum banner cadastrado — a home mostra a abertura automática.</p>
+          <p className="p-4 text-sm text-gray-500">
+            {ehCategoria
+              ? 'Nenhum banner de categoria ainda — as páginas de categoria mostram só a listagem.'
+              : 'Nenhum banner cadastrado — a home mostra a abertura automática.'}
+          </p>
         )}
 
         {banners.map(b => {
@@ -97,7 +140,9 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
                 <BannerForm
                   lojaId={lojaId}
                   id={b.id}
-                  inicial={b}
+                  modo={modo}
+                  opcoesCategoria={opcoesCategoria}
+                  inicial={{ ...b, loja_categoria_id: b.loja_categoria_id ?? '' }}
                   aoSalvar={() => { setEditandoId(null); router.refresh() }}
                   aoCancelar={() => setEditandoId(null)}
                 />
@@ -112,6 +157,11 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="truncate font-medium text-gray-900">{b.titulo || '(sem título)'}</p>
+                      {ehCategoria && (
+                        <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                          {opcoesCategoria.find(o => o.id === b.loja_categoria_id)?.rotulo ?? 'categoria removida'}
+                        </span>
+                      )}
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${s.cor}`}>
                         {s.texto}
                       </span>
@@ -136,9 +186,11 @@ export default function BannersClient({ lojaId, banners }: { lojaId: string; ban
   )
 }
 
-function BannerForm({ lojaId, id, inicial, aoSalvar, aoCancelar }: {
+function BannerForm({ lojaId, id, modo, opcoesCategoria, inicial, aoSalvar, aoCancelar }: {
   lojaId: string
   id?: string
+  modo: 'hero' | 'categoria'
+  opcoesCategoria: { id: string; rotulo: string }[]
   inicial: Omit<Banner, 'id'>
   aoSalvar: () => void
   aoCancelar: () => void
@@ -179,6 +231,9 @@ function BannerForm({ lojaId, id, inicial, aoSalvar, aoCancelar }: {
         linkUrl: form.link_url, ctaTexto: form.cta_texto,
         ordem: form.ordem, ativo: form.ativo,
         inicioEm: form.inicio_em, fimEm: form.fim_em,
+        // `posicao` explícita só na criação: é a rota que decide pelo que
+        // recebe, e categoria vazia NÃO pode cair em banner da home.
+        ...(modo === 'categoria' ? { posicao: 'categoria', categoriaId: form.loja_categoria_id } : {}),
       }
       const r = await fetch(id ? `/api/loja-admin/banners/${id}` : '/api/loja-admin/banners', {
         method: id ? 'PATCH' : 'POST',
@@ -197,6 +252,23 @@ function BannerForm({ lojaId, id, inicial, aoSalvar, aoCancelar }: {
 
   return (
     <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-4">
+      {modo === 'categoria' && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Categoria</label>
+          <select
+            value={form.loja_categoria_id ?? ''}
+            onChange={e => set('loja_categoria_id', e.target.value)}
+            className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-2 text-sm"
+          >
+            <option value="">Escolha a categoria…</option>
+            {opcoesCategoria.map(o => <option key={o.id} value={o.id}>{o.rotulo}</option>)}
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Escolher uma categoria-mãe cobre também as subcategorias dela.
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2">
         <CampoImagem
           rotulo="Imagem (desktop)"
@@ -258,11 +330,18 @@ function BannerForm({ lojaId, id, inicial, aoSalvar, aoCancelar }: {
       {erro && <p className="text-sm text-red-700">{erro}</p>}
 
       <div className="flex gap-2">
-        <button onClick={salvar} disabled={salvando || !form.imagem_url} className={botao('primario')}>
+        <button
+          onClick={salvar}
+          disabled={salvando || !form.imagem_url || (modo === 'categoria' && !form.loja_categoria_id)}
+          className={botao('primario')}
+        >
           {salvando ? 'Salvando…' : 'Salvar'}
         </button>
         <button onClick={aoCancelar} disabled={salvando} className={botao('secundario')}>Cancelar</button>
         {!form.imagem_url && <span className="self-center text-xs text-gray-500">Envie uma imagem para salvar</span>}
+        {form.imagem_url && modo === 'categoria' && !form.loja_categoria_id && (
+          <span className="self-center text-xs text-gray-500">Escolha a categoria para salvar</span>
+        )}
       </div>
     </div>
   )

@@ -20,9 +20,9 @@ const SECOES: Secao[] = [
     titulo: 'Marca',
     descricao: 'Sem logotipo, a vitrine usa o nome da loja em texto — o que também funciona bem.',
     campos: [
-      { nome: 'logo_url', rotulo: 'Logotipo (URL)', max: 500,
-        ajuda: 'Fundo transparente (PNG ou SVG) e altura de pelo menos 64px.' },
-      { nome: 'favicon_url', rotulo: 'Favicon (URL)', max: 500,
+      { nome: 'logo_url', rotulo: 'Logotipo', tipo: 'imagem', max: 500,
+        ajuda: 'Fundo transparente (PNG) e altura de pelo menos 64px. Envie o arquivo ou, para SVG, cole o endereço.' },
+      { nome: 'favicon_url', rotulo: 'Favicon', tipo: 'imagem', max: 500,
         ajuda: 'O ícone da aba do navegador. Quadrado, 32×32 ou maior.' },
     ],
   },

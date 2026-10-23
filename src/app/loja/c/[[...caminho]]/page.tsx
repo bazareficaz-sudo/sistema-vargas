@@ -2,8 +2,9 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { lojaObrigatoria } from '@/lib/commerce/loja'
-import { buscar, categoriaPorCaminho, categorias } from '@/lib/commerce/catalogo'
+import { bannersDeCategorias, bannersParaCategoria, buscar, categoriaPorCaminho, categorias } from '@/lib/commerce/catalogo'
 import Listagem from '@/components/loja/Listagem'
+import HeroCarousel, { type Slide } from '@/components/loja/HeroCarousel'
 import { TituloSecao } from '@/components/loja/ds'
 import type { Ordenacao } from '@/lib/commerce/tipos'
 
@@ -70,14 +71,25 @@ export default async function PaginaCategoria({ params, searchParams }: Props) {
   const { atual, trilha } = await categoriaPorCaminho(loja.id, caminho)
   if (!atual) notFound()
 
-  const resultado = await buscar(loja, {
-    categoriaId: atual.id,
-    soPromocao: busca.promocao === '1',
-    soDisponivel: busca.disponivel === '1',
-    ordem: (busca.ordem as Ordenacao) || 'relevancia',
-    pagina: Math.max(Number(busca.pagina) || 1, 1),
-    porPagina: 24,
-  })
+  const [resultado, todosBanners] = await Promise.all([
+    buscar(loja, {
+      categoriaId: atual.id,
+      soPromocao: busca.promocao === '1',
+      soDisponivel: busca.disponivel === '1',
+      ordem: (busca.ordem as Ordenacao) || 'relevancia',
+      pagina: Math.max(Number(busca.pagina) || 1, 1),
+      porPagina: 24,
+    }),
+    bannersDeCategorias(loja.id),
+  ])
+
+  // A trilha vai da raiz até esta categoria; para herdar, o banner mais
+  // próximo precisa vir primeiro — daí o reverse.
+  const slides: Slide[] = bannersParaCategoria(todosBanners, trilha.map(c => c.id).reverse())
+    .map(b => ({
+      tipo: 'banner', id: b.id, imagemUrl: b.imagemUrl ?? b.imagemMobileUrl ?? '',
+      imagemMobileUrl: b.imagemMobileUrl, linkUrl: b.linkUrl, titulo: b.titulo,
+    }))
 
   return (
     <>
@@ -96,6 +108,12 @@ export default async function PaginaCategoria({ params, searchParams }: Props) {
           ))}
         </ol>
       </nav>
+
+      {/* Banner da categoria (ou herdado da categoria-mãe). Mesmo carrossel da
+          home: com um banner só, sem controle nenhum; com vários, gira. */}
+      {slides.length > 0 && (
+        <HeroCarousel slides={slides} politica={loja.politicaPreco} permiteSemEstoque={loja.permitirVendaSemEstoque} />
+      )}
 
       {atual.filhos.length > 0 && (
         <div className="loja-container pt-4">

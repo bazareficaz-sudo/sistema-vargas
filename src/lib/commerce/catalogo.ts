@@ -1,7 +1,7 @@
 import { unstable_cache } from 'next/cache'
 import { db, limpar } from './db'
 import type {
-  Banner, BlocoHome, Categoria, FiltrosBusca, Loja,
+  Banner, BannerCategoria, BlocoHome, Categoria, FiltrosBusca, Loja,
   ProdutoCard, ProdutoDetalhe, ResultadoBusca,
 } from './tipos'
 
@@ -495,6 +495,59 @@ export function banners(lojaId: string): Promise<Banner[]> {
     ['loja-banners', lojaId],
     { revalidate: 300, tags: [`loja:${lojaId}`] },
   )()
+}
+
+/**
+ * Banners de TODAS as categorias da loja, numa consulta só.
+ *
+ * A tabela é pequena (um banner por campanha, não por produto), então ler tudo
+ * uma vez e escolher em memória é mais barato do que uma consulta por página de
+ * categoria — e cabe no mesmo cache de 5 minutos dos outros banners. Quem
+ * escolhe qual vale para a página é `bannersParaCategoria`.
+ */
+async function lerBannersDeCategorias(lojaId: string): Promise<BannerCategoria[]> {
+  const agora = new Date().toISOString()
+  const { data } = await db()
+    .from('loja_banners')
+    .select('id, loja_categoria_id, titulo, subtitulo, imagem_url, imagem_mobile_url, link_url, cta_texto, inicio_em, fim_em')
+    .eq('loja_id', lojaId)
+    .eq('posicao', 'categoria')
+    .eq('ativo', true)
+    .order('ordem')
+
+  return ((data ?? []) as Record<string, any>[])
+    .filter(b => b.loja_categoria_id && b.imagem_url)
+    .filter(b => (!b.inicio_em || b.inicio_em <= agora) && (!b.fim_em || b.fim_em >= agora))
+    .map(b => ({
+      id: b.id, categoriaId: b.loja_categoria_id, titulo: b.titulo, subtitulo: b.subtitulo,
+      imagemUrl: b.imagem_url, imagemMobileUrl: b.imagem_mobile_url,
+      linkUrl: b.link_url, ctaTexto: b.cta_texto,
+    }))
+}
+
+export function bannersDeCategorias(lojaId: string): Promise<BannerCategoria[]> {
+  return unstable_cache(
+    () => lerBannersDeCategorias(lojaId),
+    ['loja-banners-categorias', lojaId],
+    { revalidate: 300, tags: [`loja:${lojaId}`] },
+  )()
+}
+
+/**
+ * Qual banner vale para esta página.
+ *
+ * `caminhoIds` vai da categoria da página até a raiz (a mais próxima primeiro).
+ * A mais próxima que tiver banner ganha — subcategoria com banner próprio usa o
+ * dela, e sem banner herda o da categoria-mãe. Nunca mistura níveis: mostrar o
+ * banner da subcategoria E o da mãe juntos seria dois anúncios competindo pelo
+ * mesmo espaço.
+ */
+export function bannersParaCategoria(todos: BannerCategoria[], caminhoIds: string[]): BannerCategoria[] {
+  for (const id of caminhoIds) {
+    const doNivel = todos.filter(b => b.categoriaId === id)
+    if (doNivel.length > 0) return doNivel
+  }
+  return []
 }
 
 export function marcasEmDestaque(lojaId: string, limite = 12): Promise<string[]> {
