@@ -472,6 +472,8 @@ export type AtualizarAnuncioInput = {
   larguraCm?: number
   alturaCm?: number
   skuCanal?: string
+  /** GTIN do anúncio — sem ele a Shopee passou a recusar alterações. */
+  gtin?: string
   /** `description_type` do anúncio. A Shopee recusa `description` em item
    *  com descrição estendida (a de blocos, com imagem no meio) — nesse caso
    *  o texto é ignorado e o aviso volta para a tela, em vez de a edição
@@ -540,6 +542,7 @@ export async function atualizarAnuncio(
       }
     }
     if (input.skuCanal != null) body.item_sku = input.skuCanal
+    if (input.gtin) body.gtin_code = input.gtin
 
     // Só `item_id` significa que nada mudou — não gasta chamada.
     if (Object.keys(body).length === 1) return { ok: true, avisos }

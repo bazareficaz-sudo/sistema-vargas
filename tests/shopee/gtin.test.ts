@@ -48,3 +48,20 @@ describe('anúncio com variação', () => {
     assert.match(p.pendencia ?? '', /1 variação/)
   })
 })
+
+describe('GTIN digitado no modal de edição', () => {
+  test('aceita "00", EAN válido e o código interno (com aviso na tela)', async () => {
+    const { gtinAceitoNaEdicao, ehCodigoInterno } = await import('../../src/lib/shopee/gtinRegras')
+    assert.equal(gtinAceitoNaEdicao('00'), true)
+    assert.equal(gtinAceitoNaEdicao('7891234567895'), true)
+    assert.equal(gtinAceitoNaEdicao('2000000000008'), true)
+    assert.equal(ehCodigoInterno('2000000000008'), true)
+    assert.equal(ehCodigoInterno('7891234567895'), false)
+  })
+  test('recusa dígito errado e tamanho errado', async () => {
+    const { gtinAceitoNaEdicao } = await import('../../src/lib/shopee/gtinRegras')
+    assert.equal(gtinAceitoNaEdicao('7891234567890'), false)
+    assert.equal(gtinAceitoNaEdicao('12345'), false)
+    assert.equal(gtinAceitoNaEdicao('0000000000000'), false)
+  })
+})

@@ -188,6 +188,8 @@ export function imagensDoAnuncio(
 // ── Ficha do pacote e identificação ─────────────────────────────────────────
 
 export type FichaAnuncio = {
+  /** Shopee: `gtin_code` do anúncio ("00" = sem GTIN). */
+  gtin?: string | null
   pesoKg: number | null
   comprimentoCm: number | null
   larguraCm: number | null
@@ -204,6 +206,7 @@ export function fichaDoAnuncio(plataforma: string, dadosBrutos: any): FichaAnunc
 
   if (plataforma === 'shopee') {
     return {
+      gtin: typeof b.gtin_code === 'string' && b.gtin_code.trim() ? b.gtin_code.trim() : null,
       pesoKg: numeroOuNulo(b.weight),
       comprimentoCm: numeroOuNulo(b.dimension?.package_length),
       larguraCm: numeroOuNulo(b.dimension?.package_width),

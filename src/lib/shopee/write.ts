@@ -1,4 +1,5 @@
-import { shopeePost, getIntegracaoCredentials } from './client'
+import { shopeeGet, shopeePost, getIntegracaoCredentials } from './client'
+import { situacaoGtin } from './gtinRegras'
 import { sleep, THROTTLE_MS } from './catalog'
 import { ShopeeApiError, type ShopeeChannel } from './types'
 
@@ -109,12 +110,62 @@ export async function pushPrecoEstoque(ctx: CallCtx, itemId: number, alvos: Alvo
 
 export type ResultadoUnlist = { itemId: number; ok: boolean; erro?: string }
 
+/**
+ * Motivos de recusa da Shopee que já apareceram, em português e dizendo o
+ * que fazer. Desde out/2026 a Shopee recusa QUALQUER alteração (pausar,
+ * estoque) em anúncio com cadastro incompleto.
+ */
+export function motivoShopeeEmPortugues(motivo: string): string {
+  if (/gtin/i.test(motivo)) return 'falta o GTIN (EAN) no anúncio — corrija em Marketplaces → GTIN na Shopee'
+  if (/parcel size|package.*(size|dimension)/i.test(motivo)) return 'faltam as medidas da embalagem no anúncio — preencha no Seller Centre (ou no cadastro e reenvie o anúncio)'
+  if (/weight/i.test(motivo)) return 'falta o peso no anúncio'
+  if (/brand/i.test(motivo)) return 'falta a marca do anúncio'
+  if (/attribute/i.test(motivo)) return `falta atributo obrigatório da categoria (${motivo})`
+  return motivo
+}
+
+/**
+ * Motivo de cada item numa resposta da Shopee — também quando ela recusa o
+ * LOTE INTEIRO: aí o envelope vem com erro ("Unlist item all failed.") e o
+ * motivo de cada item continua em `response.failure_list`. Medido em
+ * 22/10/2026: 113 pausas falharam e todas mostravam só a frase geral.
+ */
+function motivosPorItem(corpo: unknown): Map<number, string> {
+  const lista = (corpo as { response?: { failure_list?: unknown } } | null)?.response?.failure_list
+  return new Map((Array.isArray(lista) ? lista : []).map((f: any) => [
+    Number(f?.item_id),
+    motivoShopeeEmPortugues(String(f?.failed_reason ?? f?.fail_message ?? f?.message ?? 'Falha ao atualizar status')),
+  ]))
+}
+
 const UNLIST_BATCH_SIZE = 50
 
 // Liga/desliga o anúncio inteiro na Shopee (pausar = unlist:true, ativar =
 // unlist:false) — diferente de preço/estoque, é por item, não por variação.
 // Mesmo nível de confiança do resto deste arquivo (shape confirmado por
 // fonte secundária, não pela doc oficial).
+/**
+ * Lê os anúncios (só leitura) e diz o que falta neles — o que a Shopee
+ * passou a exigir para aceitar qualquer alteração: GTIN, medidas e peso.
+ */
+async function oQueFaltaNoAnuncio(callOptions: Awaited<ReturnType<typeof callOpts>>, itemIds: number[]): Promise<Map<number, string>> {
+  const r = await shopeeGet('/api/v2/product/get_item_base_info', { item_id_list: itemIds.join(',') }, callOptions)
+  const saida = new Map<number, string>()
+  for (const it of r?.response?.item_list ?? []) {
+    const falta: string[] = []
+    if (!it.has_model && ['falta', 'invalido'].includes(situacaoGtin(it.gtin_code))) falta.push('GTIN (EAN)')
+    const d = it.dimension ?? {}
+    if (!(Number(d.package_length) > 0 && Number(d.package_width) > 0 && Number(d.package_height) > 0)) falta.push('medidas da embalagem')
+    if (!(Number(it.weight) > 0)) falta.push('peso')
+    saida.set(Number(it.item_id), falta.length
+      ? `a Shopee recusou: falta ${falta.join(', ')} no anúncio${falta.includes('GTIN (EAN)') ? ' — GTIN se corrige em Marketplaces → GTIN na Shopee' : ''}`
+      : it.has_model
+        ? 'a Shopee recusou — confira o GTIN das variações (Marketplaces → GTIN na Shopee) e os atributos obrigatórios no Seller Centre'
+        : 'a Shopee recusou sem dizer o motivo — confira o anúncio no Seller Centre')
+  }
+  return saida
+}
+
 export async function unlistItems(ctx: CallCtx, itemIds: number[], unlist: boolean): Promise<ResultadoUnlist[]> {
   const callOptions = await callOpts(ctx)
   const resultados: ResultadoUnlist[] = []
@@ -125,16 +176,22 @@ export async function unlistItems(ctx: CallCtx, itemIds: number[], unlist: boole
       const data = await shopeePost('/api/v2/product/unlist_item', {
         item_list: lote.map(item_id => ({ item_id, unlist })),
       }, callOptions)
-      const falhas = new Map<number, string>(
-        (data?.response?.failure_list ?? []).map((f: any) => [Number(f.item_id), f.failed_reason ?? 'Falha ao atualizar status'])
-      )
+      const falhas = motivosPorItem(data)
       for (const itemId of lote) {
         const erro = falhas.get(itemId)
         resultados.push(erro ? { itemId, ok: false, erro } : { itemId, ok: true })
       }
     } catch (e: any) {
-      const erro = e instanceof ShopeeApiError ? e.message : (e?.message ?? 'Erro ao atualizar status')
-      for (const itemId of lote) resultados.push({ itemId, ok: false, erro })
+      // Lote inteiro recusado: o motivo de cada item pode vir no corpo do
+      // erro; quando não vem, lê o anúncio e diz o que falta nele.
+      const porItem = e instanceof ShopeeApiError ? motivosPorItem(e.raw) : new Map<number, string>()
+      const geral = e instanceof ShopeeApiError ? e.message : (e?.message ?? 'Erro ao atualizar status')
+      const semMotivo = lote.filter(id => !porItem.has(id))
+      if (semMotivo.length) {
+        const lido = await oQueFaltaNoAnuncio(callOptions, semMotivo).catch(() => new Map<number, string>())
+        for (const [id, m] of lido) porItem.set(id, m)
+      }
+      for (const itemId of lote) resultados.push({ itemId, ok: false, erro: porItem.get(itemId) ?? geral })
     }
     if (i + UNLIST_BATCH_SIZE < itemIds.length) await sleep(THROTTLE_MS)
   }

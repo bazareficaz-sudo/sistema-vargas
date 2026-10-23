@@ -38,6 +38,20 @@ export function gtinParaMarketplace(ean: string | null | undefined): string | nu
   return g
 }
 
+/**
+ * Código digitado/escolhido no modal de edição: "00" (sem GTIN) ou um código
+ * de 8, 12, 13 ou 14 dígitos com o dígito verificador certo. O de uso interno
+ * (prefixo 2) passa — é escolha consciente da pessoa, com aviso na tela.
+ */
+export function gtinAceitoNaEdicao(codigo: string): boolean {
+  const g = codigo.replace(/\D/g, '')
+  if (codigo.trim() === SEM_GTIN) return true
+  return /^(\d{8}|\d{12,14})$/.test(g) && !/^0+$/.test(g) && digitoConfere(g)
+}
+
+/** Código de circulação restrita (uso interno da loja, prefixo 2). */
+export const ehCodigoInterno = (codigo: string) => /^2\d{12}$/.test(codigo.replace(/\D/g, ''))
+
 /** O que o anúncio tem hoje na Shopee. */
 export function situacaoGtin(gtinCode: unknown): 'tem' | 'sem_gtin' | 'falta' | 'invalido' {
   const g = typeof gtinCode === 'string' ? gtinCode.trim() : gtinCode == null ? '' : String(gtinCode)
