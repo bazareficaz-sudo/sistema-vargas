@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { contextoAdmin, lojaDaSessao } from '@/lib/commerce/admin'
+import { contextoAdmin, invalidarVitrine, lojaDaSessao } from '@/lib/commerce/admin'
 import { validarRegraFrete } from '@/lib/commerce/frete/validar'
 
 export const dynamic = 'force-dynamic'
@@ -28,5 +28,6 @@ export async function POST(req: Request) {
     console.error('[loja-admin] frete/regras criar falhou', { erro: error.message })
     return NextResponse.json({ erro: 'Não foi possível salvar a regra.' }, { status: 500 })
   }
+  invalidarVitrine(lojaId)
   return NextResponse.json({ ok: true, id: data.id })
 }

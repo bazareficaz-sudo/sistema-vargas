@@ -6,6 +6,7 @@ import {
   type ConfigFrete, type RegraFrete, type ItemFrete, type ResultadoFrete, type OpcaoFrete,
 } from './calculo'
 import { distanciaRetaKm, localizarCep, type EnderecoLocalizado } from './geo'
+import { politicaDoDestino, type PoliticaDestino } from './politica'
 
 // Liga o motor de frete ao banco e ao mundo: carrega regras, pesa o carrinho
 // com os dados REAIS do servidor (preço e peso nunca vêm do navegador) e
@@ -179,4 +180,53 @@ export async function calcularParaCarrinho(
 export function escolherOpcao(r: ResultadoFrete, servico?: string): OpcaoFrete | null {
   if (r.status !== 'opcoes') return null
   return r.opcoes.find(o => o.servico === servico) ?? r.opcoes[0]
+}
+
+export type PoliticaConsultada = {
+  local: { bairro: string | null; cidade: string | null; uf: string | null; cep: string | null }
+  /** `true` quando o CEP não foi achado — o bairro informado à mão ainda vale. */
+  cepNaoEncontrado: boolean
+  politica: PoliticaDestino
+  /** Só quando a consulta traz um produto: o frete real daquele item. */
+  cotacao: ResultadoFrete | null
+}
+
+/**
+ * Como é a entrega para um destino — e, se vier um produto, quanto custa
+ * levá-lo. `null` = frete desligado. O destino pode ser só um bairro (a
+ * janela da loja) ou um CEP (que traz bairro, cidade e distância).
+ */
+export async function consultarPolitica(
+  loja: Loja,
+  destino: EntradaDestino,
+  produto?: { produtoId: string; quantidade: number },
+): Promise<PoliticaConsultada | null> {
+  const frete = await carregarFrete(loja.id)
+  if (!frete) return null
+
+  const endereco = destino.cep ? await localizarCep(destino.cep) : null
+  const bairro = destino.bairro?.trim() || endereco?.bairro || null
+  const cidade = destino.cidade?.trim() || endereco?.cidade || null
+  const uf = destino.uf?.trim() || endereco?.uf || null
+
+  let distanciaKm: number | null = null
+  if (frete.origem && endereco?.lat != null && endereco.lng != null) {
+    const reta = distanciaRetaKm(frete.origem, { lat: endereco.lat, lng: endereco.lng })
+    distanciaKm = Math.round(reta * frete.config.fatorEstrada * 10) / 10
+  }
+
+  const d = { cep: destino.cep ?? null, bairro, cidade, uf, distanciaKm }
+
+  let cotacao: ResultadoFrete | null = null
+  if (produto) {
+    const { itens } = await itensParaFrete(loja, [produto])
+    if (itens.length > 0) cotacao = calcularFrete(frete.config, frete.regras, itens, d)
+  }
+
+  return {
+    local: { bairro, cidade, uf, cep: destino.cep ?? endereco?.cep ?? null },
+    cepNaoEncontrado: !!destino.cep && !endereco,
+    politica: politicaDoDestino(frete.config, frete.regras, d),
+    cotacao,
+  }
 }

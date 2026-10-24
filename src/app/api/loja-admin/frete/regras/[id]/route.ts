@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { contextoAdmin, lojaDaSessao } from '@/lib/commerce/admin'
+import { contextoAdmin, invalidarVitrine, lojaDaSessao } from '@/lib/commerce/admin'
 import { validarRegraFrete } from '@/lib/commerce/frete/validar'
 
 export const dynamic = 'force-dynamic'
@@ -34,6 +34,7 @@ export async function PUT(req: Request, { params }: Ctx) {
     return NextResponse.json({ erro: 'Não foi possível salvar a regra.' }, { status: 500 })
   }
   if (!data?.length) return NextResponse.json({ erro: 'Regra não encontrada' }, { status: 404 })
+  invalidarVitrine(lojaId)
   return NextResponse.json({ ok: true })
 }
 
@@ -51,5 +52,6 @@ export async function DELETE(req: Request, { params }: Ctx) {
     console.error('[loja-admin] frete/regras excluir falhou', { erro: error.message })
     return NextResponse.json({ erro: 'Não foi possível excluir.' }, { status: 500 })
   }
+  invalidarVitrine(lojaId)
   return NextResponse.json({ ok: true })
 }

@@ -1,4 +1,7 @@
 import { contextoAdmin } from '@/lib/commerce/admin'
+import { paraConfig, paraRegra } from '@/lib/commerce/frete/servico'
+import { bairrosAtendidos, politicaDoDestino, textoDaOpcao } from '@/lib/commerce/frete/politica'
+import type { ExperienciaTela } from '@/components/loja-admin/FreteExperiencia'
 import FreteClient, { type ConfigFreteTela, type RegraTela, type ProdutoEspecialTela } from '@/components/loja-admin/FreteClient'
 
 export const dynamic = 'force-dynamic'
@@ -58,6 +61,30 @@ export default async function Frete() {
     pesoKg: e.peso_kg != null ? Number(e.peso_kg) : null,
   }))
 
+  // O que o cliente lê em cada bairro da lista: a mesma função que a loja usa,
+  // aplicada às regras salvas — é a conferência do que o gestor configurou.
+  const regrasMotor = ((regras.data ?? []) as Record<string, any>[]).map(paraRegra)
+  const configMotor = paraConfig((cfg.data ?? {}) as Record<string, any>)
+  const previa = bairrosAtendidos(regrasMotor).map(b => {
+    const p = politicaDoDestino(configMotor, regrasMotor, {
+      bairro: b.bairro, cidade: b.cidade, distanciaKm: null,
+    })
+    return {
+      cidade: b.cidade, bairro: b.bairro,
+      texto: p.status === 'opcoes' ? p.opcoes.map(textoDaOpcao).join('  |  ') : p.motivo,
+    }
+  })
+
+  const c = (cfg.data ?? {}) as Record<string, any>
+  const experiencia: ExperienciaTela = {
+    seletor_gatilho: c.seletor_gatilho ?? 'produto',
+    seletor_identificacao: c.seletor_identificacao ?? 'ambos',
+    seletor_titulo: c.seletor_titulo ?? null,
+    faixa_topo: c.faixa_topo ?? true,
+    mostrar_no_produto: c.mostrar_no_produto ?? true,
+    incentivo_gratis: c.incentivo_gratis ?? true,
+  }
+
   return (
     <FreteClient
       lojaId={ctx.lojaId}
@@ -66,6 +93,9 @@ export default async function Frete() {
       produtos={produtos}
       entregaAtiva={!!loja.data?.entrega_ativa}
       enderecoLojaOk={!!(loja.data?.cep || (loja.data?.cidade && loja.data?.uf))}
+      experiencia={experiencia}
+      previa={previa}
+      cidadeLoja={loja.data?.cidade ?? null}
     />
   )
 }

@@ -4,6 +4,10 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { botao } from '@/components/ui/botao'
 import type { ResultadoFrete } from '@/lib/commerce/frete/calculo'
+import {
+  BairrosRapido, ExperienciaCliente, PreviaCliente,
+  type ExperienciaTela, type PreviaLinha,
+} from './FreteExperiencia'
 
 // Painel do frete: configuração geral, regras, simulador e produtos especiais.
 //
@@ -81,7 +85,7 @@ async function enviar(url: string, metodo: string, corpo?: unknown) {
 }
 
 export default function FreteClient({
-  lojaId, config, regras, produtos, entregaAtiva, enderecoLojaOk,
+  lojaId, config, regras, produtos, entregaAtiva, enderecoLojaOk, experiencia, previa, cidadeLoja,
 }: {
   lojaId: string
   config: ConfigFreteTela | null
@@ -89,6 +93,9 @@ export default function FreteClient({
   produtos: ProdutoEspecialTela[]
   entregaAtiva: boolean
   enderecoLojaOk: boolean
+  experiencia: ExperienciaTela
+  previa: PreviaLinha[]
+  cidadeLoja: string | null
 }) {
   return (
     <div className="space-y-5">
@@ -99,7 +106,13 @@ export default function FreteClient({
         </div>
       )}
       <ConfiguracaoGeral lojaId={lojaId} config={config} enderecoLojaOk={enderecoLojaOk} />
+      <ExperienciaCliente lojaId={lojaId} experiencia={experiencia} temBairros={previa.length > 0} />
+      <BairrosRapido
+        lojaId={lojaId} cidadeLoja={cidadeLoja}
+        bairrosExistentes={regras.filter(r => r.area_tipo === 'bairros').flatMap(r => r.bairros.map(b => ({ cidade: r.cidade, bairro: b })))}
+      />
       <Regras lojaId={lojaId} regras={regras} />
+      <PreviaCliente linhas={previa} />
       <Simulador lojaId={lojaId} temConfig={!!config} />
       <ProdutosEspeciais lojaId={lojaId} produtos={produtos} />
     </div>

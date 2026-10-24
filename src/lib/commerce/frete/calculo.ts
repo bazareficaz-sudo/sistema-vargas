@@ -117,7 +117,7 @@ export function pesoTotal(itens: ItemFrete[], pesoPadraoKg: number): number {
   return centavos(total * 1000) / 1000
 }
 
-function casaArea(r: RegraFrete, d: DestinoFrete): boolean | 'sem_distancia' {
+export function casaArea(r: RegraFrete, d: DestinoFrete): boolean | 'sem_distancia' {
   switch (r.areaTipo) {
     case 'toda_loja':
       return true

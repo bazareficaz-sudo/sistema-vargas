@@ -5,6 +5,7 @@ import { lojaObrigatoria } from '@/lib/commerce/loja'
 import { compreJunto, produtoPorSlug, relacionados, variacoesDoProduto } from '@/lib/commerce/catalogo'
 import CardProduto from '@/components/loja/CardProduto'
 import OpcoesVariacao from '@/components/loja/OpcoesVariacao'
+import FreteProduto from '@/components/loja/FreteProduto'
 import CompreJunto from '@/components/loja/CompreJunto'
 import ComprarProduto from '@/components/loja/ComprarProduto'
 import CompartilharProduto from '@/components/loja/CompartilharProduto'
@@ -142,6 +143,8 @@ export default async function PaginaProduto({ params }: Props) {
             {variacoes && <OpcoesVariacao variacoes={variacoes} />}
 
             <ComprarProduto produto={p} permiteSemEstoque={loja.permitirVendaSemEstoque} />
+
+            <FreteProduto produtoId={p.produtoId} />
 
             <CompartilharProduto nome={p.nome} />
 
