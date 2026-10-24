@@ -2,8 +2,9 @@ import { unstable_cache } from 'next/cache'
 import { db, limpar } from './db'
 import type {
   Banner, BannerCategoria, BlocoHome, Categoria, FiltrosBusca, Loja,
-  ProdutoCard, ProdutoDetalhe, ResultadoBusca,
+  ProdutoCard, ProdutoDetalhe, ResultadoBusca, VariacoesProduto,
 } from './tipos'
+import { compararRotulos } from './variacoes'
 
 // Leitura do catálogo para a vitrine.
 //
@@ -173,6 +174,49 @@ export async function produtoPorSlug(loja: Loja, slug: string): Promise<ProdutoD
     limiteMaximoPorCompra: r.limite_maximo_por_compra ?? loja.limiteMaximoPorCompra ?? null,
     disponivelAgora: disp.get(r.produto_id) ?? 0,
   }
+}
+
+/**
+ * As outras opções do produto (cores, medidas), quando ele faz parte de uma
+ * família. Cada opção é um produto com página própria; aqui só saem os dados
+ * para montar os botões. `null` = produto sem variações, ou família que ficou
+ * com uma opção só — nada para escolher.
+ */
+export async function variacoesDoProduto(
+  loja: Loja, lojaProdutoId: string,
+): Promise<VariacoesProduto | null> {
+  const { data: eu } = await db()
+    .from('loja_produtos').select('familia_id')
+    .eq('id', lojaProdutoId).eq('loja_id', loja.id).maybeSingle()
+  if (!eu?.familia_id) return null
+
+  const [{ data: fam }, { data: irmaos }] = await Promise.all([
+    db().from('loja_familias').select('nome, tipo_opcao')
+      .eq('id', eu.familia_id).eq('loja_id', loja.id).maybeSingle(),
+    // Só o que está à venda — mais o próprio produto, que pode estar pausado
+    // (a página continua existindo) e precisa aparecer como a opção marcada.
+    db().from('loja_produtos')
+      .select('id, slug, opcao_rotulo, opcao_cor, opcao_ordem, estoque_publicavel')
+      .eq('loja_id', loja.id).eq('familia_id', eu.familia_id)
+      .or(`status.eq.publicado,id.eq.${lojaProdutoId}`),
+  ])
+  if (!fam) return null
+
+  const opcoes = ((irmaos ?? []) as Record<string, any>[])
+    .filter(i => i.opcao_rotulo)
+    .sort((a, b) =>
+      Number(a.opcao_ordem) - Number(b.opcao_ordem) ||
+      compararRotulos(String(a.opcao_rotulo), String(b.opcao_rotulo)))
+    .map(i => ({
+      slug: String(i.slug),
+      rotulo: String(i.opcao_rotulo),
+      cor: (i.opcao_cor as string | null) ?? null,
+      disponivel: Number(i.estoque_publicavel ?? 0) > 0 || loja.permitirVendaSemEstoque,
+      atual: i.id === lojaProdutoId,
+    }))
+  if (opcoes.length < 2) return null
+
+  return { familia: String(fam.nome), tipoOpcao: String(fam.tipo_opcao), opcoes }
 }
 
 /** Relacionados: mesma categoria, com saldo, sem repetir o próprio produto. */

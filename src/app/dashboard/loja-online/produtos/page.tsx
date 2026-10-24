@@ -59,9 +59,19 @@ export default async function ProdutosLoja({ searchParams }: {
   const ids = (produtos ?? []).map((x: any) => x.id)
   const { data: publicacoes } = ids.length
     ? await ctx.sb.from('loja_produtos')
-        .select('produto_id, status, slug, estoque_publicavel')
+        .select('produto_id, status, slug, estoque_publicavel, familia_id, opcao_rotulo')
         .eq('loja_id', ctx.lojaId).in('produto_id', ids)
     : { data: [] }
+
+  // Famílias de variações: o nome aparece na linha, e a lista inteira alimenta
+  // o "acrescentar a uma família existente" do modal de agrupar.
+  const { data: familiasDb } = await ctx.sb
+    .from('loja_familias').select('id, nome, tipo_opcao')
+    .eq('loja_id', ctx.lojaId).order('nome')
+  const familias = ((familiasDb ?? []) as any[]).map(f => ({
+    id: f.id as string, nome: f.nome as string, tipoOpcao: f.tipo_opcao as string,
+  }))
+  const nomeFamilia = new Map(familias.map(f => [f.id, f.nome]))
 
   const porProduto = new Map(
     ((publicacoes ?? []) as any[]).map(l => [l.produto_id, l]),
@@ -81,6 +91,10 @@ export default async function ProdutosLoja({ searchParams }: {
       status: (pub?.status ?? 'nao_publicado') as string,
       slug: pub?.slug ?? null,
       estoqueLoja: pub?.estoque_publicavel != null ? Number(pub.estoque_publicavel) : null,
+      temLinha: !!pub,
+      familiaId: (pub?.familia_id ?? null) as string | null,
+      familiaNome: pub?.familia_id ? (nomeFamilia.get(pub.familia_id) ?? null) : null,
+      opcao: (pub?.opcao_rotulo ?? null) as string | null,
     }
   }).filter((l: any) => !status || l.status === status)
 
@@ -92,6 +106,7 @@ export default async function ProdutosLoja({ searchParams }: {
       pagina={pagina}
       porPagina={POR_PAGINA}
       filtros={{ q: termo, status, foto, estoque }}
+      familias={familias}
     />
   )
 }

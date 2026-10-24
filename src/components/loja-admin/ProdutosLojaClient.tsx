@@ -3,11 +3,15 @@
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { botao } from '@/components/ui/botao'
+import AgruparVariacoesModal, { type FamiliaResumo } from './AgruparVariacoesModal'
 
 type Linha = {
   id: string; nome: string; sku: string | null; marca: string | null; categoria: string | null
   preco: number; estoqueCadastro: number; temFoto: boolean
   status: string; slug: string | null; estoqueLoja: number | null
+  /** Já tem linha em `loja_produtos` — pré-requisito para entrar numa família. */
+  temLinha: boolean
+  familiaId: string | null; familiaNome: string | null; opcao: string | null
 }
 
 const ROTULO: Record<string, { texto: string; cor: string }> = {
@@ -20,10 +24,11 @@ const ROTULO: Record<string, { texto: string; cor: string }> = {
 const real = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export default function ProdutosLojaClient({
-  lojaId, linhas, total, pagina, porPagina, filtros,
+  lojaId, linhas, total, pagina, porPagina, filtros, familias,
 }: {
   lojaId: string
   linhas: Linha[]
+  familias: FamiliaResumo[]
   total: number
   pagina: number
   porPagina: number
@@ -35,6 +40,7 @@ export default function ProdutosLojaClient({
   const [salvando, setSalvando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const [busca, setBusca] = useState(filtros.q)
+  const [agrupando, setAgrupando] = useState(false)
 
   const paginas = Math.max(Math.ceil(total / porPagina), 1)
 
@@ -147,6 +153,9 @@ export default function ProdutosLojaClient({
         </span>
 
         <div className="ml-auto flex flex-wrap gap-2">
+          <button onClick={() => setAgrupando(true)} disabled={salvando || marcados.size === 0} className={botao('secundario')}>
+            Agrupar como variações
+          </button>
           <button onClick={() => aplicar('publicado')} disabled={salvando || marcados.size === 0} className={botao('primario')}>
             Publicar
           </button>
@@ -158,6 +167,23 @@ export default function ProdutosLojaClient({
           </button>
         </div>
       </div>
+
+      {agrupando && (
+        <AgruparVariacoesModal
+          lojaId={lojaId}
+          produtos={linhas.filter(l => marcados.has(l.id)).map(l => ({
+            id: l.id, nome: l.nome, sku: l.sku, temLinha: l.temLinha, familiaId: l.familiaId,
+          }))}
+          familias={familias}
+          aoFechar={() => setAgrupando(false)}
+          aoConcluir={msg => {
+            setAgrupando(false)
+            setMarcados(new Set())
+            setAviso(msg)
+            router.refresh()
+          }}
+        />
+      )}
 
       {aviso && (
         <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">{aviso}</p>
@@ -204,6 +230,13 @@ export default function ProdutosLojaClient({
                   <div className="text-xs text-gray-500">
                     {[l.sku && `Cód. ${l.sku}`, l.marca, l.categoria].filter(Boolean).join(' · ')}
                   </div>
+                  {l.familiaId && (
+                    <div className="mt-1">
+                      <span className="inline-block rounded bg-indigo-50 px-1.5 py-0.5 text-xs text-indigo-700">
+                        Variação: {l.familiaNome} — {l.opcao}
+                      </span>
+                    </div>
+                  )}
                 </td>
                 <td className="p-3 whitespace-nowrap">
                   {l.preco > 0 ? real(l.preco) : <span className="text-amber-700">sem preço</span>}
