@@ -8,6 +8,7 @@ import { calcularKit, recalcularKitsQueUsam } from '@/lib/produtos/kit'
 import { registrarMovimentoEstoque } from '@/lib/produtos/movimentacao'
 import { faixasDoProduto } from '@/lib/produtos/promocao'
 import { sincronizarProdutoVinculado } from '@/lib/produtos/vinculo'
+import { sincronizarFotoPrincipal } from '@/lib/produtos/fotoPrincipal'
 import { normalizarGrupoSimilar } from '@/lib/produtos/similares'
 import VisualizadorImagem from './VisualizadorImagem'
 import EnviarImagensWhatsappModal from './EnviarImagensWhatsappModal'
@@ -693,6 +694,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       setImagens(prev => [...prev, img])
     }
     if (erros.length) setErroImg('Alguns arquivos falharam: ' + erros.join('; '))
+    await sincronizarFotoPrincipal(sb, form.id)
     setUploadando(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -712,6 +714,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     }).select().single()
     if (error) { setErroImg('Erro: ' + error.message); setUploadando(false); return }
     setImagens(prev => [...prev, img])
+    await sincronizarFotoPrincipal(sb, form.id)
     setUrlInput(''); setAdicionandoUrl(false); setUploadando(false)
   }
 
@@ -721,6 +724,7 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
     await sb.from('produto_imagens').update({ principal: false }).eq('produto_id', form.id)
     await sb.from('produto_imagens').update({ principal: true }).eq('id', id)
     setImagens(prev => prev.map(img => ({ ...img, principal: img.id === id })))
+    await sincronizarFotoPrincipal(sb, form.id)
   }
 
   // ── Imagens: Remover ──
@@ -737,6 +741,9 @@ export default function EditarProdutoModal({ produto, onClose, onSaved, empresaI
       novas[0] = { ...novas[0], principal: true }
     }
     setImagens(novas)
+    // Também quando a galeria ficou vazia: aí o atalho vira NULL, e é isso que
+    // faz a foto excluída sumir de verdade do PDV e da vitrine.
+    if (form) await sincronizarFotoPrincipal(sb, form.id)
   }
 
   // ── Imagens: Reordenar (move para cima) ──
