@@ -15,11 +15,13 @@ type ItemForm = { produtoId: string; nome: string; rotulo: string; cor: string }
 // Nada do produto muda — SKU, estoque e preço seguem como estão.
 
 export default function AgruparVariacoesModal({
-  lojaId, produtos, familias, aoFechar, aoConcluir,
+  lojaId, produtos, familias, tipoInicial, aoFechar, aoConcluir,
 }: {
   lojaId: string
   produtos: Produto[]
   familias: FamiliaResumo[]
+  /** Tipo já sugerido (ex.: veio da sugestão automática). Padrão: Cor. */
+  tipoInicial?: string
   aoFechar: () => void
   aoConcluir: (mensagem: string) => void
 }) {
@@ -29,7 +31,7 @@ export default function AgruparVariacoesModal({
   // é acrescentar a ela; senão, criar uma nova.
   const [destino, setDestino] = useState<string>('nova')
   const [nome, setNome] = useState(sugestao.nome)
-  const [tipo, setTipo] = useState<string>('Cor')
+  const [tipo, setTipo] = useState<string>(tipoInicial ?? 'Cor')
   const [itens, setItens] = useState<ItemForm[]>(() =>
     produtos
       .map((p, i) => ({ produtoId: p.id, nome: p.nome, rotulo: sugestao.rotulos[i] ?? '', cor: '' }))
