@@ -1,5 +1,7 @@
 import { contextoAdmin } from '@/lib/commerce/admin'
 import VariacoesClient from '@/components/loja-admin/VariacoesClient'
+import SugestoesVariacoes from '@/components/loja-admin/SugestoesVariacoes'
+import { sugerirAgrupamentos } from '@/lib/commerce/variacoes'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,15 +47,43 @@ export default async function VariacoesLoja() {
     porFamilia.set(m.familia_id, lista)
   }
 
+  // Sugestões: produtos que já estão na loja e ainda não têm família. Um
+  // produto que nunca foi publicado não entra — a família mora na linha de
+  // `loja_produtos`, que só existe depois de publicar ou salvar rascunho.
+  const { data: candidatos } = await ctx.sb
+    .from('loja_produtos')
+    .select('produto_id, produtos(nome, marca, categoria)')
+    .eq('loja_id', ctx.lojaId).is('familia_id', null)
+    .in('status', ['publicado', 'rascunho', 'pausado'])
+    .limit(5000)
+
+  const sugestoes = sugerirAgrupamentos(
+    ((candidatos ?? []) as any[])
+      .filter(c => c.produtos?.nome)
+      .map(c => ({
+        id: c.produto_id as string,
+        nome: c.produtos.nome as string,
+        marca: (c.produtos.marca ?? null) as string | null,
+        categoria: (c.produtos.categoria ?? null) as string | null,
+      })),
+  )
+
+  const lista = ((familias ?? []) as any[]).map(f => ({
+    id: f.id as string,
+    nome: f.nome as string,
+    tipoOpcao: f.tipo_opcao as string,
+    itens: porFamilia.get(f.id) ?? [],
+  }))
+
   return (
-    <VariacoesClient
-      lojaId={ctx.lojaId}
-      familias={((familias ?? []) as any[]).map(f => ({
-        id: f.id as string,
-        nome: f.nome as string,
-        tipoOpcao: f.tipo_opcao as string,
-        itens: porFamilia.get(f.id) ?? [],
-      }))}
-    />
+    <div className="space-y-8">
+      <SugestoesVariacoes
+        lojaId={ctx.lojaId}
+        sugestoes={sugestoes.slice(0, 60)}
+        totalSugestoes={sugestoes.length}
+        familias={lista.map(f => ({ id: f.id, nome: f.nome, tipoOpcao: f.tipoOpcao }))}
+      />
+      <VariacoesClient lojaId={ctx.lojaId} familias={lista} />
+    </div>
   )
 }
