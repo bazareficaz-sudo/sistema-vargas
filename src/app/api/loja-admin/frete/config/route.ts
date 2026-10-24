@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { contextoAdmin, lojaDaSessao } from '@/lib/commerce/admin'
+import { contextoAdmin, invalidarVitrine, lojaDaSessao } from '@/lib/commerce/admin'
 import { validarConfigFrete } from '@/lib/commerce/frete/validar'
 
 export const dynamic = 'force-dynamic'
@@ -30,5 +30,6 @@ export async function PUT(req: Request) {
     console.error('[loja-admin] frete/config falhou', { erro: error.message })
     return NextResponse.json({ erro: 'Não foi possível salvar. A migração do frete já foi aplicada?' }, { status: 500 })
   }
+  invalidarVitrine(lojaId)
   return NextResponse.json({ ok: true })
 }

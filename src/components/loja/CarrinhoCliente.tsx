@@ -6,6 +6,7 @@ import { useCarrinho } from './CarrinhoContexto'
 import { EstadoVazio, ImagemProduto, classesBotao, estiloPrimario, real } from './ds'
 import type { ItemCarrinhoConferido } from '@/lib/commerce/tipos'
 import CotacaoFreteCarrinho from './CotacaoFreteCarrinho'
+import IncentivoFrete from './IncentivoFrete'
 
 // Carrinho.
 //
@@ -192,6 +193,7 @@ export default function CarrinhoCliente({
             <span className="text-[var(--tinta-media)]">Subtotal</span>
             <span className="text-2xl font-bold tracking-tight">{real(subtotal)}</span>
           </div>
+          {freteAtivo && <IncentivoFrete subtotal={subtotal} />}
           {freteAtivo ? (
             <CotacaoFreteCarrinho
               subtotal={subtotal}

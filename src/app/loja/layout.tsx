@@ -2,8 +2,11 @@ import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import { lojaObrigatoria } from '@/lib/commerce/loja'
 import { categorias } from '@/lib/commerce/catalogo'
+import { entregaDaVitrine } from '@/lib/commerce/frete/vitrine'
 import { CarrinhoProvider } from '@/components/loja/CarrinhoContexto'
 import Cabecalho from '@/components/loja/Cabecalho'
+import { EntregaProvider } from '@/components/loja/EntregaContexto'
+import FaixaEntrega from '@/components/loja/FaixaEntrega'
 import Rodape from '@/components/loja/Rodape'
 import './loja.css'
 
@@ -39,7 +42,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function LayoutLoja({ children }: { children: React.ReactNode }) {
   const loja = await lojaObrigatoria()
-  const arvore = await categorias(loja.id)
+  const [arvore, entrega] = await Promise.all([categorias(loja.id), entregaDaVitrine(loja.id)])
 
   // Loja fechada para manutenção: página única, sem cabeçalho nem catálogo.
   // Continua devolvendo 200 (e não 503) porque isto é estado de montagem, e
@@ -80,6 +83,8 @@ export default async function LayoutLoja({ children }: { children: React.ReactNo
       }}
     >
       <CarrinhoProvider lojaId={loja.id}>
+       <EntregaProvider lojaId={loja.id} config={entrega}>
+        <FaixaEntrega />
         {/* useSearchParams no cabeçalho exige fronteira de Suspense. */}
         <Suspense fallback={<div className="h-[124px] border-b border-[var(--borda)] lg:h-[104px]" />}>
           <Cabecalho
@@ -89,6 +94,7 @@ export default async function LayoutLoja({ children }: { children: React.ReactNo
         </Suspense>
 
         <main className="flex-1">{children}</main>
+       </EntregaProvider>
       </CarrinhoProvider>
 
       <Rodape loja={loja} categorias={arvore} />

@@ -78,6 +78,29 @@ export function validarConfigFrete(corpo: Record<string, unknown>): Saida<Record
   }
 }
 
+// ─── Experiência do cliente (janela de bairro) ───────────────────────────────
+
+const GATILHOS = ['entrada', 'produto', 'carrinho', 'nunca'] as const
+const IDENTIFICACOES = ['bairro', 'cep', 'ambos'] as const
+
+export function validarExperienciaFrete(corpo: Record<string, unknown>): Saida<Record<string, unknown>> {
+  const gatilho = GATILHOS.find(g => g === corpo.seletor_gatilho)
+  const identificacao = IDENTIFICACOES.find(i => i === corpo.seletor_identificacao)
+  if (!gatilho) return { erro: 'Escolha quando a janela de bairro aparece.' }
+  if (!identificacao) return { erro: 'Escolha o que o cliente informa: bairro, CEP ou os dois.' }
+
+  return {
+    valores: {
+      seletor_gatilho: gatilho,
+      seletor_identificacao: identificacao,
+      seletor_titulo: texto(corpo.seletor_titulo, 80) || null,
+      faixa_topo: corpo.faixa_topo === true,
+      mostrar_no_produto: corpo.mostrar_no_produto === true,
+      incentivo_gratis: corpo.incentivo_gratis === true,
+    },
+  }
+}
+
 // ─── Regras ──────────────────────────────────────────────────────────────────
 
 function lerFaixas(v: unknown): { ate: number | null; valor: number }[] | { erro: string } {
